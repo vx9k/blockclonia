@@ -190,8 +190,9 @@ static wound *add_wound(health *h, int part, int kind, float depth, int arterial
     w->kind = (uint8_t)kind;
     w->depth = clampf_(depth, 0.0f, 1.0f);
     w->arterial = (uint8_t)arterial;
-    /* Capillary/venous ooze grows with depth; a severed artery pours. */
-    w->bleed0 = arterial ? 150.0f + 250.0f * w->depth : 3.0f + 60.0f * w->depth * w->depth;
+    /* Capillary/venous ooze grows with depth; a severed artery pours, and
+     * deeper cuts reach bigger arteries (a femoral bleed tops 1 L/min). */
+    w->bleed0 = arterial ? 150.0f + 850.0f * w->depth * w->depth : 3.0f + 60.0f * w->depth * w->depth;
     w->bleed = w->bleed0;
     w->contamination = clampf_(contamination, 0.0f, 1.0f);
     return w;
@@ -733,6 +734,11 @@ void health_step(health *h, const health_env *e, double dt)
     float vo2_frac = h->vo2 / vo2max_l();
     float do2_rel = (h->co / 4.8f) * cao2_rel;
     if (do2_rel < 0.5f) h->lactate += (0.5f - do2_rel) * 0.05f * fdt; /* shock: tissues starved of oxygen */
+    /* Prolonged severe hypoperfusion poisons the heart and vessels
+     * (acidosis, inflammatory mediators): past a point, restoring volume
+     * no longer restores pressure. Slowly repaid once perfusion returns. */
+    if (!arrest && do2_rel < 0.4f) h->shock_debt += (0.4f - do2_rel) / 0.4f * fdt / 60.0f;
+    else h->shock_debt = maxf(0.0f, h->shock_debt - fdt / 1800.0f);
     h->lactate -= (h->lactate - 1.0f) * 0.0012f * h->organ[ORG_LIVER] * fdt;
     h->lactate = clampf_(h->lactate, 0.5f, 30.0f);
 
@@ -741,6 +747,9 @@ void health_step(health *h, const health_env *e, double dt)
     float ctrl = clampf_(1000.0f * (fever_set - h->temp), -900.0f, 60.0f); /* sweating .. vasoconstriction */
     float immersion = 25.0f * (float)e->submerged * (h->temp - (float)e->water_temp);
     h->temp += (0.8f * p - 68.0f - immersion + ctrl) / HEAT_CAP * fdt;
+    /* Fever: chills and shut-down skin raise the set point within hours,
+     * which on the survival clock is minutes. */
+    if (fever_set > h->temp + 0.05f) h->temp += (fever_set - h->temp) * minf(1.0f, gh / 1.5f);
     float sweat = maxf(0.0f, -ctrl) / 2.43e6f * fdt;
 
     /* ---- water */
@@ -847,6 +856,7 @@ void health_step(health *h, const health_env *e, double dt)
     float contract = h->organ[ORG_HEART] * (0.85f + 0.35f * minf(1.0f, h->symp + ex)) *
                      (h->lactate > 8.0f ? 0.8f : 1.0f) * (h->sao2 < 0.6f ? 0.3f + 0.7f * h->sao2 / 0.6f : 1.0f);
     contract *= h->hr > 160.0f ? maxf(0.4f, 1.0f - (h->hr - 160.0f) / 200.0f) : 1.0f; /* short diastole */
+    contract /= 1.0f + 0.25f * h->shock_debt * h->shock_debt;
     float vu = 4.05f - 1.3f * h->symp + 0.5f * h->sepsis;    /* unstressed volume, venoconstriction */
     float pms = maxf(0.0f, (veff - vu) / CSYS) * (1.0f + 1.3f * ex); /* muscle pump */
     float rvr = RVR0 * (1.0f - 0.4f * ex);
@@ -855,7 +865,8 @@ void health_step(health *h, const health_env *e, double dt)
     else rap = pms / (1.0f + 0.0f);
     h->co = co;
     h->sv = h->hr > 1.0f ? co * 1000.0f / h->hr : 0.0f;
-    h->svr = SVR0 * (0.85f + 0.9f * h->symp) / 0.985f * (1.0f - 0.6f * ex) * (1.0f - 0.5f * h->sepsis);
+    h->svr = SVR0 * (0.85f + 0.9f * h->symp) / 0.985f * (1.0f - 0.6f * ex) * (1.0f - 0.5f * h->sepsis) /
+             (1.0f + 0.15f * h->shock_debt * h->shock_debt);
     float map_t = co * h->svr + rap;
     h->map = lag(h->map, map_t, dt, 1.0);
     float pp = arrest ? 0.0f : h->sv / 1.9f * (1.0f + 0.6f * ex + maxf(0.0f, (h->map - MAP_SET) / 150.0f));
@@ -895,16 +906,19 @@ void health_step(health *h, const health_env *e, double dt)
     if (can_air && drive_ok) {
         h->breathing = 1;
         float rr_need = 12.0f + 26.0f * vo2_frac;
-        float rr_t = rr_need + 1.2f * maxf(0.0f, h->paco2 - 40.0f) + 60.0f * maxf(0.0f, 0.93f - h->sao2) +
-                     0.6f * h->pain + 18.0f * h->pneumothorax + 10.0f * h->lung_water +
-                     (h->lactate > 4.0f ? 1.5f * (h->lactate - 4.0f) : 0.0f) + 2.0f * maxf(0.0f, h->temp - 37.5f);
+        /* Pain and distress add fast, shallow breaths: they raise the rate
+         * far more than they clear CO2. */
+        float shallow = minf(0.5f * h->pain, 6.0f) + 18.0f * h->pneumothorax + 10.0f * h->lung_water;
+        float rr_t = rr_need + 1.2f * maxf(0.0f, h->paco2 - 40.0f) + 60.0f * maxf(0.0f, 0.93f - h->sao2) + shallow +
+                     (h->lactate > 4.0f ? 0.9f * (h->lactate - 4.0f) : 0.0f) + 2.0f * maxf(0.0f, h->temp - 37.5f);
         if (!awake) rr_t = minf(rr_t, 24.0f);
         if (h->organ[ORG_BRAIN] < 0.3f) rr_t *= h->organ[ORG_BRAIN] / 0.3f;
         h->rr = lag(h->rr, clampf_(rr_t, 4.0f, 55.0f), dt, 4.0);
         float pao2_target = 0.21f * 713.0f - h->paco2 / 0.8f;
         float store_t = O2_VOL * pao2_target / 713.0f;
         h->o2_store = lag(h->o2_store, store_t, dt, 6.0 * 14.0 / maxf(h->rr, 4.0f));
-        h->paco2 = lag(h->paco2, 40.0f * rr_need / maxf(h->rr, 4.0f), dt, 20.0);
+        float alveolar = maxf(h->rr - 0.6f * minf(shallow, maxf(h->rr - rr_need, 0.0f)), 4.0f);
+        h->paco2 = lag(h->paco2, 40.0f * rr_need / alveolar, dt, 20.0);
         h->apnea_time = 0.0f;
         h->gasp_timer = 0.0f;
     } else {
@@ -937,6 +951,7 @@ void health_step(health *h, const health_env *e, double dt)
     float cpp = h->map - h->icp;
     float cbf = cpp >= 55.0f ? 1.0f : maxf(0.0f, cpp / 55.0f);
     cbf *= clampf_(1.0f + 0.025f * (h->paco2 - 40.0f), 0.6f, 1.6f) * (1.0f + 0.5f * maxf(0.0f, 0.9f - h->sao2));
+    cbf *= clampf_(powf(15.0f / maxf(hb, 3.0f), 0.8f), 1.0f, 1.8f); /* thinner blood flows faster */
     h->brain_o2 = lag(h->brain_o2, cbf * cao2_rel, dt, 8.0);
     if (h->brain_o2 < 0.3f) h->organ[ORG_BRAIN] -= (0.3f - h->brain_o2) / 0.3f * fdt / 300.0f;
     if (h->icp > 40.0f) h->organ[ORG_BRAIN] -= fdt / 120.0f;
@@ -945,13 +960,18 @@ void health_step(health *h, const health_env *e, double dt)
     h->concussion = maxf(0.0f, h->concussion - fdt);
     h->confusion = maxf(0.0f, h->confusion - fdt);
 
+    /* The brain extracts more oxygen as delivery falls, so function holds
+     * until delivery is roughly halved: confusion near 55%, fainting
+     * below about 40%. Extra flow cannot make up for very low arterial
+     * oxygen, though: oxygen has to diffuse into the tissue, and acute
+     * hypoxaemia blacks people out near SaO2 50% whatever the flow. */
     float bo = h->brain_o2;
     int cons = CONS_ALERT;
-    if (bo < 0.7f || h->confusion > 0.0f || h->temp < 33.0f || h->temp > 40.0f || h->sepsis > 0.7f ||
+    if (bo < 0.55f || h->sao2 < 0.7f || h->blood < 0.7f * BLOOD_NORMAL || h->confusion > 0.0f || h->temp < 33.0f || h->temp > 40.0f || h->sepsis > 0.7f ||
         h->organ[ORG_BRAIN] < 0.6f || dehyd > 0.1f || h->fat < 2000.0f)
         cons = CONS_CONFUSED;
-    float wake = h->conscious == CONS_UNCONSCIOUS ? 0.55f : 0.5f; /* hysteresis */
-    if (bo < wake || h->concussion > 0.0f || h->temp < 30.0f || h->temp > 41.5f || h->organ[ORG_BRAIN] < 0.3f ||
+    int out = h->conscious == CONS_UNCONSCIOUS; /* hysteresis */
+    if (bo < (out ? 0.45f : 0.4f) || h->sao2 < (out ? 0.55f : 0.5f) || h->concussion > 0.0f || h->temp < 30.0f || h->temp > 41.5f || h->organ[ORG_BRAIN] < 0.3f ||
         h->icp > 35.0f || h->sepsis > 0.92f || arrest)
         cons = CONS_UNCONSCIOUS;
     if (cons == CONS_UNCONSCIOUS && h->conscious != CONS_UNCONSCIOUS) health_log(h, "Lost consciousness");

@@ -158,6 +158,7 @@ typedef struct health {
     float vo2;                        /* L/min */
     float wbal;                       /* J of anaerobic reserve */
     float lactate;                    /* mmol/L */
+    float shock_debt;                 /* minutes of starved tissue: past ~3, shock turns irreversible */
     float temp;                       /* core, degrees C */
 
     /* Nervous system. */
