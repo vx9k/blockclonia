@@ -129,6 +129,7 @@ static int set_block(world *w, int x, int y, int z, uint8_t id, uint8_t meta, in
     c->solid_count[sy] = (uint16_t)(c->solid_count[sy] + (id != B_AIR) - (old != B_AIR));
     c->opaque_count[sy] = (uint16_t)(c->opaque_count[sy] + block_opaque(id) - block_opaque(old));
     c->modified = 1;
+    c->unsaved = 1;
 
     /* Sections the block's neighbourhood reaches: at most two per axis. */
     int cx = chunk_of(x), cz = chunk_of(z);
@@ -204,6 +205,7 @@ static void gen_run(job *j)
         g->c->meta = NULL;
     }
     g->c->modified = (uint8_t)loaded; /* keep saved columns saved */
+    g->c->unsaved = 0;
     column_recount(g->c);
 }
 
@@ -244,16 +246,23 @@ static void request_column(world *w, int cx, int cz)
     jobs_submit(w->jobs, &g->base);
 }
 
+static void store_column(world *w, column *c)
+{
+    if (!c->unsaved || !w->save_dir[0]) return;
+    if (save_store_column(w->save_dir, c) != 0)
+        log_error("failed to save column %d,%d", c->cx, c->cz);
+    else
+        c->unsaved = 0;
+}
+
 static void unload_column(world *w, column *c)
 {
     if (c->state == COL_LOADING) {
         c->want_unload = 1;
         return;
     }
-    if (c->modified && w->save_dir[0]) {
-        if (save_store_column(w->save_dir, c) != 0)
-            log_error("failed to save column %d,%d", c->cx, c->cz);
-    }
+    if (w->on_column_unload) w->on_column_unload(w->edit_user, c);
+    store_column(w, c);
     if (w->on_mesh_free)
         for (int s = 0; s < SECTIONS; s++)
             if (c->mesh[s].vtx_capacity) w->on_mesh_free(w->render_user, &c->mesh[s]);
@@ -551,22 +560,27 @@ void world_init(world *w, uint32_t seed, int radius, jobs *js, const char *save_
     qsort(w->spiral, (size_t)w->spiral_count, sizeof *w->spiral, cmp_dist);
 }
 
+/* Moves the streaming centre and unloads columns that fell out of range. */
+static void set_center(world *w, int pcx, int pcz)
+{
+    if (w->have_center && pcx == w->center_cx && pcz == w->center_cz) return;
+    w->center_cx = pcx;
+    w->center_cz = pcz;
+    w->have_center = 1;
+    w->gen_cursor = 0;
+    w->sched_pending = 1;
+    for (int i = 0; i < w->grid_w * w->grid_w; i++) {
+        column *c = w->grid[i];
+        if (c && !in_ring(c->cx - pcx, c->cz - pcz, w->radius, 1)) unload_column(w, c);
+    }
+}
+
 void world_update(world *w, double px, double py, double pz)
 {
     int pcx = chunk_of((int)floor(px)), pcz = chunk_of((int)floor(pz));
     w->eye_sy = clampi((int)floor(py) / SECTION_H, 0, SECTIONS - 1);
 
-    if (!w->have_center || pcx != w->center_cx || pcz != w->center_cz) {
-        w->center_cx = pcx;
-        w->center_cz = pcz;
-        w->have_center = 1;
-        w->gen_cursor = 0;
-        w->sched_pending = 1;
-        for (int i = 0; i < w->grid_w * w->grid_w; i++) {
-            column *c = w->grid[i];
-            if (c && !in_ring(c->cx - pcx, c->cz - pcz, w->radius, 1)) unload_column(w, c);
-        }
-    }
+    set_center(w, pcx, pcz);
 
     for (int i = w->gen_cursor; i < w->spiral_count && w->gen_in_flight < w->max_gen_in_flight; i++) {
         int cx = pcx + w->spiral[i][0], cz = pcz + w->spiral[i][1];
@@ -589,6 +603,7 @@ void world_load_blocking(world *w, double px, double pz, int radius)
 {
     int pcx = chunk_of((int)floor(px)), pcz = chunk_of((int)floor(pz));
     radius = clampi(radius, 0, w->radius + 1);
+    set_center(w, pcx, pcz);
     for (int dz = -radius; dz <= radius; dz++)
         for (int dx = -radius; dx <= radius; dx++) {
             int cx = pcx + dx, cz = pcz + dz;
@@ -602,7 +617,8 @@ void world_load_blocking(world *w, double px, double pz, int radius)
                 }
                 c = w->grid[slot_of(w, cx, cz)];
             }
-            if (!c) request_column(w, cx, cz);
+            if (c) c->want_unload = 0; /* a pending unload would drop it */
+            else request_column(w, cx, cz);
         }
     jobs_wait_idle(w->jobs);
     jobs_poll(w->jobs, -1);
@@ -614,10 +630,7 @@ void world_save_all(world *w)
     if (!w->save_dir[0]) return;
     for (int i = 0; i < w->grid_w * w->grid_w; i++) {
         column *c = w->grid[i];
-        if (c && c->state == COL_READY && c->modified) {
-            if (save_store_column(w->save_dir, c) != 0)
-                log_error("failed to save column %d,%d", c->cx, c->cz);
-        }
+        if (c && c->state == COL_READY) store_column(w, c);
     }
 }
 

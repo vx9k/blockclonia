@@ -29,6 +29,7 @@ add_library(mccore STATIC
   src/block.c
   src/gpupool.c
   src/jobs.c
+  src/log.c
   src/mem.c
   src/mesher.c
   src/noise.c
@@ -40,12 +41,16 @@ add_library(mccore STATIC
 )
 target_include_directories(mccore PUBLIC src)
 target_compile_options(mccore PRIVATE ${MC_WARNINGS})
-# mimalloc goes first so its malloc/free take precedence for the process.
-target_link_libraries(mccore PUBLIC mimalloc Threads::Threads m)
-
 if(MC_SANITIZE)
+  # ASan cannot see mi_* allocations, so sanitizer builds use libc malloc.
+  set(MC_VK_MIMALLOC OFF) # shadows the option for this configure only
+  target_compile_definitions(mccore PUBLIC MC_MEM_LIBC)
   target_compile_options(mccore PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
   target_link_options(mccore PUBLIC -fsanitize=address,undefined)
+  target_link_libraries(mccore PUBLIC Threads::Threads m)
+else()
+  # mimalloc goes first so its malloc/free take precedence for the process.
+  target_link_libraries(mccore PUBLIC mimalloc Threads::Threads m)
 endif()
 if(MC_NATIVE)
   target_compile_options(mccore PUBLIC -march=native)

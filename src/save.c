@@ -3,11 +3,13 @@
 #include "log.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 /* File layout (little endian):
  *   0  "MCCL"        magic
@@ -132,17 +134,76 @@ static int column_path(char *buf, size_t cap, const char *dir, int cx, int cz, c
     return n > 0 && (size_t)n < cap ? 0 : -1;
 }
 
+/* World folders can come from anyone, so file access never follows a
+ * symlink and only touches regular files. Otherwise a shared world could
+ * point level.dat or a column file at, say, ~/.bashrc and have the game
+ * overwrite it on save, or at a FIFO and hang a loader thread. */
+
+/* Reads up to `cap` bytes of a regular file. Returns the length read,
+ * cap + 1 if the file is larger, or -1 if it is missing or unusable. */
+static long read_regular(const char *path, uint8_t *buf, size_t cap)
+{
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) return -1;
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        close(fd);
+        errno = EINVAL;
+        return -1;
+    }
+    if ((unsigned long long)st.st_size > cap) {
+        close(fd);
+        return (long)cap + 1;
+    }
+    size_t len = 0;
+    while (len < cap) {
+        ssize_t n = read(fd, buf + len, cap - len);
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0) {
+            close(fd);
+            return -1;
+        }
+        if (n == 0) break;
+        len += (size_t)n;
+    }
+    close(fd);
+    return (long)len;
+}
+
+/* Writes a whole file through a fresh temp file and a rename, so a crash
+ * mid-save never leaves a truncated file, and whatever sat at either name
+ * before (a symlink, a hard link to another file) is replaced, never
+ * written through. */
+static int write_atomic(const char *path, const char *tmp, const void *data, size_t len)
+{
+    unlink(tmp); /* a stale or planted temp entry; unlink never follows */
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (fd < 0) return -1;
+    const uint8_t *p = data;
+    size_t done = 0;
+    while (done < len) {
+        ssize_t n = write(fd, p + done, len - done);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) break;
+        done += (size_t)n;
+    }
+    int ok = done == len;
+    ok &= close(fd) == 0;
+    if (ok && rename(tmp, path) == 0) return 0;
+    unlink(tmp);
+    return -1;
+}
+
 int save_load_column(const char *dir, column *c)
 {
     char path[512];
     if (column_path(path, sizeof path, dir, c->cx, c->cz, "") != 0) return 0;
-    FILE *f = fopen(path, "rb");
-    if (!f) return 0;
-    uint8_t *buf = mem_alloc(SAVE_MAX_FILE + 1);
-    size_t len = fread(buf, 1, SAVE_MAX_FILE + 1, f);
-    int err = ferror(f);
-    fclose(f);
-    int r = (!err && len <= SAVE_MAX_FILE && save_decode_column(c, buf, len) == 0) ? 1 : -1;
+    uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
+    long len = read_regular(path, buf, SAVE_MAX_FILE);
+    int r = 0; /* missing: generate */
+    if (len > SAVE_MAX_FILE) r = -1;
+    else if (len >= 0) r = save_decode_column(c, buf, (size_t)len) == 0 ? 1 : -1;
+    else if (errno != ENOENT) r = -1; /* exists but is not a readable regular file */
     mem_free(buf);
     return r;
 }
@@ -154,19 +215,7 @@ int save_store_column(const char *dir, const column *c)
     if (column_path(tmp, sizeof tmp, dir, c->cx, c->cz, ".tmp") != 0) return -1;
     uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
     size_t len = save_encode_column(c, buf, SAVE_MAX_FILE);
-    int r = -1;
-    if (len) {
-        FILE *f = fopen(tmp, "wb");
-        if (f) {
-            int ok = fwrite(buf, 1, len, f) == len;
-            ok &= fflush(f) == 0;
-            ok &= fclose(f) == 0;
-            /* Write-to-temp then rename: a crash mid-save never leaves a
-             * truncated column file behind. */
-            if (ok && rename(tmp, path) == 0) r = 0;
-            else remove(tmp);
-        }
-    }
+    int r = len ? write_atomic(path, tmp, buf, len) : -1;
     mem_free(buf);
     return r;
 }
@@ -185,10 +234,8 @@ int save_read_seed(const char *dir, uint32_t *seed)
     char path[512], buf[64];
     int n = snprintf(path, sizeof path, "%s/level.dat", dir);
     if (n < 0 || (size_t)n >= sizeof path) return -1;
-    FILE *f = fopen(path, "rb");
-    if (!f) return -1;
-    size_t len = fread(buf, 1, sizeof buf - 1, f);
-    fclose(f);
+    long len = read_regular(path, (uint8_t *)buf, sizeof buf - 1);
+    if (len < 0 || len > (long)sizeof buf - 1) return -1;
     buf[len] = '\0';
     if (strncmp(buf, "seed ", 5) != 0) return -1;
     char *end;
@@ -201,12 +248,11 @@ int save_read_seed(const char *dir, uint32_t *seed)
 
 int save_write_seed(const char *dir, uint32_t seed)
 {
-    char path[512];
+    char path[512], tmp[512], text[32];
     int n = snprintf(path, sizeof path, "%s/level.dat", dir);
     if (n < 0 || (size_t)n >= sizeof path) return -1;
-    FILE *f = fopen(path, "wb");
-    if (!f) return -1;
-    int ok = fprintf(f, "seed %u\n", seed) > 0;
-    ok &= fclose(f) == 0;
-    return ok ? 0 : -1;
+    n = snprintf(tmp, sizeof tmp, "%s/level.dat.tmp", dir);
+    if (n < 0 || (size_t)n >= sizeof tmp) return -1;
+    int len = snprintf(text, sizeof text, "seed %u\n", seed);
+    return write_atomic(path, tmp, text, (size_t)len);
 }

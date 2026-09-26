@@ -127,6 +127,7 @@ struct renderer {
 
     VkSwapchainKHR swap;
     VkFormat swap_fmt;
+    VkColorSpaceKHR swap_cs;
     VkExtent2D extent;
     uint32_t image_count;
     VkImage images[MAX_SWAP_IMAGES];
@@ -466,16 +467,33 @@ static void choose_surface_format(renderer *r)
     if (!n) log_fatal("surface reports no formats");
     VkSurfaceFormatKHR *f = mem_alloc(mem_array_size(n, sizeof *f));
     VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(r->pd, r->surf, &n, f));
-    VkFormat chosen = f[0].format == VK_FORMAT_UNDEFINED ? VK_FORMAT_B8G8R8A8_SRGB : f[0].format;
-    for (uint32_t i = 0; i < n; i++)
-        if ((f[i].format == VK_FORMAT_B8G8R8A8_SRGB || f[i].format == VK_FORMAT_R8G8B8A8_SRGB) &&
-            f[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-            chosen = f[i].format;
-            break;
+    /* Best first: 8-bit sRGB, then 8-bit UNORM (the shader encodes sRGB),
+     * then whatever the surface lists first. */
+    VkSurfaceFormatKHR chosen = f[0];
+    if (chosen.format == VK_FORMAT_UNDEFINED)
+        chosen = (VkSurfaceFormatKHR){VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+    int best = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        if (f[i].colorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) continue;
+        int rank = f[i].format == VK_FORMAT_B8G8R8A8_SRGB || f[i].format == VK_FORMAT_R8G8B8A8_SRGB   ? 2
+                   : f[i].format == VK_FORMAT_B8G8R8A8_UNORM || f[i].format == VK_FORMAT_R8G8B8A8_UNORM ? 1
+                                                                                                        : 0;
+        if (rank > best) {
+            best = rank;
+            chosen = f[i];
         }
+    }
     mem_free(f);
-    r->swap_fmt = chosen;
-    r->swap_srgb = chosen == VK_FORMAT_B8G8R8A8_SRGB || chosen == VK_FORMAT_R8G8B8A8_SRGB;
+    r->swap_fmt = chosen.format;
+    r->swap_cs = chosen.colorSpace;
+    r->swap_srgb = chosen.format == VK_FORMAT_B8G8R8A8_SRGB || chosen.format == VK_FORMAT_R8G8B8A8_SRGB;
+}
+
+/* Screenshots read back 4 bytes per pixel as 8-bit RGBA or BGRA. */
+static int format_is_rgba8(VkFormat f)
+{
+    return f == VK_FORMAT_B8G8R8A8_SRGB || f == VK_FORMAT_B8G8R8A8_UNORM || f == VK_FORMAT_R8G8B8A8_SRGB ||
+           f == VK_FORMAT_R8G8B8A8_UNORM;
 }
 
 static VkPresentModeKHR choose_present_mode(renderer *r)
@@ -535,21 +553,23 @@ static int create_swapchain(renderer *r)
         if (ext.width > caps.maxImageExtent.width) ext.width = caps.maxImageExtent.width;
         if (ext.height > caps.maxImageExtent.height) ext.height = caps.maxImageExtent.height;
     }
-    if (ext.width == 0 || ext.height == 0) return 0; /* minimised */
+    if (ext.width == 0 || ext.height == 0) return 0; /* minimised: keep what we have */
+    if (r->swap) destroy_swap_resources(r);
 
     uint32_t count = caps.minImageCount + 1;
     if (caps.maxImageCount && count > caps.maxImageCount) count = caps.maxImageCount;
     if (count > MAX_SWAP_IMAGES) count = MAX_SWAP_IMAGES;
 
     VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    r->shot_supported = (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
+    r->shot_supported =
+        (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0 && format_is_rgba8(r->swap_fmt);
     r->swap_has_src = r->shot_supported && r->shot_usage;
     if (r->swap_has_src) usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
     VkSwapchainKHR old = r->swap;
     VkSwapchainCreateInfoKHR si = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR, .surface = r->surf, .minImageCount = count,
-        .imageFormat = r->swap_fmt, .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, .imageExtent = ext,
+        .imageFormat = r->swap_fmt, .imageColorSpace = r->swap_cs, .imageExtent = ext,
         .imageArrayLayers = 1, .imageUsage = usage, .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .preTransform = caps.currentTransform, .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode = choose_present_mode(r), .clipped = VK_TRUE, .oldSwapchain = old};
@@ -586,9 +606,11 @@ static int recreate_swapchain(renderer *r)
     glfwGetFramebufferSize(r->win, &w, &h);
     if (w == 0 || h == 0) return 0;
     vkDeviceWaitIdle(r->dev);
-    destroy_swap_resources(r);
+    /* Surface caps can still say 0x0 (a minimise race): then nothing is
+     * destroyed and `resized` stays set so the next frame tries again. */
+    if (!create_swapchain(r)) return 0;
     r->resized = 0;
-    return create_swapchain(r);
+    return 1;
 }
 
 /* ------------------------------------------------------------ pipelines */
@@ -1158,6 +1180,7 @@ int renderer_begin_frame(renderer *r)
     VkResult res = vkAcquireNextImageKHR(r->dev, r->swap, UINT64_MAX, f->image_ready, VK_NULL_HANDLE,
                                          &r->image_index);
     if (res == VK_ERROR_OUT_OF_DATE_KHR) {
+        r->resized = 1;
         recreate_swapchain(r);
         return 0;
     }

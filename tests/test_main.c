@@ -9,7 +9,10 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static int g_failed, g_checks;
 
@@ -119,6 +122,69 @@ static void fill_input(mesh_input *in, uint8_t fill)
     memset(in->meta, 0, sizeof in->meta);
 }
 
+static int file_is(const char *path, const char *text)
+{
+    char buf[64] = {0};
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    return n == strlen(text) && memcmp(buf, text, n) == 0;
+}
+
+/* A shared world folder must not be able to redirect saves elsewhere. */
+static void test_save_files(void)
+{
+    char dir[] = "/tmp/mc_test_XXXXXX";
+    if (!mkdtemp(dir)) {
+        CHECK(!"mkdtemp");
+        return;
+    }
+    char victim[128], p[160];
+    snprintf(victim, sizeof victim, "%s/victim.txt", dir);
+    FILE *f = fopen(victim, "wb");
+    fputs("precious", f);
+    fclose(f);
+
+    snprintf(p, sizeof p, "%s/level.dat", dir);
+    CHECK(symlink(victim, p) == 0);
+    uint32_t seed = 0;
+    CHECK(save_read_seed(dir, &seed) == -1); /* symlinks are not followed */
+    CHECK(save_write_seed(dir, 77) == 0);
+    CHECK(file_is(victim, "precious"));
+    CHECK(save_read_seed(dir, &seed) == 0 && seed == 77);
+    struct stat st;
+    CHECK(lstat(p, &st) == 0 && S_ISREG(st.st_mode)); /* the link was replaced */
+
+    column *c = column_alloc(0, 0);
+    flat_gen(0, c);
+    snprintf(p, sizeof p, "%s/c.0.0.bin.tmp", dir);
+    CHECK(symlink(victim, p) == 0);
+    CHECK(save_store_column(dir, c) == 0);
+    CHECK(file_is(victim, "precious"));
+    column *d = column_alloc(0, 0);
+    CHECK(save_load_column(dir, d) == 1 && memcmp(c->blocks, d->blocks, COL_VOL) == 0);
+
+    /* A FIFO in place of a column file is rejected, not waited on. */
+    snprintf(p, sizeof p, "%s/c.1.0.bin", dir);
+    CHECK(mkfifo(p, 0600) == 0);
+    column *e = column_alloc(1, 0);
+    CHECK(save_load_column(dir, e) == -1);
+    column *g = column_alloc(2, 0);
+    CHECK(save_load_column(dir, g) == 0); /* missing: generate */
+
+    column_free(c);
+    column_free(d);
+    column_free(e);
+    column_free(g);
+    const char *names[] = {"victim.txt", "level.dat", "c.0.0.bin", "c.1.0.bin"};
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
+        snprintf(p, sizeof p, "%s/%s", dir, names[i]);
+        unlink(p);
+    }
+    rmdir(dir);
+}
+
 static void test_mesher(void)
 {
     mesh_input *in = mem_alloc(sizeof *in);
@@ -178,7 +244,7 @@ static void test_world_basics(void)
     CHECK(world_set(&t.w, 3, 13, 3, B_BRICK, 0));
     CHECK(world_get(&t.w, 3, 13, 3) == B_BRICK);
     column *c = world_column(&t.w, 0, 0);
-    CHECK(c && c->modified && c->dirty[0]);
+    CHECK(c && c->modified && c->unsaved && c->dirty[0]);
     /* Edits on a column border dirty the neighbour's section too. */
     column *n = world_column(&t.w, -1, 0);
     n->dirty[0] = 0;
@@ -346,6 +412,22 @@ static void test_buoyancy(void)
     tw_free(&t);
 }
 
+static void test_settle(void)
+{
+    test_world t;
+    tw_init(&t);
+    /* Falling bodies are put back into the world before a save. */
+    t.ph.bodies[0] = (body){.pos = dv3(2, GROUND + 6.3, 2), .block = B_SAND};
+    t.ph.bodies[1] = (body){.pos = dv3(40, GROUND + 3, 2), .block = B_STONE}; /* another column */
+    t.ph.body_count = 2;
+    physics_settle_bodies(&t.ph, world_column(&t.w, 0, 0));
+    CHECK(t.ph.body_count == 1 && t.ph.bodies[0].block == B_STONE);
+    CHECK(world_get(&t.w, 2, GROUND, 2) == B_SAND); /* dropped onto the ground */
+    physics_settle_bodies(&t.ph, NULL);
+    CHECK(t.ph.body_count == 0 && world_get(&t.w, 40, GROUND, 2) == B_STONE);
+    tw_free(&t);
+}
+
 static long total_water(const world *w, int r)
 {
     long v = 0;
@@ -392,12 +474,14 @@ int main(void)
     mesher_init();
     test_gpupool();
     test_save_roundtrip();
+    test_save_files();
     test_mesher();
     test_world_basics();
     test_player_physics();
     test_friction();
     test_structure();
     test_buoyancy();
+    test_settle();
     test_fluid();
     test_raycast();
     printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);

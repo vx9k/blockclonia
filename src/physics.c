@@ -10,7 +10,8 @@
 #define EPS 1e-7
 #define REGION_W (2 * STRUCT_RADIUS + 1)
 #define REGION_CELLS (REGION_W * REGION_W * REGION_W)
-#define FLUID_QUEUE_CAP 16384
+#define FLUID_QUEUE_CAP 16384   /* initial; grows on demand */
+#define FLUID_QUEUE_MAX (1 << 18)
 #define FLUID_BUDGET 4096
 #define GROUNDED (STRUCT_MAX_SPAN + 1)
 #define STRUCT_BUDGET_S 0.0004 /* per step, after the first check */
@@ -30,6 +31,22 @@ static inline void setc3(dvec3 *v, int a, double d)
 static int is_structural(uint8_t id)
 {
     return id == B_UNLOADED || (id < B_COUNT && (g_blocks[id].flags & BF_SOLID));
+}
+
+/* Lighter than water: floats, and a floating block counts as supported. */
+static int is_buoyant(uint8_t id)
+{
+    return id < B_COUNT && (g_blocks[id].flags & BF_SOLID) && g_blocks[id].density < 1000.0f;
+}
+
+static int is_free(uint8_t id) { return id == B_AIR || id == B_WATER; }
+
+/* Would a block placed at (x, y, z) be supported right away? */
+static int supported_below(const world *w, int x, int y, int z, uint8_t id)
+{
+    if (y <= 0) return 1;
+    uint8_t below = world_get(w, x, y - 1, z);
+    return is_structural(below) || (below == B_WATER && is_buoyant(id));
 }
 
 static int span_of(uint8_t id)
@@ -77,6 +94,21 @@ static void pq_free(pos_queue *q)
     memset(q, 0, sizeof *q);
 }
 
+static void pq_grow(pos_queue *q)
+{
+    q->cap *= 2;
+    q->items = mem_realloc(q->items, mem_array_size((size_t)q->cap, sizeof(ipos)));
+    q->set_cap *= 2;
+    mem_free(q->set);
+    q->set = mem_calloc(q->set_cap, sizeof(uint32_t));
+    uint32_t mask = q->set_cap - 1;
+    for (int i = 0; i < q->count; i++) {
+        uint32_t h = hash_pos(q->items[i]) & mask;
+        while (q->set[h]) h = (h + 1) & mask;
+        q->set[h] = (uint32_t)i + 1;
+    }
+}
+
 static int pq_push(pos_queue *q, ipos p)
 {
     uint32_t mask = q->set_cap - 1, h = hash_pos(p) & mask;
@@ -85,7 +117,18 @@ static int pq_push(pos_queue *q, ipos p)
         if (o.x == p.x && o.y == p.y && o.z == p.z) return 1;
         h = (h + 1) & mask;
     }
-    if (q->count >= q->cap) return 0;
+    if (q->count >= q->cap) {
+        if (q->cap >= FLUID_QUEUE_MAX) {
+            /* A dropped wake leaves water frozen until something nearby
+             * changes; say so once rather than silently. */
+            static int warned;
+            if (!warned) log_warn("fluid queue full (%d cells); some water will pause", q->cap);
+            warned = 1;
+            return 0;
+        }
+        pq_grow(q);
+        return pq_push(q, p);
+    }
     q->items[q->count++] = p;
     q->set[h] = (uint32_t)q->count;
     return 1;
@@ -394,7 +437,11 @@ static int solidify(physics *ph, const body *b)
         uint8_t id = world_get(w, x, y, z);
         if (id != B_AIR && id != B_WATER) continue;
         aabb cell = {dv3(x, y, z), dv3(x + 1, y + 1, z + 1)};
-        if (ph->pl && !ph->pl->flying && boxes_overlap(cell, player_box(ph->pl))) return 0;
+        /* Never inside the player, flying or not; and only where it will
+         * stay put, or the structural check would knock it loose again. A
+         * body resting on the player just rests until they move. */
+        if (ph->pl && boxes_overlap(cell, player_box(ph->pl))) return 0;
+        if (!supported_below(w, x, y, z, b->block)) return 0;
         int displaced = id == B_WATER ? world_water_level(w, x, y, z) : 0;
         world_set(w, x, y, z, b->block, 0);
         if (displaced) {
@@ -432,19 +479,22 @@ static void bodies_step(physics *ph)
         /* Cube face-on: Cd ~1.05, A = 1 m^2, m = rho * 1 m^3. */
         double k = 0.5 * 1.05 * (1.225 * (1.0 - sub) + 1000.0 * sub) / rho;
         double speed = dv3_len(b->vel);
-        b->vel = dv3_scale(b->vel, 1.0 / (1.0 + k * speed * dt));
+        /* Quadratic drag fades at low speed; a floating block also sheds
+         * energy into the waves it makes, so it settles in seconds. */
+        b->vel = dv3_scale(b->vel, 1.0 / (1.0 + (k * speed + 2.0 * sub) * dt));
 
         int landed = 0;
         for (int axis = 0; axis < 3; axis++) {
             double d = getc3(b->vel, axis) * dt;
             if (d == 0.0) continue;
             double m = sweep(ph, box, axis, d, SWEEP_PLAYER, i);
-            addc3(&box.min, axis, m);
-            addc3(&box.max, axis, m);
             if (m != d) {
-                if (axis == 1 && d < 0) landed = 1;
+                /* Landing means the world stopped it, not the player. */
+                if (axis == 1 && d < 0 && sweep(ph, box, axis, d, 0, i) != d) landed = 1;
                 setc3(&b->vel, axis, 0.0);
             }
+            addc3(&box.min, axis, m);
+            addc3(&box.max, axis, m);
         }
         b->pos = box.min;
 
@@ -455,6 +505,37 @@ static void bodies_step(physics *ph)
             ph->bodies[i--] = ph->bodies[--ph->body_count];
         }
     }
+}
+
+/* Puts a body back into the world where it would have come to rest:
+ * straight down onto support, then up to the first free cell. */
+static void settle_body(physics *ph, const body *b)
+{
+    world *w = ph->w;
+    int x = (int)floor(b->pos.x + 0.5), z = (int)floor(b->pos.z + 0.5);
+    int y = (int)floor(b->pos.y + 0.5);
+    y = y < 0 ? 0 : (y >= WORLD_H ? WORLD_H - 1 : y);
+    while (y > 0 && is_free(world_get(w, x, y, z)) && !supported_below(w, x, y, z, b->block)) y--;
+    while (y < WORLD_H && !is_free(world_get(w, x, y, z))) y++;
+    if (y < WORLD_H) world_set(w, x, y, z, b->block, 0);
+}
+
+void physics_settle_bodies(physics *ph, const column *only)
+{
+    ph->suppress_struct++;
+    for (int i = 0; i < ph->body_count; i++) {
+        const body *b = &ph->bodies[i];
+        int bx = (int)floor(b->pos.x + 0.5), bz = (int)floor(b->pos.z + 0.5);
+        if (only && (chunk_of(bx) != only->cx || chunk_of(bz) != only->cz)) continue;
+        settle_body(ph, b);
+        ph->bodies[i--] = ph->bodies[--ph->body_count];
+    }
+    ph->suppress_struct--;
+}
+
+void physics_on_column_unload(void *user, column *c)
+{
+    physics_settle_bodies(user, c);
 }
 
 /* ------------------------------------------------------------ structure */
@@ -505,7 +586,8 @@ int physics_check_structure(physics *ph, int x, int y, int z)
                  * worse than a missed one. */
                 int anchor = id == B_UNLOADED || (block_get(id)->flags & BF_ANCHOR) || wy == 0 ||
                              i == 0 || i == REGION_W - 1 || k == 0 || k == REGION_W - 1 ||
-                             (j == 0 && y0 > 0) || (j == ny - 1 && y1 < WORLD_H - 1);
+                             (j == 0 && y0 > 0) || (j == ny - 1 && y1 < WORLD_H - 1) ||
+                             (j > 0 && ids[RIDX(i, j - 1, k)] == B_WATER && is_buoyant(id)); /* floating */
                 if (anchor) {
                     s[idx] = GROUNDED;
                     bucket[GROUNDED][blen[GROUNDED]++] = idx;
@@ -563,6 +645,9 @@ int physics_check_structure(physics *ph, int x, int y, int z)
 done:
     ph->suppress_struct--;
 #undef RIDX
+    /* Out of bodies: check again once some have landed, so the rest of the
+     * collapse is not left hanging. */
+    if (ph->body_count >= MAX_BODIES) queue_structure(ph, x, y, z);
     if (fell) ph->last_collapse = fell;
     return fell;
 }
@@ -615,6 +700,9 @@ void physics_on_block_changed(void *user, int x, int y, int z, uint8_t old_id, u
         wake_water(ph, x, y, z - 1);
     }
     if (ph->suppress_struct) return;
+    /* Water drained from under a floating block: it may now hang. */
+    if (old_id == B_WATER && new_id != B_WATER && is_buoyant(world_get(ph->w, x, y + 1, z)))
+        queue_structure(ph, x, y + 1, z);
     int was = is_structural(old_id), is = is_structural(new_id);
     if (was && !is) {
         if (!removal_is_safe(ph->w, x, y, z)) queue_structure(ph, x, y, z);
@@ -713,7 +801,7 @@ void physics_step(physics *ph, player *p, const player_input *in)
 
     /* At least one structural check per step, more while time allows. */
     double t0 = ph->struct_count > 1 ? mono_sec() : 0.0;
-    for (int n = 0; ph->struct_count > 0; n++) {
+    for (int n = 0; ph->struct_count > 0 && ph->body_count < MAX_BODIES; n++) {
         if (n > 0 && mono_sec() - t0 > STRUCT_BUDGET_S) break;
         ipos q = ph->struct_queue[ph->struct_head];
         ph->struct_head = (ph->struct_head + 1) % (int)(sizeof ph->struct_queue / sizeof ph->struct_queue[0]);

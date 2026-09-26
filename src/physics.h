@@ -115,4 +115,10 @@ int physics_check_structure(physics *ph, int x, int y, int z);
 
 void physics_fluid_tick(physics *ph);
 
+/* Places falling bodies back into the world (all of them, or only those in
+ * one column) so they survive a save. */
+void physics_settle_bodies(physics *ph, const column *only);
+/* Hook for world->on_column_unload. */
+void physics_on_column_unload(void *user, column *c);
+
 #endif

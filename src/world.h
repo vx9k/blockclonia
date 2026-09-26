@@ -45,7 +45,8 @@ typedef struct column {
     int cx, cz;
     col_state state;
     uint8_t want_unload;   /* unload once the in-flight load job finishes */
-    uint8_t modified;      /* differs from generated terrain: save on unload */
+    uint8_t modified;      /* differs from generated terrain: keep a save file */
+    uint8_t unsaved;       /* edited since it was last written to disk */
     uint8_t *blocks;       /* COL_VOL block ids */
     uint8_t *meta;         /* COL_VOL fluid levels, NULL when all zero */
     uint8_t dirty[SECTIONS];        /* needs re-meshing */
@@ -93,6 +94,9 @@ typedef struct world {
     /* Called whenever a block changes, for physics wake-ups. */
     void *edit_user;
     void (*on_block_changed)(void *user, int x, int y, int z, uint8_t old_id, uint8_t new_id);
+    /* Called with edit_user just before a loaded column is saved and freed,
+     * so state living outside it (falling bodies) can be written back. */
+    void (*on_column_unload)(void *user, column *c);
     /* Test hook: replaces terrain generation when set. */
     void (*generator)(uint32_t seed, column *c);
 } world;
@@ -134,12 +138,15 @@ void world_update(world *w, double px, double py, double pz);
 void world_schedule(world *w);
 
 /* Blocking load of every column within `radius` of (px, pz), used by tests
- * and at spawn so the player never falls through ungenerated terrain. */
+ * and at spawn so the player never falls through ungenerated terrain. Also
+ * moves the streaming centre there, so it works for teleports too. */
 void world_load_blocking(world *w, double px, double pz, int radius);
 
 /* Surface height (first air above ground) at x,z, or -1 if not loaded. */
 int world_surface_y(const world *w, int x, int z);
 
+/* Writes every column edited since its last save. Cheap when nothing
+ * changed, so it doubles as the autosave. */
 void world_save_all(world *w);
 
 /* Worker-side entry point for generating one column (also used by bench). */

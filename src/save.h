@@ -16,7 +16,7 @@ size_t save_encode_column(const column *c, uint8_t *out, size_t cap);
  * needed). Returns 0 on success, -1 if the data is malformed. */
 int save_decode_column(column *c, const uint8_t *data, size_t len);
 
-/* 1 = loaded, 0 = no save file, -1 = corrupt file. */
+/* 1 = loaded, 0 = no save file, -1 = corrupt or not a regular file. */
 int save_load_column(const char *dir, column *c);
 int save_store_column(const char *dir, const column *c);
 

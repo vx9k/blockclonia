@@ -23,6 +23,7 @@
 #define REACH 5.0
 #define MAX_STEPS_PER_FRAME 5
 #define MESH_UPLOADS_PER_FRAME 128
+#define AUTOSAVE_SECONDS 60.0
 
 typedef struct {
     uint32_t seed;
@@ -62,6 +63,36 @@ static int parse_int(const char *s, long lo, long hi, long *out)
     long v = strtol(s, &end, 10);
     if (errno || end == s || *end || v < lo || v > hi) return 0;
     *out = v;
+    return 1;
+}
+
+/* "<a><sep><b>" with both integers in [lo, hi], e.g. 1280x720 or -40,12. */
+static int parse_int_pair(const char *s, char sep, long lo, long hi, long *a, long *b)
+{
+    char *end;
+    errno = 0;
+    long x = strtol(s, &end, 10);
+    if (errno || end == s || *end != sep || x < lo || x > hi) return 0;
+    const char *t = end + 1;
+    long y = strtol(t, &end, 10);
+    if (errno || end == t || *end || y < lo || y > hi) return 0;
+    *a = x;
+    *b = y;
+    return 1;
+}
+
+/* "<a>,<b>" with both finite floats of magnitude at most `lim`. */
+static int parse_float_pair(const char *s, float lim, float *a, float *b)
+{
+    char *end;
+    errno = 0;
+    float x = strtof(s, &end);
+    if (errno || end == s || *end != ',' || !(fabsf(x) <= lim)) return 0;
+    const char *t = end + 1;
+    float y = strtof(t, &end);
+    if (errno || end == t || *end || !(fabsf(y) <= lim)) return 0;
+    *a = x;
+    *b = y;
     return 1;
 }
 
@@ -113,11 +144,10 @@ static int parse_args(int argc, char **argv, options *o)
             o->radius = (int)n;
         } else if (!strcmp(a, "--size")) {
             NEED_VALUE();
-            int w, h;
-            char tail;
-            if (sscanf(v, "%dx%d%c", &w, &h, &tail) != 2 || w < 64 || h < 64 || w > 16384 || h > 16384) goto bad;
-            o->width = w;
-            o->height = h;
+            long w, h;
+            if (!parse_int_pair(v, 'x', 64, 16384, &w, &h)) goto bad;
+            o->width = (int)w;
+            o->height = (int)h;
         } else if (!strcmp(a, "--no-vsync")) {
             o->vsync = 0;
         } else if (!strcmp(a, "--threads")) {
@@ -150,19 +180,16 @@ static int parse_args(int argc, char **argv, options *o)
         } else if (!strcmp(a, "--look")) {
             NEED_VALUE();
             float y, p;
-            char tail;
-            if (sscanf(v, "%f,%f%c", &y, &p, &tail) != 2 || !isfinite(y) || !isfinite(p)) goto bad;
+            if (!parse_float_pair(v, 3600.0f, &y, &p)) goto bad;
             o->look_yaw = y;
             o->look_pitch = p;
             o->have_look = 1;
         } else if (!strcmp(a, "--spawn")) {
             NEED_VALUE();
-            int x, z;
-            char tail;
-            if (sscanf(v, "%d,%d%c", &x, &z, &tail) != 2 || abs(x) > WORLD_LIMIT - 64 || abs(z) > WORLD_LIMIT - 64)
-                goto bad;
-            o->spawn_x = x;
-            o->spawn_z = z;
+            long x, z;
+            if (!parse_int_pair(v, ',', -(WORLD_LIMIT - 64), WORLD_LIMIT - 64, &x, &z)) goto bad;
+            o->spawn_x = (int)x;
+            o->spawn_z = (int)z;
             o->have_spawn = 1;
         } else if (!strcmp(a, "--demo")) {
             o->demo = 1;
@@ -256,6 +283,17 @@ static void resize_cb(GLFWwindow *win, int w, int h)
 static int box_hits_cell(aabb b, int x, int y, int z)
 {
     return b.min.x < x + 1 && b.max.x > x && b.min.y < y + 1 && b.max.y > y && b.min.z < z + 1 && b.max.z > z;
+}
+
+typedef struct { world *w; physics *ph; } save_ctx;
+
+/* A fatal error (device lost, surface lost) must not take the player's
+ * edits with it: the world lives in CPU memory and is still intact. */
+static void save_on_fatal(void *user)
+{
+    save_ctx *sc = user;
+    physics_settle_bodies(sc->ph, NULL);
+    world_save_all(sc->w);
 }
 
 static void find_spawn(uint32_t seed, double *sx, double *sz)
@@ -353,6 +391,9 @@ int main(int argc, char **argv)
     physics_init(&ph, &w);
     w.edit_user = &ph;
     w.on_block_changed = physics_on_block_changed;
+    w.on_column_unload = physics_on_column_unload;
+    save_ctx sc = {&w, &ph};
+    log_set_fatal_hook(save_on_fatal, &sc);
     renderer_bind_world(rd, &w);
 
     double sx, sz;
@@ -373,7 +414,7 @@ int main(int argc, char **argv)
              jobs_worker_count(js));
 
     demo_state demo = {0};
-    double prev = glfwGetTime(), acc = 0.0, title_t = prev;
+    double prev = glfwGetTime(), acc = 0.0, title_t = prev, save_t = prev;
     int frame = 0, fps_frames = 0;
     double fps = 0.0;
     char title[256];
@@ -486,10 +527,16 @@ int main(int argc, char **argv)
                      rs.pool_total_kb / 1024);
             glfwSetWindowTitle(win, title);
         }
+        if (now - save_t >= AUTOSAVE_SECONDS) {
+            save_t = now;
+            world_save_all(&w); /* only columns edited since the last save */
+        }
         if (o.frames && frame >= o.frames) break;
     }
 
     log_info("saving and shutting down");
+    log_set_fatal_hook(NULL, NULL);
+    physics_settle_bodies(&ph, NULL);
     world_save_all(&w);
     jobs_wait_idle(js);
     world_destroy(&w);

@@ -12,7 +12,11 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#ifdef MC_MEM_LIBC
+#include <stdlib.h>
+#else
 #include <mimalloc.h>
+#endif
 
 /* Aborts on out-of-memory: the game cannot recover from a failed
  * allocation mid-frame, and a clean abort beats a NULL dereference. */
@@ -20,7 +24,12 @@ void *mem_alloc(size_t size);
 void *mem_calloc(size_t count, size_t size);
 void *mem_realloc(void *ptr, size_t size);
 void *mem_alloc_aligned(size_t size, size_t align);
+#ifdef MC_MEM_LIBC
+/* Sanitizer builds: libc malloc, which ASan and valgrind can track. */
+static inline void mem_free(void *ptr) { free(ptr); }
+#else
 static inline void mem_free(void *ptr) { mi_free(ptr); }
+#endif
 
 /* Overflow-checked count * size for array allocations. Aborts on overflow. */
 size_t mem_array_size(size_t count, size_t size);
