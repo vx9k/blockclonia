@@ -1,0 +1,66 @@
+# clang-format 18 style for blockclonia, tuned to the existing code:
+# 4-space indent, 120 columns, function braces on their own line, K&R braces
+# elsewhere, and the one-line `if (x) y;` / short-function forms the code uses.
+# Measured on commit 69726bc it touches about 6% of lines (see audits/lint.md);
+# apply it to changed lines only (git clang-format) or in one isolated commit.
+Language: Cpp            # clang-format has no separate C language; Cpp covers C
+BasedOnStyle: LLVM
+ColumnLimit: 120
+IndentWidth: 4
+ContinuationIndentWidth: 4
+UseTab: Never
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: Never
+  AfterStruct: false
+  AfterEnum: false
+  AfterUnion: false
+  BeforeElse: false
+  BeforeWhile: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortLoopsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Always
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortEnumsOnASingleLine: true
+
+IndentCaseLabels: false
+IndentGotoLabels: false
+IndentPPDirectives: None
+PointerAlignment: Right
+DerivePointerAlignment: false
+SpaceAfterCStyleCast: false
+SpaceBeforeParens: ControlStatements
+Cpp11BracedListStyle: true
+
+AlignAfterOpenBracket: Align
+AlignOperands: Align
+AlignEscapedNewlines: Left
+AlignTrailingComments:
+  Kind: Leave            # keep the hand-aligned struct member comments
+AlignConsecutiveMacros: None
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
+BreakBeforeBinaryOperators: None
+BreakBeforeTernaryOperators: true
+BinPackArguments: true
+BinPackParameters: true
+AlwaysBreakAfterReturnType: None
+PenaltyReturnTypeOnItsOwnLine: 1000
+PenaltyBreakAssignment: 100
+PenaltyBreakBeforeFirstCallParameter: 100
+
+MaxEmptyLinesToKeep: 1
+KeepEmptyLinesAtTheStartOfBlocks: false
+ReflowComments: false
+SpacesBeforeTrailingComments: 1
+
+# Own header first, then each block sorted; blank-line-separated blocks stay.
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve
+IncludeIsMainRegex: '$'

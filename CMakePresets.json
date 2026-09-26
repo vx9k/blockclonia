@@ -1,0 +1,177 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": { "MC_BUILD_TESTS": "ON" }
+    },
+    {
+      "name": "linux-only",
+      "hidden": true,
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
+    },
+    {
+      "name": "dev",
+      "displayName": "Development: Debug, tests",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "release",
+      "displayName": "Release: -O2 + LTO, portable CPU baseline",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_FLAGS_RELEASE": "-O2 -DNDEBUG",
+        "MC_LTO": "ON"
+      }
+    },
+    {
+      "name": "native",
+      "displayName": "Release tuned for this machine (-march/-mcpu=native); build on the device you play on, e.g. a Pi",
+      "inherits": "release",
+      "cacheVariables": { "MC_CPU": "native" }
+    },
+    {
+      "name": "profile",
+      "displayName": "RelWithDebInfo + frame pointers, for perf/hotspot",
+      "inherits": ["base", "linux-only"],
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_C_FLAGS": "-fno-omit-frame-pointer"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "AddressSanitizer + UBSan (see stability audit: mimalloc hides heap bugs from ASan)",
+      "inherits": ["base", "linux-only"],
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "MC_SANITIZE": "ON", "MC_LTO": "OFF" }
+    },
+    {
+      "name": "core",
+      "displayName": "Core library + unit tests only (no Vulkan/GLFW/glslc needed)",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "MC_BUILD_GAME": "OFF" }
+    },
+    {
+      "name": "fuzz",
+      "displayName": "libFuzzer target for the save decoder (clang)",
+      "inherits": ["base", "linux-only"],
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "MC_BUILD_GAME": "OFF",
+        "MC_BUILD_FUZZ": "ON",
+        "MC_LTO": "OFF"
+      }
+    },
+    {
+      "name": "ci",
+      "hidden": true,
+      "inherits": "release",
+      "cacheVariables": { "MC_WERROR": "ON", "MC_DEPS": "SYSTEM" }
+    },
+    {
+      "name": "ci-gcc",
+      "displayName": "CI: gcc, Release, -Werror",
+      "inherits": ["ci", "linux-only"],
+      "cacheVariables": { "CMAKE_C_COMPILER": "gcc" }
+    },
+    {
+      "name": "ci-clang",
+      "displayName": "CI: clang, Release, -Werror",
+      "inherits": ["ci", "linux-only"],
+      "cacheVariables": { "CMAKE_C_COMPILER": "clang" }
+    },
+    {
+      "name": "pi4-aarch64",
+      "displayName": "Cross: Raspberry Pi 4, 64-bit Pi OS (set RPI_SYSROOT, optional RPI_COMPILER=clang)",
+      "inherits": ["release", "linux-only"],
+      "toolchainFile": "${sourceDir}/cmake/toolchains/rpi-aarch64.cmake",
+      "cacheVariables": { "MC_CPU": "pi4" }
+    },
+    {
+      "name": "pi5-aarch64",
+      "displayName": "Cross: Raspberry Pi 5, 64-bit Pi OS",
+      "inherits": "pi4-aarch64",
+      "cacheVariables": { "MC_CPU": "pi5" }
+    },
+    {
+      "name": "pi4-armhf",
+      "displayName": "Cross: Raspberry Pi 4/5, 32-bit Pi OS (NEON, hard float)",
+      "inherits": ["release", "linux-only"],
+      "toolchainFile": "${sourceDir}/cmake/toolchains/rpi-armhf.cmake",
+      "cacheVariables": { "MC_CPU": "pi4" }
+    },
+    {
+      "name": "mingw64",
+      "displayName": "Cross: Windows x86_64 with MinGW-w64 (experimental: needs a Windows port of jobs.c/save.c)",
+      "inherits": ["release", "linux-only"],
+      "toolchainFile": "${sourceDir}/cmake/toolchains/mingw-w64-x86_64.cmake",
+      "cacheVariables": { "MC_DEPS": "FETCH", "MC_BUILD_TESTS": "OFF" }
+    },
+    {
+      "name": "windows-msvc",
+      "displayName": "Windows, Visual Studio 2022 (experimental: needs a Windows port)",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": { "MC_DEPS": "FETCH", "MC_BUILD_TESTS": "ON" }
+    },
+    {
+      "name": "macos",
+      "displayName": "macOS with MoltenVK (Vulkan SDK or Homebrew vulkan-loader + molten-vk + shaderc)",
+      "inherits": "release",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": { "MC_DEPS": "AUTO" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "native", "configurePreset": "native" },
+    { "name": "profile", "configurePreset": "profile" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "core", "configurePreset": "core" },
+    { "name": "fuzz", "configurePreset": "fuzz" },
+    { "name": "ci-gcc", "configurePreset": "ci-gcc" },
+    { "name": "ci-clang", "configurePreset": "ci-clang" },
+    { "name": "pi4-aarch64", "configurePreset": "pi4-aarch64" },
+    { "name": "pi5-aarch64", "configurePreset": "pi5-aarch64" },
+    { "name": "pi4-armhf", "configurePreset": "pi4-armhf" },
+    { "name": "mingw64", "configurePreset": "mingw64" },
+    { "name": "windows-msvc", "configurePreset": "windows-msvc", "configuration": "Release" },
+    { "name": "macos", "configurePreset": "macos" }
+  ],
+  "testPresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "timeout": 300 }
+    },
+    { "name": "dev", "inherits": "base", "configurePreset": "dev" },
+    { "name": "release", "inherits": "base", "configurePreset": "release" },
+    { "name": "core", "inherits": "base", "configurePreset": "core" },
+    {
+      "name": "asan",
+      "inherits": "base",
+      "configurePreset": "asan",
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:abort_on_error=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
+      }
+    },
+    { "name": "ci-gcc", "inherits": "base", "configurePreset": "ci-gcc" },
+    { "name": "ci-clang", "inherits": "base", "configurePreset": "ci-clang" },
+    { "name": "pi4-aarch64", "inherits": "base", "configurePreset": "pi4-aarch64",
+      "filter": { "include": { "label": "headless" } } },
+    { "name": "pi4-armhf", "inherits": "base", "configurePreset": "pi4-armhf",
+      "filter": { "include": { "label": "headless" } } },
+    { "name": "windows-msvc", "inherits": "base", "configurePreset": "windows-msvc", "configuration": "Release" }
+  ]
+}

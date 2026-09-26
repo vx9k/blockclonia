@@ -1,0 +1,75 @@
+# clang-tidy 18 configuration for blockclonia (C11).
+# Goal: flag real defects, stay green. Style checks that fight the house style
+# (short identifiers, brace-less one-line ifs, magic numbers in physics
+# constants) are off on purpose; see audits/lint.md for the measured counts.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  cert-*,
+  -cert-err33-c,
+  clang-analyzer-*,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  misc-*,
+  -misc-include-cleaner,
+  performance-*,
+  portability-*,
+  readability-avoid-const-params-in-decls,
+  readability-duplicate-include,
+  readability-function-cognitive-complexity,
+  readability-identifier-naming,
+  readability-inconsistent-declaration-parameter-name,
+  readability-misleading-indentation,
+  readability-misplaced-array-index,
+  readability-non-const-parameter,
+  readability-redundant-control-flow,
+  readability-redundant-declaration,
+  readability-redundant-preprocessor,
+  readability-simplify-boolean-expr
+
+# Headers under src/ are checked when a .c file includes them; system, Vulkan,
+# GLFW and generated shader headers are not.
+HeaderFilterRegex: '.*/(src|tests)/[^/]*\.h$'
+FormatStyle: file
+WarningsAsErrors: ''
+
+CheckOptions:
+  # Return values that must not be dropped (replaces cert-err33-c, which also
+  # demands checking every printf/fprintf, i.e. every log line).
+  bugprone-unused-return-value.CheckedFunctions: >-
+    ::fopen;::fclose;::fflush;::fread;::fwrite;::fgets;::fseek;::ftell;::setvbuf;::rename;
+    ::malloc;::calloc;::realloc;::aligned_alloc;
+    ::strtol;::strtoll;::strtoul;::strtoull;::strtof;::strtod;
+    ::pthread_create;::mkdir
+  # `(void)fclose(f);` documents a deliberately ignored result.
+  bugprone-unused-return-value.AllowCastToVoid: true
+  # int8_t is a number here (block span), not a character.
+  bugprone-signed-char-misuse.CharTypdefsToIgnore: 'int8_t'
+  cert-str34-c.CharTypdefsToIgnore: 'int8_t'
+  # `sizeof *p` where p is column** or VkPhysicalDevice* is correct.
+  bugprone-sizeof-expression.WarnOnSizeOfPointerToAggregate: false
+  # Ratchet: the most complex function today is parse_args at 134.
+  readability-function-cognitive-complexity.Threshold: 140
+  readability-function-cognitive-complexity.DescribeBasicIncrements: false
+  # The naming convention the code already follows.
+  readability-identifier-naming.FunctionCase: lower_case
+  readability-identifier-naming.ParameterCase: lower_case
+  readability-identifier-naming.VariableCase: lower_case
+  readability-identifier-naming.MemberCase: lower_case
+  readability-identifier-naming.StructCase: lower_case
+  readability-identifier-naming.UnionCase: lower_case
+  readability-identifier-naming.EnumCase: lower_case
+  readability-identifier-naming.TypedefCase: lower_case
+  readability-identifier-naming.TypedefIgnoredRegexp: '^GLFWwindow$'
+  readability-identifier-naming.EnumConstantCase: UPPER_CASE
+  readability-identifier-naming.GlobalVariableCase: lower_case
+  readability-identifier-naming.GlobalVariablePrefix: g_
+  readability-identifier-naming.GlobalVariableIgnoredRegexp: '^t_[a-z0-9_]+$'
+  readability-identifier-naming.GlobalConstantCase: UPPER_CASE
+  readability-identifier-naming.GlobalConstantIgnoredRegexp: '^g_[a-z0-9_]+$'
+  readability-identifier-naming.StaticConstantCase: UPPER_CASE
+  readability-identifier-naming.StaticConstantIgnoredRegexp: '^g_[a-z0-9_]+$'
+  readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
+  readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^log_[a-z]+$'
