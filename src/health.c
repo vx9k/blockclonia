@@ -709,7 +709,7 @@ void health_step(health *h, const health_env *e, double dt)
     float p = BMR_W * (1.0f + 0.1f * maxf(0.0f, h->temp - 37.0f));
     int swimming = e->submerged > 0.5;
     if (awake) {
-        if (swimming) p += 250.0f + 450.0f * (float)minf((float)e->speed, 3.0f);
+        if (swimming) p += 60.0f + 450.0f * (float)minf((float)e->speed, 3.0f); /* sculling + strokes */
         else if (e->on_ground) p += 300.0f * minf((float)e->speed, 9.0f);
         else p += 60.0f;
         if (e->jumped) h->wbal -= 1500.0f;
@@ -816,31 +816,36 @@ void health_step(health *h, const health_env *e, double dt)
     /* Exercise drive: central command reacts at once, the metabolic part
      * follows oxygen uptake. */
     float ex = clampf_(0.35f * minf(p / VO2MAX_W, 1.0f) + 0.65f * vo2_frac, 0.0f, 1.0f);
-    float b = clampf_((MAP_SET + 30.0f * ex - h->map) / 30.0f, -0.3f, 1.0f); /* baroreflex resets upward in exercise */
+    float b = clampf_((MAP_SET + 30.0f * ex - h->map) / 30.0f, -1.0f, 1.0f); /* baroreflex resets upward in exercise */
     float chemo = clampf_((0.92f - h->sao2) / 0.3f, 0.0f, 1.0f) + 0.6f * clampf_((h->paco2 - 45.0f) / 25.0f, 0.0f, 1.0f);
     int diving = e->airway == AIRWAY_WATER;
     h->icp = 10.0f + 0.8f * h->ich + 0.012f * h->ich * h->ich;
     int cushing = h->icp > 30.0f;
 
     float symp_t = 0.15f + 1.0f * maxf(b, 0.0f) + 0.4f * chemo + 0.03f * h->pain + (diving ? 0.2f : 0.0f) +
-                   (cushing ? 0.5f : 0.0f) - 0.3f * maxf(-b, 0.0f);
+                   (cushing ? 0.5f : 0.0f) - 0.45f * maxf(-b, 0.0f);
     if (h->organ[ORG_BRAIN] < 0.15f) symp_t = 0.05f; /* autonomic failure */
     h->symp = lag(h->symp, clampf_(symp_t, 0.0f, 1.0f), dt, 4.0);
 
     float hr_max = HR_MAX * (0.55f + 0.45f * h->organ[ORG_HEART]);
-    float drive = 0.95f * ex + 0.85f * maxf(b, 0.0f) + 0.5f * chemo + 0.025f * h->pain +
+    /* Chemoreceptors speed the heart only while the lungs inflate; in
+     * apnoea the same reflex slows it (the diving response). */
+    float drive = 0.95f * ex + 0.85f * maxf(b, 0.0f) + (h->breathing ? 0.5f : -0.2f) * chemo + 0.025f * h->pain +
                   0.07f * maxf(0.0f, h->temp - 37.0f) + 0.25f * h->sepsis - 0.4f * maxf(-b, 0.0f) +
                   (h->lactate > 4.0f ? 0.02f * (h->lactate - 4.0f) : 0.0f);
     float hr_rest = HR_REST * (h->temp < 35.0f ? clampf_(1.0f - (35.0f - h->temp) * 0.08f, 0.3f, 1.0f) : 1.0f);
-    float hr_t = hr_rest + (hr_max - hr_rest) * clampf_(drive, -0.3f, 1.0f);
+    /* Above rest the drive spends the heart-rate reserve; below it, vagal
+     * slowing scales the resting rate. */
+    float hr_t = drive >= 0.0f ? hr_rest + (hr_max - hr_rest) * minf(drive, 1.0f)
+                               : hr_rest * (1.0f + 0.8f * maxf(drive, -0.6f));
     if (diving && awake) hr_t *= 0.85f;                       /* diving reflex */
     if (cushing) hr_t = minf(hr_t, 50.0f);                     /* Cushing reflex */
-    if (h->sao2 < 0.5f) hr_t *= powf(h->sao2 / 0.5f, 1.5f);    /* hypoxic bradycardia */
+    if (h->sao2 < 0.5f) hr_t *= 0.35f + 0.65f * h->sao2 / 0.5f; /* hypoxic bradycardia */
     if (h->organ[ORG_BRAIN] < 0.15f) hr_t = minf(hr_t, 50.0f);
     if (!arrest) h->hr = lag(h->hr, hr_t, dt, hr_t > h->hr ? 2.5 : 4.0);
 
     float contract = h->organ[ORG_HEART] * (0.85f + 0.35f * minf(1.0f, h->symp + ex)) *
-                     (h->lactate > 8.0f ? 0.8f : 1.0f) * (h->sao2 < 0.7f ? h->sao2 / 0.7f : 1.0f);
+                     (h->lactate > 8.0f ? 0.8f : 1.0f) * (h->sao2 < 0.6f ? 0.3f + 0.7f * h->sao2 / 0.6f : 1.0f);
     contract *= h->hr > 160.0f ? maxf(0.4f, 1.0f - (h->hr - 160.0f) / 200.0f) : 1.0f; /* short diastole */
     float vu = 4.05f - 1.3f * h->symp + 0.5f * h->sepsis;    /* unstressed volume, venoconstriction */
     float pms = maxf(0.0f, (veff - vu) / CSYS) * (1.0f + 1.3f * ex); /* muscle pump */
@@ -866,6 +871,9 @@ void health_step(health *h, const health_env *e, double dt)
         float ratio = demand / maxf(supply, 0.01f);
         if (ratio > 1.0f) h->ischemia += (ratio - 1.0f) * 0.08f * fdt;
         else h->ischemia = maxf(0.0f, h->ischemia - 0.02f * fdt);
+        /* Profoundly hypoxic blood starves the myocardium however slowly
+         * it beats: the path from drowning to arrest. */
+        if (h->sao2 < 0.3f) h->ischemia += (0.3f - h->sao2) / 0.3f * 0.05f * fdt;
         h->ischemia = minf(h->ischemia, 10.0f);
         if (h->ischemia > 1.5f) h->organ[ORG_HEART] = maxf(0.0f, h->organ[ORG_HEART] - 0.0015f * (h->ischemia - 1.5f) * fdt);
         float vf = (h->ischemia > 3.0f ? 0.1f * (h->ischemia - 3.0f) : 0.0f) + (h->temp < 28.0f ? 0.05f : 0.0f) +
@@ -882,7 +890,8 @@ void health_step(health *h, const health_env *e, double dt)
     float lung_eff = h->organ[ORG_LUNGS] * (1.0f - h->pneumothorax) * (1.0f - clampf_(h->lung_water / 1.5f, 0.0f, 0.9f));
     int drive_ok = h->organ[ORG_BRAIN] > 0.08f && !(arrest && h->arrest_time > 20.0f);
     int can_air = e->airway == AIRWAY_AIR;
-    h->o2_store = maxf(0.0f, h->o2_store - h->vo2 / 60.0f * fdt);
+    /* Tissues extract less as the store runs dry and the brain shuts down. */
+    h->o2_store = maxf(0.0f, h->o2_store - h->vo2 * clampf_(h->pao2 / 25.0f, 0.3f, 1.0f) / 60.0f * fdt);
     if (can_air && drive_ok) {
         h->breathing = 1;
         float rr_need = 12.0f + 26.0f * vo2_frac;
