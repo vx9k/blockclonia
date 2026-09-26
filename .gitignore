@@ -1,0 +1,7 @@
+build/
+build-*/
+world/
+*.ppm
+screenshot.*
+compile_commands.json
+.cache/
