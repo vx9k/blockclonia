@@ -17,6 +17,8 @@ typedef struct jobs jobs;
 jobs *jobs_create(int workers);
 void jobs_destroy(jobs *js);    /* drains queued jobs, then joins workers */
 void jobs_submit(jobs *js, job *j);
+/* Queues ahead of everything else (edits the player is waiting to see). */
+void jobs_submit_front(jobs *js, job *j);
 /* Runs up to `budget` completion callbacks (budget < 0: all). */
 int jobs_poll(jobs *js, int budget);
 int jobs_worker_count(const jobs *js);

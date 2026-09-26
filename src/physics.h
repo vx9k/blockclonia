@@ -71,12 +71,15 @@ typedef struct physics {
     body *bodies;
     int body_count;
     pos_queue fluid_now, fluid_next;
+    int fluid_read, fluid_end;   /* this tick's cells: fluid_now.items[fluid_read, fluid_end) */
+    int fluid_per_step;          /* a tick's work is spread over FLUID_TICK_EVERY steps */
     ipos struct_queue[256];
     int struct_head, struct_count;
     int suppress_struct;
     uint64_t step_count;
     /* Scratch for structural checks. */
     int8_t *st_s;
+    uint8_t *st_id;              /* block ids of the region, read once per check */
     int32_t *st_bucket[STRUCT_MAX_SPAN + 2];
     int st_bucket_len[STRUCT_MAX_SPAN + 2];
     const player *pl;    /* for body-vs-player collisions */

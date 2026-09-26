@@ -46,9 +46,13 @@ size_t mem_array_size(size_t count, size_t size)
 
 void mem_init(void)
 {
-    /* Low-end devices are usually memory constrained: return freed pages to
-     * the OS reasonably quickly instead of holding on to them. */
-    mi_option_set(mi_option_purge_delay, 100);
+    /* Sized for 1-2 GB devices. mimalloc reserves address space in 1 GiB
+     * arenas and, where the kernel overcommits, commits them eagerly: that
+     * shows up as a gigabyte "committed" on a game that uses ~100 MB.
+     * Reserve in 64 MiB steps and commit on demand instead. The default
+     * purge delay (10 ms) already returns freed pages quickly. */
+    mi_option_set(mi_option_arena_reserve, 64 * 1024); /* KiB */
+    mi_option_set(mi_option_arena_eager_commit, 0);
 }
 
 void mem_print_stats(void)

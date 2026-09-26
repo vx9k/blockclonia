@@ -1,6 +1,7 @@
-/* Vulkan 1.0 renderer tuned for low-end GPUs: 4-byte vertices, one vertex
- * pool buffer for every chunk mesh, push constants instead of uniform
- * buffers, reversed-Z depth, no discard, CPU frustum culling, fog. */
+/* Vulkan 1.0 renderer tuned for low-end GPUs: 4-byte vertices in a few
+ * large vertex pool buffers, one draw call per section with back-facing
+ * face groups skipped, push constants instead of uniform buffers,
+ * reversed-Z depth, no discard, CPU frustum culling, fog. */
 #ifndef MC_RENDERER_H
 #define MC_RENDERER_H
 
@@ -16,7 +17,8 @@ typedef struct {
     int validate;
     int render_radius;
     int gpu_index;       /* -1: pick automatically */
-    uint32_t pool_mb;    /* 0: derive from render radius */
+    uint32_t pool_mb;    /* first vertex pool block; 0: derive from render radius */
+    int screenshots;     /* a screenshot is planned: readable swapchain from the start */
 } render_opts;
 
 typedef struct {

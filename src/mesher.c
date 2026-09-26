@@ -30,44 +30,36 @@ void mesher_init(void)
     }
 }
 
-static const int DIR[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
-
-static inline int pidx3(const int p[3]) { return mesh_pidx(p[0], p[1], p[2]); }
-
 static inline uint32_t pack_vertex(const int p[3], int face, int ao, int tex, int drop)
 {
     return (uint32_t)p[0] | (uint32_t)p[1] << 5 | (uint32_t)p[2] << 10 | (uint32_t)face << 15 |
            (uint32_t)ao << 18 | (uint32_t)tex << 20 | (uint32_t)drop << 28;
 }
 
+/* Index strides in the padded array for axes x, y, z: every neighbour is
+ * the base index plus a constant, so nothing is recomputed per lookup. */
+static const int STRIDE[3] = {1, MESH_PAD * MESH_PAD, MESH_PAD};
+
 /* Vertex AO from the three blocks around a corner in the layer in front of
- * the face. */
-static inline int corner_ao(const mesh_input *in, const int l[3], int u, int v, int su, int sv)
+ * the face (n is that layer's cell, ou/ov the signed tangent strides). */
+static inline int corner_ao(const uint8_t *cls, int n, int ou, int ov)
 {
-    int a[3] = {l[0], l[1], l[2]}, b[3] = {l[0], l[1], l[2]}, c[3] = {l[0], l[1], l[2]};
-    a[u] += su;
-    b[v] += sv;
-    c[u] += su;
-    c[v] += sv;
-    int s1 = g_class[in->blocks[pidx3(a)]] == C_OPAQUE;
-    int s2 = g_class[in->blocks[pidx3(b)]] == C_OPAQUE;
-    int cr = g_class[in->blocks[pidx3(c)]] == C_OPAQUE;
+    int s1 = cls[n + ou] == C_OPAQUE, s2 = cls[n + ov] == C_OPAQUE, cr = cls[n + ou + ov] == C_OPAQUE;
     return (s1 && s2) ? 0 : 3 - (s1 + s2 + cr);
 }
 
-static uint32_t face_key(const mesh_input *in, const int p[3], int f, int u, int v)
+static inline uint32_t face_key(const mesh_input *in, const uint8_t *cls, int pi, int ni, int f, int su, int sv)
 {
-    uint8_t b = in->blocks[pidx3(p)];
-    uint8_t cb = g_class[b];
+    uint8_t cb = cls[pi];
     if (cb == C_AIR) return 0;
-    int q[3] = {p[0] + DIR[f][0], p[1] + DIR[f][1], p[2] + DIR[f][2]};
-    uint8_t n = in->blocks[pidx3(q)];
-    uint8_t cn = g_class[n];
+    uint8_t cn = cls[ni];
+    if (cn == C_OPAQUE && cb != C_WATER) return 0; /* hidden: the common case, decided first */
+    uint8_t b = in->blocks[pi];
     uint32_t key = K_PRESENT | g_blocks[b].tex[f];
 
     if (cb == C_WATER) {
-        int level = in->meta[pidx3(p)] ? in->meta[pidx3(p)] : WATER_FULL;
-        int above_water = g_class[in->blocks[mesh_pidx(p[0], p[1] + 1, p[2])]] == C_WATER;
+        int level = in->meta[pi] ? in->meta[pi] : WATER_FULL;
+        int above_water = cls[pi + STRIDE[1]] == C_WATER;
         if (cn == C_WATER || (cn == C_OPAQUE && !(f == 2 && level < WATER_FULL))) return 0;
         int drop = above_water ? 0 : (WATER_FULL - level > 0 ? WATER_FULL - level : 1);
         key |= K_TRANS | (uint32_t)drop << 16 | (uint32_t)3 << 8 | (uint32_t)3 << 10 |
@@ -75,40 +67,42 @@ static uint32_t face_key(const mesh_input *in, const int p[3], int f, int u, int
         if (f != 2 && f != 3 && drop) key |= K_NOMERGE;
         return key;
     }
-    if (cn == C_OPAQUE) return 0;
     if (cb == C_TRANS) {
-        if (n == b) return 0;
+        if (in->blocks[ni] == b) return 0;
         key |= K_TRANS;
     }
 
     /* Corners in (u, v) order: (0,0) (1,0) (1,1) (0,1). */
-    int ao0 = corner_ao(in, q, u, v, -1, -1);
-    int ao1 = corner_ao(in, q, u, v, +1, -1);
-    int ao2 = corner_ao(in, q, u, v, +1, +1);
-    int ao3 = corner_ao(in, q, u, v, -1, +1);
+    int ao0 = corner_ao(cls, ni, -su, -sv);
+    int ao1 = corner_ao(cls, ni, +su, -sv);
+    int ao2 = corner_ao(cls, ni, +su, +sv);
+    int ao3 = corner_ao(cls, ni, -su, +sv);
     key |= (uint32_t)(ao0 | ao1 << 2 | ao2 << 4 | ao3 << 6) << 8;
     return key;
 }
 
-uint32_t mesh_section(const mesh_input *in, uint32_t *out, uint32_t *opaque_quads,
-                      uint32_t *trans_quads)
+uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *mc)
 {
     uint32_t nopq = 0, ntr = 0;
     uint32_t mask[16][16];
+    uint8_t cls[MESH_PAD_VOL];
+    for (int i = 0; i < MESH_PAD_VOL; i++) cls[i] = g_class[in->blocks[i]];
 
     for (int f = 0; f < 6; f++) {
         int d = f / 2, sgn = (f & 1) ? -1 : 1;
         int u = (d + 1) % 3, v = (d + 2) % 3;
+        int su = STRIDE[u], sv = STRIDE[v], nof = sgn * STRIDE[d];
         for (int slice = 0; slice < 16; slice++) {
             int any = 0;
-            for (int j = 0; j < 16; j++)
-                for (int i = 0; i < 16; i++) {
-                    int p[3];
-                    p[d] = slice; p[u] = i; p[v] = j;
-                    uint32_t k = face_key(in, p, f, u, v);
+            int base = mesh_pidx(0, 0, 0) + slice * STRIDE[d];
+            for (int j = 0; j < 16; j++) {
+                int pi = base + j * sv;
+                for (int i = 0; i < 16; i++, pi += su) {
+                    uint32_t k = face_key(in, cls, pi, pi + nof, f, su, sv);
                     mask[j][i] = k;
                     any |= k != 0;
                 }
+            }
             if (!any) continue;
 
             for (int j = 0; j < 16; j++)
@@ -165,13 +159,23 @@ uint32_t mesh_section(const mesh_input *in, uint32_t *out, uint32_t *opaque_quad
                     i += w;
                 }
         }
+        mc->face_end[f] = (uint16_t)nopq;
     }
 
     /* Translucent quads were written backwards from the end; move them to
      * directly follow the opaque ones. */
     if (ntr)
         memmove(out + 4u * nopq, out + 4u * (MESH_MAX_QUADS - ntr), sizeof(uint32_t) * 4u * ntr);
-    *opaque_quads = nopq;
-    *trans_quads = ntr;
+    mc->opaque = nopq;
+    mc->trans = ntr;
     return nopq + ntr;
+}
+
+uint32_t mesh_section(const mesh_input *in, uint32_t *out, uint32_t *opaque_quads, uint32_t *trans_quads)
+{
+    mesh_counts mc;
+    uint32_t n = mesh_section_counts(in, out, &mc);
+    *opaque_quads = mc.opaque;
+    *trans_quads = mc.trans;
+    return n;
 }

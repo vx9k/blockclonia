@@ -65,7 +65,7 @@ foreach(shader block.vert block.frag entity.vert line.vert line.frag)
   add_custom_command(
     OUTPUT ${out}
     COMMAND ${GLSLC} -O --target-env=vulkan1.0 -mfmt=c -I ${SHADER_DIR} -o ${out} ${SHADER_DIR}/${shader}
-    DEPENDS ${SHADER_DIR}/${shader} ${SHADER_DIR}/common.glsl
+    DEPENDS ${SHADER_DIR}/${shader} ${SHADER_DIR}/push_vert.glsl ${SHADER_DIR}/push_frag.glsl
     COMMENT "Compiling shader ${shader}"
     VERBATIM)
   list(APPEND SHADER_INCS ${out})

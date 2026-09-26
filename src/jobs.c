@@ -4,6 +4,10 @@
 
 #include <pthread.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#endif
 
 struct jobs {
     pthread_mutex_t lock;
@@ -58,6 +62,11 @@ static job *pop(job **head, job **tail)
 static void *worker_main(void *arg)
 {
     jobs *js = arg;
+#ifdef __linux__
+    /* Background work yields to the render thread on small CPUs. Linux
+     * applies nice values per thread; failure is harmless. */
+    (void)setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 5);
+#endif
     pthread_mutex_lock(&js->lock);
     for (;;) {
         while (!js->queue_head && !js->quit)
@@ -124,6 +133,20 @@ void jobs_submit(jobs *js, job *j)
     }
     pthread_mutex_lock(&js->lock);
     push(&js->queue_head, &js->queue_tail, j);
+    pthread_cond_signal(&js->work_cv);
+    pthread_mutex_unlock(&js->lock);
+}
+
+void jobs_submit_front(jobs *js, job *j)
+{
+    if (js->worker_count == 0) {
+        jobs_submit(js, j);
+        return;
+    }
+    pthread_mutex_lock(&js->lock);
+    j->next = js->queue_head;
+    js->queue_head = j;
+    if (!js->queue_tail) js->queue_tail = j;
     pthread_cond_signal(&js->work_cv);
     pthread_mutex_unlock(&js->lock);
 }

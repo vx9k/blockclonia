@@ -22,7 +22,7 @@
 
 #define REACH 5.0
 #define MAX_STEPS_PER_FRAME 5
-#define MESH_UPLOADS_PER_FRAME 48
+#define MESH_UPLOADS_PER_FRAME 128
 
 typedef struct {
     uint32_t seed;
@@ -126,7 +126,7 @@ static int parse_args(int argc, char **argv, options *o)
             o->threads = (int)n;
         } else if (!strcmp(a, "--pool-mb")) {
             NEED_VALUE();
-            if (!parse_int(v, 4, 2048, &n)) goto bad;
+            if (!parse_int(v, 1, 512, &n)) goto bad;
             o->pool_mb = (uint32_t)n;
         } else if (!strcmp(a, "--gpu")) {
             NEED_VALUE();
@@ -344,7 +344,7 @@ int main(int argc, char **argv)
     jobs *js = jobs_create(workers);
 
     render_opts ro = {.vsync = o.vsync, .validate = o.validate, .render_radius = o.radius,
-                      .gpu_index = o.gpu, .pool_mb = o.pool_mb};
+                      .gpu_index = o.gpu, .pool_mb = o.pool_mb, .screenshots = o.screenshot != NULL};
     renderer *rd = renderer_create(win, &ro);
 
     world w;
@@ -428,7 +428,7 @@ int main(int argc, char **argv)
         dvec3 eye = dv3(pl.pos.x, pl.pos.y + PLAYER_EYE, pl.pos.z);
         ray_hit hit = physics_raycast(&w, eye, look_dir(pl.yaw, pl.pitch), REACH);
         if (g_in.click_break && hit.hit && hit.id != B_BEDROCK)
-            world_set(&w, hit.block.x, hit.block.y, hit.block.z, B_AIR, 0);
+            world_set_player(&w, hit.block.x, hit.block.y, hit.block.z, B_AIR, 0);
         if (g_in.click_place && hit.hit) {
             ipos t = hit.before;
             int blocked = box_hits_cell(player_box(&pl), t.x, t.y, t.z);
@@ -438,7 +438,7 @@ int main(int argc, char **argv)
             }
             uint8_t cur = world_get(&w, t.x, t.y, t.z);
             if (!blocked && (cur == B_AIR || cur == B_WATER))
-                world_set(&w, t.x, t.y, t.z, HOTBAR[g_in.slot], 0);
+                world_set_player(&w, t.x, t.y, t.z, HOTBAR[g_in.slot], 0);
         }
         if (g_in.click_pick && hit.hit) {
             for (int i = 0; i < HOTBAR_N; i++)
@@ -448,7 +448,7 @@ int main(int argc, char **argv)
 
         if (o.demo) demo_step(&w, &pl, &demo, frame);
 
-        world_update(&w, pl.pos.x, pl.pos.z);
+        world_update(&w, pl.pos.x, pl.pos.y + PLAYER_EYE, pl.pos.z);
 
         if (g_in.want_shot) {
             renderer_request_screenshot(rd, "screenshot.ppm");
@@ -458,6 +458,7 @@ int main(int argc, char **argv)
 
         if (renderer_begin_frame(rd)) {
             jobs_poll(js, MESH_UPLOADS_PER_FRAME);
+            world_schedule(&w);
             double alpha = acc / PHYS_DT;
             dvec3 ip = dv3_lerp(pl.prev_pos, pl.pos, alpha);
             render_view v = {.eye = dv3(ip.x, ip.y + PLAYER_EYE, ip.z), .yaw = pl.yaw, .pitch = pl.pitch,
@@ -467,6 +468,7 @@ int main(int argc, char **argv)
             renderer_end_frame(rd, &w, &ph, &v, alpha);
         } else {
             jobs_poll(js, MESH_UPLOADS_PER_FRAME);
+            world_schedule(&w);
             glfwWaitEventsTimeout(0.05);
         }
 

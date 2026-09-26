@@ -1,15 +1,16 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
-#include "common.glsl"
+#include "push_vert.glsl"
 
-// Falling blocks: float position (camera-relative) plus the block vertex
-// packing for face, texture layer and the unit-cube corner (for UVs).
-layout(location = 0) in vec3 v_pos;
-layout(location = 1) in uint v_data;
+// Falling blocks: a static unit cube (block vertex packing) instanced once
+// per body.
+layout(location = 0) in uint v_data;
+layout(location = 1) in vec3 i_pos;  // body min corner relative to the camera
+layout(location = 2) in uint i_tex;  // texture layers: side | top << 8 | bottom << 16
 
-layout(location = 0) out vec3 f_uvl;
-layout(location = 1) out float f_light;
-layout(location = 2) out float f_fog;
+layout(location = 0) out vec2 f_uv;
+layout(location = 1) flat out uint f_layer;
+layout(location = 2) out mediump vec2 f_light_fog;
 
 const float FACE_SHADE[6] = float[](0.80, 0.80, 1.00, 0.50, 0.65, 0.65);
 
@@ -17,10 +18,9 @@ void main()
 {
     vec3 p = vec3(float(v_data & 31u), float((v_data >> 5) & 31u), float((v_data >> 10) & 31u));
     uint face = (v_data >> 15) & 7u;
-    uint layer = (v_data >> 20) & 255u;
-    gl_Position = pc.view_proj * vec4(v_pos, 1.0);
-    vec2 uv = face < 2u ? vec2(p.z, -p.y) : (face < 4u ? p.xz : vec2(p.x, -p.y));
-    f_uvl = vec3(uv, float(layer));
-    f_light = FACE_SHADE[face];
-    f_fog = clamp((length(v_pos) - pc.fog.x) * pc.fog.y, 0.0, 1.0);
+    vec3 rel = i_pos + p;
+    gl_Position = pc.view_proj * vec4(rel, 1.0);
+    f_uv = face < 2u ? vec2(p.z, -p.y) : (face < 4u ? p.xz : vec2(p.x, -p.y));
+    f_layer = face == 2u ? (i_tex >> 8) & 255u : (face == 3u ? (i_tex >> 16) & 255u : i_tex & 255u);
+    f_light_fog = vec2(FACE_SHADE[face], clamp((length(rel) - pc.fog.x) * pc.fog.y, 0.0, 1.0));
 }

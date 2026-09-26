@@ -31,8 +31,16 @@ static inline int mesh_pidx(int x, int y, int z)
 /* Builds lookup tables; call once before any worker thread meshes. */
 void mesher_init(void);
 
+typedef struct {
+    uint32_t opaque, trans;
+    /* Opaque quads are grouped by face (+X -X +Y -Y +Z -Z); group f ends
+     * at quad face_end[f], so the renderer can skip groups facing away. */
+    uint16_t face_end[6];
+} mesh_counts;
+
 /* Writes opaque quads first, then translucent ones. `out` must hold
  * MESH_MAX_QUADS * 4 vertices. Returns total quad count. */
+uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *counts);
 uint32_t mesh_section(const mesh_input *in, uint32_t *out, uint32_t *opaque_quads,
                       uint32_t *trans_quads);
 

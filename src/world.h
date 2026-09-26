@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 #include "block.h"
+#include "mesher.h"
 
 #define CHUNK_W 16
 #define CHUNK_SHIFT 4
@@ -30,10 +31,12 @@ static inline int col_index(int x, int y, int z) { return (y * CHUNK_W + z) * CH
 #define WATER_FULL 8
 
 typedef struct {
-    uint32_t vtx_offset;   /* first vertex in the GPU vertex pool */
+    uint32_t vtx_offset;   /* first vertex in its vertex pool block */
     uint32_t vtx_capacity; /* vertices reserved (0 = no allocation) */
     uint32_t opaque_quads;
     uint32_t trans_quads;
+    uint16_t face_end[6];  /* opaque quads grouped by face, see mesh_counts */
+    uint8_t block;         /* which vertex pool block holds it */
 } section_mesh;
 
 typedef enum { COL_LOADING, COL_READY } col_state;
@@ -50,15 +53,21 @@ typedef struct column {
     uint32_t version[SECTIONS];     /* bumped on every edit */
     uint32_t pending_version[SECTIONS];
     uint16_t solid_count[SECTIONS]; /* non-air blocks, 0 = skip meshing */
+    uint16_t opaque_count[SECTIONS];/* opaque blocks, for the enclosed test */
     section_mesh mesh[SECTIONS];
 } column;
 
 struct jobs;
 
+#define WORLD_URGENT 64
+
+struct mesh_job;
+
 typedef struct world {
     uint32_t seed;
     int radius;          /* render radius in columns */
-    int grid_w;          /* ring grid side (radius + 2 margin on each side) */
+    int grid_w;          /* ring grid side, a power of two covering the load ring */
+    int grid_mask;
     column **grid;
     int center_cx, center_cz;
     int have_center;
@@ -67,14 +76,19 @@ typedef struct world {
     struct jobs *jobs;
     int gen_in_flight, mesh_in_flight;
     int max_gen_in_flight, max_mesh_in_flight;
-    int (*spiral)[2];    /* column offsets sorted by distance */
+    int (*spiral)[2];    /* column offsets sorted by distance (load ring) */
     int spiral_count;
+    int gen_cursor;      /* spiral entries before this are loaded or loading */
+    int sched_pending;   /* something may be ready to mesh */
+    int eye_sy;          /* section the camera is in, meshed first */
+    int urgent[WORLD_URGENT][3]; /* sections edited by the player: cx, cz, sy */
+    int urgent_count;
+    struct mesh_job *retry;      /* finished meshes the renderer had no room for */
     /* Renderer hooks, called on the main thread. on_mesh_ready returns 0
      * if it could not take the mesh this frame (the section is re-meshed
      * later). */
     void *render_user;
-    int (*on_mesh_ready)(void *user, column *c, int sy, const uint32_t *verts,
-                         uint32_t opaque_quads, uint32_t trans_quads);
+    int (*on_mesh_ready)(void *user, column *c, int sy, const uint32_t *verts, const mesh_counts *mc);
     void (*on_mesh_free)(void *user, section_mesh *m);
     /* Called whenever a block changes, for physics wake-ups. */
     void *edit_user;
@@ -86,19 +100,38 @@ typedef struct world {
 void world_init(world *w, uint32_t seed, int radius, struct jobs *jobs, const char *save_dir);
 void world_destroy(world *w);
 
-column *world_column(const world *w, int cx, int cz);
+/* Inline: every physics query goes through these. */
+static inline column *world_column(const world *w, int cx, int cz)
+{
+    column *c = w->grid[(cz & w->grid_mask) * w->grid_w + (cx & w->grid_mask)];
+    return (c && c->cx == cx && c->cz == cz && c->state == COL_READY) ? c : 0;
+}
 
-uint8_t world_get(const world *w, int x, int y, int z);
+static inline uint8_t world_get(const world *w, int x, int y, int z)
+{
+    if (y < 0) return B_BEDROCK;
+    if (y >= WORLD_H) return B_AIR;
+    const column *c = world_column(w, chunk_of(x), chunk_of(z));
+    if (!c) return B_UNLOADED;
+    return c->blocks[col_index(x & (CHUNK_W - 1), y, z & (CHUNK_W - 1))];
+}
+
 uint8_t world_get_meta(const world *w, int x, int y, int z);
 int world_water_level(const world *w, int x, int y, int z);
 
 /* Raw edit: marks meshes dirty and the column modified, then fires
  * on_block_changed. Returns 0 if the column is not loaded. */
 int world_set(world *w, int x, int y, int z, uint8_t id, uint8_t meta);
+/* Same, for the player's own edits: their sections are re-meshed first. */
+int world_set_player(world *w, int x, int y, int z, uint8_t id, uint8_t meta);
 
-/* Streams columns around the given block position and schedules jobs.
- * Call once per frame. */
-void world_update(world *w, double px, double pz);
+/* Streams columns around the camera position and schedules jobs. Call
+ * once per frame. */
+void world_update(world *w, double px, double py, double pz);
+
+/* Schedules meshing again and retries uploads the renderer deferred. Call
+ * after jobs_poll() so finished work is refilled in the same frame. */
+void world_schedule(world *w);
 
 /* Blocking load of every column within `radius` of (px, pz), used by tests
  * and at spawn so the player never falls through ungenerated terrain. */

@@ -5,6 +5,7 @@
 
 #include <math.h>
 #include <string.h>
+#include <time.h>
 
 #define EPS 1e-7
 #define REGION_W (2 * STRUCT_RADIUS + 1)
@@ -12,6 +13,7 @@
 #define FLUID_QUEUE_CAP 16384
 #define FLUID_BUDGET 4096
 #define GROUNDED (STRUCT_MAX_SPAN + 1)
+#define STRUCT_BUDGET_S 0.0004 /* per step, after the first check */
 
 enum { SWEEP_BODIES = 1, SWEEP_PLAYER = 2 };
 
@@ -35,6 +37,13 @@ static int span_of(uint8_t id)
     if (id == B_UNLOADED) return STRUCT_MAX_SPAN;
     int s = block_get(id)->span;
     return s > STRUCT_MAX_SPAN ? STRUCT_MAX_SPAN : s;
+}
+
+static double mono_sec(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
 static int boxes_overlap(aabb a, aabb b)
@@ -82,10 +91,23 @@ static int pq_push(pos_queue *q, ipos p)
     return 1;
 }
 
+/* Cost follows the item count, not the table size: a tick that touched a
+ * few cells no longer wipes 128 KB. */
 static void pq_clear(pos_queue *q)
 {
     if (!q->count) return;
-    memset(q->set, 0, q->set_cap * sizeof(uint32_t));
+    if ((uint32_t)q->count > q->set_cap / 8) {
+        memset(q->set, 0, q->set_cap * sizeof(uint32_t));
+    } else {
+        uint32_t mask = q->set_cap - 1;
+        for (int i = 0; i < q->count; i++) {
+            /* Every item is in the table, so its probe always finds it;
+             * slots already cleared are simply stepped over. */
+            uint32_t h = hash_pos(q->items[i]) & mask;
+            while (q->set[h] != (uint32_t)i + 1) h = (h + 1) & mask;
+            q->set[h] = 0;
+        }
+    }
     q->count = 0;
 }
 
@@ -99,6 +121,7 @@ void physics_init(physics *ph, world *w)
     pq_init(&ph->fluid_now, FLUID_QUEUE_CAP);
     pq_init(&ph->fluid_next, FLUID_QUEUE_CAP);
     ph->st_s = mem_alloc(REGION_CELLS);
+    ph->st_id = mem_alloc(REGION_CELLS);
     for (int i = 0; i <= GROUNDED; i++)
         ph->st_bucket[i] = mem_alloc(sizeof(int32_t) * REGION_CELLS);
 }
@@ -109,6 +132,7 @@ void physics_destroy(physics *ph)
     pq_free(&ph->fluid_now);
     pq_free(&ph->fluid_next);
     mem_free(ph->st_s);
+    mem_free(ph->st_id);
     for (int i = 0; i <= GROUNDED; i++) mem_free(ph->st_bucket[i]);
     memset(ph, 0, sizeof *ph);
 }
@@ -185,9 +209,16 @@ static double sweep(const physics *ph, aabb box, int axis, double delta, int fla
     }
 
     if ((flags & SWEEP_BODIES)) {
+        /* Only bodies overlapping the swept box can shorten the move;
+         * rejecting the rest is a few compares instead of a clip. */
+        aabb sw = box;
+        if (delta > 0) addc3(&sw.max, axis, delta);
+        else addc3(&sw.min, axis, delta);
         for (int i = 0; i < ph->body_count; i++) {
-            if (i == skip_body) continue;
             const body *b = &ph->bodies[i];
+            if (b->pos.x >= sw.max.x || b->pos.x + 1 <= sw.min.x || b->pos.y >= sw.max.y ||
+                b->pos.y + 1 <= sw.min.y || b->pos.z >= sw.max.z || b->pos.z + 1 <= sw.min.z || i == skip_body)
+                continue;
             aabb ob = {b->pos, dv3(b->pos.x + 1, b->pos.y + 1, b->pos.z + 1)};
             delta = clip_against(box, ob, axis, delta);
         }
@@ -445,17 +476,28 @@ int physics_check_structure(physics *ph, int x, int y, int z)
     const int ny = y1 - y0 + 1;
     world *w = ph->w;
     int8_t *s = ph->st_s;
+    uint8_t *ids = ph->st_id;
     int32_t **bucket = ph->st_bucket;
     int *blen = ph->st_bucket_len;
     for (int i = 0; i <= GROUNDED; i++) blen[i] = 0;
 
 #define RIDX(i, j, k) (((j) * REGION_W + (k)) * REGION_W + (i))
+    /* Read the region once, one column lookup per (x, z); every later pass
+     * works on this copy. */
+    for (int k = 0; k < REGION_W; k++)
+        for (int i = 0; i < REGION_W; i++) {
+            int wx = x0 + i, wz = z0 + k;
+            const column *c = world_column(w, chunk_of(wx), chunk_of(wz));
+            const uint8_t *col = c ? &c->blocks[col_index(wx & (CHUNK_W - 1), 0, wz & (CHUNK_W - 1))] : NULL;
+            for (int j = 0; j < ny; j++) ids[RIDX(i, j, k)] = col ? col[(y0 + j) * COL_AREA] : B_UNLOADED;
+        }
+
     /* s = -2: not structural, -1: unsupported (so far), >= 0: stability. */
     for (int j = 0; j < ny; j++)
         for (int k = 0; k < REGION_W; k++)
             for (int i = 0; i < REGION_W; i++) {
-                uint8_t id = world_get(w, x0 + i, y0 + j, z0 + k);
                 int idx = RIDX(i, j, k);
+                uint8_t id = ids[idx];
                 if (!is_structural(id)) { s[idx] = -2; continue; }
                 int wy = y0 + j;
                 /* Cells on the region boundary are assumed supported: we
@@ -489,7 +531,7 @@ int physics_check_structure(physics *ph, int x, int y, int z)
                 if (ni < 0 || ni >= REGION_W || nk < 0 || nk >= REGION_W || nj < 0 || nj >= ny) continue;
                 int nidx = RIDX(ni, nj, nk);
                 if (s[nidx] < -1) continue;
-                uint8_t nid = world_get(w, x0 + ni, y0 + nj, z0 + nk);
+                uint8_t nid = ids[nidx];
                 int sp = span_of(nid), cand;
                 int capped = sp < lvl ? sp : lvl;
                 if (d == 2) cand = lvl == GROUNDED ? GROUNDED : capped;   /* resting on us */
@@ -512,7 +554,7 @@ int physics_check_structure(physics *ph, int x, int y, int z)
                 if (s[RIDX(i, j, k)] != -1) continue;
                 if (ph->body_count >= MAX_BODIES) goto done;
                 int wx = x0 + i, wy = y0 + j, wz = z0 + k;
-                uint8_t id = world_get(w, wx, wy, wz);
+                uint8_t id = ids[RIDX(i, j, k)]; /* only this pass edits, one cell at a time */
                 if (id >= B_COUNT) continue;
                 spawn_body(ph, wx, wy, wz, id);
                 world_set(w, wx, wy, wz, B_AIR, 0);
@@ -523,6 +565,34 @@ done:
 #undef RIDX
     if (fell) ph->last_collapse = fell;
     return fell;
+}
+
+/* 1 if every cell from (x, y, z) down to bedrock is structural. */
+static int grounded_column(const world *w, int x, int y, int z)
+{
+    if (y < 0) return 1;
+    const column *c = world_column(w, chunk_of(x), chunk_of(z));
+    if (!c) return 1; /* unloaded: treated as an anchor, as in the full check */
+    const uint8_t *col = &c->blocks[col_index(x & (CHUNK_W - 1), 0, z & (CHUNK_W - 1))];
+    for (int yy = y; yy >= 0; yy--)
+        if (!is_structural(col[yy * COL_AREA])) return 0;
+    return 1;
+}
+
+/* Exact shortcut for a removed block: when nothing structural rests on it
+ * and each structural neighbour stands on its own unbroken column, no load
+ * path ran only through it, so the full check would find nothing to drop.
+ * Skips about a third of surface digs. */
+static int removal_is_safe(const world *w, int x, int y, int z)
+{
+    if (y + 1 < WORLD_H && is_structural(world_get(w, x, y + 1, z))) return 0;
+    static const int N5[5][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}};
+    for (int d = 0; d < 5; d++) {
+        int nx = x + N5[d][0], ny = y + N5[d][1], nz = z + N5[d][2];
+        if (ny < 0 || !is_structural(world_get(w, nx, ny, nz))) continue;
+        if (!grounded_column(w, nx, ny, nz)) return 0;
+    }
+    return 1;
 }
 
 /* ---------------------------------------------------------------- fluids */
@@ -547,7 +617,7 @@ void physics_on_block_changed(void *user, int x, int y, int z, uint8_t old_id, u
     if (ph->suppress_struct) return;
     int was = is_structural(old_id), is = is_structural(new_id);
     if (was && !is) {
-        queue_structure(ph, x, y, z);
+        if (!removal_is_safe(ph->w, x, y, z)) queue_structure(ph, x, y, z);
     } else if (is && !was) {
         /* A block resting on a supported block is always supported (the
          * invariant is that every existing block is), so only sideways or
@@ -599,20 +669,38 @@ static void fluid_cell(physics *ph, ipos p)
     }
 }
 
-void physics_fluid_tick(physics *ph)
+/* Moves this tick's unprocessed cells to the next tick. */
+static void fluid_carry(physics *ph)
 {
+    pos_queue *now = &ph->fluid_now;
+    for (int i = ph->fluid_read; i < now->count; i++) pq_push(&ph->fluid_next, now->items[i]);
+    pq_clear(now);
+    ph->fluid_read = ph->fluid_end = 0;
+}
+
+static void fluid_begin_tick(physics *ph)
+{
+    fluid_carry(ph);
     pos_queue tmp = ph->fluid_now;
     ph->fluid_now = ph->fluid_next;
     ph->fluid_next = tmp;
-    pq_clear(&ph->fluid_next);
-
     int n = ph->fluid_now.count;
-    int budget = n < FLUID_BUDGET ? n : FLUID_BUDGET;
-    for (int i = 0; i < budget; i++) fluid_cell(ph, ph->fluid_now.items[i]);
-    /* Carry over what we had no time for. */
-    for (int i = budget; i < n; i++) pq_push(&ph->fluid_next, ph->fluid_now.items[i]);
-    ph->fluid_updates = budget;
-    pq_clear(&ph->fluid_now);
+    ph->fluid_end = n < FLUID_BUDGET ? n : FLUID_BUDGET;
+    ph->fluid_per_step = (ph->fluid_end + FLUID_TICK_EVERY - 1) / FLUID_TICK_EVERY;
+    ph->fluid_updates = ph->fluid_end;
+}
+
+static void fluid_run(physics *ph, int n)
+{
+    int end = ph->fluid_read + n < ph->fluid_end ? ph->fluid_read + n : ph->fluid_end;
+    while (ph->fluid_read < end) fluid_cell(ph, ph->fluid_now.items[ph->fluid_read++]);
+}
+
+void physics_fluid_tick(physics *ph)
+{
+    fluid_begin_tick(ph);
+    fluid_run(ph, FLUID_BUDGET);
+    fluid_carry(ph);
 }
 
 /* ------------------------------------------------------------------ step */
@@ -623,15 +711,21 @@ void physics_step(physics *ph, player *p, const player_input *in)
     player_step(ph, p, in);
     bodies_step(ph);
 
-    for (int n = 0; n < 2 && ph->struct_count > 0; n++) {
+    /* At least one structural check per step, more while time allows. */
+    double t0 = ph->struct_count > 1 ? mono_sec() : 0.0;
+    for (int n = 0; ph->struct_count > 0; n++) {
+        if (n > 0 && mono_sec() - t0 > STRUCT_BUDGET_S) break;
         ipos q = ph->struct_queue[ph->struct_head];
         ph->struct_head = (ph->struct_head + 1) % (int)(sizeof ph->struct_queue / sizeof ph->struct_queue[0]);
         ph->struct_count--;
         physics_check_structure(ph, q.x, q.y, q.z);
     }
 
+    /* Fluids tick at 10 Hz, but each tick's cells are spread over the
+     * steps until the next one instead of landing in a single step. */
     ph->step_count++;
-    if (ph->step_count % FLUID_TICK_EVERY == 0) physics_fluid_tick(ph);
+    if (ph->step_count % FLUID_TICK_EVERY == 0) fluid_begin_tick(ph);
+    fluid_run(ph, ph->fluid_per_step);
 }
 
 /* --------------------------------------------------------------- raycast */
