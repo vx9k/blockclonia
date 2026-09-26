@@ -65,7 +65,7 @@ static rgba texel(int layer, int x, int y)
     }
     case T_SNOW: return shade(240, 245, 250, 255, n / 3);
     case T_ICE: return shade(160, 190, 250, 190, n / 2);
-    case T_WATER: return shade(40, 90, 200, 170, n / 2);
+    case T_WATER: return shade(30, 75, 185, 195, n / 2);
     default: return (rgba){255, 0, 255, 255};
     }
 }

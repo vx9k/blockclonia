@@ -113,7 +113,7 @@ struct renderer {
     VkDescriptorPool dpool;
     VkDescriptorSet dset;
     VkPipelineLayout layout;
-    VkPipeline p_opaque, p_trans, p_entity, p_line_world, p_line_screen;
+    VkPipeline p_opaque, p_trans, p_entity, p_entity_trans, p_line_world, p_line_screen;
     VkCommandPool cmdpool;
 
     VkImage tex;
@@ -669,6 +669,9 @@ static void create_pipelines(renderer *r)
     pipe_desc e = {evs, bfs, &ent_bind, ent_attr, 2, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 1, 1, 0,
                    VK_CULL_MODE_BACK_BIT};
     r->p_entity = make_pipeline(r, &e);
+    e.depth_write = 0;
+    e.blend = 1;
+    r->p_entity_trans = make_pipeline(r, &e);
     pipe_desc l = {lvs, lfs, &line_bind, &line_attr, 1, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, 1, 0, 0,
                    VK_CULL_MODE_NONE};
     r->p_line_world = make_pipeline(r, &l);
@@ -945,6 +948,7 @@ void renderer_destroy(renderer *r)
     vkDestroyPipeline(r->dev, r->p_opaque, r->ac);
     vkDestroyPipeline(r->dev, r->p_trans, r->ac);
     vkDestroyPipeline(r->dev, r->p_entity, r->ac);
+    vkDestroyPipeline(r->dev, r->p_entity_trans, r->ac);
     vkDestroyPipeline(r->dev, r->p_line_world, r->ac);
     vkDestroyPipeline(r->dev, r->p_line_screen, r->ac);
     vkDestroyPipelineLayout(r->dev, r->layout, r->ac);
@@ -1171,23 +1175,31 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         st.quads += vi->opaque;
     }
 
-    /* Falling bodies, all in one draw from the per-frame dynamic buffer. */
+    /* Falling bodies from the per-frame dynamic buffer: opaque ones packed
+     * from the front, translucent ones (glass, ice) from the back so each
+     * group is one draw. */
     uint8_t *dyn = f->dyn.map;
     VkDeviceSize dyn_used = 0;
+    int n_opaque_bodies = 0, n_trans_bodies = 0;
     if (ph && ph->body_count) {
         entity_vertex *ev = (entity_vertex *)dyn;
-        for (int i = 0; i < ph->body_count; i++) {
+        int nb = ph->body_count;
+        for (int i = 0; i < nb; i++) {
             const body *b = &ph->bodies[i];
             dvec3 p = dv3_lerp(b->prev_pos, b->pos, alpha);
-            emit_cube(ev + i * 24, v3((float)(p.x - v->eye.x), (float)(p.y - v->eye.y), (float)(p.z - v->eye.z)),
+            int trans = (block_get(b->block)->flags & BF_TRANSLUCENT) != 0;
+            int slot = trans ? nb - 1 - n_trans_bodies++ : n_opaque_bodies++;
+            emit_cube(ev + slot * 24, v3((float)(p.x - v->eye.x), (float)(p.y - v->eye.y), (float)(p.z - v->eye.z)),
                       b->block);
         }
-        dyn_used = (VkDeviceSize)ph->body_count * 24 * sizeof(entity_vertex);
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_entity);
-        vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buf, &zero);
-        vkCmdPushConstants(cmd, r->layout, stages, 0, sizeof pc, &pc);
-        vkCmdDrawIndexed(cmd, (uint32_t)ph->body_count * 36, 1, 0, 0, 0);
-        st.draw_calls++;
+        dyn_used = (VkDeviceSize)nb * 24 * sizeof(entity_vertex);
+        if (n_opaque_bodies) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_entity);
+            vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buf, &zero);
+            vkCmdPushConstants(cmd, r->layout, stages, 0, sizeof pc, &pc);
+            vkCmdDrawIndexed(cmd, (uint32_t)n_opaque_bodies * 36, 1, 0, 0, 0);
+            st.draw_calls++;
+        }
     }
 
     /* Translucent, back to front. */
@@ -1201,6 +1213,14 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         vkCmdDrawIndexed(cmd, vi->trans * 6, 1, 0, (int32_t)(vi->vtx_offset + vi->opaque * 4), 0);
         st.draw_calls++;
         st.quads += vi->trans;
+    }
+
+    if (n_trans_bodies) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_entity_trans);
+        vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buf, &zero);
+        vkCmdPushConstants(cmd, r->layout, stages, 0, sizeof pc, &pc);
+        vkCmdDrawIndexed(cmd, (uint32_t)n_trans_bodies * 36, 1, 0, n_opaque_bodies * 24, 0);
+        st.draw_calls++;
     }
 
     /* Selection outline and crosshair. */
