@@ -33,8 +33,9 @@ typedef struct {
     int frames;
     const char *screenshot;
     int bench, demo, mem_stats;
-    int have_look;
+    int have_look, have_spawn;
     float look_yaw, look_pitch;
+    int spawn_x, spawn_z;
 } options;
 
 typedef struct {
@@ -80,6 +81,7 @@ static void usage(void)
            "  --frames N        quit after N frames\n"
            "  --screenshot F    write a PPM of the last frame to F\n"
            "  --look YAW,PITCH  initial view angles in degrees\n"
+           "  --spawn X,Z       spawn position (default: nearest dry land)\n"
            "  --demo            scripted structural-collapse demo\n"
            "  --bench           run CPU benchmarks and exit (no window)\n"
            "  --mem-stats       print mimalloc statistics at exit\n");
@@ -153,6 +155,15 @@ static int parse_args(int argc, char **argv, options *o)
             o->look_yaw = y;
             o->look_pitch = p;
             o->have_look = 1;
+        } else if (!strcmp(a, "--spawn")) {
+            NEED_VALUE();
+            int x, z;
+            char tail;
+            if (sscanf(v, "%d,%d%c", &x, &z, &tail) != 2 || abs(x) > WORLD_LIMIT - 64 || abs(z) > WORLD_LIMIT - 64)
+                goto bad;
+            o->spawn_x = x;
+            o->spawn_z = z;
+            o->have_spawn = 1;
         } else if (!strcmp(a, "--demo")) {
             o->demo = 1;
         } else if (!strcmp(a, "--bench")) {
@@ -264,19 +275,23 @@ static void find_spawn(uint32_t seed, double *sx, double *sz)
 }
 
 /* Scripted demo: builds a stone tower with a long timber cantilever in
- * front of the player, then knocks out the tower's base. */
-static void demo_step(world *w, const player *p, int frame)
+ * front of the player, then knocks out the tower's middle. */
+typedef struct { int bx, by, bz, built; } demo_state;
+
+static void demo_step(world *w, const player *p, demo_state *d, int frame)
 {
-    int bx = (int)floor(p->pos.x) + 4, bz = (int)floor(p->pos.z) - 10;
-    int gy = world_surface_y(w, bx, bz);
-    if (gy < 0) return;
     if (frame == 30) {
-        for (int y = gy; y < gy + 8; y++) world_set(w, bx, y, bz, B_STONE, 0);
-        for (int i = 1; i <= 5; i++) world_set(w, bx - i, gy + 7, bz, B_PLANKS, 0);
-        for (int i = 1; i <= 3; i++) world_set(w, bx - 5, gy + 7 - i, bz, B_GLASS, 0);
-        log_info("demo: built tower and cantilever at %d,%d,%d", bx, gy, bz);
-    } else if (frame == 90) {
-        world_set(w, bx, gy + 3, bz, B_AIR, 0);
+        d->bx = (int)floor(p->pos.x) + 4;
+        d->bz = (int)floor(p->pos.z) - 10;
+        d->by = world_surface_y(w, d->bx, d->bz);
+        if (d->by < 0 || d->by + 8 >= WORLD_H) return;
+        for (int y = d->by; y < d->by + 8; y++) world_set(w, d->bx, y, d->bz, B_STONE, 0);
+        for (int i = 1; i <= 5; i++) world_set(w, d->bx - i, d->by + 7, d->bz, B_PLANKS, 0);
+        for (int i = 1; i <= 3; i++) world_set(w, d->bx - 5, d->by + 7 - i, d->bz, B_GLASS, 0);
+        d->built = 1;
+        log_info("demo: built tower and cantilever at %d,%d,%d", d->bx, d->by, d->bz);
+    } else if (frame == 90 && d->built) {
+        world_set(w, d->bx, d->by + 3, d->bz, B_AIR, 0);
         log_info("demo: removed the tower's middle block");
     }
 }
@@ -341,7 +356,12 @@ int main(int argc, char **argv)
     renderer_bind_world(rd, &w);
 
     double sx, sz;
-    find_spawn(seed, &sx, &sz);
+    if (o.have_spawn) {
+        sx = o.spawn_x + 0.5;
+        sz = o.spawn_z + 0.5;
+    } else {
+        find_spawn(seed, &sx, &sz);
+    }
     world_load_blocking(&w, sx, sz, 1);
     player pl;
     player_spawn(&pl, &w, sx, sz);
@@ -352,6 +372,7 @@ int main(int argc, char **argv)
     log_info("spawn at %.1f %.1f %.1f with %d worker threads", pl.pos.x, pl.pos.y, pl.pos.z,
              jobs_worker_count(js));
 
+    demo_state demo = {0};
     double prev = glfwGetTime(), acc = 0.0, title_t = prev;
     int frame = 0, fps_frames = 0;
     double fps = 0.0;
@@ -425,7 +446,7 @@ int main(int argc, char **argv)
         }
         g_in.click_break = g_in.click_place = g_in.click_pick = 0;
 
-        if (o.demo) demo_step(&w, &pl, frame);
+        if (o.demo) demo_step(&w, &pl, &demo, frame);
 
         world_update(&w, pl.pos.x, pl.pos.z);
 

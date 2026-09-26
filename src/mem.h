@@ -1,8 +1,11 @@
 /* Memory: every heap allocation in the game goes through mimalloc.
  *
- * Use these wrappers instead of malloc/free so allocation policy lives in
- * one place. The Vulkan driver's own host allocations are routed through
- * mimalloc too, via mem_vk_callbacks().
+ * Game code uses these wrappers (mi_* underneath) so allocation policy
+ * lives in one place. Third-party code (GLFW, the Vulkan loader and
+ * driver) gets mimalloc through the shared library's malloc override,
+ * which is why mimalloc is linked first. mem_vk_callbacks() can also hand
+ * mimalloc to the driver explicitly via VkAllocationCallbacks, for
+ * platforms without the override.
  */
 #ifndef MC_MEM_H
 #define MC_MEM_H
@@ -25,9 +28,9 @@ size_t mem_array_size(size_t count, size_t size);
 void mem_init(void);
 void mem_print_stats(void);
 
-/* Returns a pointer to static VkAllocationCallbacks backed by mimalloc, or
- * NULL when MC_VK_MIMALLOC is disabled at build time. Declared as void* so
- * this header does not need vulkan.h. */
+/* Returns static VkAllocationCallbacks backed by mimalloc when built with
+ * MC_VK_MIMALLOC and run with MC_VK_ALLOC=1, else NULL (driver default).
+ * Declared as void* so this header does not need vulkan.h. */
 const void *mem_vk_callbacks(void);
 
 #endif

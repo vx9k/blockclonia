@@ -15,7 +15,7 @@ int worldgen_height(uint32_t seed, int x, int z)
     float hills = fbm2(seed + 17, fx / 110.0f, fz / 110.0f, 4);
     float ridge = 1.0f - fabsf(noise2(seed + 31, fx / 260.0f, fz / 260.0f));
     float mountain = fmaxf(0.0f, continent + 0.15f) * ridge * ridge * ridge;
-    float h = 54.0f + continent * 16.0f + hills * 9.0f + mountain * 60.0f;
+    float h = 51.0f + continent * 24.0f + hills * 8.0f + mountain * 60.0f;
     return clampi((int)h, 4, WORLD_H - 12);
 }
 

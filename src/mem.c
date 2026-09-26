@@ -91,7 +91,16 @@ static const VkAllocationCallbacks g_vk_callbacks = {
     .pfnFree = vk_free,
 };
 
-const void *mem_vk_callbacks(void) { return &g_vk_callbacks; }
+/* Opt-in (MC_VK_ALLOC=1). Some drivers mishandle custom allocators: Mesa's
+ * lavapipe frees a stack address through pfnFree while recording a
+ * pipeline barrier. Where mimalloc is linked as the shared, overriding
+ * build (the Linux default), the driver's malloc already is mimalloc, so
+ * the callbacks add nothing there. */
+const void *mem_vk_callbacks(void)
+{
+    const char *e = getenv("MC_VK_ALLOC");
+    return (e && e[0] == '1') ? &g_vk_callbacks : NULL;
+}
 #else
 const void *mem_vk_callbacks(void) { return NULL; }
 #endif
