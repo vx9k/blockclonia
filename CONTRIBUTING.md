@@ -35,7 +35,11 @@ the same shape as the code around them.
 
 - Keep each pull request to one topic. A refactor and a feature go in
   separate commits, or better, separate pull requests.
-- Write commit messages as a short imperative subject, then a body that
-  says what changed and why.
+- Write commit messages in the
+  [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)
+  form, `<type>[optional scope][!]: <description>`, e.g.
+  `fix(save): reject columns with negative heights`, then a body that
+  says what changed and why. AGENTS.md (Git) lists the types, scopes and
+  how to mark breaking changes.
 - Don't reformat code you didn't otherwise change.
 - Screenshots help for anything visual (F2 saves `screenshot.ppm`).

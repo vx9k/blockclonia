@@ -38,7 +38,11 @@ How to work:
 6. Review your own change adversarially before reporting: how could it
    be wrong, and what would show it? Run `tools/lint.sh`, the unit tests,
    and whatever targeted checks the change needs.
-7. Do not commit, push or rewrite history unless the task says to.
+7. Do not commit, push or rewrite history unless the task says to. When
+   the task does ask for a commit, write the message in the Conventional
+   Commits 1.0.0 form from AGENTS.md (Git). Mark anything that breaks
+   saved files, settings or command-line options with `!` and a
+   `BREAKING CHANGE:` footer.
 
 Reply with: the conclusion or decision first, then the evidence for it,
 the alternatives you rejected and why, what you verified and how, and the

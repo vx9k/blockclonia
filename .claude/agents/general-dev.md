@@ -34,7 +34,10 @@ How to work:
 4. For a code review, report concrete defects with file and line, the
    input that triggers each and the wrong result, most severe first. Skip
    style nits that `clang-format` or the compiler already enforce.
-5. Do not commit, push or rewrite history unless the task says to.
+5. Do not commit, push or rewrite history unless the task says to. When
+   the task does ask for a commit, write the message in the Conventional
+   Commits 1.0.0 form from AGENTS.md (Git), e.g.
+   `fix(physics): stop water duplicating at column edges`.
 
 Stop and recommend the deep-reasoning agent if the task turns out to need
 an architectural decision, touches many modules, changes a file format or

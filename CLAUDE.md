@@ -24,3 +24,9 @@
   comment density and naming, and don't reformat lines you didn't change.
 - Don't push, force-push or rewrite published history unless asked. Commit
   on a branch; the maintainer merges.
+- Write every commit message in the Conventional Commits 1.0.0 form that
+  AGENTS.md (Git) describes: `<type>[optional scope][!]: <description>`.
+  The attribution trailer Claude Code adds (`Co-Authored-By: ...`) is a
+  footer: put it last, after a blank line following the body, with no
+  other text below it. Before committing, check the header against the
+  allowed types and the 72-column limit.

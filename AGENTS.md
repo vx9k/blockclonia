@@ -156,8 +156,86 @@ from a job.
 
 ## Git
 
-- Commit messages: a short imperative subject (`Add ...`, `Fix ...`), a
-  blank line, then what changed and why, wrapped at 72 columns.
+- Commit messages follow
+  [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)
+  (details below).
 - Don't commit build output, `world/`, `blockclonia.cfg`,
   `blockclonia.pipelines` or screenshots (`.gitignore` covers them).
 - Security issues go through [`SECURITY.md`](SECURITY.md), not public issues.
+
+### Commit messages
+
+Every commit message follows
+[Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/):
+
+```
+<type>[optional scope][!]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+What the specification requires:
+
+- The header is a type, an optional scope in parentheses, an optional
+  `!`, then a colon, a space and the description.
+- `feat` MUST be used for a commit that adds a feature, and `fix` for one
+  that fixes a bug. Other types are allowed.
+- A scope is a noun naming a section of the codebase, e.g. `fix(save):`.
+- The body is optional, free-form, and starts one blank line after the
+  description.
+- Footers are optional and start one blank line after the body. Each is a
+  token, then `: ` or ` #`, then a value (`Refs #42`,
+  `Co-Authored-By: Name <email>`). Tokens use `-` in place of spaces; the
+  only exception is `BREAKING CHANGE`.
+- A breaking change is marked with `!` just before the colon, with a
+  `BREAKING CHANGE: <description>` footer, or with both. The footer token
+  must be uppercase. `BREAKING-CHANGE` means the same thing.
+
+What this project adds on top:
+
+- **Types**: `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `build`
+  (CMake, dependencies, packaging), `ci` (`.github/workflows`), `style`
+  (formatting only, no behaviour change), `chore` (anything else that
+  touches no shipped code) and `revert`. Don't invent others.
+- **Scopes** are optional. When you use one, make it the module's file
+  name without the extension (`renderer`, `gpucaps`, `mesher`, `physics`,
+  `thermo`, `health`, `save`, `settings`, `sound`, `worldgen`, `menu`,
+  ...), or `shaders`, `tests`, `lint`, `agents`, `readme` or `docs` for
+  those areas. Leave the scope out when a change spans several modules.
+- **Description**: imperative mood, starting with a lower-case letter
+  (names and identifiers such as `Vulkan` or `INV1` keep their case), no
+  full stop, and the whole header within 72 columns
+  (`fix(save): reject columns with negative heights`).
+- **Body**: say what changed and why, wrapped at 72 columns.
+- **Breaking changes**: mark anything that breaks users with `!` and a
+  `BREAKING CHANGE:` footer. That includes a save or settings format old
+  files can no longer be read from, a removed or renamed command-line
+  option or settings key, and a raised minimum Vulkan version or
+  dependency.
+- One logical change per commit. If a header needs two types, split the
+  commit.
+
+Examples (illustrative, not real history):
+
+```
+feat(camera): add a --fov option for the field of view
+```
+
+```
+fix(physics): stop water duplicating at column edges
+
+The flow step read a neighbour's level after that neighbour had already
+been updated this tick, so water was counted twice. Snapshot the levels
+before the step.
+
+Refs #57
+```
+
+```
+feat(inventory)!: store item durability in the saved inventory
+
+BREAKING CHANGE: the inventory tag changes from INV1 to INV2, and
+inventories saved by older builds are no longer read.
+```

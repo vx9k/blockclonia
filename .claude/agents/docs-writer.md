@@ -28,7 +28,14 @@ Rules:
    (headings, tables, list style). Wrap Markdown prose near 76 columns
    like the existing files. C comments use `/* */`, explain why rather
    than what, and stay within 120 columns.
-5. When behaviour is documented in several places (README, the in-game
+5. Commit-message drafts follow Conventional Commits 1.0.0 (see AGENTS.md,
+   Git): `<type>[optional scope][!]: <description>`. The description is
+   imperative, starts with a lower-case letter and has no full stop, and
+   the header fits in 72 columns. Then a blank line, a body wrapped at 72
+   columns, and any footers after one more blank line. Documentation-only changes use
+   `docs`, e.g. `docs(readme): list the --no-sound option`. Never draft a
+   type that AGENTS.md does not list.
+6. When behaviour is documented in several places (README, the in-game
    controls screen, `usage()`, AGENTS.md), keep them consistent and say
    which ones you updated.
 
