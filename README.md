@@ -65,22 +65,31 @@ for low-end hardware. All memory comes from [mimalloc](https://github.com/micros
 
 ## Building
 
-Dependencies: a C11 compiler, CMake ≥ 3.21, Ninja or Make, the Vulkan
-headers and loader, `glslc` (shaderc), GLFW 3.3+, mimalloc 2.x.
+Dependencies: a C11 compiler, CMake ≥ 3.21, Ninja, the Vulkan headers and
+loader, `glslc` (shaderc), GLFW 3.3+, mimalloc 2.1+.
 
-Debian/Ubuntu:
+Debian, Ubuntu, Raspberry Pi OS:
 
 ```sh
-sudo apt install build-essential cmake ninja-build libvulkan-dev glslc \
+sudo apt install build-essential cmake ninja-build glslc libvulkan-dev \
                  libglfw3-dev libmimalloc-dev mesa-vulkan-drivers
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-./build/blockclonia
+cmake --preset native            # tuned for this machine (use this on a Pi)
+cmake --build --preset native
+./build/native/blockclonia
 ```
 
-Build options: `-DMC_SANITIZE=ON` (ASan + UBSan), `-DMC_NATIVE=ON`
-(`-march=native`), `-DMC_BUILD_FUZZ=ON` (libFuzzer target for the save
-decoder, clang only), `-DMC_VK_MIMALLOC=OFF`.
+- If the distro's mimalloc is older than 2.1 (Pi OS bookworm, Ubuntu
+  22.04), the build downloads and compiles mimalloc 2.1.7 (and GLFW 3.4 if
+  GLFW is missing). `-DMC_DEPS=SYSTEM` forbids downloads; `FETCH` always
+  uses the pinned releases.
+- `cmake --list-presets` shows the rest: `dev`, `release` (-O2 + LTO,
+  portable), `profile`, `asan`, `core` (no Vulkan or GLFW needed), `fuzz`,
+  `ci-gcc`/`ci-clang` (-Werror), and cross builds for the Pi 4/5
+  (`pi4-aarch64`, `pi5-aarch64`, `pi4-armhf`; see the header of
+  `cmake/toolchains/rpi-aarch64.cmake`).
+- `-DMC_CPU=pi4|pi5|native|x86-64-v2` picks the CPU to tune for. 32-bit
+  Pi OS's compiler has NEON off by default, so set it there.
+- Packages: `cd build/release && cpack` makes a `.tar.gz` and a `.deb`.
 
 ### Running
 
@@ -100,7 +109,7 @@ Headless (no GPU), with Mesa's software rasterizer:
 ```sh
 Xvfb :99 &
 DISPLAY=:99 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
-  ./build/blockclonia --frames 300 --screenshot shot.ppm --no-save
+  ./build/native/blockclonia --frames 300 --screenshot shot.ppm --no-save
 ```
 
 ## Memory allocation
@@ -117,8 +126,12 @@ they did not allocate through the callbacks.
 ## Tests
 
 ```sh
-ctest --test-dir build --output-on-failure
+cmake --preset dev && cmake --build --preset dev && ctest --preset dev
+tools/lint.sh      # -Werror builds (gcc, clang), clang-tidy, cppcheck, shaders, clang-format
 ```
+
+`ctest` runs the unit tests, `--bench`, and, when `xvfb-run` and Mesa's
+lavapipe are installed, a 120-frame render with the validation layer.
 
 The unit tests cover the vertex-pool allocator, save round-trips and
 corruption rejection, the mesher (greedy merging, worst case, water),
@@ -138,6 +151,9 @@ src/mesher.c     greedy mesher with AO     src/texgen.c  procedural textures
 src/physics.c    player, bodies, structure, water, raycast
 src/save.c       world files               src/jobs.c    thread pool
 src/gpupool.c    vertex pool allocator     src/mem.c     mimalloc wrappers
+src/log.c        logging, save-on-fatal hook
 shaders/         GLSL, compiled to SPIR-V and embedded at build time
 tests/           unit tests and the save-file fuzzer
+cmake/           dependencies, shaders, warnings, packaging, Pi toolchains
+tools/lint.sh    the lint gate CI runs
 ```

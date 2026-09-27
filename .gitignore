@@ -5,3 +5,4 @@ world/
 screenshot.*
 compile_commands.json
 .cache/
+CMakeUserPresets.json

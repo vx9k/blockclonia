@@ -1,0 +1,136 @@
+# Builds and tests blockclonia on every push and pull request.
+#
+#   linux     Ubuntu 24.04, gcc and clang, Release flags, -Werror, system
+#             packages only; unit tests, --bench, and a 120-frame render on
+#             Mesa lavapipe (software Vulkan) under Xvfb with validation.
+#   sanitize  ASan + UBSan (gcc).
+#   lint      tools/lint.sh: clang-tidy, cppcheck, shader checks, and
+#             clang-format on the lines this change touches.
+#   pi-arm64  native arm64 runner inside Debian bookworm (the base of
+#             Raspberry Pi OS bookworm), tuned for the Pi 4; produces a .deb
+#             that installs on 64-bit Pi OS.
+#   pi-armhf  cross build for 32-bit Pi OS in Debian bookworm, tests under
+#             qemu-user; produces an armhf .deb.
+#   macos     experimental: core + unit tests (the renderer still needs the
+#             MoltenVK portability changes described in the build audit).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev \
+            mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
+      - run: cmake --preset ci-${{ matrix.compiler }}
+      - run: cmake --build --preset ci-${{ matrix.compiler }}
+      - run: ctest --preset ci-${{ matrix.compiler }}
+
+  sanitize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev \
+            mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
+      - run: cmake --preset asan -DMC_WERROR=ON
+      - run: cmake --build --preset asan
+      - run: ctest --preset asan
+
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # clang-format checks only lines changed since the base
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build glslc glslang-tools libvulkan-dev libglfw3-dev libmimalloc-dev \
+            clang clang-tidy clang-format cppcheck
+      - name: tools/lint.sh
+        env:
+          MC_FORMAT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # A new branch's first push has no "before" commit.
+          if ! git cat-file -e "${MC_FORMAT_BASE}^{commit}" 2>/dev/null; then MC_FORMAT_BASE=HEAD~1; fi
+          export MC_FORMAT_BASE
+          tools/lint.sh
+
+  pi-arm64:
+    runs-on: ubuntu-24.04-arm # GitHub-hosted arm64; free for public repositories
+    container: debian:bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packages
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build ca-certificates glslc \
+            libvulkan-dev libglfw3-dev \
+            mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
+      # bookworm's mimalloc (2.0.x) predates the options mem.c uses, so
+      # MC_DEPS=AUTO builds the pinned mimalloc from source here.
+      - run: cmake --preset release -DMC_CPU=pi4 -DMC_DEPS=AUTO -DMC_WERROR=ON
+      - run: cmake --build --preset release
+      - run: ctest --preset release
+      - run: cd build/release && cpack -G DEB
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blockclonia-pi-arm64
+          path: build/release/*.deb
+
+  pi-armhf:
+    runs-on: ubuntu-24.04
+    container: debian:bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packages
+        run: |
+          dpkg --add-architecture armhf
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            cmake ninja-build ca-certificates glslc qemu-user \
+            crossbuild-essential-armhf \
+            libvulkan-dev:armhf libglfw3-dev:armhf
+      - run: cmake --preset pi4-armhf -DMC_DEPS=AUTO -DMC_WERROR=ON
+      - run: cmake --build --preset pi4-armhf
+      - run: ctest --preset pi4-armhf # unit + bench under qemu-arm
+      - run: cd build/pi4-armhf && cpack -G DEB
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blockclonia-pi-armhf
+          path: build/pi4-armhf/*.deb
+
+  macos:
+    runs-on: macos-14
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install ninja mimalloc
+      - run: cmake --preset core -DCMAKE_PREFIX_PATH="$(brew --prefix)" -DMC_DEPS=AUTO
+      - run: cmake --build --preset core
+      - run: ctest --preset core

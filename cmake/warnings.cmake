@@ -1,12 +1,8 @@
 # blockclonia compiler warning policy.
 #
-# Use from the top-level CMakeLists.txt, in place of the current
-# `set(MC_WARNINGS ...)` line:
-#
-#     include(cmake/warnings.cmake)
-#
-# Every target keeps using `target_compile_options(<tgt> PRIVATE ${MC_WARNINGS})`
-# (add it to fuzz_save too). Configure CI with -DMC_WERROR=ON.
+# Included by the top-level CMakeLists.txt, which applies MC_WARNINGS to our
+# own targets through the mc_warnings interface library. CI configures with
+# -DMC_WERROR=ON (the ci-* presets).
 #
 # Everything below is clean on gcc 13 and clang 18, on x86_64 and on a 32-bit
 # (ILP32) syntax pass, once the fixes in audits/lint.md are applied.
