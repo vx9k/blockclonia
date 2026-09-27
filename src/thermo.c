@@ -248,12 +248,12 @@ float thermo_daylight(const thermo *t)
  * paths through the air scatter the blue away) around sunrise and sunset. */
 void thermo_sky(const thermo *t, float rgb[3])
 {
-    static const double night[3] = {0.02, 0.03, 0.08}, day[3] = {0.53, 0.74, 1.0}, dusk[3] = {1.0, 0.50, 0.22};
+    static const double NIGHT[3] = {0.02, 0.03, 0.08}, DAY[3] = {0.53, 0.74, 1.0}, DUSK[3] = {1.0, 0.50, 0.22};
     double f = daylight_frac(t), s = sun_sin(t);
     double tint = 0.6 * exp(-((s - 0.03) / 0.09) * ((s - 0.03) / 0.09));
     for (int i = 0; i < 3; i++) {
-        double base = night[i] + (day[i] - night[i]) * f;
-        rgb[i] = (float)(base * (1.0 - tint) + dusk[i] * tint);
+        double base = NIGHT[i] + (DAY[i] - NIGHT[i]) * f;
+        rgb[i] = (float)(base * (1.0 - tint) + DUSK[i] * tint);
     }
 }
 

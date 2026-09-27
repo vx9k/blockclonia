@@ -1317,6 +1317,12 @@ void renderer_set_vsync(renderer *r, int on)
 }
 
 const char *renderer_device_name(const renderer *r) { return r->props.deviceName; }
+
+const char *renderer_api_string(const renderer *r)
+{
+    (void)r;
+    return "Vulkan 1.0";
+}
 render_stats renderer_stats(const renderer *r) { return r->stats; }
 
 void renderer_request_screenshot(renderer *r, const char *path)

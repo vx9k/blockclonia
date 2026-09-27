@@ -2,31 +2,28 @@
 #include "save.h"
 
 #include <errno.h>
-#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 typedef struct {
     const char *key;
-    size_t offset;
     int lo, hi;
 } field;
 
-#define F(name, lo, hi) {#name, offsetof(settings, name), lo, hi}
+/* In the order of field_ptr's cases. */
 static const field FIELDS[] = {
-    F(fov, SETTINGS_FOV_MIN, SETTINGS_FOV_MAX),
-    F(sensitivity, SETTINGS_SENS_MIN, SETTINGS_SENS_MAX),
-    F(invert_y, 0, 1),
-    F(view_bob, 0, 1),
-    F(fov_effects, 0, 1),
-    F(sprint_toggle, 0, 1),
-    F(gui_scale, 0, SETTINGS_GUI_MAX),
-    F(vsync, 0, 1),
-    F(render_distance, SETTINGS_RD_MIN, SETTINGS_RD_MAX),
-    F(show_hints, 0, 1),
+    {"fov", SETTINGS_FOV_MIN, SETTINGS_FOV_MAX},
+    {"sensitivity", SETTINGS_SENS_MIN, SETTINGS_SENS_MAX},
+    {"invert_y", 0, 1},
+    {"view_bob", 0, 1},
+    {"fov_effects", 0, 1},
+    {"sprint_toggle", 0, 1},
+    {"gui_scale", 0, SETTINGS_GUI_MAX},
+    {"vsync", 0, 1},
+    {"render_distance", SETTINGS_RD_MIN, SETTINGS_RD_MAX},
+    {"show_hints", 0, 1},
 };
-#undef F
 #define NFIELDS ((int)(sizeof FIELDS / sizeof FIELDS[0]))
 
 void settings_default(settings *s)
@@ -43,10 +40,26 @@ void settings_default(settings *s)
     s->show_hints = 1;
 }
 
-static int *field_ptr(settings *s, const field *f) { return (int *)(void *)((char *)s + f->offset); }
-static int field_get(const settings *s, const field *f)
+static int *field_ptr(settings *s, int i)
 {
-    return *(const int *)(const void *)((const char *)s + f->offset);
+    switch (i) {
+    case 0: return &s->fov;
+    case 1: return &s->sensitivity;
+    case 2: return &s->invert_y;
+    case 3: return &s->view_bob;
+    case 4: return &s->fov_effects;
+    case 5: return &s->sprint_toggle;
+    case 6: return &s->gui_scale;
+    case 7: return &s->vsync;
+    case 8: return &s->render_distance;
+    default: return &s->show_hints;
+    }
+}
+
+static int field_get(const settings *s, int i)
+{
+    settings t = *s;
+    return *field_ptr(&t, i);
 }
 
 /* One "key value" line; the value must be a plain decimal integer. */
@@ -64,7 +77,7 @@ static int apply_line(settings *s, const char *line)
     for (int i = 0; i < NFIELDS; i++) {
         if (strlen(FIELDS[i].key) != klen || memcmp(FIELDS[i].key, line, klen) != 0) continue;
         if (n < FIELDS[i].lo || n > FIELDS[i].hi) return 0;
-        *field_ptr(s, &FIELDS[i]) = (int)n;
+        *field_ptr(s, i) = (int)n;
         return 1;
     }
     return 0;
@@ -94,7 +107,7 @@ int settings_format(const settings *s, char *out, int cap)
     if (cap <= 0) return 0;
     int len = snprintf(out, (size_t)cap, "# blockclonia settings\n");
     for (int i = 0; i < NFIELDS && len >= 0 && len < cap; i++)
-        len += snprintf(out + len, (size_t)(cap - len), "%s %d\n", FIELDS[i].key, field_get(s, &FIELDS[i]));
+        len += snprintf(out + len, (size_t)(cap - len), "%s %d\n", FIELDS[i].key, field_get(s, i));
     if (len < 0) len = 0;
     if (len >= cap) len = cap - 1;
     return len;

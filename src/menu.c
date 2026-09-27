@@ -330,8 +330,8 @@ static void controls_screen(ctx *c)
     };
     const int n = (int)(sizeof KEYS / sizeof KEYS[0]);
     for (int i = 0; i < n; i++) {
-        float col = (float)(i / 8), row = (float)(i % 8);
-        float kx = x + 8 + col * 206, ky = y + 24 + row * 24;
+        int col = i / 8, row = i % 8;
+        float kx = x + 8 + (float)col * 206, ky = y + 24 + (float)row * 24;
         float t = ease_out_cubic((m->age - 0.02f * (float)i) / 0.3f);
         ui_rect(u, kx, ky, 198, 20, ui_alpha(ui_rgba(255, 255, 255, 10), t));
         ui_text(u, kx + 4, ky + 3, 1, ui_alpha(C_ECG, t), KEYS[i][0]);

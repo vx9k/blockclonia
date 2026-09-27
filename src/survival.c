@@ -213,8 +213,9 @@ static float get32f(const uint8_t *p)
 size_t survival_encode_player(const player *p, const inventory *inv, double day, uint8_t *out, size_t cap)
 {
     if (cap < PLAYER_FILE_SIZE) return 0;
+    static const uint8_t MAGIC[4] = {'M', 'C', 'P', 'L'};
     memset(out, 0, PLAYER_FILE_SIZE);
-    memcpy(out, "MCPL", 4);
+    memcpy(out, MAGIC, sizeof MAGIC);
     out[4] = 1;
     put64(out + 8, p->pos.x);
     put64(out + 16, p->pos.y);

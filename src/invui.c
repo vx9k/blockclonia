@@ -84,6 +84,7 @@ void invui_icon(ui *u, int id, float x, float y, float size, float alpha)
         return;
     }
     /* Items: the sprite, one rectangle per run of equal texels in a row. */
+    if (id < ITEM_FIRST || id >= ITEM_END) return;
     const float px = size / 16.0f;
     const uint32_t *sp = &g_sprite[id - ITEM_FIRST][0][0];
     for (int ty = 0; ty < 16; ty++)

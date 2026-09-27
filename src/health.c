@@ -1789,36 +1789,40 @@ __attribute__((format(printf, 4, 5))) static void cat(char *buf, size_t n, size_
     if (w > 0) *len += (size_t)w < n - *len ? (size_t)w : n - *len - 1;
 }
 
-int health_part_status(const health *h, int part, char *buf, size_t n)
+/* A status line built from comma-separated findings; sev is the worst. */
+typedef struct {
+    char *buf;
+    size_t n, len;
+    int sev;
+} status_text;
+
+__attribute__((format(printf, 3, 4))) static void status_add(status_text *s, int sev, const char *fmt, ...)
+{
+    if (s->len) cat(s->buf, s->n, &s->len, ", ");
+    char item[96];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(item, sizeof item, fmt, ap);
+    va_end(ap);
+    cat(s->buf, s->n, &s->len, "%s", item);
+    if (sev > s->sev) s->sev = sev;
+}
+
+/* Bones, joints and weight on the part. */
+static void status_structure(const health *h, int part, status_text *s)
 {
     const body_part *p = &h->part[part];
-    size_t len = 0;
-    int sev = 0;
-    buf[0] = 0;
-#define SEP() cat(buf, n, &len, len ? ", " : "")
-#define SEV_AT_LEAST(v) sev = sev > (v) ? sev : (v)
-    if (p->crush_load > 0.0f) {
-        SEP();
-        cat(buf, n, &len, "pinned under %.0f kg", (double)p->crush_load);
-        SEV_AT_LEAST(part == BP_CHEST ? 3 : 2);
-    }
-    if (p->fracture) {
-        SEP();
-        cat(buf, n, &len, "%s fracture%s", p->fracture == FX_OPEN ? "open" : "closed",
-            p->splinted ? " (splinted)" : "");
-        SEV_AT_LEAST(2);
-    }
-    if (p->dislocated) {
-        SEP();
-        cat(buf, n, &len, "dislocated %s", p->dislocated == DISLOC_ELBOW ? "elbow" : "shoulder");
-        SEV_AT_LEAST(2);
-    }
-    if (p->sprain > 0.05f) {
-        SEP();
-        cat(buf, n, &len, "sprain%s", p->splinted ? " (braced)" : "");
-        SEV_AT_LEAST(1);
-    }
-    /* Cuts and grazes; burn and frostbite wounds are named below. */
+    if (p->crush_load > 0.0f) status_add(s, part == BP_CHEST ? 3 : 2, "pinned under %.0f kg", (double)p->crush_load);
+    if (p->fracture)
+        status_add(s, 2, "%s fracture%s", p->fracture == FX_OPEN ? "open" : "closed", p->splinted ? " (splinted)" : "");
+    if (p->dislocated) status_add(s, 2, "dislocated %s", p->dislocated == DISLOC_ELBOW ? "elbow" : "shoulder");
+    if (p->sprain > 0.05f) status_add(s, 1, "sprain%s", p->splinted ? " (braced)" : "");
+}
+
+/* Cuts, grazes, burns, cold injury and infection. */
+static void status_wounds(const health *h, int part, status_text *s)
+{
+    const body_part *p = &h->part[part];
     float bleed = 0.0f, inf = 0.0f;
     int wounds = 0, grazes = 0, bandaged = 0, arterial = 0, burn_dressed = 0;
     for (int i = 0; i < h->wound_count; i++) {
@@ -1827,7 +1831,7 @@ int health_part_status(const health *h, int part, char *buf, size_t n)
         inf = maxf(inf, w->infection);
         if (w->kind == WOUND_BURN || w->kind == WOUND_FROSTBITE) {
             burn_dressed |= w->kind == WOUND_BURN && w->bandage != 0;
-            continue;
+            continue; /* named below */
         }
         wounds++;
         grazes += w->kind == WOUND_ABRASION;
@@ -1835,55 +1839,46 @@ int health_part_status(const health *h, int part, char *buf, size_t n)
         bandaged += w->bandage != 0;
         arterial |= w->arterial && w->bleed > 20.0f;
     }
-    if (p->burn) {
-        SEP();
-        cat(buf, n, &len, "%s-degree burn, %.0f%% of body%s", ordinal(p->burn),
-            (double)fmaxf(1.0f, p->burn_area * NINES[part] * 100.0f), burn_dressed ? " (dressed)" : "");
-        SEV_AT_LEAST(p->burn == 3 || h->burn_tbsa > 15.0f ? 3 : p->burn);
-    }
-    if (p->frost) {
-        static const char *const FROST[] = {"", "frostnip", "frostbite", "deep frostbite"};
-        SEP();
-        cat(buf, n, &len, "%s", FROST[p->frost]);
-        SEV_AT_LEAST(p->frost);
-    } else if (p->skin < 12.0f) {
-        SEP();
-        cat(buf, n, &len, "numb with cold (%.0f" DEG "C)", (double)p->skin);
-        SEV_AT_LEAST(1);
-    }
+    if (p->burn)
+        status_add(s, p->burn == 3 || h->burn_tbsa > 15.0f ? 3 : p->burn, "%s-degree burn, %.0f%% of body%s",
+                   ordinal(p->burn), (double)fmaxf(1.0f, p->burn_area * NINES[part] * 100.0f),
+                   burn_dressed ? " (dressed)" : "");
+    static const char *const FROST[] = {"", "frostnip", "frostbite", "deep frostbite"};
+    if (p->frost) status_add(s, p->frost, "%s", FROST[p->frost]);
+    else if (p->skin < 12.0f) status_add(s, 1, "numb with cold (%.0f" DEG "C)", (double)p->skin);
     if (wounds) {
-        SEP();
-        if (wounds == 1) cat(buf, n, &len, arterial ? "cut artery" : (grazes ? "abrasion" : "wound"));
-        else if (grazes == wounds) cat(buf, n, &len, "%d abrasions", wounds);
-        else cat(buf, n, &len, "%d wounds%s", wounds, arterial ? ", artery" : "");
-        if (bleed >= 1.0f) cat(buf, n, &len, " bleeding %.0f mL/min", (double)bleed);
-        if (bandaged) cat(buf, n, &len, bandaged == wounds ? " (dressed)" : " (partly dressed)");
-        SEV_AT_LEAST(1);
-        if (bleed > 30.0f || arterial) sev = 3;
+        char what[48], extra[48] = "";
+        if (wounds == 1) snprintf(what, sizeof what, "%s", arterial ? "cut artery" : (grazes ? "abrasion" : "wound"));
+        else if (grazes == wounds) snprintf(what, sizeof what, "%d abrasions", wounds);
+        else snprintf(what, sizeof what, "%d wounds%s", wounds, arterial ? ", artery" : "");
+        if (bleed >= 1.0f) snprintf(extra, sizeof extra, " bleeding %.0f mL/min", (double)bleed);
+        status_add(s, bleed > 30.0f || arterial ? 3 : 1, "%s%s%s", what, extra,
+                   bandaged ? (bandaged == wounds ? " (dressed)" : " (partly dressed)") : "");
     }
-    if (inf > 0.1f) {
-        SEP();
-        cat(buf, n, &len, "%s infection", inf > 0.6f ? "severe" : (inf > 0.3f ? "spreading" : "early"));
-        SEV_AT_LEAST(inf > 0.6f ? 3 : 2);
-    }
-    if (p->internal > 1.0f) {
-        SEP();
-        cat(buf, n, &len, "internal bleeding %.0f mL/min", (double)p->internal);
-        sev = p->internal > 20.0f ? 3 : (sev > 2 ? sev : 2);
-    }
-    if (p->crush > 0.05f) {
-        SEP();
-        cat(buf, n, &len, "crushed muscle %.0f%%", (double)(p->crush * 100.0f));
-        SEV_AT_LEAST(p->crush > 0.5f ? 3 : 2);
-    } else if (p->integrity < 0.95f) {
-        SEP();
-        cat(buf, n, &len, "%s", p->integrity < 0.5f ? "badly bruised" : "bruised");
-        SEV_AT_LEAST(p->integrity < 0.3f ? 2 : 1);
-    }
-    if (!len) cat(buf, n, &len, "OK");
-#undef SEV_AT_LEAST
-#undef SEP
-    return sev;
+    if (inf > 0.1f)
+        status_add(s, inf > 0.6f ? 3 : 2, "%s infection", inf > 0.6f ? "severe" : (inf > 0.3f ? "spreading" : "early"));
+}
+
+/* Bleeding inside, crushed muscle and bruising. */
+static void status_tissue(const health *h, int part, status_text *s)
+{
+    const body_part *p = &h->part[part];
+    if (p->internal > 1.0f)
+        status_add(s, p->internal > 20.0f ? 3 : 2, "internal bleeding %.0f mL/min", (double)p->internal);
+    if (p->crush > 0.05f) status_add(s, p->crush > 0.5f ? 3 : 2, "crushed muscle %.0f%%", (double)(p->crush * 100.0f));
+    else if (p->integrity < 0.95f)
+        status_add(s, p->integrity < 0.3f ? 2 : 1, "%s", p->integrity < 0.5f ? "badly bruised" : "bruised");
+}
+
+int health_part_status(const health *h, int part, char *buf, size_t n)
+{
+    status_text s = {buf, n, 0, 0};
+    buf[0] = 0;
+    status_structure(h, part, &s);
+    status_wounds(h, part, &s);
+    status_tissue(h, part, &s);
+    if (!s.len) cat(buf, n, &s.len, "OK");
+    return s.sev;
 }
 
 int health_organ_status(const health *h, int organ, char *buf, size_t n)

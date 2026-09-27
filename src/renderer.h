@@ -79,6 +79,9 @@ void renderer_on_resize(renderer *r);
 /* Switches between FIFO and the fastest mode; rebuilds the swapchain. */
 void renderer_set_vsync(renderer *r, int on);
 const char *renderer_device_name(const renderer *r);
+/* "Vulkan 1.3 (dynamic rendering, ...)": the API version in use and the
+ * optional features the renderer turned on. */
+const char *renderer_api_string(const renderer *r);
 render_stats renderer_stats(const renderer *r);
 
 #endif

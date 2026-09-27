@@ -7,9 +7,10 @@
 #include <stdint.h>
 #include "block.h"
 
+#define I_NONE 0
+#define ITEM_FIRST 64 /* below: block ids */
+
 enum {
-    I_NONE = 0,
-    ITEM_FIRST = 64,
     I_STICK = ITEM_FIRST,
     I_FIBRE,
     I_BANDAGE,
@@ -30,11 +31,11 @@ typedef struct {
 
 typedef struct {
     const char *name;
+    const char *desc;    /* one-line tooltip */
+    float density;       /* kg/m^3 of a dropped item: floats below 1000 */
     uint8_t stack;       /* most per slot */
     uint8_t block;       /* block it places, B_AIR if none */
     uint8_t tex;         /* texture layer: the sprite (items) or the side face (blocks) */
-    const char *desc;    /* one-line tooltip */
-    float density;       /* kg/m^3 of a dropped item: floats below 1000 */
 } item_def;
 
 /* 1 for ids that exist as items (not air, loose water or bedrock). */

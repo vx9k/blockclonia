@@ -906,6 +906,15 @@ static int test_accept(void *user, int id, int count)
     return count - inv_add(user, id, count);
 }
 
+/* Field by field: the struct has padding, so memcmp is not a comparison. */
+static int inv_equal(const inventory *a, const inventory *b)
+{
+    if (a->selected != b->selected || a->cursor.id != b->cursor.id || a->cursor.count != b->cursor.count) return 0;
+    for (int i = 0; i < INV_SLOTS; i++)
+        if (a->slot[i].id != b->slot[i].id || a->slot[i].count != b->slot[i].count) return 0;
+    return 1;
+}
+
 static void test_inventory(void)
 {
     inventory inv;
@@ -967,7 +976,7 @@ static void test_inventory(void)
     uint8_t buf[INV_ENCODED_SIZE];
     CHECK(inv_encode(&inv, buf, sizeof buf) == INV_ENCODED_SIZE);
     inventory back;
-    CHECK(inv_decode(&back, buf, sizeof buf) == 0 && memcmp(&back, &inv, sizeof inv) == 0);
+    CHECK(inv_decode(&back, buf, sizeof buf) == 0 && inv_equal(&back, &inv));
     buf[8] = B_BEDROCK;
     buf[9] = 1;
     CHECK(inv_decode(&back, buf, sizeof buf) == -1);
@@ -991,7 +1000,7 @@ static void test_inventory(void)
     CHECK(survival_decode_player(&q, &qi, &day, pf, sizeof pf) == 0);
     CHECK(fabs(day - 0.75) < 1e-4);
     CHECK(q.pos.x == p.pos.x && q.pos.y == p.pos.y && q.pos.z == p.pos.z && q.yaw == p.yaw && q.flying == 1);
-    CHECK(memcmp(&qi, &inv, sizeof inv) == 0);
+    CHECK(inv_equal(&qi, &inv));
     double nan = (double)NAN;
     memcpy(pf + 16, &nan, 8);
     CHECK(survival_decode_player(&q, &qi, NULL, pf, sizeof pf) == -1);
@@ -1114,7 +1123,7 @@ static void test_interact(void)
     p.pitch = -0.55f;
     dir = look_dir(p.yaw, p.pitch);
     hit = physics_raycast(&t.w, eye, dir, 5.0);
-    o = interact_frame(&s, &t.w, &t.ph, NULL, &p, &inv, fx, eye, dir, hit, &use);
+    interact_frame(&s, &t.w, &t.ph, NULL, &p, &inv, fx, eye, dir, hit, &use);
     CHECK(inv_held(&inv)->id == I_WATER_BUCKET);
     int water = 0;
     for (int x = 6; x <= 8; x++)
@@ -1212,11 +1221,11 @@ static void test_menu(void)
     /* Pressing a slider row at its left edge drags it to the minimum; scan
      * down the panel for the FOV row. */
     int found = 0;
-    for (float y = 40; y < 200 && !found; y += 2) {
+    for (int y = 40; y < 200 && !found; y += 2) {
         settings before = s;
         menu_input c = idle;
         c.mx = 180;
-        c.my = y;
+        c.my = (float)y;
         c.click = c.mouse_down = 1;
         ui_begin(&u, mem, 8192, 1280, 720);
         menu_frame(&m, &u, &c, &s);
@@ -1242,10 +1251,10 @@ static void test_menu(void)
     /* Clicking the last pause button quits. */
     menu_run(&m, &u, mem, &s, &idle, 30);
     menu_action got = MENU_NONE;
-    for (float y = 150; y < 300 && got == MENU_NONE; y += 4) {
+    for (int y = 150; y < 300 && got == MENU_NONE; y += 4) {
         menu_input c = idle;
         c.mx = 320;
-        c.my = y;
+        c.my = (float)y;
         c.click = 1;
         got = menu_run(&m, &u, mem, &s, &c, 1);
         if (got != MENU_NONE && got != MENU_QUIT) {

@@ -1,20 +1,29 @@
 #include "item.h"
 
 static const item_def ITEMS[ITEM_END - ITEM_FIRST] = {
-    [I_STICK - ITEM_FIRST] = {"Stick", 64, B_AIR, T_ITEM_STICK, "Fuel, splints. 2 planks make 4.", 600.0f},
-    [I_FIBRE - ITEM_FIRST] = {"Plant fibre", 64, B_AIR, T_ITEM_FIBRE, "From leaves. 2 make a rough bandage.", 300.0f},
-    [I_BANDAGE - ITEM_FIRST] = {"Sterile bandage", 16, B_AIR, T_ITEM_BANDAGE, "Pressure dressing (H, then B).", 250.0f},
-    [I_SPLINT - ITEM_FIRST] = {"Splint", 16, B_AIR, T_ITEM_SPLINT, "Holds a broken limb (H, then S).", 600.0f},
-    [I_ANTISEPTIC - ITEM_FIRST] = {"Antiseptic", 16, B_AIR, T_ITEM_ANTISEPTIC, "Cleans wounds (H, then D).", 1050.0f},
-    [I_PAINKILLER - ITEM_FIRST] = {"Painkillers", 32, B_AIR, T_ITEM_PAINKILLER, "6 h of relief (H, then P).", 1200.0f},
-    [I_ANTIBIOTIC - ITEM_FIRST] = {"Antibiotics", 16, B_AIR, T_ITEM_ANTIBIOTIC, "Treats infection (H, then A).", 1200.0f},
-    [I_APPLE - ITEM_FIRST] = {"Apple", 32, B_AIR, T_ITEM_APPLE, "95 kcal. E to eat.", 800.0f},
-    [I_BUCKET - ITEM_FIRST] = {"Bucket", 1, B_AIR, T_ITEM_BUCKET, "Right-click water to fill.", 550.0f},
-    [I_WATER_BUCKET - ITEM_FIRST] = {"Water bucket", 1, B_WATER, T_ITEM_WATER_BUCKET,
-                                     "Right-click to pour; R to drink.", 1080.0f},
+    [I_STICK - ITEM_FIRST] = {.name = "Stick", .stack = 64, .block = B_AIR, .tex = T_ITEM_STICK,
+                            .desc = "Fuel, splints. 2 planks make 4.", .density = 600.0f},
+    [I_FIBRE - ITEM_FIRST] = {.name = "Plant fibre", .stack = 64, .block = B_AIR, .tex = T_ITEM_FIBRE,
+                            .desc = "From leaves. 2 make a rough bandage.", .density = 300.0f},
+    [I_BANDAGE - ITEM_FIRST] = {.name = "Sterile bandage", .stack = 16, .block = B_AIR, .tex = T_ITEM_BANDAGE,
+                            .desc = "Pressure dressing (H, then B).", .density = 250.0f},
+    [I_SPLINT - ITEM_FIRST] = {.name = "Splint", .stack = 16, .block = B_AIR, .tex = T_ITEM_SPLINT,
+                            .desc = "Holds a broken limb (H, then S).", .density = 600.0f},
+    [I_ANTISEPTIC - ITEM_FIRST] = {.name = "Antiseptic", .stack = 16, .block = B_AIR, .tex = T_ITEM_ANTISEPTIC,
+                            .desc = "Cleans wounds (H, then D).", .density = 1050.0f},
+    [I_PAINKILLER - ITEM_FIRST] = {.name = "Painkillers", .stack = 32, .block = B_AIR, .tex = T_ITEM_PAINKILLER,
+                            .desc = "6 h of relief (H, then P).", .density = 1200.0f},
+    [I_ANTIBIOTIC - ITEM_FIRST] = {.name = "Antibiotics", .stack = 16, .block = B_AIR, .tex = T_ITEM_ANTIBIOTIC,
+                            .desc = "Treats infection (H, then A).", .density = 1200.0f},
+    [I_APPLE - ITEM_FIRST] = {.name = "Apple", .stack = 32, .block = B_AIR, .tex = T_ITEM_APPLE,
+                            .desc = "95 kcal. E to eat.", .density = 800.0f},
+    [I_BUCKET - ITEM_FIRST] = {.name = "Bucket", .stack = 1, .block = B_AIR, .tex = T_ITEM_BUCKET,
+                            .desc = "Right-click water to fill.", .density = 550.0f},
+    [I_WATER_BUCKET - ITEM_FIRST] = {.name = "Water bucket", .stack = 1, .block = B_WATER, .tex = T_ITEM_WATER_BUCKET,
+                            .desc = "Right-click to pour; R to drink.", .density = 1080.0f},
 };
 
-static const item_def UNKNOWN = {"?", 1, B_AIR, T_STONE, "", 1000.0f};
+static const item_def UNKNOWN = {.name = "?", .desc = "", .density = 1000.0f, .stack = 1, .block = B_AIR, .tex = T_STONE};
 
 int item_valid(int id)
 {
@@ -29,7 +38,8 @@ const item_def *item_get(int id)
     if (!built) {
         for (int b = 0; b < B_COUNT; b++) {
             const block_def *d = &g_blocks[b];
-            blocks[b] = (item_def){d->name, 64, (uint8_t)b, d->tex[0], "", d->density};
+            blocks[b] = (item_def){.name = d->name, .desc = "", .density = d->density, .stack = 64, .block = (uint8_t)b,
+                                   .tex = d->tex[0]};
         }
         blocks[B_GLASS].desc = "Brittle: shatters when it falls hard.";
         blocks[B_ICE].desc = "Melts above 0" "\x7f" "C.";

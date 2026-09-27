@@ -170,6 +170,119 @@ static void usage(void)
            "  --mem-stats       print mimalloc statistics at exit\n");
 }
 
+/* Options that take no value. */
+static int parse_flag(options *o, const char *a)
+{
+    const struct {
+        const char *name;
+        int *field;
+    } flags[] = {
+        {"--play", &o->play},        {"--debug", &o->debug},      {"--validate", &o->validate},
+        {"--demo", &o->demo},        {"--health-panel", &o->open_panel},
+        {"--bench", &o->bench},      {"--mem-stats", &o->mem_stats},
+    };
+    for (size_t i = 0; i < sizeof flags / sizeof flags[0]; i++)
+        if (strcmp(a, flags[i].name) == 0) {
+            *flags[i].field = 1;
+            return 1;
+        }
+    if (strcmp(a, "--no-vsync") == 0) {
+        o->vsync = 0;
+        o->no_vsync = 1;
+        return 1;
+    }
+    if (strcmp(a, "--no-save") == 0) {
+        o->world_dir = NULL;
+        return 1;
+    }
+    return 0;
+}
+
+/* Options with an integer value in a range. */
+static int parse_int_option(options *o, const char *a, const char *v, int *ok)
+{
+    const struct {
+        const char *name;
+        int *field;
+        int lo, hi;
+        int *have;
+    } ints[] = {
+        {"--radius", &o->radius, 2, 32, &o->have_radius},
+        {"--threads", &o->threads, 0, 64, NULL},
+        {"--gpu", &o->gpu, 0, 64, NULL},
+        {"--frames", &o->frames, 1, INT_MAX, NULL},
+    };
+    for (size_t i = 0; i < sizeof ints / sizeof ints[0]; i++) {
+        if (strcmp(a, ints[i].name) != 0) continue;
+        long long n;
+        *ok = parse_int(v, ints[i].lo, ints[i].hi, &n);
+        if (*ok) {
+            *ints[i].field = (int)n;
+            if (ints[i].have) *ints[i].have = 1;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static int valid_screen(const char *v)
+{
+    static const char *const NAMES[] = {"title", "pause", "settings", "controls", "game", "inventory"};
+    for (size_t i = 0; i < sizeof NAMES / sizeof NAMES[0]; i++)
+        if (strcmp(v, NAMES[i]) == 0) return 1;
+    return 0;
+}
+
+/* Options with any other value. Returns 1 if a is one of them; *ok says
+ * whether the value was acceptable. */
+static int parse_value_option(options *o, const char *a, const char *v, int *ok)
+{
+    long long n = 0, x = 0, z = 0;
+    *ok = 1;
+    if (strcmp(a, "--seed") == 0) {
+        *ok = parse_int(v, 0, (long long)UINT32_MAX, &n);
+        o->seed = (uint32_t)n;
+        o->have_seed = *ok;
+    } else if (strcmp(a, "--size") == 0) {
+        *ok = parse_int_pair(v, 'x', 64, 16384, &x, &z);
+        o->width = (int)x;
+        o->height = (int)z;
+    } else if (strcmp(a, "--pool-mb") == 0) {
+        *ok = parse_int(v, 1, 512, &n);
+        o->pool_mb = (uint32_t)n;
+    } else if (strcmp(a, "--time") == 0) {
+        *ok = parse_int(v, 0, 23, &n);
+        o->time_of_day = (double)n / 24.0;
+        o->have_time = *ok;
+    } else if (strcmp(a, "--look") == 0) {
+        *ok = parse_float_pair(v, 3600.0f, &o->look_yaw, &o->look_pitch);
+        o->have_look = *ok;
+    } else if (strcmp(a, "--spawn") == 0) {
+        *ok = parse_int_pair(v, ',', -(WORLD_LIMIT - 64), WORLD_LIMIT - 64, &x, &z);
+        o->spawn_x = (int)x;
+        o->spawn_z = (int)z;
+        o->have_spawn = *ok;
+    } else if (strcmp(a, "--config") == 0) {
+        *ok = strlen(v) < 400;
+        o->config = v;
+    } else if (strcmp(a, "--world") == 0) {
+        *ok = strlen(v) < 200;
+        o->world_dir = v;
+    } else if (strcmp(a, "--screen") == 0) {
+        *ok = valid_screen(v);
+        o->screen = v;
+    } else if (strcmp(a, "--screenshot") == 0) {
+        o->screenshot = v;
+    } else if (strcmp(a, "--give") == 0) {
+        o->give = v;
+    } else if (strcmp(a, "--hurt") == 0) {
+        o->hurt = v;
+    } else {
+        return parse_int_option(o, a, v, ok);
+    }
+    return 1;
+}
+
 static int parse_args(int argc, char **argv, options *o)
 {
     memset(o, 0, sizeof *o);
@@ -183,115 +296,29 @@ static int parse_args(int argc, char **argv, options *o)
     o->config = "blockclonia.cfg";
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
-        const char *v = i + 1 < argc ? argv[i + 1] : NULL;
-        long long n;
-#define NEED_VALUE() do { if (!v) { fprintf(stderr, "%s needs a value\n", a); return 0; } i++; } while (0)
-        if (!strcmp(a, "--seed")) {
-            NEED_VALUE();
-            if (!parse_int(v, 0, (long long)UINT32_MAX, &n)) goto bad;
-            o->seed = (uint32_t)n;
-            o->have_seed = 1;
-        } else if (!strcmp(a, "--radius")) {
-            NEED_VALUE();
-            if (!parse_int(v, 2, 32, &n)) goto bad;
-            o->radius = (int)n;
-            o->have_radius = 1;
-        } else if (!strcmp(a, "--size")) {
-            NEED_VALUE();
-            long long w, h;
-            if (!parse_int_pair(v, 'x', 64, 16384, &w, &h)) goto bad;
-            o->width = (int)w;
-            o->height = (int)h;
-        } else if (!strcmp(a, "--no-vsync")) {
-            o->vsync = 0;
-            o->no_vsync = 1;
-        } else if (!strcmp(a, "--config")) {
-            NEED_VALUE();
-            if (strlen(v) >= 400) goto bad;
-            o->config = v;
-        } else if (!strcmp(a, "--play")) {
-            o->play = 1;
-        } else if (!strcmp(a, "--debug")) {
-            o->debug = 1;
-        } else if (!strcmp(a, "--time")) {
-            NEED_VALUE();
-            if (!parse_int(v, 0, 23, &n)) goto bad;
-            o->time_of_day = (double)n / 24.0;
-            o->have_time = 1;
-        } else if (!strcmp(a, "--give")) {
-            NEED_VALUE();
-            o->give = v;
-        } else if (!strcmp(a, "--screen")) {
-            NEED_VALUE();
-            if (strcmp(v, "title") && strcmp(v, "pause") && strcmp(v, "settings") && strcmp(v, "controls") &&
-                strcmp(v, "game") && strcmp(v, "inventory"))
-                goto bad;
-            o->screen = v;
-        } else if (!strcmp(a, "--threads")) {
-            NEED_VALUE();
-            if (!parse_int(v, 0, 64, &n)) goto bad;
-            o->threads = (int)n;
-        } else if (!strcmp(a, "--pool-mb")) {
-            NEED_VALUE();
-            if (!parse_int(v, 1, 512, &n)) goto bad;
-            o->pool_mb = (uint32_t)n;
-        } else if (!strcmp(a, "--gpu")) {
-            NEED_VALUE();
-            if (!parse_int(v, 0, 64, &n)) goto bad;
-            o->gpu = (int)n;
-        } else if (!strcmp(a, "--world")) {
-            NEED_VALUE();
-            if (strlen(v) >= 200) goto bad;
-            o->world_dir = v;
-        } else if (!strcmp(a, "--no-save")) {
-            o->world_dir = NULL;
-        } else if (!strcmp(a, "--validate")) {
-            o->validate = 1;
-        } else if (!strcmp(a, "--frames")) {
-            NEED_VALUE();
-            if (!parse_int(v, 1, INT_MAX, &n)) goto bad;
-            o->frames = (int)n;
-        } else if (!strcmp(a, "--screenshot")) {
-            NEED_VALUE();
-            o->screenshot = v;
-        } else if (!strcmp(a, "--look")) {
-            NEED_VALUE();
-            float y, p;
-            if (!parse_float_pair(v, 3600.0f, &y, &p)) goto bad;
-            o->look_yaw = y;
-            o->look_pitch = p;
-            o->have_look = 1;
-        } else if (!strcmp(a, "--spawn")) {
-            NEED_VALUE();
-            long long x, z;
-            if (!parse_int_pair(v, ',', -(WORLD_LIMIT - 64), WORLD_LIMIT - 64, &x, &z)) goto bad;
-            o->spawn_x = (int)x;
-            o->spawn_z = (int)z;
-            o->have_spawn = 1;
-        } else if (!strcmp(a, "--demo")) {
-            o->demo = 1;
-        } else if (!strcmp(a, "--health-panel")) {
-            o->open_panel = 1;
-        } else if (!strcmp(a, "--hurt")) {
-            NEED_VALUE();
-            o->hurt = v;
-        } else if (!strcmp(a, "--bench")) {
-            o->bench = 1;
-        } else if (!strcmp(a, "--mem-stats")) {
-            o->mem_stats = 1;
-        } else if (!strcmp(a, "--help") || !strcmp(a, "-h")) {
+        if (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) {
             usage();
             exit(0);
-        } else {
+        }
+        if (parse_flag(o, a)) continue;
+        const char *v = i + 1 < argc ? argv[i + 1] : NULL;
+        int ok = 1;
+        options probe = *o; /* is it a valued option at all? */
+        if (!parse_value_option(&probe, a, v ? v : "", &ok)) {
             fprintf(stderr, "unknown option %s\n", a);
             usage();
             return 0;
         }
-        continue;
-    bad:
-        fprintf(stderr, "invalid value for %s: %s\n", a, v);
-        return 0;
-#undef NEED_VALUE
+        if (!v) {
+            fprintf(stderr, "%s needs a value\n", a);
+            return 0;
+        }
+        parse_value_option(o, a, v, &ok);
+        if (!ok) {
+            fprintf(stderr, "invalid value for %s: %s\n", a, v);
+            return 0;
+        }
+        i++;
     }
     return 1;
 }
@@ -647,47 +674,115 @@ static void demo_step(world *w, physics *ph, fx_state *fx, const player *p, demo
     }
 }
 
-int main(int argc, char **argv)
-{
+/* ---------------------------------------------------------------- game */
+
+/* Everything the loop owns. One instance, static: several members are
+ * large (the health model keeps seconds of waveforms). */
+typedef struct {
     options o;
-    if (!parse_args(argc, argv, &o)) return 2;
-    mem_init();
-    mesher_init();
-
     settings st;
-    settings_default(&st);
-    if (settings_load(&st, o.config) == 0) log_info("settings from %s", o.config);
-    if (!o.have_radius) o.radius = st.render_distance;
-    if (!o.no_vsync) o.vsync = st.vsync;
-    else st.vsync = 0;
+    int settings_dirty;
+    uint32_t seed;
+    GLFWwindow *win;
+    jobs *js;
+    renderer *rd;
+    world w;
+    physics ph;
+    thermo *th;
+    world_hooks hooks;
+    save_ctx sc;
+    double sx, sz;            /* spawn point */
+    player pl;
+    inventory inv;
+    health hl;
+    hud_state hs;
+    fx_state *fx;
+    interact ia;
+    invui iu;
+    entity_instance *ents;
+    fx_crack crack;
+    viewmodel vm;
+    entity_instance vm_ents[VIEWMODEL_MAX];
+    float eat_anim;           /* 1 at the start of eating, easing to 0 */
+    uint32_t death_rng;
+    int actions;              /* blocks broken or placed since the last physics step */
+    menu mn;
+    camera_anim cam;
+    debug_frames dframes;
+    float phys_ms;
+    char versions[128];
+    demo_state demo;
+    double acc;               /* unsimulated time, s */
+    int frame;
+    int inv_was_open;
+    double title_t, save_t;
+    int fps_frames;
 
-    if (o.bench) {
-        int r = bench_run(o.have_seed ? o.seed : 1337u);
-        if (o.mem_stats) mem_print_stats();
-        return r;
+    /* This frame. */
+    int in_menu, frozen;
+    float look_dx, look_dy;   /* radians turned this frame, for the view model's lag */
+    camera_pose pose;
+    dvec3 eye;
+    vec3 look;
+    ray_hit hit;
+} game;
+
+static game g_game;
+
+/* Drops a stack in front of the player (inventory closed with a stack on
+ * the cursor, or thrown out of the window). */
+static void toss(game *g, item_stack st)
+{
+    if (!st.count) return;
+    vec3 d = look_dir(g->pl.yaw, g->pl.pitch);
+    physics_drop_item(&g->ph, dv3(g->pl.pos.x, g->pl.pos.y + 1.3, g->pl.pos.z),
+                      dv3((double)d.x * 3.0, 1.5, (double)d.z * 3.0), st.id, st.count, 1.2f);
+}
+
+static void open_start_screen(game *g)
+{
+    const options *o = &g->o;
+    menu_init(&g->mn);
+    int skip_title = o->play || o->demo || o->open_panel || o->hurt;
+    g_in.screen = skip_title ? SCREEN_NONE : SCREEN_TITLE;
+    if (o->screen) {
+        if (!strcmp(o->screen, "title")) g_in.screen = SCREEN_TITLE;
+        else if (!strcmp(o->screen, "pause")) g_in.screen = SCREEN_PAUSE;
+        else if (!strcmp(o->screen, "settings")) g_in.screen = SCREEN_SETTINGS;
+        else if (!strcmp(o->screen, "controls")) g_in.screen = SCREEN_CONTROLS;
+        else g_in.screen = SCREEN_NONE;
+        g_in.inv_open = !strcmp(o->screen, "inventory");
     }
-
-    uint32_t seed = o.have_seed ? o.seed : (uint32_t)time(NULL) * 2654435761u;
-    if (o.world_dir) {
-        if (save_ensure_dir(o.world_dir) != 0) {
-            log_error("cannot create world directory '%s'; saving disabled", o.world_dir);
-            o.world_dir = NULL;
-        } else {
-            uint32_t saved;
-            if (save_read_seed(o.world_dir, &saved) == 0) {
-                if (o.have_seed && saved != o.seed) log_warn("--seed ignored: world '%s' uses seed %u", o.world_dir, saved);
-                seed = saved;
-            } else if (save_write_seed(o.world_dir, seed) != 0) {
-                log_warn("could not write level.dat");
-            }
-        }
+    if (g_in.screen != SCREEN_NONE) {
+        if (g_in.screen != SCREEN_TITLE) g->mn.screen = SCREEN_PAUSE; /* settings/controls return to pause */
+        menu_open(&g->mn, g_in.screen);
     }
-    log_info("seed %u", seed);
+}
 
+static uint32_t choose_seed(options *o)
+{
+    uint32_t seed = o->have_seed ? o->seed : (uint32_t)time(NULL) * 2654435761u;
+    if (!o->world_dir) return seed;
+    if (save_ensure_dir(o->world_dir) != 0) {
+        log_error("cannot create world directory '%s'; saving disabled", o->world_dir);
+        o->world_dir = NULL;
+        return seed;
+    }
+    uint32_t saved;
+    if (save_read_seed(o->world_dir, &saved) == 0) {
+        if (o->have_seed && saved != o->seed) log_warn("--seed ignored: world '%s' uses seed %u", o->world_dir, saved);
+        return saved;
+    }
+    if (save_write_seed(o->world_dir, seed) != 0) log_warn("could not write level.dat");
+    return seed;
+}
+
+static GLFWwindow *open_window(const options *o)
+{
     if (!glfwInit()) log_fatal("glfwInit failed");
     if (!glfwVulkanSupported()) log_fatal("no Vulkan loader/driver found");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow *win = glfwCreateWindow(o.width, o.height, "blockclonia", NULL, NULL);
+    GLFWwindow *win = glfwCreateWindow(o->width, o->height, "blockclonia", NULL, NULL);
     if (!win) log_fatal("could not create window");
     glfwSetKeyCallback(win, key_cb);
     glfwSetMouseButtonCallback(win, mouse_button_cb);
@@ -696,520 +791,570 @@ int main(int argc, char **argv)
     glfwSetFramebufferSizeCallback(win, resize_cb);
     glfwSetWindowFocusCallback(win, focus_cb);
     if (glfwRawMouseMotionSupported()) glfwSetInputMode(win, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+    return win;
+}
 
-    int workers = o.threads >= 0 ? o.threads : cpu_count() - 1;
-    if (workers < 1 && o.threads < 0) workers = 1;
-    if (workers > 8 && o.threads < 0) workers = 8;
-    jobs *js = jobs_create(workers);
+/* The world, physics, heat, the player and their things. */
+static void game_init_world(game *g)
+{
+    const options *o = &g->o;
+    int workers = o->threads >= 0 ? o->threads : cpu_count() - 1;
+    if (workers < 1 && o->threads < 0) workers = 1;
+    if (workers > 8 && o->threads < 0) workers = 8;
+    g->js = jobs_create(workers);
 
-    render_opts ro = {.vsync = o.vsync, .validate = o.validate, .render_radius = o.radius,
-                      .gpu_index = o.gpu, .pool_mb = o.pool_mb, .screenshots = o.screenshot != NULL};
-    renderer *rd = renderer_create(win, &ro);
+    render_opts ro = {.vsync = o->vsync, .validate = o->validate, .render_radius = o->radius,
+                      .gpu_index = o->gpu, .pool_mb = o->pool_mb, .screenshots = o->screenshot != NULL};
+    g->rd = renderer_create(g->win, &ro);
 
-    world w;
-    world_init(&w, seed, o.radius, js, o.world_dir);
-    physics ph;
-    physics_init(&ph, &w);
-    thermo *th = thermo_create(seed);
-    world_hooks hooks = {&ph, th, &w};
-    w.edit_user = &hooks;
-    w.on_block_changed = on_block_changed;
-    w.on_column_unload = on_column_unload;
-    save_ctx sc = {&w, &ph, NULL, NULL, th, NULL};
-    log_set_fatal_hook(save_on_fatal, &sc);
-    renderer_bind_world(rd, &w);
+    world_init(&g->w, g->seed, o->radius, g->js, o->world_dir);
+    physics_init(&g->ph, &g->w);
+    g->th = thermo_create(g->seed);
+    g->hooks = (world_hooks){&g->ph, g->th, &g->w};
+    g->w.edit_user = &g->hooks;
+    g->w.on_block_changed = on_block_changed;
+    g->w.on_column_unload = on_column_unload;
+    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, o->world_dir};
+    log_set_fatal_hook(save_on_fatal, &g->sc);
+    renderer_bind_world(g->rd, &g->w);
 
-    double sx, sz;
-    if (o.have_spawn) {
-        sx = o.spawn_x + 0.5;
-        sz = o.spawn_z + 0.5;
+    if (o->have_spawn) {
+        g->sx = o->spawn_x + 0.5;
+        g->sz = o->spawn_z + 0.5;
     } else {
-        find_spawn(seed, &sx, &sz);
+        find_spawn(g->seed, &g->sx, &g->sz);
     }
-    world_load_blocking(&w, sx, sz, 1);
-    player pl;
-    player_spawn(&pl, &w, sx, sz);
-    if (o.have_look) {
-        pl.yaw = o.look_yaw * (float)(MC_PI / 180.0);
-        pl.pitch = clampf(o.look_pitch, -89.0f, 89.0f) * (float)(MC_PI / 180.0);
+    world_load_blocking(&g->w, g->sx, g->sz, 1);
+    player_spawn(&g->pl, &g->w, g->sx, g->sz);
+    if (o->have_look) {
+        g->pl.yaw = o->look_yaw * (float)(MC_PI / 180.0);
+        g->pl.pitch = clampf(o->look_pitch, -89.0f, 89.0f) * (float)(MC_PI / 180.0);
     }
-    inventory inv;
-    inv_starting_kit(&inv);
+    inv_starting_kit(&g->inv);
     double day = THERMO_DAY_START;
-    if (!o.have_spawn && !o.demo && load_player(o.world_dir, &pl, &inv, &day)) {
-        thermo_set_day_time(th, day);
-        world_load_blocking(&w, pl.pos.x, pl.pos.z, 1);
-        log_info("player restored from %s/player.dat", o.world_dir);
+    if (!o->have_spawn && !o->demo && load_player(o->world_dir, &g->pl, &g->inv, &day)) {
+        thermo_set_day_time(g->th, day);
+        world_load_blocking(&g->w, g->pl.pos.x, g->pl.pos.z, 1);
+        log_info("player restored from %s/player.dat", o->world_dir);
     }
-    if (o.give) give_items(&inv, o.give);
-    if (o.have_time) thermo_set_day_time(th, o.time_of_day);
-    sc.pl = &pl;
-    sc.inv = &inv;
-    sc.dir = o.world_dir;
-    log_info("spawn at %.1f %.1f %.1f with %d worker threads", pl.pos.x, pl.pos.y, pl.pos.z,
-             jobs_worker_count(js));
-    fx_state *fx = mem_alloc(sizeof *fx);
-    fx_init(fx, seed);
-    interact ia;
-    interact_init(&ia, seed ^ 0xA5A5u);
-    invui iu;
-    invui_init(&iu);
-    entity_instance *ents = mem_alloc(sizeof(entity_instance) * RENDER_MAX_ENTS);
-    fx_crack crack = {0};
-    viewmodel vm;
-    viewmodel_init(&vm);
-    entity_instance vm_ents[VIEWMODEL_MAX];
-    float eat_anim = 0.0f;
-    uint32_t death_rng = seed;
+    if (o->give) give_items(&g->inv, o->give);
+    if (o->have_time) thermo_set_day_time(g->th, o->time_of_day);
+    log_info("spawn at %.1f %.1f %.1f with %d worker threads", g->pl.pos.x, g->pl.pos.y, g->pl.pos.z,
+             jobs_worker_count(g->js));
 
-    static health hl; /* 23 KB of waveform history: keep it off the stack */
-    health_init(&hl, seed ^ 0x9E3779B9u);
-    if (o.hurt) apply_hurt(&hl, o.hurt);
-    hud_state hs;
-    memset(&hs, 0, sizeof hs);
+    health_init(&g->hl, g->seed ^ 0x9E3779B9u);
+    if (o->hurt) apply_hurt(&g->hl, o->hurt);
+}
+
+static void game_init(game *g)
+{
+    g->seed = choose_seed(&g->o);
+    log_info("seed %u", g->seed);
+    g->win = open_window(&g->o);
+    game_init_world(g);
+
+    g->fx = mem_alloc(sizeof *g->fx);
+    fx_init(g->fx, g->seed);
+    interact_init(&g->ia, g->seed ^ 0xA5A5u);
+    invui_init(&g->iu);
+    g->ents = mem_alloc(sizeof(entity_instance) * RENDER_MAX_ENTS);
+    viewmodel_init(&g->vm);
+    camera_init(&g->cam);
+    g->death_rng = g->seed;
+
     g_in.treat = -1;
     g_in.slot = -1;
-    g_in.panel = o.open_panel;
-    g_in.debug = o.debug;
-    int actions = 0; /* blocks broken or placed since the last physics step */
+    g_in.panel = g->o.open_panel;
+    g_in.debug = g->o.debug;
+    open_start_screen(g);
 
-    /* Title screen first, unless a scripted start asks for the game. */
-    menu mn;
-    menu_init(&mn);
-    int skip_title = o.play || o.demo || o.open_panel || o.hurt;
-    g_in.screen = skip_title ? SCREEN_NONE : SCREEN_TITLE;
-    if (o.screen) {
-        if (!strcmp(o.screen, "title")) g_in.screen = SCREEN_TITLE;
-        else if (!strcmp(o.screen, "pause")) g_in.screen = SCREEN_PAUSE;
-        else if (!strcmp(o.screen, "settings")) g_in.screen = SCREEN_SETTINGS;
-        else if (!strcmp(o.screen, "controls")) g_in.screen = SCREEN_CONTROLS;
-        else g_in.screen = SCREEN_NONE;
-        g_in.inv_open = !strcmp(o.screen, "inventory");
+    char mi[48];
+    mem_version_string(mi, sizeof mi);
+    int gmaj, gmin, grev;
+    glfwGetVersion(&gmaj, &gmin, &grev);
+    snprintf(g->versions, sizeof g->versions, "%s  GLFW %d.%d.%d  %s", mi, gmaj, gmin, grev,
+             renderer_api_string(g->rd));
+    snprintf(g->mn.footer, sizeof g->mn.footer, "seed %u   %s   GLFW %d.%d.%d", g->seed, mi, gmaj, gmin, grev);
+}
+
+/* Menus, focus, the inventory screen opening and closing, and what that
+ * freezes. */
+static void frame_menus(game *g, double dt)
+{
+    if (g_in.lost_focus) {
+        if (g_in.screen == SCREEN_NONE && !g->o.frames) g_in.screen = SCREEN_PAUSE;
+        g_in.lost_focus = 0;
     }
-    if (g_in.screen != SCREEN_NONE) {
-        if (g_in.screen != SCREEN_TITLE) mn.screen = SCREEN_PAUSE; /* settings/controls return to pause */
-        menu_open(&mn, g_in.screen);
+    if (g_in.screen != SCREEN_NONE && g->mn.screen != g_in.screen) menu_open(&g->mn, g_in.screen);
+    g->in_menu = g_in.screen != SCREEN_NONE;
+    set_captured(g->win, !g->in_menu && g_in.captured);
+    if (g->in_menu) {
+        g->acc = 0.0; /* the simulation stands still */
+        memset(g_in.keys, 0, sizeof g_in.keys); /* no keys stuck down on return */
+        g_in.click_break = g_in.click_place = g_in.click_pick = 0;
+        g_in.attack = 0;
+    } else {
+        g->acc += dt;
     }
-    int settings_dirty = 0;
-    camera_anim cam;
-    camera_init(&cam);
-    debug_frames dframes;
-    memset(&dframes, 0, sizeof dframes);
-    float phys_ms = 0.0f;
-    char versions[128];
-    {
-        char mi[48];
-        mem_version_string(mi, sizeof mi);
-        int gmaj, gmin, grev;
-        glfwGetVersion(&gmaj, &gmin, &grev);
-        snprintf(versions, sizeof versions, "%s  GLFW %d.%d.%d  Vulkan 1.0", mi, gmaj, gmin, grev);
-        snprintf(mn.footer, sizeof mn.footer, "seed %u   %s   GLFW %d.%d.%d", seed, mi, gmaj, gmin, grev);
+    /* The inventory screen frees the cursor; closing it takes it back. */
+    if (g_in.inv_open && !g->inv_was_open) {
+        set_captured(g->win, 0);
+        g->iu.open_t = 0.0f;
+    } else if (!g_in.inv_open && g->inv_was_open) {
+        toss(g, inv_return_cursor(&g->inv));
+        if (!g->in_menu) set_captured(g->win, 1);
+    }
+    g->inv_was_open = g_in.inv_open;
+    if (g->hl.dead) g_in.inv_open = 0;
+    /* The panel, death and unconsciousness freeze the player's input. */
+    g->frozen = g->in_menu || g_in.panel || g_in.inv_open || g->hl.dead || g->hl.conscious == CONS_UNCONSCIOUS;
+    if (g->frozen) g_in.mouse_dx = g_in.mouse_dy = 0;
+}
+
+/* Looking, the hotbar and the movement keys. */
+static player_input frame_input(game *g)
+{
+    const settings *st = &g->st;
+    player *pl = &g->pl;
+    const float sens = 0.0022f * (float)st->sensitivity / 100.0f;
+    g->look_dx = (float)g_in.mouse_dx * sens;
+    g->look_dy = (float)g_in.mouse_dy * sens;
+    pl->yaw += g->look_dx;
+    pl->pitch -= g->look_dy * (st->invert_y ? -1.0f : 1.0f);
+    pl->pitch = clampf(pl->pitch, -1.55f, 1.55f);
+    pl->yaw = fmodf(pl->yaw, (float)(2 * MC_PI));
+    g_in.mouse_dx = g_in.mouse_dy = 0;
+    if (g_in.scroll != 0) {
+        if (!g->in_menu && !g_in.panel) {
+            int s = g->inv.selected - (g_in.scroll > 0 ? 1 : -1);
+            g->inv.selected = (s % INV_HOTBAR + INV_HOTBAR) % INV_HOTBAR;
+        }
+        g_in.scroll = 0;
+    }
+    if (g_in.slot >= 0 && g_in.slot < INV_HOTBAR) g->inv.selected = g_in.slot;
+    g_in.slot = -1;
+    if (g_in.toggle_fly) {
+        pl->flying = !pl->flying;
+        pl->vel = dv3(0, 0, 0);
+        g_in.toggle_fly = 0;
     }
 
-    demo_state demo = {0};
-    double prev = glfwGetTime(), acc = 0.0, title_t = prev, save_t = prev;
-    int frame = 0, fps_frames = 0;
-    char title[256];
+    player_input in = {0};
+    in.forward = (float)(g_in.keys[GLFW_KEY_W] - g_in.keys[GLFW_KEY_S]);
+    in.right = (float)(g_in.keys[GLFW_KEY_D] - g_in.keys[GLFW_KEY_A]);
+    in.jump = g_in.keys[GLFW_KEY_SPACE];
+    in.descend = g_in.keys[GLFW_KEY_LEFT_SHIFT];
+    in.sneak = g_in.keys[GLFW_KEY_LEFT_SHIFT];
+    g_in.sprint_toggle = st->sprint_toggle;
+    if (!g_in.keys[GLFW_KEY_W]) g_in.sprint_tap = 0;
+    if (!st->sprint_toggle) g_in.sprint_latch = 0;
+    in.sprint = (st->sprint_toggle ? g_in.sprint_latch : g_in.keys[GLFW_KEY_LEFT_CONTROL]) || g_in.sprint_tap;
+    if (g->frozen) memset(&in, 0, sizeof in);
+    survival_limit_input(&g->hl, pl, &in);
+    return in;
+}
 
-    while (!glfwWindowShouldClose(win)) {
+/* Fixed 60 Hz steps: physics, what it did to the body, and the body. */
+static void frame_simulate(game *g, const player_input *in, double dt)
+{
+    g->ph.magnet = !g->hl.dead && !g->in_menu;
+    int steps = 0;
+    float landing = 0.0f; /* hardest landing this frame, for the camera */
+    double t0 = glfwGetTime();
+    while (g->acc >= PHYS_DT && steps < MAX_STEPS_PER_FRAME) {
+        survival_before sb = survival_capture(&g->pl);
+        physics_step(&g->ph, &g->pl, in);
+        if ((float)g->pl.fall_speed > landing) landing = (float)g->pl.fall_speed;
+        health_env env;
+        survival_env(&g->w, &g->pl, &sb, g->actions, &env);
+        thermal_env(g->th, &g->w, &g->pl, &env);
+        g->actions = 0;
+        survival_impacts(&g->hl, &g->w, &g->ph, &g->pl, &sb);
+        /* Per-step physics events, cleared by the next step. */
+        for (int k = 0; k < g->ph.shatter_count; k++)
+            fx_break(g->fx, g->ph.shatter_block[k], g->ph.shatter_pos[k].x, g->ph.shatter_pos[k].y,
+                     g->ph.shatter_pos[k].z, 24);
+        for (int k = 0; k < g->ph.splash_count; k++) fx_splash(g->fx, g->ph.splash_pos[k], (double)g->ph.splash_speed[k]);
+        health_step(&g->hl, &env, PHYS_DT);
+        g->acc -= PHYS_DT;
+        steps++;
+    }
+    if (steps == MAX_STEPS_PER_FRAME) g->acc = 0.0; /* too slow to keep up: slow down time instead */
+    if (steps) physics_pickup(&g->ph, accept_item, &g->inv);
+    if (!g->in_menu) {
+        thermo_step(g->th, &g->w, dt, g->pl.pos);
+        fx_step(g->fx, &g->w, dt);
+    }
+    g->phys_ms = anim_approach(g->phys_ms, (float)((glfwGetTime() - t0) * 1000.0), 5.0f, (float)dt);
+    g->pose = camera_update(&g->cam, &g->pl, landing, g->hl.hurt_flash, g->st.view_bob, g->st.fov_effects,
+                            g->in_menu ? 0.0f : (float)dt);
+}
+
+/* The hands: breaking, placing, using; then treatments and respawning. */
+static void frame_interact(game *g, double dt)
+{
+    player *pl = &g->pl;
+    g->eye = dv3(pl->pos.x, pl->pos.y + PLAYER_EYE - (double)g->cam.crouch, pl->pos.z);
+    g->look = look_dir(pl->yaw, pl->pitch);
+    g->hit = physics_raycast(&g->w, g->eye, g->look, REACH);
+    health_limits lim = health_get_limits(&g->hl);
+    int hands = !g->frozen && (pl->flying || (lim.has_control && lim.can_act));
+    interact_input ii = {.attack = g_in.attack && !g->frozen, .attack_click = g_in.click_break,
+                         .use_click = g_in.click_place, .pick_click = g_in.click_pick && !g->frozen,
+                         .drop = g->frozen ? 0 : g_in.drop, .can_act = hands,
+                         .speed = pl->flying ? 1.0f : 0.4f + 0.6f * lim.move_scale,
+                         .dt = g->in_menu ? 0.0f : (float)dt};
+    interact_out io = interact_frame(&g->ia, &g->w, &g->ph, g->th, pl, &g->inv, g->fx, g->eye, g->look, g->hit, &ii);
+    g->actions += io.actions;
+    if (io.broke) survival_on_break(&g->hl, io.broken_id);
+    if (io.eat) g_in.treat = TREAT_EAT;
+    if (io.msg) {
+        snprintf(g->hs.msg, sizeof g->hs.msg, "%s", io.msg);
+        g->hs.msg_age = 0.0f;
+    }
+    g->crack = (fx_crack){g->ia.has_target && !pl->flying, g->ia.target.x, g->ia.target.y, g->ia.target.z,
+                          g->ia.progress};
+    g_in.click_break = g_in.click_place = g_in.click_pick = g_in.drop = 0;
+
+    if (g_in.treat >= 0) {
+        if (!g->hl.dead) {
+            int water = survival_water_nearby(&g->w, pl, g->look) || inv_held(&g->inv)->id == I_WATER_BUCKET;
+            int ok = health_treat(&g->hl, &g->inv, g_in.sel_part, g_in.treat, water, g->hs.msg, sizeof g->hs.msg);
+            if (ok && (g_in.treat == TREAT_EAT || g_in.treat == TREAT_DRINK)) g->eat_anim = 1.0f;
+            g->hs.msg_age = 0.0f;
+        }
+        g_in.treat = -1;
+    }
+    if (g_in.respawn) {
+        if (g->hl.dead) {
+            drop_everything(&g->ph, &g->inv, pl, &g->death_rng);
+            world_load_blocking(&g->w, g->sx, g->sz, 1);
+            player_spawn(pl, &g->w, g->sx, g->sz);
+            health_init(&g->hl, g->seed ^ (uint32_t)g->frame * 2654435761u);
+            inv_starting_kit(&g->inv);
+            g->hs.alert_count = 0;
+            g_in.panel = 0;
+            log_info("respawned");
+        }
+        g_in.respawn = 0;
+    }
+    g->hs.msg_age += (float)dt;
+}
+
+/* Camera, sky, entities and the first-person arm for the renderer. */
+static render_view build_view(game *g, double now, double dt, double alpha)
+{
+    const player *pl = &g->pl;
+    dvec3 ip = dv3_lerp(pl->prev_pos, pl->pos, alpha);
+    render_view v = {.eye = dv3(ip.x, ip.y + PLAYER_EYE, ip.z), .yaw = pl->yaw, .pitch = pl->pitch,
+                     .fov = (float)g->st.fov * (float)(MC_PI / 180.0), .has_selection = g->hit.hit && !g->in_menu,
+                     .selection = g->hit.block};
+    int on_title = g_in.screen == SCREEN_TITLE;
+    v.eye.x += (double)g->pose.dx;
+    v.eye.y += (double)g->pose.dy;
+    v.eye.z += (double)g->pose.dz;
+    v.roll = g->pose.roll;
+    v.pitch = clampf(v.pitch + g->pose.pitch_add, -1.56f, 1.56f);
+    v.fov *= g->pose.fov_scale;
+    if (on_title) {
+        /* The title screen circles high above the spawn point. */
+        double t = now * 0.035;
+        int gy = world_surface_y(&g->w, (int)floor(g->sx), (int)floor(g->sz));
+        double h = (gy > 0 ? gy : SEA_LEVEL) + 22.0;
+        v.eye = dv3(g->sx + cos(t) * 28.0, h, g->sz + sin(t) * 28.0);
+        v.yaw = (float)(t - MC_PI * 0.5);
+        v.pitch = -0.32f;
+        v.roll = 0.0f;
+    }
+    v.underwater = world_get(&g->w, (int)floor(v.eye.x), (int)floor(v.eye.y), (int)floor(v.eye.z)) == B_WATER;
+    v.time = (float)fmod(now, 3600.0);
+    v.daylight = thermo_daylight(g->th);
+    thermo_sky(g->th, v.sky);
+
+    g->eat_anim = fmaxf(0.0f, g->eat_anim - (float)dt / 1.6f);
+    if (!on_title && !g->hl.dead && !g->in_menu) {
+        const item_stack *held = &g->inv.slot[g->inv.selected];
+        viewmodel_input vi = {held->count ? held->id : 0,
+                              g->ia.swing,
+                              g->ia.swinging,
+                              g->cam.stride,
+                              g->cam.bob,
+                              g->cam.sprint,
+                              g->look_dx,
+                              g->look_dy,
+                              g->eat_anim > 0.0f ? 1.0f - g->eat_anim : 0.0f,
+                              v.daylight,
+                              (float)dt};
+        v.view_model = g->vm_ents;
+        v.view_model_count = viewmodel_build(&g->vm, &vi, g->vm_ents, VIEWMODEL_MAX);
+    }
+    int n_op = 0, n_tr = 0;
+    fx_build_entities(g->fx, &g->ph, &g->crack, v.eye, alpha, v.time, g->ents, RENDER_MAX_ENTS, &n_op, &n_tr);
+    v.ents = g->ents;
+    v.ent_opaque = n_op;
+    v.ent_trans = n_tr;
+    v.hide_crosshair = g->frozen || on_title;
+    return v;
+}
+
+static void draw_debug(game *g, ui *u, int fb_w, int fb_h, double alpha)
+{
+    const player *pl = &g->pl;
+    dvec3 ip = dv3_lerp(pl->prev_pos, pl->pos, alpha);
+    render_stats rs = renderer_stats(g->rd);
+    debug_info di;
+    memset(&di, 0, sizeof di);
+    di.frames = &g->dframes;
+    di.phys_ms = g->phys_ms;
+    di.x = ip.x;
+    di.y = ip.y;
+    di.z = ip.z;
+    di.yaw = pl->yaw;
+    di.pitch = pl->pitch;
+    di.vx = pl->vel.x;
+    di.vy = pl->vel.y;
+    di.vz = pl->vel.z;
+    di.on_ground = pl->on_ground;
+    di.sprinting = pl->sprinting;
+    di.sneaking = pl->sneaking;
+    di.flying = pl->flying;
+    di.submerged = pl->submerged;
+    di.body_temp = g->hl.temp;
+    di.air_temp = thermo_air(g->th, &g->w, g->eye.x, g->eye.y, g->eye.z);
+    di.feels_like = health_skin_mean(&g->hl);
+    di.day_time = thermo_day_time(g->th);
+    di.heat_cells = thermo_cell_count(g->th);
+    di.fires = thermo_fire_count(g->th);
+    di.has_target = g->hit.hit;
+    di.tx = g->hit.block.x;
+    di.ty = g->hit.block.y;
+    di.tz = g->hit.block.z;
+    di.target_id = g->hit.id;
+    di.target_temp = g->hit.hit ? thermo_block_temp(g->th, &g->w, g->hit.block.x, g->hit.block.y, g->hit.block.z) : 0.0f;
+    di.seed = g->seed;
+    di.radius = g->w.radius;
+    di.threads = jobs_worker_count(g->js);
+    di.bodies = g->ph.body_count;
+    di.items = g->ph.item_count;
+    di.particles = g->fx->count;
+    di.break_progress = g->ia.has_target ? g->ia.progress : 0.0f;
+    di.fluid_updates = g->ph.fluid_updates;
+    di.last_collapse = g->ph.last_collapse;
+    di.draw_calls = rs.draw_calls;
+    di.sections = rs.sections_drawn;
+    di.quads = rs.quads;
+    di.pool_used_kb = rs.pool_used_kb;
+    di.pool_total_kb = rs.pool_total_kb;
+    di.ui_quads = u->quads;
+    mem_process_info(&di.rss, &di.commit);
+    di.gpu = renderer_device_name(g->rd);
+    di.versions = g->versions;
+    di.width = fb_w;
+    di.height = fb_h;
+    debug_draw(u, &di);
+}
+
+/* Menus take the mouse: returns the action, applied here. */
+static void run_menu(game *g, ui *u, float mx, float my, double dt)
+{
+    menu_input mi = {.mouse_down = g_in.ui_down, .click = g_in.ui_click, .up = g_in.ui_up, .down = g_in.ui_dn,
+                     .left = g_in.ui_left, .right = g_in.ui_right, .enter = g_in.ui_enter, .back = g_in.ui_back,
+                     .dt = (float)dt};
+    mi.mx = mx;
+    mi.my = my;
+    int mins = (int)(g->hl.t / 60.0);
+    snprintf(g->mn.status, sizeof g->mn.status, "Alive %d:%02d   core %.1f" UI_CH_DEGREE "C   %s", mins / 60, mins % 60,
+             (double)g->hl.temp, g->hl.dead ? "dead" : "");
+    switch (menu_frame(&g->mn, u, &mi, &g->st)) {
+    case MENU_PLAY:
+    case MENU_RESUME:
+        g_in.screen = SCREEN_NONE;
+        set_captured(g->win, 1);
+        break;
+    case MENU_TO_TITLE:
+        physics_settle_bodies(&g->ph, NULL);
+        world_save_all(&g->w);
+        save_player(&g->sc);
+        g_in.inv_open = 0;
+        g_in.screen = SCREEN_TITLE;
+        g_in.panel = 0;
+        break;
+    case MENU_QUIT: glfwSetWindowShouldClose(g->win, GLFW_TRUE); break;
+    case MENU_SETTINGS:
+        renderer_set_vsync(g->rd, g->st.vsync);
+        g->settings_dirty = 1;
+        break;
+    default: break;
+    }
+    if (g_in.screen != SCREEN_NONE) g_in.screen = g->mn.screen;
+    if (g->settings_dirty && g_in.screen != SCREEN_SETTINGS) {
+        if (settings_save(&g->st, g->o.config) != 0) log_warn("could not save settings to %s", g->o.config);
+        g->settings_dirty = 0;
+    }
+}
+
+/* The mouse in UI pixels, or -1 when unknown. */
+static void cursor_ui(const game *g, const ui *u, int fb_w, int fb_h, float *mx, float *my)
+{
+    double wx, wy;
+    int ww, wh;
+    glfwGetCursorPos(g->win, &wx, &wy);
+    glfwGetWindowSize(g->win, &ww, &wh);
+    *mx = *my = -1.0f;
+    if (ww > 0 && wh > 0) {
+        *mx = (float)(wx * fb_w / ww) / u->scale;
+        *my = (float)(wy * fb_h / wh) / u->scale;
+    }
+}
+
+/* The 2D overlay: HUD, hotbar, inventory, F3 and menus. Returns the quads. */
+static int draw_overlay(game *g, double dt, double alpha)
+{
+    int max_quads, fb_w, fb_h;
+    ui_vertex *uv = renderer_ui_buffer(g->rd, &max_quads, &fb_w, &fb_h);
+    ui u;
+    ui_begin(&u, uv, max_quads, fb_w, fb_h);
+    ui_set_scale(&u, g->st.gui_scale, fb_w, fb_h);
+    int on_title = g_in.screen == SCREEN_TITLE;
+    hud_state *hs = &g->hs;
+    hs->panel = g_in.panel;
+    hs->sel = g_in.sel_part;
+    hs->held = NULL;
+    hs->flying = g->pl.flying;
+    hs->debug = g_in.debug;
+    hs->inv = &g->inv;
+    hs->hide_hints = !g->st.show_hints;
+    hud_update(hs, &g->hl, g->in_menu ? 0.0f : (float)dt);
+    if (!on_title) hud_draw(&u, &g->hl, hs);
+    if (!on_title && !g->hl.dead && !g_in.panel && !g_in.inv_open) invui_hotbar(&u, &g->iu, &g->inv, (float)dt);
+    float mx, my;
+    cursor_ui(g, &u, fb_w, fb_h, &mx, &my);
+    if (g_in.inv_open && !g->in_menu && !g->hl.dead) {
+        invui_input in = {mx, my, g_in.ui_click, g_in.ui_rclick,
+                          g_in.keys[GLFW_KEY_LEFT_SHIFT] || g_in.keys[GLFW_KEY_RIGHT_SHIFT],
+                          thermo_near_fire(g->th, &g->w, g->pl.pos, 3.0), (float)dt};
+        toss(g, invui_screen(&u, &g->iu, &g->inv, &in).drop);
+    }
+    if (g_in.debug && !on_title) draw_debug(g, &u, fb_w, fb_h, alpha);
+    if (g->in_menu) run_menu(g, &u, mx, my, dt);
+    return u.quads;
+}
+
+static void frame_render(game *g, double now, double dt)
+{
+    if (g_in.want_shot) {
+        renderer_request_screenshot(g->rd, "screenshot.ppm");
+        g_in.want_shot = 0;
+    }
+    if (g->o.screenshot && g->o.frames && g->frame == g->o.frames - 1)
+        renderer_request_screenshot(g->rd, g->o.screenshot);
+    if (!renderer_begin_frame(g->rd)) {
+        jobs_poll(g->js, MESH_UPLOADS_PER_FRAME);
+        world_schedule(&g->w);
+        glfwWaitEventsTimeout(0.05);
+        return;
+    }
+    jobs_poll(g->js, MESH_UPLOADS_PER_FRAME);
+    world_schedule(&g->w);
+    double alpha = g->acc / PHYS_DT;
+    render_view v = build_view(g, now, dt, alpha);
+    v.ui_quads = draw_overlay(g, dt, alpha);
+    renderer_end_frame(g->rd, &g->w, &g->ph, &v, alpha);
+}
+
+/* The window title (frame rate and a few counters) and the autosave. */
+static void frame_bookkeeping(game *g, double now)
+{
+    if (g->frame < INT_MAX) g->frame++; /* int overflow is UB; only --frames and the demo read it */
+    g->fps_frames++;
+    if (now - g->title_t >= 0.5) {
+        double fps = g->fps_frames / (now - g->title_t);
+        g->fps_frames = 0;
+        g->title_t = now;
+        render_stats rs = renderer_stats(g->rd);
+        const item_stack *held = &g->inv.slot[g->inv.selected];
+        char title[256];
+        snprintf(title, sizeof title,
+                 "blockclonia | %.0f fps | %.1f %.1f %.1f | %s%s | draws %d | bodies %d | mesh %u/%u MB", fps,
+                 g->pl.pos.x, g->pl.pos.y, g->pl.pos.z, held->count ? item_get(held->id)->name : "empty hand",
+                 g->pl.flying ? " | fly" : "", rs.draw_calls, g->ph.body_count, rs.pool_used_kb / 1024,
+                 rs.pool_total_kb / 1024);
+        glfwSetWindowTitle(g->win, title);
+    }
+    if (now - g->save_t >= AUTOSAVE_SECONDS) {
+        g->save_t = now;
+        world_save_all(&g->w); /* only columns edited since the last save */
+        save_player(&g->sc);
+    }
+}
+
+static void game_shutdown(game *g)
+{
+    if (g->settings_dirty && settings_save(&g->st, g->o.config) != 0)
+        log_warn("could not save settings to %s", g->o.config);
+    log_info("saving and shutting down");
+    log_set_fatal_hook(NULL, NULL);
+    physics_settle_bodies(&g->ph, NULL);
+    world_save_all(&g->w);
+    if (!g->hl.dead) save_player(&g->sc);
+    jobs_wait_idle(g->js);
+    mem_free(g->ents);
+    mem_free(g->fx);
+    world_destroy(&g->w);
+    physics_destroy(&g->ph);
+    thermo_destroy(g->th);
+    jobs_destroy(g->js);
+    renderer_destroy(g->rd);
+    glfwDestroyWindow(g->win);
+    glfwTerminate();
+}
+
+int main(int argc, char **argv)
+{
+    game *g = &g_game;
+    if (!parse_args(argc, argv, &g->o)) return 2;
+    mem_init();
+    mesher_init();
+
+    settings_default(&g->st);
+    if (settings_load(&g->st, g->o.config) == 0) log_info("settings from %s", g->o.config);
+    if (!g->o.have_radius) g->o.radius = g->st.render_distance;
+    if (!g->o.no_vsync) g->o.vsync = g->st.vsync;
+    else g->st.vsync = 0;
+
+    if (g->o.bench) {
+        int r = bench_run(g->o.have_seed ? g->o.seed : 1337u);
+        if (g->o.mem_stats) mem_print_stats();
+        return r;
+    }
+
+    game_init(g);
+    double prev = glfwGetTime();
+    g->title_t = g->save_t = prev;
+    while (!glfwWindowShouldClose(g->win)) {
         glfwPollEvents();
         double now = glfwGetTime();
         double dt = now - prev;
         prev = now;
-        debug_frames_push(&dframes, (float)(dt * 1000.0));
+        debug_frames_push(&g->dframes, (float)(dt * 1000.0));
         if (dt > 0.25) dt = 0.25;
-
         if (g_in.resized) {
-            renderer_on_resize(rd);
+            renderer_on_resize(g->rd);
             g_in.resized = 0;
         }
-
-        /* Menus: the simulation stands still and the cursor is free. */
-        if (g_in.lost_focus) {
-            if (g_in.screen == SCREEN_NONE && !o.frames) {
-                g_in.screen = SCREEN_PAUSE;
-            }
-            g_in.lost_focus = 0;
-        }
-        if (g_in.screen != SCREEN_NONE && mn.screen != g_in.screen) menu_open(&mn, g_in.screen);
-        int in_menu = g_in.screen != SCREEN_NONE;
-        set_captured(win, !in_menu && g_in.captured);
-        if (in_menu) {
-            acc = 0.0;
-            memset(g_in.keys, 0, sizeof g_in.keys); /* no keys stuck down on return */
-            g_in.click_break = g_in.click_place = g_in.click_pick = 0;
-            g_in.attack = 0;
-        } else {
-            acc += dt;
-        }
-        /* The inventory screen frees the cursor; closing it takes it back. */
-        static int inv_was_open;
-        if (g_in.inv_open && !inv_was_open) {
-            set_captured(win, 0);
-            iu.open_t = 0.0f;
-        } else if (!g_in.inv_open && inv_was_open) {
-            item_stack left = inv_return_cursor(&inv);
-            if (left.count) {
-                vec3 d = look_dir(pl.yaw, pl.pitch);
-                physics_drop_item(&ph, dv3(pl.pos.x, pl.pos.y + 1.3, pl.pos.z),
-                                  dv3((double)d.x * 3.0, 1.5, (double)d.z * 3.0), left.id, left.count, 1.2f);
-            }
-            if (!in_menu) set_captured(win, 1);
-        }
-        inv_was_open = g_in.inv_open;
-        if (hl.dead) g_in.inv_open = 0;
-
-        /* The panel, death and unconsciousness freeze the player's input. */
-        int frozen = in_menu || g_in.panel || g_in.inv_open || hl.dead || hl.conscious == CONS_UNCONSCIOUS;
-        if (frozen) g_in.mouse_dx = g_in.mouse_dy = 0;
-
-        /* Look. */
-        const float sens = 0.0022f * (float)st.sensitivity / 100.0f;
-        float look_dx = (float)g_in.mouse_dx * sens, look_dy = (float)g_in.mouse_dy * sens;
-        pl.yaw += (float)g_in.mouse_dx * sens;
-        pl.pitch -= (float)g_in.mouse_dy * sens * (st.invert_y ? -1.0f : 1.0f);
-        pl.pitch = clampf(pl.pitch, -1.55f, 1.55f);
-        pl.yaw = fmodf(pl.yaw, (float)(2 * MC_PI));
-        g_in.mouse_dx = g_in.mouse_dy = 0;
-        if (g_in.scroll != 0) {
-            if (!in_menu && !g_in.panel) {
-                int s = inv.selected - (g_in.scroll > 0 ? 1 : -1);
-                inv.selected = (s % INV_HOTBAR + INV_HOTBAR) % INV_HOTBAR;
-            }
-            g_in.scroll = 0;
-        }
-        if (g_in.slot >= 0 && g_in.slot < INV_HOTBAR) inv.selected = g_in.slot;
-        g_in.slot = -1;
-        if (g_in.toggle_fly) {
-            pl.flying = !pl.flying;
-            pl.vel = dv3(0, 0, 0);
-            g_in.toggle_fly = 0;
-        }
-
-        player_input in = {0};
-        in.forward = (float)(g_in.keys[GLFW_KEY_W] - g_in.keys[GLFW_KEY_S]);
-        in.right = (float)(g_in.keys[GLFW_KEY_D] - g_in.keys[GLFW_KEY_A]);
-        in.jump = g_in.keys[GLFW_KEY_SPACE];
-        in.descend = g_in.keys[GLFW_KEY_LEFT_SHIFT];
-        in.sneak = g_in.keys[GLFW_KEY_LEFT_SHIFT];
-        g_in.sprint_toggle = st.sprint_toggle;
-        if (!g_in.keys[GLFW_KEY_W]) g_in.sprint_tap = 0;
-        if (!st.sprint_toggle) g_in.sprint_latch = 0;
-        in.sprint = (st.sprint_toggle ? g_in.sprint_latch : g_in.keys[GLFW_KEY_LEFT_CONTROL]) || g_in.sprint_tap;
-        if (frozen) memset(&in, 0, sizeof in);
-        survival_limit_input(&hl, &pl, &in);
-
-        ph.magnet = !hl.dead && !in_menu;
-        int steps = 0;
-        float landing = 0.0f; /* hardest landing this frame, for the camera */
-        double phys_t0 = glfwGetTime();
-        while (acc >= PHYS_DT && steps < MAX_STEPS_PER_FRAME) {
-            survival_before sb = survival_capture(&pl);
-            physics_step(&ph, &pl, &in);
-            if ((float)pl.fall_speed > landing) landing = (float)pl.fall_speed;
-            health_env env;
-            survival_env(&w, &pl, &sb, actions, &env);
-            thermal_env(th, &w, &pl, &env);
-            actions = 0;
-            survival_impacts(&hl, &w, &ph, &pl, &sb);
-            /* Per-step physics events, cleared by the next step. */
-            for (int k = 0; k < ph.shatter_count; k++)
-                fx_break(fx, ph.shatter_block[k], ph.shatter_pos[k].x, ph.shatter_pos[k].y, ph.shatter_pos[k].z, 24);
-            for (int k = 0; k < ph.splash_count; k++) fx_splash(fx, ph.splash_pos[k], (double)ph.splash_speed[k]);
-            health_step(&hl, &env, PHYS_DT);
-            acc -= PHYS_DT;
-            steps++;
-        }
-        if (steps == MAX_STEPS_PER_FRAME) acc = 0.0; /* too slow to keep up: slow down time instead */
-        if (steps) physics_pickup(&ph, accept_item, &inv);
-        if (!in_menu) thermo_step(th, &w, dt, pl.pos);
-        if (!in_menu) fx_step(fx, &w, dt);
-        phys_ms = anim_approach(phys_ms, (float)((glfwGetTime() - phys_t0) * 1000.0), 5.0f, (float)dt);
-        camera_pose pose = camera_update(&cam, &pl, landing, hl.hurt_flash, st.view_bob, st.fov_effects,
-                                         in_menu ? 0.0f : (float)dt);
-
-        /* Block interaction. */
-        dvec3 eye = dv3(pl.pos.x, pl.pos.y + PLAYER_EYE - (double)cam.crouch, pl.pos.z);
-        vec3 look = look_dir(pl.yaw, pl.pitch);
-        ray_hit hit = physics_raycast(&w, eye, look, REACH);
-        health_limits lim = health_get_limits(&hl);
-        int hands = !frozen && (pl.flying || (lim.has_control && lim.can_act));
-        {
-            interact_input ii = {.attack = g_in.attack && !frozen, .attack_click = g_in.click_break,
-                                 .use_click = g_in.click_place, .pick_click = g_in.click_pick && !frozen,
-                                 .drop = frozen ? 0 : g_in.drop, .can_act = hands,
-                                 .speed = pl.flying ? 1.0f : 0.4f + 0.6f * lim.move_scale, .dt = (float)dt};
-            if (in_menu) ii.dt = 0.0f;
-            interact_out io = interact_frame(&ia, &w, &ph, th, &pl, &inv, fx, eye, look, hit, &ii);
-            actions += io.actions;
-            if (io.broke) survival_on_break(&hl, io.broken_id);
-            if (io.eat) g_in.treat = TREAT_EAT;
-            if (io.msg) {
-                snprintf(hs.msg, sizeof hs.msg, "%s", io.msg);
-                hs.msg_age = 0.0f;
-            }
-            crack = (fx_crack){ia.has_target && !pl.flying, ia.target.x, ia.target.y, ia.target.z, ia.progress};
-        }
-        g_in.click_break = g_in.click_place = g_in.click_pick = g_in.drop = 0;
-
-        /* Treatments, eating and drinking. */
-        if (g_in.treat >= 0) {
-            if (!hl.dead) {
-                int water = survival_water_nearby(&w, &pl, look) || inv_held(&inv)->id == I_WATER_BUCKET;
-                int ok = health_treat(&hl, &inv, g_in.sel_part, g_in.treat, water, hs.msg, sizeof hs.msg);
-                if (ok && (g_in.treat == TREAT_EAT || g_in.treat == TREAT_DRINK)) eat_anim = 1.0f;
-                hs.msg_age = 0.0f;
-            }
-            g_in.treat = -1;
-        }
-        if (g_in.respawn) {
-            if (hl.dead) {
-                drop_everything(&ph, &inv, &pl, &death_rng);
-                world_load_blocking(&w, sx, sz, 1);
-                player_spawn(&pl, &w, sx, sz);
-                health_init(&hl, seed ^ (uint32_t)frame * 2654435761u);
-                inv_starting_kit(&inv);
-                hs.alert_count = 0;
-                g_in.panel = 0;
-                log_info("respawned");
-            }
-            g_in.respawn = 0;
-        }
-        hs.msg_age += (float)dt;
-
-        if (o.demo) demo_step(&w, &ph, fx, &pl, &demo, frame);
-
-        world_update(&w, pl.pos.x, pl.pos.y + PLAYER_EYE, pl.pos.z);
-
-        if (g_in.want_shot) {
-            renderer_request_screenshot(rd, "screenshot.ppm");
-            g_in.want_shot = 0;
-        }
-        if (o.screenshot && o.frames && frame == o.frames - 1) renderer_request_screenshot(rd, o.screenshot);
-
-        if (renderer_begin_frame(rd)) {
-            jobs_poll(js, MESH_UPLOADS_PER_FRAME);
-            world_schedule(&w);
-            double alpha = acc / PHYS_DT;
-            dvec3 ip = dv3_lerp(pl.prev_pos, pl.pos, alpha);
-            render_view v = {.eye = dv3(ip.x, ip.y + PLAYER_EYE, ip.z), .yaw = pl.yaw, .pitch = pl.pitch,
-                             .fov = (float)st.fov * (float)(MC_PI / 180.0), .has_selection = hit.hit && !in_menu,
-                             .selection = hit.block};
-            int on_title = g_in.screen == SCREEN_TITLE;
-            v.eye.x += (double)pose.dx;
-            v.eye.y += (double)pose.dy;
-            v.eye.z += (double)pose.dz;
-            v.roll = pose.roll;
-            v.pitch = clampf(v.pitch + pose.pitch_add, -1.56f, 1.56f);
-            v.fov *= pose.fov_scale;
-            if (on_title) {
-                v.roll = 0.0f;
-                /* The title screen circles high above the spawn point. */
-                double t = now * 0.035;
-                int gy = world_surface_y(&w, (int)floor(sx), (int)floor(sz));
-                double h = (gy > 0 ? gy : SEA_LEVEL) + 22.0;
-                v.eye = dv3(sx + cos(t) * 28.0, h, sz + sin(t) * 28.0);
-                v.yaw = (float)(t - MC_PI * 0.5);
-                v.pitch = -0.32f;
-            }
-            v.underwater = world_get(&w, (int)floor(v.eye.x), (int)floor(v.eye.y), (int)floor(v.eye.z)) == B_WATER;
-            v.time = (float)fmod(now, 3600.0);
-            v.daylight = thermo_daylight(th);
-            thermo_sky(th, v.sky);
-            eat_anim = fmaxf(0.0f, eat_anim - (float)dt / 1.6f);
-            if (!on_title && !hl.dead && !in_menu) {
-                const item_stack *held_st = &inv.slot[inv.selected];
-                viewmodel_input vi = {held_st->count ? held_st->id : 0, ia.swing, ia.swinging, cam.stride, cam.bob,
-                                      cam.sprint, look_dx, look_dy, eat_anim > 0.0f ? 1.0f - eat_anim : 0.0f,
-                                      v.daylight, (float)dt};
-                v.view_model = vm_ents;
-                v.view_model_count = viewmodel_build(&vm, &vi, vm_ents, VIEWMODEL_MAX);
-            }
-            int n_op = 0, n_tr = 0;
-            fx_build_entities(fx, &ph, &crack, v.eye, alpha, v.time, ents, RENDER_MAX_ENTS, &n_op, &n_tr);
-            v.ents = ents;
-            v.ent_opaque = n_op;
-            v.ent_trans = n_tr;
-
-            /* Overlay: the game writes its quads straight into the frame's
-             * mapped buffer. */
-            int max_quads, fb_w, fb_h;
-            ui_vertex *uv = renderer_ui_buffer(rd, &max_quads, &fb_w, &fb_h);
-            ui u;
-            ui_begin(&u, uv, max_quads, fb_w, fb_h);
-            ui_set_scale(&u, st.gui_scale, fb_w, fb_h);
-            hs.panel = g_in.panel;
-            hs.sel = g_in.sel_part;
-            hs.held = NULL;
-            hs.flying = pl.flying;
-            hs.debug = g_in.debug;
-            hs.inv = &inv;
-            hs.hide_hints = !st.show_hints;
-            hud_update(&hs, &hl, in_menu ? 0.0f : (float)dt);
-            if (!on_title) hud_draw(&u, &hl, &hs);
-            if (!on_title && !hl.dead && !g_in.panel && !g_in.inv_open) invui_hotbar(&u, &iu, &inv, (float)dt);
-            float mx = -1.0f, my = -1.0f;
-            {
-                double wx, wy;
-                int ww, wh;
-                glfwGetCursorPos(win, &wx, &wy);
-                glfwGetWindowSize(win, &ww, &wh);
-                if (ww > 0 && wh > 0) {
-                    mx = (float)(wx * fb_w / ww) / u.scale;
-                    my = (float)(wy * fb_h / wh) / u.scale;
-                }
-            }
-            if (g_in.inv_open && !in_menu && !hl.dead) {
-                invui_input ui_in = {mx, my, g_in.ui_click, g_in.ui_rclick,
-                                     g_in.keys[GLFW_KEY_LEFT_SHIFT] || g_in.keys[GLFW_KEY_RIGHT_SHIFT],
-                                     thermo_near_fire(th, &w, pl.pos, 3.0), (float)dt};
-                invui_result ir = invui_screen(&u, &iu, &inv, &ui_in);
-                if (ir.drop.count) {
-                    vec3 d = look_dir(pl.yaw, pl.pitch);
-                    physics_drop_item(&ph, dv3(pl.pos.x, pl.pos.y + 1.3, pl.pos.z),
-                                      dv3((double)d.x * 3.0, 1.5, (double)d.z * 3.0), ir.drop.id, ir.drop.count, 1.2f);
-                }
-            }
-            if (g_in.debug && !on_title) {
-                render_stats rs = renderer_stats(rd);
-                debug_info di;
-                memset(&di, 0, sizeof di);
-                di.frames = &dframes;
-                di.phys_ms = phys_ms;
-                di.x = ip.x;
-                di.y = ip.y;
-                di.z = ip.z;
-                di.yaw = pl.yaw;
-                di.pitch = pl.pitch;
-                di.vx = pl.vel.x;
-                di.vy = pl.vel.y;
-                di.vz = pl.vel.z;
-                di.on_ground = pl.on_ground;
-                di.sprinting = pl.sprinting;
-                di.sneaking = pl.sneaking;
-                di.flying = pl.flying;
-                di.submerged = pl.submerged;
-                di.body_temp = hl.temp;
-                di.air_temp = thermo_air(th, &w, eye.x, eye.y, eye.z);
-                di.feels_like = health_skin_mean(&hl);
-                di.day_time = thermo_day_time(th);
-                di.heat_cells = thermo_cell_count(th);
-                di.fires = thermo_fire_count(th);
-                di.has_target = hit.hit;
-                di.tx = hit.block.x;
-                di.ty = hit.block.y;
-                di.tz = hit.block.z;
-                di.target_id = hit.id;
-                di.target_temp = hit.hit ? thermo_block_temp(th, &w, hit.block.x, hit.block.y, hit.block.z) : 0.0f;
-                di.seed = seed;
-                di.radius = w.radius;
-                di.threads = jobs_worker_count(js);
-                di.bodies = ph.body_count;
-                di.items = ph.item_count;
-                di.particles = fx->count;
-                di.break_progress = ia.has_target ? ia.progress : 0.0f;
-                di.fluid_updates = ph.fluid_updates;
-                di.last_collapse = ph.last_collapse;
-                di.draw_calls = rs.draw_calls;
-                di.sections = rs.sections_drawn;
-                di.quads = rs.quads;
-                di.pool_used_kb = rs.pool_used_kb;
-                di.pool_total_kb = rs.pool_total_kb;
-                di.ui_quads = u.quads;
-                mem_process_info(&di.rss, &di.commit);
-                di.gpu = renderer_device_name(rd);
-                di.versions = versions;
-                di.width = fb_w;
-                di.height = fb_h;
-                debug_draw(&u, &di);
-            }
-            if (in_menu) {
-                menu_input mi = {.mouse_down = g_in.ui_down, .click = g_in.ui_click, .up = g_in.ui_up,
-                                 .down = g_in.ui_dn, .left = g_in.ui_left, .right = g_in.ui_right,
-                                 .enter = g_in.ui_enter, .back = g_in.ui_back, .dt = (float)dt};
-                mi.mx = mx;
-                mi.my = my;
-                int mins = (int)(hl.t / 60.0);
-                snprintf(mn.status, sizeof mn.status, "Alive %d:%02d   core %.1f" UI_CH_DEGREE "C   %s", mins / 60,
-                         mins % 60, (double)hl.temp, hl.dead ? "dead" : "");
-                menu_action act = menu_frame(&mn, &u, &mi, &st);
-                switch (act) {
-                case MENU_PLAY:
-                case MENU_RESUME:
-                    g_in.screen = SCREEN_NONE;
-                    set_captured(win, 1);
-                    break;
-                case MENU_TO_TITLE:
-                    physics_settle_bodies(&ph, NULL);
-                    world_save_all(&w);
-                    save_player(&sc);
-                    g_in.inv_open = 0;
-                    g_in.screen = SCREEN_TITLE;
-                    g_in.panel = 0;
-                    break;
-                case MENU_QUIT: glfwSetWindowShouldClose(win, GLFW_TRUE); break;
-                case MENU_SETTINGS:
-                    renderer_set_vsync(rd, st.vsync);
-                    settings_dirty = 1;
-                    break;
-                default: break;
-                }
-                if (g_in.screen != SCREEN_NONE) g_in.screen = mn.screen;
-                if (settings_dirty && g_in.screen != SCREEN_SETTINGS) {
-                    if (settings_save(&st, o.config) != 0) log_warn("could not save settings to %s", o.config);
-                    settings_dirty = 0;
-                }
-            }
-            v.ui_quads = u.quads;
-            v.hide_crosshair = frozen || on_title;
-            renderer_end_frame(rd, &w, &ph, &v, alpha);
-        } else {
-            jobs_poll(js, MESH_UPLOADS_PER_FRAME);
-            world_schedule(&w);
-            glfwWaitEventsTimeout(0.05);
-        }
+        frame_menus(g, dt);
+        player_input in = frame_input(g);
+        frame_simulate(g, &in, dt);
+        frame_interact(g, dt);
+        if (g->o.demo) demo_step(&g->w, &g->ph, g->fx, &g->pl, &g->demo, g->frame);
+        world_update(&g->w, g->pl.pos.x, g->pl.pos.y + PLAYER_EYE, g->pl.pos.z);
+        frame_render(g, now, dt);
         g_in.ui_click = g_in.ui_rclick = g_in.ui_up = g_in.ui_dn = g_in.ui_left = g_in.ui_right = g_in.ui_enter =
             g_in.ui_back = 0;
-
-        if (frame < INT_MAX) frame++; /* int overflow is UB; only --frames and the demo read it */
-        fps_frames++;
-        if (now - title_t >= 0.5) {
-            double fps = fps_frames / (now - title_t);
-            fps_frames = 0;
-            title_t = now;
-            render_stats rs = renderer_stats(rd);
-            const item_stack *held = &inv.slot[inv.selected];
-            snprintf(title, sizeof title,
-                     "blockclonia | %.0f fps | %.1f %.1f %.1f | %s%s | draws %d | bodies %d | mesh %u/%u MB",
-                     fps, pl.pos.x, pl.pos.y, pl.pos.z, held->count ? item_get(held->id)->name : "empty hand",
-                     pl.flying ? " | fly" : "", rs.draw_calls, ph.body_count, rs.pool_used_kb / 1024,
-                     rs.pool_total_kb / 1024);
-            glfwSetWindowTitle(win, title);
-        }
-        if (now - save_t >= AUTOSAVE_SECONDS) {
-            save_t = now;
-            world_save_all(&w); /* only columns edited since the last save */
-            save_player(&sc);
-        }
-        if (o.frames && frame >= o.frames) break;
+        frame_bookkeeping(g, now);
+        if (g->o.frames && g->frame >= g->o.frames) break;
     }
-
-    if (settings_dirty && settings_save(&st, o.config) != 0) log_warn("could not save settings to %s", o.config);
-    log_info("saving and shutting down");
-    log_set_fatal_hook(NULL, NULL);
-    physics_settle_bodies(&ph, NULL);
-    world_save_all(&w);
-    if (!hl.dead) save_player(&sc);
-    jobs_wait_idle(js);
-    mem_free(ents);
-    mem_free(fx);
-    world_destroy(&w);
-    physics_destroy(&ph);
-    thermo_destroy(th);
-    jobs_destroy(js);
-    renderer_destroy(rd);
-    glfwDestroyWindow(win);
-    glfwTerminate();
-    if (o.mem_stats) mem_print_stats();
+    game_shutdown(g);
+    if (g->o.mem_stats) mem_print_stats();
     return 0;
 }

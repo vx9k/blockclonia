@@ -97,53 +97,53 @@ static void axes(ui *u, float yaw, float pitch)
 
 void debug_draw(ui *u, const debug_info *d)
 {
-    column_ctx L = {u, 4, 0};
+    column_ctx lc = {u, 4, 0};
     const debug_frames *f = d->frames;
-    line(&L, C_HEAD, "blockclonia  %.0f fps  (%.2f ms, physics %.2f ms)", f ? (double)f->fps : 0.0,
+    line(&lc, C_HEAD, "blockclonia  %.0f fps  (%.2f ms, physics %.2f ms)", f ? (double)f->fps : 0.0,
          f && f->fps > 0.0f ? 1000.0 / (double)f->fps : 0.0, (double)d->phys_ms);
-    gap(&L);
-    line(&L, C_TEXT, "XYZ %.3f / %.3f / %.3f", d->x, d->y, d->z);
+    gap(&lc);
+    line(&lc, C_TEXT, "XYZ %.3f / %.3f / %.3f", d->x, d->y, d->z);
     int bx = (int)floor(d->x), by = (int)floor(d->y), bz = (int)floor(d->z);
-    line(&L, C_TEXT, "Block %d %d %d   chunk %d %d  in %d %d", bx, by, bz, bx >> 4, bz >> 4, bx & 15, bz & 15);
-    line(&L, C_TEXT, "Facing %s  (yaw %.1f" UI_CH_DEGREE ", pitch %.1f" UI_CH_DEGREE ")", debug_facing(d->yaw),
+    line(&lc, C_TEXT, "Block %d %d %d   chunk %d %d  in %d %d", bx, by, bz, bx >> 4, bz >> 4, bx & 15, bz & 15);
+    line(&lc, C_TEXT, "Facing %s  (yaw %.1f" UI_CH_DEGREE ", pitch %.1f" UI_CH_DEGREE ")", debug_facing(d->yaw),
          (double)d->yaw * 180.0 / MC_PI, (double)d->pitch * 180.0 / MC_PI);
     double hs = sqrt(d->vx * d->vx + d->vz * d->vz);
-    line(&L, C_TEXT, "Velocity %.2f %.2f %.2f m/s  (%.2f horizontal)", d->vx, d->vy, d->vz, hs);
-    line(&L, C_TEXT, "%s%s%s  submerged %.0f%%", d->flying ? "flying" : (d->on_ground ? "on ground" : "airborne"),
+    line(&lc, C_TEXT, "Velocity %.2f %.2f %.2f m/s  (%.2f horizontal)", d->vx, d->vy, d->vz, hs);
+    line(&lc, C_TEXT, "%s%s%s  submerged %.0f%%", d->flying ? "flying" : (d->on_ground ? "on ground" : "airborne"),
          d->sprinting ? ", sprinting" : "", d->sneaking ? ", sneaking" : "", d->submerged * 100.0);
     int mins = (int)(d->day_time * 24.0 * 60.0);
-    line(&L, C_TEXT, "Time %02d:%02d   air %.1f" UI_CH_DEGREE "C   skin %.1f" UI_CH_DEGREE "C   core %.2f" UI_CH_DEGREE "C",
+    line(&lc, C_TEXT, "Time %02d:%02d   air %.1f" UI_CH_DEGREE "C   skin %.1f" UI_CH_DEGREE "C   core %.2f" UI_CH_DEGREE "C",
          mins / 60, mins % 60, (double)d->air_temp, (double)d->feels_like, (double)d->body_temp);
-    gap(&L);
+    gap(&lc);
     if (d->has_target) {
         const block_def *b = block_get(d->target_id);
-        line(&L, C_ECG, "Target %s at %d %d %d", b->name, d->tx, d->ty, d->tz);
-        line(&L, C_TEXT, "  density %.0f kg/m3  friction %.2f  span %d", (double)b->density, (double)b->friction,
+        line(&lc, C_ECG, "Target %s at %d %d %d", b->name, d->tx, d->ty, d->tz);
+        line(&lc, C_TEXT, "  density %.0f kg/m3  friction %.2f  span %d", (double)b->density, (double)b->friction,
              (int)b->span);
-        line(&L, C_TEXT, "  restitution %.2f  hardness %.1f s  c %.0f J/kgK  k %.2f W/mK", (double)b->restitution,
+        line(&lc, C_TEXT, "  restitution %.2f  hardness %.1f s  c %.0f J/kgK  k %.2f W/mK", (double)b->restitution,
              (double)b->hardness, (double)b->heat_capacity, (double)b->conductivity);
-        line(&L, C_TEXT, "  temperature %.1f" UI_CH_DEGREE "C", (double)d->target_temp);
-        if (d->target_level) line(&L, C_TEXT, "  water level %d/8", d->target_level);
-        if (d->break_progress > 0.0f) line(&L, C_CO2, "  breaking %.0f%%", (double)d->break_progress * 100.0);
+        line(&lc, C_TEXT, "  temperature %.1f" UI_CH_DEGREE "C", (double)d->target_temp);
+        if (d->target_level) line(&lc, C_TEXT, "  water level %d/8", d->target_level);
+        if (d->break_progress > 0.0f) line(&lc, C_CO2, "  breaking %.0f%%", (double)d->break_progress * 100.0);
     } else {
-        line(&L, C_DIM, "Target: none");
+        line(&lc, C_DIM, "Target: none");
     }
 
-    column_ctx R = {u, 4, 1};
-    line(&R, C_TEXT, "%s", d->versions ? d->versions : "");
-    line(&R, C_TEXT, "GPU %s", d->gpu ? d->gpu : "?");
-    line(&R, C_TEXT, "Display %dx%d  UI scale %.0f  quads %d", d->width, d->height, (double)u->scale, d->ui_quads);
-    gap(&R);
+    column_ctx rc = {u, 4, 1};
+    line(&rc, C_TEXT, "%s", d->versions ? d->versions : "");
+    line(&rc, C_TEXT, "GPU %s", d->gpu ? d->gpu : "?");
+    line(&rc, C_TEXT, "Display %dx%d  UI scale %.0f  quads %d", d->width, d->height, (double)u->scale, d->ui_quads);
+    gap(&rc);
     if (d->rss || d->commit)
-        line(&R, C_TEXT, "Memory rss %.1f MB  committed %.1f MB", (double)d->rss / 1048576.0,
+        line(&rc, C_TEXT, "Memory rss %.1f MB  committed %.1f MB", (double)d->rss / 1048576.0,
              (double)d->commit / 1048576.0);
-    line(&R, C_TEXT, "Mesh pool %.1f / %.0f MB", (double)d->pool_used_kb / 1024.0, (double)d->pool_total_kb / 1024.0);
-    line(&R, C_TEXT, "Draws %d  sections %d  quads %u", d->draw_calls, d->sections, d->quads);
-    gap(&R);
-    line(&R, C_TEXT, "Seed %u  radius %d  workers %d", d->seed, d->radius, d->threads);
-    line(&R, C_TEXT, "Bodies %d  items %d  particles %d", d->bodies, d->items, d->particles);
-    line(&R, C_TEXT, "Fluid cells %d/tick  heat cells %d  fires %d", d->fluid_updates, d->heat_cells, d->fires);
-    if (d->last_collapse) line(&R, C_TEXT, "Last collapse %d blocks", d->last_collapse);
+    line(&rc, C_TEXT, "Mesh pool %.1f / %.0f MB", (double)d->pool_used_kb / 1024.0, (double)d->pool_total_kb / 1024.0);
+    line(&rc, C_TEXT, "Draws %d  sections %d  quads %u", d->draw_calls, d->sections, d->quads);
+    gap(&rc);
+    line(&rc, C_TEXT, "Seed %u  radius %d  workers %d", d->seed, d->radius, d->threads);
+    line(&rc, C_TEXT, "Bodies %d  items %d  particles %d", d->bodies, d->items, d->particles);
+    line(&rc, C_TEXT, "Fluid cells %d/tick  heat cells %d  fires %d", d->fluid_updates, d->heat_cells, d->fires);
+    if (d->last_collapse) line(&rc, C_TEXT, "Last collapse %d blocks", d->last_collapse);
 
     if (f) frame_graph(u, f, u->w - 184, u->h - 52, 180, 48);
     axes(u, d->yaw, d->pitch);

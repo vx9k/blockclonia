@@ -2,6 +2,7 @@
 #include "palette.h"
 
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -52,7 +53,7 @@ static void trace_sweep(ui *u, const float *buf, int pos, float x, float y, floa
             if (prev < mn) mn = prev;
             if (prev > mx) mx = prev;
         }
-        prev = buf[k1 - 1];
+        prev = buf[k1 > k0 ? k1 - 1 : k0];
         have_prev = 1;
         float t0 = clamp01((mx - lo) / (hi - lo)), t1 = clamp01((mn - lo) / (hi - lo));
         float y0 = y + h - t0 * h, y1 = y + h - t1 * h;
@@ -127,34 +128,48 @@ typedef struct {
 
 static const char *side_name(int part) { return part == BP_LARM || part == BP_LLEG ? "left" : "right"; }
 
-/* The conditions worth a line on the HUD, most urgent first. Each has a
- * key that stays the same while its text changes (bleeding rate, degrees),
- * so the animation can follow it. */
-static int collect_alerts(const health *h, alert *a, int max)
+typedef struct {
+    alert *a;
+    int n, max;
+} alert_list;
+
+__attribute__((format(printf, 4, 5))) static void add_alert(alert_list *l, uint32_t key, int sev, const char *fmt, ...)
 {
-    int n = 0;
-#define ADD(k, sv, ...)                                         \
-    do {                                                        \
-        if (n < max) {                                          \
-            snprintf(a[n].text, sizeof a[n].text, __VA_ARGS__); \
-            a[n].key = (uint32_t)(k);                           \
-            a[n].sev = (sv);                                    \
-            n++;                                                \
-        }                                                       \
-    } while (0)
-#define KEY (__LINE__ * 16)
+    if (l->n >= l->max) return;
+    alert *al = &l->a[l->n++];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(al->text, sizeof al->text, fmt, ap);
+    va_end(ap);
+    al->key = key;
+    al->sev = sev;
+}
+
+/* Keys stay the same while an alert's text changes (bleeding rate,
+ * degrees), so the animation can follow it; the line number makes them
+ * unique. */
+#define KEY ((uint32_t)__LINE__ * 16u)
+
+/* Heart, breathing, blood, fire and weight on the body. */
+static void alerts_vital(const health *h, alert_list *l)
+{
     float bleed = h->bleed_ext + h->bleed_int;
-    if (h->rhythm == RHYTHM_VF) ADD(KEY, 3, "CARDIAC ARREST (VF)");
-    else if (h->rhythm == RHYTHM_ASYSTOLE) ADD(KEY, 3, "CARDIAC ARREST");
-    if (h->in_fire) ADD(KEY, 3, "ON FIRE");
+    if (h->rhythm == RHYTHM_VF) add_alert(l, KEY, 3, "CARDIAC ARREST (VF)");
+    else if (h->rhythm == RHYTHM_ASYSTOLE) add_alert(l, KEY, 3, "CARDIAC ARREST");
+    if (h->in_fire) add_alert(l, KEY, 3, "ON FIRE");
     float pinned = 0.0f;
     for (int i = 0; i < BP_COUNT; i++) pinned += h->part[i].crush_load;
-    if (pinned > 0.0f) ADD(KEY, 3, "Crushed: pinned under %.0f kg", (double)pinned);
-    if (bleed >= 5.0f) ADD(KEY, bleed > 30.0f ? 3 : 2, "Bleeding %.0f mL/min", (double)bleed);
+    if (pinned > 0.0f) add_alert(l, KEY, 3, "Crushed: pinned under %.0f kg", (double)pinned);
+    if (bleed >= 5.0f) add_alert(l, KEY, bleed > 30.0f ? 3 : 2, "Bleeding %.0f mL/min", (double)bleed);
     if (!h->breathing && h->conscious != CONS_UNCONSCIOUS && h->rhythm == RHYTHM_SINUS)
-        ADD(KEY, h->sao2 < 0.85f || h->lung_water > 0.02f ? 3 : 1,
-            h->lung_water > 0.02f ? "Drowning" : (pinned > 0.0f ? "Can't breathe" : "Holding breath"));
-    if (h->sao2 < 0.9f && h->rhythm == RHYTHM_SINUS) ADD(KEY, h->sao2 < 0.8f ? 3 : 2, "Low oxygen");
+        add_alert(l, KEY, h->sao2 < 0.85f || h->lung_water > 0.02f ? 3 : 1, "%s",
+                  h->lung_water > 0.02f ? "Drowning" : (pinned > 0.0f ? "Can't breathe" : "Holding breath"));
+    if (h->sao2 < 0.9f && h->rhythm == RHYTHM_SINUS) add_alert(l, KEY, h->sao2 < 0.8f ? 3 : 2, "Low oxygen");
+}
+
+/* Burns, broken bones, joints, frostbite and crushed muscle. */
+static void alerts_injury(const health *h, alert_list *l)
+{
     int burn = 0;
     float burned = 0.0f;
     for (int i = 0; i < BP_COUNT; i++) {
@@ -163,57 +178,73 @@ static int collect_alerts(const health *h, alert *a, int max)
         if (p->burn) burned += p->burn_area * health_part_area(i) * 100.0f;
     }
     if (burn)
-        ADD(KEY, burn >= 2 && burned > 15.0f ? 3 : burn, "Burned: %s degree, %.0f%% of body",
-            burn == 1 ? "1st" : (burn == 2 ? "2nd" : "3rd"), (double)(burned < 1.0f ? 1.0f : burned));
-    if (h->radiant > 2500.0f && !h->in_fire) ADD(KEY, 2, "Scorching heat");
+        add_alert(l, KEY, burn >= 2 && burned > 15.0f ? 3 : burn, "Burned: %s degree, %.0f%% of body",
+                  burn == 1 ? "1st" : (burn == 2 ? "2nd" : "3rd"), (double)(burned < 1.0f ? 1.0f : burned));
+    if (h->radiant > 2500.0f && !h->in_fire) add_alert(l, KEY, 2, "Scorching heat");
     for (int i = 0; i < BP_COUNT; i++)
         if (h->part[i].fracture)
-            ADD(KEY + i, 2, "Broken %s%s", health_bone_name(i), h->part[i].splinted ? " (splinted)" : "");
+            add_alert(l, KEY + (uint32_t)i, 2, "Broken %s%s", health_bone_name(i),
+                      h->part[i].splinted ? " (splinted)" : "");
     for (int i = BP_LARM; i <= BP_RARM; i++)
         if (h->part[i].dislocated)
-            ADD(KEY + i, 2, "Dislocated %s %s", side_name(i),
-                h->part[i].dislocated == DISLOC_ELBOW ? "elbow" : "shoulder");
+            add_alert(l, KEY + (uint32_t)i, 2, "Dislocated %s %s", side_name(i),
+                      h->part[i].dislocated == DISLOC_ELBOW ? "elbow" : "shoulder");
     int frost = 0, frost_part = 0;
-    for (int i = 0; i < BP_COUNT; i++) {
+    for (int i = 0; i < BP_COUNT; i++)
         if (h->part[i].frost > frost) {
             frost = h->part[i].frost;
             frost_part = i;
         }
-    }
     if (frost)
-        ADD(KEY, frost, "%s: %s",
-            frost == FROST_NIP ? "Frostnip" : (frost == FROST_DEEP ? "Deep frostbite" : "Frostbite"),
-            health_part_name(frost_part));
-    if (h->myoglobin > 5.0f || h->potassium > 6.0f) ADD(KEY, 3, "Crush syndrome: drink");
-    else {
-        for (int i = 0; i < BP_COUNT; i++)
-            if (h->part[i].crush > 0.3f && h->part[i].crush_load <= 0.0f) {
-                ADD(KEY, 2, "Crushed %s", health_part_name(i));
-                break;
-            }
+        add_alert(l, KEY, frost, "%s: %s",
+                  frost == FROST_NIP ? "Frostnip" : (frost == FROST_DEEP ? "Deep frostbite" : "Frostbite"),
+                  health_part_name(frost_part));
+    if (h->myoglobin > 5.0f || h->potassium > 6.0f) {
+        add_alert(l, KEY, 3, "Crush syndrome: drink");
+        return;
     }
+    for (int i = 0; i < BP_COUNT; i++)
+        if (h->part[i].crush > 0.3f && h->part[i].crush_load <= 0.0f) {
+            add_alert(l, KEY, 2, "Crushed %s", health_part_name(i));
+            break;
+        }
+}
+
+/* Water, food, temperature, infection, pain and fatigue. */
+static void alerts_needs(const health *h, alert_list *l)
+{
     float hyd = health_hydration(h), hun = health_hunger(h);
-    if (hyd < 0.35f) ADD(KEY, hyd < 0.15f ? 3 : 1, hyd < 0.15f ? "Severely dehydrated" : "Thirsty");
-    if (hun > 0.7f) ADD(KEY, hun > 0.95f ? 3 : 1, hun > 0.95f ? "Starving" : "Hungry");
-    if (h->temp < 35.0f) ADD(KEY, h->temp < 32.0f ? 3 : 2, "Hypothermia %.1f" UI_CH_DEGREE "C", (double)h->temp);
+    if (hyd < 0.35f) add_alert(l, KEY, hyd < 0.15f ? 3 : 1, "%s", hyd < 0.15f ? "Severely dehydrated" : "Thirsty");
+    if (hun > 0.7f) add_alert(l, KEY, hun > 0.95f ? 3 : 1, "%s", hun > 0.95f ? "Starving" : "Hungry");
+    if (h->temp < 35.0f)
+        add_alert(l, KEY, h->temp < 32.0f ? 3 : 2, "Hypothermia %.1f" UI_CH_DEGREE "C", (double)h->temp);
     else if (h->temp > 38.3f)
-        ADD(KEY, h->temp > 40.0f ? 3 : 1,
-            h->sepsis > 0.1f ? "Fever %.1f" UI_CH_DEGREE "C" : "Overheating %.1f" UI_CH_DEGREE "C", (double)h->temp);
+        add_alert(l, KEY, h->temp > 40.0f ? 3 : 1, "%s %.1f" UI_CH_DEGREE "C", h->sepsis > 0.1f ? "Fever" : "Overheating",
+                  (double)h->temp);
     float cold = 99.0f;
     for (int i = 0; i < BP_COUNT; i++) cold = h->part[i].skin < cold ? h->part[i].skin : cold;
-    if (h->wet > 0.5f) ADD(KEY, h->air_temp < 10.0f ? 2 : 1, h->air_temp < 10.0f ? "Soaked and freezing" : "Soaked");
+    if (h->wet > 0.5f)
+        add_alert(l, KEY, h->air_temp < 10.0f ? 2 : 1, "%s", h->air_temp < 10.0f ? "Soaked and freezing" : "Soaked");
     else if (cold < 8.0f || (h->air_temp < 5.0f && health_skin_mean(h) < 26.0f))
-        ADD(KEY, cold < 2.0f ? 2 : 1, "Freezing");
+        add_alert(l, KEY, cold < 2.0f ? 2 : 1, "Freezing");
     float inf = 0.0f;
     for (int i = 0; i < h->wound_count; i++) inf = inf > h->wounds[i].infection ? inf : h->wounds[i].infection;
-    if (h->sepsis > 0.2f) ADD(KEY, 3, "Sepsis");
-    else if (inf > 0.3f) ADD(KEY, 2, "Infected wound");
-    if (h->pain > 6.0f) ADD(KEY, 2, "Severe pain");
-    if (health_stamina(h) < 0.1f) ADD(KEY, 1, "Exhausted");
-    if (h->conscious == CONS_CONFUSED) ADD(KEY, 2, "Confused");
+    if (h->sepsis > 0.2f) add_alert(l, KEY, 3, "Sepsis");
+    else if (inf > 0.3f) add_alert(l, KEY, 2, "Infected wound");
+    if (h->pain > 6.0f) add_alert(l, KEY, 2, "Severe pain");
+    if (health_stamina(h) < 0.1f) add_alert(l, KEY, 1, "Exhausted");
+    if (h->conscious == CONS_CONFUSED) add_alert(l, KEY, 2, "Confused");
+}
 #undef KEY
-#undef ADD
-    return n;
+
+/* The conditions worth a line on the HUD, most urgent first. */
+static int collect_alerts(const health *h, alert *a, int max)
+{
+    alert_list l = {a, 0, max};
+    alerts_vital(h, &l);
+    alerts_injury(h, &l);
+    alerts_needs(h, &l);
+    return l.n;
 }
 
 static float approach(float cur, float target, float dt, float tau)
