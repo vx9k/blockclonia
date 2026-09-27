@@ -9,3 +9,8 @@ CMakeUserPresets.json
 blockclonia.cfg
 blockclonia.pipelines
 *.tmp
+.claude/worktrees/
+.claude/settings.local.json
+.claude/*.log
+.claude/cache/
+.claude/sessions/
