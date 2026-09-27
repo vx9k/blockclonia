@@ -570,9 +570,10 @@ static void drop_everything(physics *ph, inventory *inv, const player *pl, uint3
         if (!st->count) continue;
         *rng = *rng * 1664525u + 1013904223u;
         double a = (double)(*rng >> 8) / 16777216.0 * 2.0 * MC_PI;
-        physics_drop_item(ph, dv3(pl->pos.x, pl->pos.y + 1.0, pl->pos.z), dv3(cos(a) * 2.0, 3.0, sin(a) * 2.0), st->id,
-                          st->count, 1.0f);
-        *st = (item_stack){0, 0};
+        /* A stack that finds no room in the world stays in the inventory. */
+        if (physics_drop_item(ph, dv3(pl->pos.x, pl->pos.y + 1.0, pl->pos.z), dv3(cos(a) * 2.0, 3.0, sin(a) * 2.0),
+                              st->id, st->count, 1.0f))
+            *st = (item_stack){0, 0};
     }
 }
 
@@ -698,6 +699,7 @@ typedef struct {
     options o;
     settings st;
     int settings_dirty;
+    int cfg_vsync;            /* vsync as the settings file has it (--no-vsync is not saved) */
     uint32_t seed;
     GLFWwindow *win;
     jobs *js;
@@ -751,6 +753,15 @@ typedef struct {
 } game;
 
 static game g_game;
+
+/* Writes the settings file. A --no-vsync override is not written back
+ * unless the player changed VSync in the menu (which clears it). */
+static int save_settings(const game *g)
+{
+    settings s = g->st;
+    if (g->o.no_vsync) s.vsync = g->cfg_vsync;
+    return settings_save(&s, g->o.config);
+}
 
 /* ---------------------------------------------------------------- sound */
 
@@ -878,8 +889,13 @@ static void toss(game *g, item_stack st)
 {
     if (!st.count) return;
     vec3 d = look_dir(g->pl.yaw, g->pl.pitch);
-    physics_drop_item(&g->ph, dv3(g->pl.pos.x, g->pl.pos.y + 1.3, g->pl.pos.z),
-                      dv3((double)d.x * 3.0, 1.5, (double)d.z * 3.0), st.id, st.count, 1.2f);
+    if (!physics_drop_item(&g->ph, dv3(g->pl.pos.x, g->pl.pos.y + 1.3, g->pl.pos.z),
+                           dv3((double)d.x * 3.0, 1.5, (double)d.z * 3.0), st.id, st.count, 1.2f)) {
+        /* No room for more items in the world: back into the inventory, or
+         * held on the cursor until there is. */
+        int left = inv_add(&g->inv, st.id, st.count);
+        if (left) g->inv.cursor = (item_stack){st.id, (uint8_t)left};
+    }
 }
 
 static void open_start_screen(game *g)
@@ -1033,7 +1049,10 @@ static void game_init(game *g)
 static void frame_menus(game *g, double dt)
 {
     if (g_in.lost_focus) {
-        if (g_in.screen == SCREEN_NONE && !g->o.frames) g_in.screen = SCREEN_PAUSE;
+        if (g_in.screen == SCREEN_NONE && !g->o.frames) {
+            g_in.screen = SCREEN_PAUSE;
+            g_in.inv_open = 0; /* closes below, returning any stack on the cursor */
+        }
         g_in.lost_focus = 0;
     }
     if (g_in.screen != SCREEN_NONE && g->mn.screen != g_in.screen) menu_open(&g->mn, g_in.screen);
@@ -1221,11 +1240,12 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     v.pitch = clampf(v.pitch + g->pose.pitch_add, -1.56f, 1.56f);
     v.fov *= g->pose.fov_scale;
     if (on_title) {
-        /* The title screen circles high above the spawn point. */
-        double t = now * 0.035;
-        int gy = world_surface_y(&g->w, (int)floor(g->sx), (int)floor(g->sz));
+        /* The title screen circles high above the player, whose
+         * surroundings are what the world keeps loaded. */
+        double t = now * 0.035, cx = pl->pos.x, cz = pl->pos.z;
+        int gy = world_surface_y(&g->w, (int)floor(cx), (int)floor(cz));
         double h = (gy > 0 ? gy : SEA_LEVEL) + 22.0;
-        v.eye = dv3(g->sx + cos(t) * 28.0, h, g->sz + sin(t) * 28.0);
+        v.eye = dv3(cx + cos(t) * 28.0, h, cz + sin(t) * 28.0);
         v.yaw = (float)(t - MC_PI * 0.5);
         v.pitch = -0.32f;
         v.roll = 0.0f;
@@ -1350,11 +1370,13 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
         world_save_all(&g->w);
         save_player(&g->sc);
         g_in.inv_open = 0;
-        g_in.screen = SCREEN_TITLE;
         g_in.panel = 0;
+        menu_open(&g->mn, SCREEN_TITLE); /* the menu's own screen too, or the copy below undoes it */
+        g_in.screen = SCREEN_TITLE;
         break;
     case MENU_QUIT: glfwSetWindowShouldClose(g->win, GLFW_TRUE); break;
     case MENU_SETTINGS:
+        if (g->o.no_vsync && g->st.vsync) g->o.no_vsync = 0; /* turned back on in the menu: a real choice */
         renderer_set_vsync(g->rd, g->st.vsync);
         apply_volumes(g);
         g->settings_dirty = 1;
@@ -1365,7 +1387,7 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     else if (g->mn.hovered) sound_play(g->snd, SND_UI_HOVER, NULL, 0, 0.4f);
     if (g_in.screen != SCREEN_NONE) g_in.screen = g->mn.screen;
     if (g->settings_dirty && g_in.screen != SCREEN_SETTINGS) {
-        if (settings_save(&g->st, g->o.config) != 0) log_warn("could not save settings to %s", g->o.config);
+        if (save_settings(g) != 0) log_warn("could not save settings to %s", g->o.config);
         g->settings_dirty = 0;
     }
 }
@@ -1475,7 +1497,7 @@ static void frame_bookkeeping(game *g, double now)
 
 static void game_shutdown(game *g)
 {
-    if (g->settings_dirty && settings_save(&g->st, g->o.config) != 0)
+    if (g->settings_dirty && save_settings(g) != 0)
         log_warn("could not save settings to %s", g->o.config);
     log_info("saving and shutting down");
     log_set_fatal_hook(NULL, NULL);
@@ -1506,6 +1528,7 @@ int main(int argc, char **argv)
     settings_default(&g->st);
     if (settings_load(&g->st, g->o.config) == 0) log_info("settings from %s", g->o.config);
     if (!g->o.have_radius) g->o.radius = g->st.render_distance;
+    g->cfg_vsync = g->st.vsync; /* the file's value, kept while --no-vsync overrides it */
     if (!g->o.no_vsync) g->o.vsync = g->st.vsync;
     else g->st.vsync = 0;
 

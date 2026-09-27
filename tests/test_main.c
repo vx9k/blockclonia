@@ -1149,6 +1149,69 @@ static void test_interact(void)
     tw_free(&t);
 }
 
+/* Regressions from the review: items in unloaded columns survive, building
+ * into water keeps the water, a falling campfire keeps its fuel, and the
+ * crack overlay is never crowded out of the entity list. */
+static void test_review_fixes(void)
+{
+    test_world t;
+    tw_init(&t);
+    player p;
+    player_spawn(&p, &t.w, 0.5, 0.5);
+    t.ph.pl = &p;
+    player_input idle = {0};
+
+    /* 1 km away nothing is loaded: the item waits instead of vanishing. */
+    CHECK(physics_drop_item(&t.ph, dv3(1000.5, 40.0, 1000.5), dv3(0, 0, 0), B_STONE, 3, 0.0f));
+    run_steps(&t, &p, &idle, 120);
+    CHECK(t.ph.item_count == 1 && t.ph.items[0].count == 3 && t.ph.items[0].pos.y == 40.0);
+    t.ph.item_count = 0;
+
+    /* Planks placed into a full water cell push the water up a block. */
+    world_set(&t.w, 6, GROUND - 1, 6, B_STONE, 0);
+    world_set(&t.w, 6, GROUND, 6, B_WATER, 0);
+    for (int x = 5; x <= 7; x++)
+        for (int z = 5; z <= 7; z++)
+            if (x != 6 || z != 6)
+                for (int y = GROUND; y <= GROUND + 2; y++) world_set(&t.w, x, y, z, B_GLASS, 0); /* a well */
+    inventory inv;
+    inv_init(&inv);
+    inv_add(&inv, B_PLANKS, 1);
+    interact s;
+    interact_init(&s, 9);
+    fx_state *fx = mem_alloc(sizeof *fx);
+    fx_init(fx, 9);
+    ray_hit hit = {1, {6, GROUND - 1, 6}, {6, GROUND, 6}, B_STONE};
+    interact_input use = {.use_click = 1, .can_act = 1, .speed = 1.0f, .dt = 1.0f / 60.0f};
+    p.flying = 1; /* out of the way of the cell */
+    interact_frame(&s, &t.w, &t.ph, NULL, &p, &inv, fx, dv3(6.5, GROUND + 3.0, 6.5), v3(0, -1, 0), hit, &use);
+    CHECK(world_get(&t.w, 6, GROUND, 6) == B_PLANKS && world_water_level(&t.w, 6, GROUND + 1, 6) == WATER_FULL);
+    p.flying = 0;
+
+    /* A campfire with 3 units of fuel knocked off its pillar lands with 3. */
+    for (int y = GROUND; y < GROUND + 3; y++) world_set(&t.w, -6, y, -6, B_STONE, 0);
+    world_set(&t.w, -6, GROUND + 3, -6, B_CAMPFIRE, 3);
+    world_set(&t.w, -6, GROUND + 2, -6, B_AIR, 0);
+    run_steps(&t, &p, &idle, 240);
+    CHECK(world_get(&t.w, -6, GROUND + 2, -6) == B_CAMPFIRE && world_get_meta(&t.w, -6, GROUND + 2, -6) == 3);
+
+    /* 600 translucent cards and a crack in a list of 300: the crack is in. */
+    for (int i = 0; i < 300; i++)
+        physics_drop_item(&t.ph, dv3(2.5 + (i % 10) * 0.3, GROUND + 0.2, 2.5 + (i / 10) * 0.3), dv3(0, 0, 0),
+                          I_APPLE, 2, 0.0f);
+    entity_instance *ents = mem_alloc(sizeof(entity_instance) * 300);
+    fx_crack cr = {1, 1, GROUND - 1, 1, 0.9f};
+    int no = 0, nt = 0;
+    fx_build_entities(fx, &t.ph, &cr, dv3(0, 20, 0), 0.0, 0.0f, ents, 300, &no, &nt);
+    CHECK(no + nt == 300);
+    int crack_found = 0;
+    for (int i = no; i < no + nt; i++) crack_found |= ents[i].tex == (uint32_t)(T_CRACK0 + 3) * 0x010101u;
+    CHECK(crack_found);
+    mem_free(ents);
+    mem_free(fx);
+    tw_free(&t);
+}
+
 static void test_settings(void)
 {
     settings s, t;
@@ -1310,6 +1373,7 @@ int main(void)
     test_inventory();
     test_items_physics();
     test_interact();
+    test_review_fixes();
     test_thermo_all();
     test_health2_all();
     test_bodies_all();

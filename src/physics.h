@@ -47,6 +47,7 @@ typedef struct {
     float rot[4];        /* drawn orientation (unit quaternion); collisions stay axis-aligned */
     float spin[3];       /* rad/s: tumbling from the collapse and from bounces */
     uint8_t block;
+    uint8_t meta;        /* the block's meta while it falls (a campfire's fuel) */
     uint8_t bounces;
 } body;
 

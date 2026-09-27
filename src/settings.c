@@ -127,7 +127,7 @@ int settings_format(const settings *s, char *out, int cap)
 
 int settings_load(settings *s, const char *path)
 {
-    char buf[1024];
+    char buf[4096]; /* the file is ~300 bytes; room for comments a player adds */
     long n = save_read_file(path, buf, sizeof buf - 1);
     if (n < 0) return -1;
     buf[n] = '\0';
@@ -137,7 +137,7 @@ int settings_load(settings *s, const char *path)
 
 int settings_save(const settings *s, const char *path)
 {
-    char buf[1024];
+    char buf[4096]; /* the file is ~300 bytes; room for comments a player adds */
     int n = settings_format(s, buf, (int)sizeof buf);
     return save_write_file(path, buf, (size_t)n);
 }

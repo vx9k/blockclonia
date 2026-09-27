@@ -15,6 +15,7 @@
 #define FLUID_QUEUE_CAP 16384   /* initial; grows on demand */
 #define FLUID_QUEUE_MAX (1 << 18)
 #define FLUID_BUDGET 4096
+#define ITEM_BODY_SWEEP_MAX 64 /* falling blocks items still collide with */
 #define GROUNDED (STRUCT_MAX_SPAN + 1)
 #define STRUCT_BUDGET_S 0.0004 /* per step, after the first check */
 
@@ -498,7 +499,7 @@ static int solidify(physics *ph, const body *b)
         if (ph->pl && boxes_overlap(cell, player_box(ph->pl))) return 0;
         if (!supported_below(w, x, y, z, b->block)) return 0;
         int displaced = id == B_WATER ? world_water_level(w, x, y, z) : 0;
-        world_set(w, x, y, z, b->block, 0);
+        world_set(w, x, y, z, b->block, b->meta);
         if (displaced) {
             /* Push the displaced water up rather than deleting it. */
             uint8_t up = world_get(w, x, y + 1, z);
@@ -825,7 +826,7 @@ static void settle_body(physics *ph, const body *b)
     y = y < 0 ? 0 : (y >= WORLD_H ? WORLD_H - 1 : y);
     while (y > 0 && is_free(world_get(w, x, y, z)) && !supported_below(w, x, y, z, b->block)) y--;
     while (y < WORLD_H && !is_free(world_get(w, x, y, z))) y++;
-    if (y < WORLD_H) world_set(w, x, y, z, b->block, 0);
+    if (y < WORLD_H) world_set(w, x, y, z, b->block, b->meta);
 }
 
 void physics_settle_bodies(physics *ph, const column *only)
@@ -913,8 +914,16 @@ static void items_step(physics *ph)
         it->age += (float)dt;
         it->touching = 0;
         int ix = (int)floor(it->pos.x), iy = (int)floor(it->pos.y), iz = (int)floor(it->pos.z);
-        if (it->age > ITEM_LIFETIME || !world_column(w, chunk_of(ix), chunk_of(iz))) {
+        if (it->age > ITEM_LIFETIME) {
             ph->items[i--] = ph->items[--ph->item_count];
+            continue;
+        }
+        /* Its column streamed out (the player respawned far away): keep it
+         * where it is until the column is back, within its lifetime. This
+         * comes before the solid check, which unloaded terrain would pass. */
+        if (!world_column(w, chunk_of(ix), chunk_of(iz))) {
+            it->vel = dv3(0, 0, 0);
+            it->prev_pos = it->pos;
             continue;
         }
         /* A block placed over an item pushes it out of the top. */
@@ -954,7 +963,9 @@ static void items_step(physics *ph)
         for (int axis = 0; axis < 3; axis++) {
             double d = getc3(it->vel, axis) * dt;
             if (d == 0.0) continue;
-            double m = sweep(ph, box, axis, d, SWEEP_BODIES, -1);
+            /* Items land on falling blocks only while there are few of those:
+             * a big collapse would make every item test every block. */
+            double m = sweep(ph, box, axis, d, ph->body_count <= ITEM_BODY_SWEEP_MAX ? SWEEP_BODIES : 0, -1);
             if (m != d) {
                 double e = item_restitution(it->id);
                 double v = getc3(it->vel, axis);
@@ -1086,6 +1097,7 @@ int physics_check_structure(physics *ph, int x, int y, int z)
                 uint8_t id = ids[RIDX(i, j, k)]; /* only this pass edits, one cell at a time */
                 if (id >= B_COUNT) continue;
                 spawn_body(ph, wx, wy, wz, id);
+                ph->bodies[ph->body_count - 1].meta = world_get_meta(w, wx, wy, wz); /* a campfire keeps its fuel */
                 collapse_spin(&ph->bodies[ph->body_count - 1], wx - x, wz - z);
                 world_set(w, wx, wy, wz, B_AIR, 0);
                 fell++;

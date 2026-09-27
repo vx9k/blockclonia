@@ -133,7 +133,18 @@ static void use_item(interact *s, world *w, physics *ph, thermo *th, const playe
         o->msg = "Pour onto dry ground";
         return;
     }
+    /* Water in the cell is pushed up, not deleted (as when a falling block
+     * lands in water); what does not fit above is lost to the surroundings. */
+    int displaced = world_water_level(w, t.x, t.y, t.z);
     world_set_player(w, t.x, t.y, t.z, d->block, 0);
+    if (displaced && t.y + 1 < WORLD_H) {
+        uint8_t up = world_get(w, t.x, t.y + 1, t.z);
+        if (up == B_AIR || up == B_WATER) {
+            int total = displaced + world_water_level(w, t.x, t.y + 1, t.z);
+            if (total > WATER_FULL) total = WATER_FULL;
+            world_set_player(w, t.x, t.y + 1, t.z, B_WATER, (uint8_t)(total >= WATER_FULL ? 0 : total));
+        }
+    }
     o->actions++;
     s->swing = 1.0f;
     emit(o, d->block == B_WATER ? IE_POUR : IE_PLACE, d->block, centre(t));

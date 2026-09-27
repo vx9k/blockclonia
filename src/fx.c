@@ -144,15 +144,36 @@ static uint32_t block_tex(uint8_t b)
 
 static uint32_t same_tex(uint8_t layer) { return (uint32_t)layer * 0x010101u; }
 
+/* The output array is shared: opaque instances fill it from the front,
+ * translucent ones from the back, and the translucent block is moved down
+ * behind the opaque one at the end. Neither kind has a cap of its own. */
+typedef struct {
+    entity_instance *out;
+    int no, tb, max; /* opaque in [0, no), translucent in [tb, max) */
+} ent_list;
+
+static void put_opaque(ent_list *l, entity_instance e)
+{
+    if (l->no < l->tb) l->out[l->no++] = e;
+}
+
+static void put_trans(ent_list *l, entity_instance e)
+{
+    if (l->tb > l->no) l->out[--l->tb] = e;
+}
+
 void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *crack, dvec3 eye, double alpha, float time,
                        entity_instance *out, int max, int *n_opaque, int *n_trans)
 {
-    /* Opaque from the front of out[], translucent collected in a second
-     * pass so the caller gets [opaque..., translucent...]. */
-    int no = 0, nt = 0;
-    entity_instance trans[256];
-    const int max_trans = (int)(sizeof trans / sizeof trans[0]);
-
+    ent_list l = {out, 0, max > 0 ? max : 0, max > 0 ? max : 0};
+    /* The crack goes first: the block being broken always shows it. */
+    if (crack && crack->active && crack->progress > 0.0f) {
+        int stage = (int)(crack->progress * 4.0f);
+        stage = stage < 0 ? 0 : (stage > 3 ? 3 : stage);
+        dvec3 c = dv3(crack->x + 0.5, crack->y + 0.5, crack->z + 0.5);
+        put_trans(&l, cube_at(c, eye, same_tex((uint8_t)(T_CRACK0 + stage)), quat_identity(), 1.004f, 1.004f, 1.004f,
+                              1.0f));
+    }
     for (int i = 0; ph && i < ph->item_count; i++) {
         const item_ent *it = &ph->items[i];
         dvec3 p = dv3_lerp(it->prev_pos, it->pos, alpha);
@@ -163,15 +184,14 @@ void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *cra
         int stacks = it->count > 32 ? 3 : (it->count > 1 ? 2 : 1); /* a pile looks like a pile */
         for (int k = 0; k < stacks; k++) {
             dvec3 pk = dv3(p.x + 0.05 * k, p.y + 0.04 * k, p.z - 0.04 * k);
-            if (item_is_block(it->id)) {
-                const block_def *d = block_get(it->id);
-                entity_instance e = cube_at(pk, eye, block_tex(it->id), q, 0.25f, 0.25f, 0.25f, 1.0f);
-                if ((d->flags & BF_TRANSLUCENT) && nt < max_trans) trans[nt++] = e;
-                else if (!(d->flags & BF_TRANSLUCENT) && no < max) out[no++] = e;
-            } else if (nt < max_trans) {
+            if (!item_is_block(it->id)) {
                 /* Items are cards: their sprite on a thin slab, standing up. */
-                trans[nt++] = cube_at(pk, eye, same_tex(item_get(it->id)->tex), q, 0.32f, 0.32f, 0.02f, 1.1f);
+                put_trans(&l, cube_at(pk, eye, same_tex(item_get(it->id)->tex), q, 0.32f, 0.32f, 0.02f, 1.1f));
+                continue;
             }
+            entity_instance e = cube_at(pk, eye, block_tex(it->id), q, 0.25f, 0.25f, 0.25f, 1.0f);
+            if (block_get(it->id)->flags & BF_TRANSLUCENT) put_trans(&l, e);
+            else put_opaque(&l, e);
         }
     }
     for (int i = 0; f && i < f->count; i++) {
@@ -182,19 +202,11 @@ void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *cra
         float s = pt->size * (life < 0.33f ? life * 3.0f : 1.0f);
         quat q = quat_axis(0.3f, 1.0f, 0.2f, pt->spin);
         entity_instance e = cube_at(p, eye, same_tex(pt->tex), q, s, s, s, 0.9f);
-        const int translucent = pt->tex == T_WATER || pt->tex == T_GLASS || pt->tex == T_ICE;
-        if (translucent && nt < max_trans) trans[nt++] = e;
-        else if (!translucent && no < max) out[no++] = e;
+        if (pt->tex == T_WATER || pt->tex == T_GLASS || pt->tex == T_ICE) put_trans(&l, e);
+        else put_opaque(&l, e);
     }
-    if (crack && crack->active && crack->progress > 0.0f && nt < max_trans) {
-        int stage = (int)(crack->progress * 4.0f);
-        stage = stage < 0 ? 0 : (stage > 3 ? 3 : stage);
-        dvec3 c = dv3(crack->x + 0.5, crack->y + 0.5, crack->z + 0.5);
-        trans[nt++] = cube_at(c, eye, same_tex((uint8_t)(T_CRACK0 + stage)), quat_identity(), 1.004f, 1.004f, 1.004f,
-                              1.0f);
-    }
-    if (no + nt > max) nt = max - no;
-    memcpy(out + no, trans, (size_t)(nt > 0 ? nt : 0) * sizeof(entity_instance));
-    *n_opaque = no;
-    *n_trans = nt > 0 ? nt : 0;
+    int nt = l.max - l.tb;
+    memmove(out + l.no, out + l.tb, (size_t)nt * sizeof(entity_instance));
+    *n_opaque = l.no;
+    *n_trans = nt;
 }
