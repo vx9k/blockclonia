@@ -6,3 +6,6 @@ screenshot.*
 compile_commands.json
 .cache/
 CMakeUserPresets.json
+blockclonia.cfg
+blockclonia.pipelines
+*.tmp

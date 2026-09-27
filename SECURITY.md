@@ -1,177 +1,113 @@
-# Security Policy
+# Security policy
 
-## Reporting a Vulnerability
+blockclonia is a single-player game. It has no network code, no accounts,
+no telemetry, no mods or scripting, and it never runs anything it reads
+from disk. That leaves a small attack surface, and this policy describes
+exactly what it is.
 
-We take security very seriously. If you discover a security vulnerability in Blockclonia, please **do not** open a public GitHub issue. Instead, please report it responsibly by emailing security@kthread.dev or using GitHub's private vulnerability reporting feature.
+## Reporting a vulnerability
 
-### What to Include
+Please report privately. Don't open a public issue.
 
-When reporting a vulnerability, please provide:
-- A clear description of the vulnerability
-- Steps to reproduce the issue
-- Potential impact and severity
-- Any affected platforms (Windows, Linux, macOS, Android, FreeBSD, OpenBSD)
-- Your contact information for follow-up
+- **GitHub**: *Security → Report a vulnerability* on the repository
+  (private vulnerability reporting), or
+- **Email**: security@kthread.dev
 
-### Response Timeline
+Include:
 
-We aim to:
-- Acknowledge receipt of your report within 48 hours
-- Provide an initial assessment within 7 days
-- Release a security patch within 30 days for confirmed vulnerabilities (where feasible)
-- Keep you updated on the status of your report
+- what an attacker controls (for example "a world folder someone
+  downloads") and what they gain (a crash, reading or writing a file
+  outside the world, code execution);
+- the smallest input that shows it: a world folder, settings file or
+  command line, as an attachment;
+- the commit you tested (`git rev-parse HEAD`), your OS and, for crashes,
+  the output of an ASan build (`cmake --preset asan`).
 
-## Scope of Security Coverage
+What to expect:
 
-This policy applies to:
-- **Core Engine**: C11 codebase, Vulkan 1.0 renderer, physics simulation
-- **Network**: Multiplayer protocol and server-client communication
-- **User Data**: Account credentials, player data, world data
-- **Platforms**: Windows, Linux, macOS, Android, FreeBSD, OpenBSD
-- **Dependencies**: All third-party libraries and build tools
+| | |
+|---|---|
+| Acknowledgement | within 48 hours |
+| First assessment (confirmed or not, severity) | within 7 days |
+| Fix on `main` for confirmed issues | within 30 days where feasible |
 
-## Known Security Limitations
+Say whether you'd like to be credited in the fix. Please give the fix
+time to land before publishing details.
 
-### Current Development State
-- **Alpha/Beta Status**: Blockclonia is under active development. Security should not be considered production-ready for sensitive use cases.
-- **Protocol Evolution**: The multiplayer protocol may change; older clients may become incompatible.
-- **No User Authentication** (Initial Releases): Early versions may use lightweight or no authentication. This will be strengthened as multiplayer support matures.
+## Supported versions
 
-## Security Best Practices
+There are no releases yet. Fixes go to the `main` branch, and only `main`
+is supported. Packages built from an older commit (`.deb`, `.tar.gz`)
+should be rebuilt from `main`.
 
-### For Server Operators
+## What counts as a vulnerability
 
-1. **Network Security**
-   - Run servers behind firewalls with restrictive ingress/egress rules
-   - Use TLS/SSL for all client-server communications
-   - Implement rate limiting to mitigate DDoS attacks
-   - Monitor for suspicious connection patterns
+The game treats these as **untrusted input**:
 
-2. **Access Control**
-   - Implement player whitelisting/blacklisting systems
-   - Use strong, unique admin credentials
-   - Rotate API keys and authentication tokens regularly
-   - Enforce strong password policies for player accounts
+| Input | Where | Why it is untrusted |
+|---|---|---|
+| World folders | `world/` or `--world DIR`: `level.dat`, `player.dat`, `c.X.Z.bin` column files | People share worlds. A world folder must never be able to crash the game in a memory-unsafe way, make it read or write files outside that folder, or hang it. |
+| Settings file | `blockclonia.cfg` or `--config FILE` | Hand-edited, and possibly copied from someone else. |
+| Command line | `--give`, `--hurt`, `--spawn`, sizes and so on | Launchers and scripts pass these through. |
 
-3. **World & Data Protection**
-   - Regularly backup world data and player data
-   - Store data with appropriate file permissions (not world-readable)
-   - Encrypt sensitive data at rest
-   - Use separate storage for authentication credentials and game data
+In scope:
 
-4. **Server Maintenance**
-   - Keep Blockclonia server binaries up to date
-   - Patch operating system and dependency vulnerabilities promptly
-   - Maintain audit logs of administrative actions
-   - Review logs regularly for unauthorized access attempts
+- memory-safety bugs (out-of-bounds access, use after free, integer
+  overflow into a size) reachable from any input above;
+- reading, writing, truncating or following links to files outside the
+  folder the game was pointed at, or anything that turns a save into
+  writes somewhere else;
+- inputs that hang the game or make it allocate without bound;
+- flaws in the build that let someone swap a dependency (see *Supply
+  chain* below).
 
-### For Client Users
+Out of scope:
 
-1. **Software Updates**
-   - Keep the Blockclonia client up to date
-   - Enable automatic updates where available
-   - Review changelog before updating
+- anything that already needs write access to your home directory or the
+  game binary;
+- bugs in GPU drivers, the Vulkan loader or validation layers, GLFW,
+  miniaudio or mimalloc themselves (report them upstream; do tell us if
+  the game triggers them from untrusted input);
+- running out of memory or VRAM with extreme but valid settings (such as
+  render distance 32 on a small device);
+- cheating: it is a single-player game.
 
-2. **Credentials**
-   - Use unique, strong passwords for your Blockclonia account
-   - Enable multi-factor authentication (MFA) when available
-   - Never share your authentication tokens or API keys
-   - Be cautious when connecting to unfamiliar servers
+## How the code defends itself
 
-3. **Malware Prevention**
-   - Download Blockclonia only from official sources
-   - Verify GPG signatures or checksums when provided
-   - Keep your operating system and antivirus software updated
-   - Be cautious with mods, plugins, and add-ons from untrusted sources
+- **Validated decoders.** The binary formats (columns, `level.dat`,
+  `player.dat` and the inventory inside it) are parsed by code that checks
+  every field and rejects the whole file on anything malformed, leaving the
+  game's state untouched (`save.c`, `survival.c`, `inventory.c`). The
+  settings parser skips unknown keys and out-of-range values line by line
+  (`settings.c`). The column decoder, the most complex one, has a
+  libFuzzer target (`tests/fuzz_save.c`, built with `cmake --preset fuzz`).
+- **Safe file access.** World and settings files are opened with
+  `O_NOFOLLOW`, must be regular files (so no FIFOs or devices), and are
+  read up to a size cap. Writes go to a temporary file first and are
+  renamed into place, so a crash never leaves a half-written save.
+- **Bounded work.** Every file is read whole into a buffer with a fixed
+  maximum size, and decoding can never produce more data than a column
+  holds.
+- **Checked arithmetic.** Array allocations go through
+  `mem_array_size()`, which aborts on overflow. Allocation failure aborts
+  cleanly instead of returning NULL.
+- **Compiler and tool gates.** CI builds with gcc and clang using
+  `-Werror` and strict conversion warnings, runs the unit tests under
+  AddressSanitizer and UndefinedBehaviorSanitizer, and runs clang-tidy
+  and cppcheck (`tools/lint.sh`).
 
-4. **Platform-Specific Considerations**
-   - **Android**: Only install from official app store; review requested permissions
-   - **BSD Variants**: Use your system package manager or official builds; verify checksums
-   - **Desktop**: Use official binary downloads or verify source code before compilation
+## Supply chain
 
-## Security Features
+The build downloads pinned releases of mimalloc, GLFW and miniaudio from
+their GitHub repositories when the system copies are missing or too old
+(`cmake/Dependencies.cmake`). The version is pinned, but the archive hash
+is only checked if you set it. For a reproducible or packaged build,
+either:
 
-### Current Implementation
-- Input validation on all network messages
-- Bounds checking for physics calculations
-- Memory safety practices in C11 code
-- Secure random number generation for cryptographic operations
+- build with `-DMC_DEPS=SYSTEM` against your distribution's packages; or
+- set `MC_MIMALLOC_SHA256`, `MC_GLFW_SHA256` and `MC_MINIAUDIO_SHA256` to
+  the archives' SHA-256 so a changed download fails the build.
 
-### Planned/In Development
-- End-to-end encryption for multiplayer communications
-- Account authentication with salted password hashing
-- Rate limiting on authentication attempts
-- Player permission and capability system
-- Admin audit logging
-- Mod/plugin security sandboxing
-
-## Third-Party Dependencies
-
-We maintain a list of all dependencies and their security status. To review:
-- Check `CMakeLists.txt` for build dependencies
-- Review the dependency versions in release notes
-- Monitor dependency advisories through GitHub security alerts
-
-## Supported Versions
-
-Only the latest stable release receives security updates. Earlier versions will not receive patches, but we encourage users to upgrade to the latest version for security and performance improvements.
-
-## Security Testing
-
-- **Code Review**: All pull requests are reviewed for security issues
-- **Fuzzing**: Critical code paths (especially network parsing) undergo fuzzing
-- **Static Analysis**: Automated security scanning via GitHub's CodeQL
-- **Dynamic Analysis**: Runtime bounds checking and memory safety tools
-- **Penetration Testing**: Will be conducted as the multiplayer component matures
-
-## Multi-Platform Security Considerations
-
-### Windows
-- Digital code signing (when available)
-- SmartScreen compatibility
-- Windows Defender exclusion guidance if needed
-
-### Linux/macOS/BSD
-- AppArmor/SELinux profiles (where applicable)
-- Signed releases (GPG/Ed25519)
-- Compatibility with security-hardened kernels
-
-### Android
-- Google Play Protect compatibility
-- Permission model compliance
-- Over-the-air (OTA) update security
-
-### FreeBSD/OpenBSD
-- Pledge/unveil sandbox support (OpenBSD)
-- Jail compatibility (FreeBSD)
-- Port security considerations
-
-## Contributing Security Fixes
-
-If you'd like to contribute a security fix:
-1. Do not open a public PR
-2. Contact the maintainers privately with the details
-3. Work with maintainers on a fix in a private branch
-4. Coordinate public disclosure timing
-
-## Compliance & Standards
-
-- Follow OWASP principles for web/multiplayer security
-- Adhere to platform-specific guidelines (Apple App Store, Google Play, etc.)
-- Comply with data protection regulations (GDPR, CCPA, etc.) as applicable
-- Follow CWE/CVSS standards for vulnerability severity assessment
-
-## Disclaimer
-
-Blockclonia is provided as-is without any warranty. While we take security seriously, no software is completely free from vulnerabilities. Users accept the risks associated with running this software and are responsible for securing their own installations and data.
-
-## Questions & Contact
-
-- **Security Issues**: security@kthread.dev
-- **General Support**: See README.md for community resources
-- **Feature Requests**: GitHub Issues (non-security)
-
----
-
-**Last Updated**: 2026-09-27
-**Policy Version**: 1.0
+Shaders are compiled from `shaders/` at build time and embedded in the
+binary. Textures and sounds are generated at start-up, so no image or
+audio files are parsed at run time.
