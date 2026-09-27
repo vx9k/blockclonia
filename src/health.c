@@ -82,11 +82,14 @@ void health_log(health *h, const char *fmt, ...)
 
 static const char *PART_NAMES[BP_COUNT] = {"Head", "Chest", "Abdomen", "Left arm", "Right arm", "Left leg",
                                            "Right leg"};
+static const char *PART_NAMES_LC[BP_COUNT] = {"head", "chest", "abdomen", "left arm", "right arm", "left leg",
+                                              "right leg"};
 static const char *BONE_NAMES[BP_COUNT] = {"skull", "ribs", "pelvis", "left forearm", "right forearm",
                                            "left tibia", "right tibia"};
 static const char *ORGAN_NAMES[ORG_COUNT] = {"Brain", "Heart", "Lungs", "Liver", "Kidneys", "Gut"};
 
 const char *health_part_name(int part) { return part >= 0 && part < BP_COUNT ? PART_NAMES[part] : "?"; }
+const char *health_bone_name(int part) { return part >= 0 && part < BP_COUNT ? BONE_NAMES[part] : "?"; }
 const char *health_organ_name(int organ) { return organ >= 0 && organ < ORG_COUNT ? ORGAN_NAMES[organ] : "?"; }
 
 const char *health_death_text(int cause)
@@ -377,8 +380,15 @@ void health_cut(health *h, int part, float severity, int arterial, float contami
     wound *w = add_wound(h, part, WOUND_CUT, severity, arterial, contamination);
     h->part[part].integrity = maxf(0.0f, h->part[part].integrity - 0.1f * severity);
     h->hurt_flash = minf(1.0f, h->hurt_flash + 0.3f + severity);
-    if (arterial) health_log(h, "Artery cut on the %s: %.0f mL/min", PART_NAMES[part], w->bleed0);
-    else health_log(h, "%s cut on the %s", severity > 0.5f ? "Deep" : "Shallow", PART_NAMES[part]);
+    if (arterial) health_log(h, "Artery cut on the %s: %.0f mL/min", PART_NAMES_LC[part], w->bleed0);
+    else health_log(h, "%s cut on the %s", severity > 0.5f ? "Deep" : "Shallow", PART_NAMES_LC[part]);
+}
+
+void health_break_bone(health *h, int part, int open)
+{
+    if (h->dead || part < 0 || part >= BP_COUNT) return;
+    break_bone(h, part, open);
+    h->hurt_flash = minf(1.0f, h->hurt_flash + 0.6f);
 }
 
 /* ------------------------------------------------------------ treatment */
@@ -389,7 +399,7 @@ int health_treat(health *h, int part, int what, int water_nearby, char *msg, siz
     if (h->dead) { snprintf(msg, n, "You are dead"); return 0; }
     if (h->conscious == CONS_UNCONSCIOUS) { snprintf(msg, n, "You are unconscious"); return 0; }
     if (part < 0 || part >= BP_COUNT) part = BP_CHEST;
-    const char *pn = PART_NAMES[part];
+    const char *pn = PART_NAMES_LC[part];
 
     switch (what) {
     case TREAT_BANDAGE: {
@@ -1006,7 +1016,7 @@ void health_step(health *h, const health_env *e, double dt)
         float seed = w->contamination > 0.1f ? w->contamination * 0.02f : 0.0f;
         float grow = 0.12f * w->infection * (1.0f - w->infection) * clampf_(w->contamination / 0.3f, 0.0f, 1.5f);
         w->infection = clampf_(w->infection + (seed + grow - (immune + abx) * w->infection) * gh, 0.0f, 1.0f);
-        if (w->infection > 0.3f && w->infection - (seed + grow) * gh <= 0.3f) health_log(h, "Wound on the %s is infected", PART_NAMES[w->part]);
+        if (w->infection > 0.3f && w->infection - (seed + grow) * gh <= 0.3f) health_log(h, "Wound on the %s is infected", PART_NAMES_LC[w->part]);
         max_inf = maxf(max_inf, w->infection);
         if (w->bleed < 1.0f)
             w->closure += gh / (24.0f * (3.0f + 7.0f * w->depth)) * (w->infection < 0.3f ? 1.0f : 0.3f) *
@@ -1192,15 +1202,16 @@ int health_part_status(const health *h, int part, char *buf, size_t n)
     }
     if (wounds) {
         SEP();
-        cat(buf, n, &len, "%d wound%s", wounds, wounds > 1 ? "s" : "");
-        if (bleed >= 1.0f) cat(buf, n, &len, " bleeding %.0f mL/min%s", bleed, arterial ? " ARTERIAL" : "");
+        if (wounds == 1) cat(buf, n, &len, arterial ? "cut artery" : "wound");
+        else cat(buf, n, &len, "%d wounds%s", wounds, arterial ? ", artery" : "");
+        if (bleed >= 1.0f) cat(buf, n, &len, " bleeding %.0f mL/min", bleed);
         if (bandaged) cat(buf, n, &len, bandaged == wounds ? " (dressed)" : " (partly dressed)");
         sev = sev > 1 ? sev : 1;
         if (bleed > 30.0f || arterial) sev = 3;
     }
     if (inf > 0.1f) {
         SEP();
-        cat(buf, n, &len, "%s infection", inf > 0.6f ? "severe" : (inf > 0.3f ? "infected:" : "early"));
+        cat(buf, n, &len, "%s infection", inf > 0.6f ? "severe" : (inf > 0.3f ? "spreading" : "early"));
         sev = sev > (inf > 0.6f ? 3 : 2) ? sev : (inf > 0.6f ? 3 : 2);
     }
     if (p->internal > 1.0f) {

@@ -142,6 +142,8 @@ set(MC_CORE_SOURCES
   src/bench.c
   src/block.c
   src/gpupool.c
+  src/health.c
+  src/hud.c
   src/jobs.c
   src/log.c
   src/mem.c
@@ -149,7 +151,9 @@ set(MC_CORE_SOURCES
   src/noise.c
   src/physics.c
   src/save.c
+  src/survival.c
   src/texgen.c
+  src/ui.c
   src/world.c
   src/worldgen.c
 )
@@ -194,7 +198,7 @@ if(MC_BUILD_GAME)
   include(Shaders)
   mc_compile_shaders(blockclonia
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders
-    SOURCES block.vert block.frag entity.vert line.vert line.frag)
+    SOURCES block.vert block.frag entity.vert line.vert line.frag ui.vert ui.frag)
   mc_copy_runtime_dlls(blockclonia) # Windows: mimalloc DLLs next to the exe
   set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT blockclonia)
 endif()

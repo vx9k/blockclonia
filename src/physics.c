@@ -455,6 +455,22 @@ static int solidify(physics *ph, const body *b)
     return 1; /* no room: crushed to rubble */
 }
 
+/* A body ran into the player: report it for the health model. Slow
+ * contacts (a block resting on the player's head) are not blows. */
+static void record_hit(physics *ph, const body *b, aabb box, int axis)
+{
+    const player *pl = ph->pl;
+    double rel = fabs(getc3(b->vel, axis) - getc3(pl->vel, axis));
+    if (rel < 1.0 || ph->hit_count >= MAX_PLAYER_HITS) return;
+    double height = axis == 1 ? (getc3(b->vel, 1) < 0 ? 1.0 : 0.0)
+                              : ((box.min.y + box.max.y) * 0.5 - pl->pos.y) / PLAYER_HEIGHT;
+    player_hit *k = &ph->hits[ph->hit_count++];
+    k->mass = block_get(b->block)->density; /* one cubic metre */
+    k->speed = (float)rel;
+    k->height = (float)clampd(height, 0.0, 1.0);
+    k->block = b->block;
+}
+
 static void bodies_step(physics *ph)
 {
     const double dt = PHYS_DT;
@@ -486,8 +502,10 @@ static void bodies_step(physics *ph)
             if (d == 0.0) continue;
             double m = sweep(ph, box, axis, d, SWEEP_PLAYER, i);
             if (m != d) {
+                double mw = sweep(ph, box, axis, d, 0, i);
+                if (fabs(m) < fabs(mw)) record_hit(ph, b, box, axis); /* the player stopped it */
                 /* Landing means the world stopped it, not the player. */
-                if (axis == 1 && d < 0 && sweep(ph, box, axis, d, 0, i) != d) landed = 1;
+                if (axis == 1 && d < 0 && mw != d) landed = 1;
                 setc3(&b->vel, axis, 0.0);
             }
             addc3(&box.min, axis, m);
@@ -790,6 +808,7 @@ void physics_fluid_tick(physics *ph)
 void physics_step(physics *ph, player *p, const player_input *in)
 {
     ph->pl = p;
+    ph->hit_count = 0;
     player_step(ph, p, in);
     bodies_step(ph);
 

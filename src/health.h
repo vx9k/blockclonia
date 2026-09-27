@@ -221,6 +221,9 @@ void health_struck(health *h, double mass, double speed, double height, double s
 /* A cut. severity 0..1; arterial cuts do not clot on their own. */
 void health_cut(health *h, int part, float severity, int arterial, float contamination);
 
+/* Breaks the main bone of a part outright (open: through the skin). */
+void health_break_bone(health *h, int part, int open);
+
 /* ------------------------------------------------------- treatments */
 
 /* Applies a treatment to a part (ignored for systemic ones). Uses up
@@ -233,6 +236,7 @@ void health_scavenge(health *h, uint8_t block_id);
 /* ---------------------------------------------------------- display */
 
 const char *health_part_name(int part);
+const char *health_bone_name(int part); /* "right forearm", "skull" */
 const char *health_organ_name(int organ);
 const char *health_death_text(int cause);
 const char *health_treat_name(int what);

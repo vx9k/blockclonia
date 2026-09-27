@@ -66,6 +66,16 @@ typedef struct {
     uint32_t set_cap;
 } pos_queue;
 
+/* A falling block that struck the player during the last step. */
+typedef struct {
+    float mass;          /* kg */
+    float speed;         /* m/s relative to the player */
+    float height;        /* 0 feet .. 1 top of the head */
+    uint8_t block;
+} player_hit;
+
+#define MAX_PLAYER_HITS 8
+
 typedef struct physics {
     world *w;
     body *bodies;
@@ -83,6 +93,8 @@ typedef struct physics {
     int32_t *st_bucket[STRUCT_MAX_SPAN + 2];
     int st_bucket_len[STRUCT_MAX_SPAN + 2];
     const player *pl;    /* for body-vs-player collisions */
+    player_hit hits[MAX_PLAYER_HITS]; /* reset at the start of each step */
+    int hit_count;
     /* Stats for the HUD/bench. */
     int last_collapse;
     int fluid_updates;
