@@ -1,10 +1,15 @@
+<!--
+Title: a Conventional Commits header, e.g. `fix(physics): stop water duplicating at column edges`.
+Branch: `<type>/<short-description>`. See AGENTS.md (Git).
+-->
+
 ## What and why
 
-<!-- What this changes, and the problem it solves. Link the issue if there is one. -->
+<!-- The problem and the approach, not a file list. Breaking changes first. Link the issue with `Closes #N`. -->
 
 ## How it was checked
 
-<!-- Tests added or changed, what you ran in game, screenshots for anything visible. -->
+<!-- Commands you ran and their results, tests added or changed, screenshots for anything visible. -->
 
 ## Checklist
 

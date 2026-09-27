@@ -156,12 +156,46 @@ from a job.
 
 ## Git
 
+- Every change reaches `main` through a pull request. Don't push to
+  `main` directly, and don't rewrite history that is already on it.
+- Branches, pull request titles and descriptions follow the rules below.
 - Commit messages follow
   [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)
   (details below).
 - Don't commit build output, `world/`, `blockclonia.cfg`,
   `blockclonia.pipelines` or screenshots (`.gitignore` covers them).
 - Security issues go through [`SECURITY.md`](SECURITY.md), not public issues.
+
+### Branches and pull requests
+
+- Branch from an up-to-date `main`. Name the branch
+  `<type>/<short-description>`: the Conventional Commits type the change
+  will carry, a slash, then a few lower-case words joined by hyphens
+  (`fix/water-column-edges`, `feat/camera-fov`). Put the issue number
+  first when there is one: `fix/57-water-column-edges`.
+- One topic per pull request. A refactor and a feature go in separate
+  pull requests, even when one needs the other.
+- **Title**: a Conventional Commits header, following the same rules as a
+  commit subject (below), e.g.
+  `fix(physics): stop water duplicating at column edges`. A squash merge
+  uses the title as the commit subject on `main`, so the title has to
+  stand on its own. Mark a breaking change with `!` in the title too.
+- **Description**: fill in every section of
+  `.github/pull_request_template.md`.
+  - *What and why*: the problem and the approach taken, not a list of
+    files.
+  - *How it was checked*: the commands you ran and their results, and
+    screenshots for anything visible.
+  - *Checklist*: tick only what you actually did.
+
+  Put any breaking change and anything the reviewer should look at first
+  at the top, and link the issue with `Closes #N`.
+- Open the pull request as a draft while work is in progress. Mark it
+  ready when CI passes and the checklist is done.
+- Before review starts you may rebase your own branch on `main` and push
+  with `--force-with-lease`. Once review has started, add commits instead
+  of rewriting them.
+- The maintainer reviews and merges. Don't merge your own pull request.
 
 ### Commit messages
 

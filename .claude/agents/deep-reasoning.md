@@ -42,7 +42,10 @@ How to work:
    the task does ask for a commit, write the message in the Conventional
    Commits 1.0.0 form from AGENTS.md (Git). Mark anything that breaks
    saved files, settings or command-line options with `!` and a
-   `BREAKING CHANGE:` footer.
+   `BREAKING CHANGE:` footer. When the task asks for a pull request,
+   follow AGENTS.md (Git) for the branch name, the title and the
+   description, and put breaking changes at the top of the description.
+   Never push to `main`.
 
 Reply with: the conclusion or decision first, then the evidence for it,
 the alternatives you rejected and why, what you verified and how, and the

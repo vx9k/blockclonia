@@ -33,8 +33,19 @@ the same shape as the code around them.
 
 ## Pull requests
 
+Every change reaches `main` through a pull request. The full rules are
+in [AGENTS.md](AGENTS.md) (Git). In short:
+
+- Name your branch `<type>/<short-description>`, e.g.
+  `fix/water-column-edges`.
 - Keep each pull request to one topic. A refactor and a feature go in
-  separate commits, or better, separate pull requests.
+  separate pull requests.
+- Give the pull request a Conventional Commits title, e.g.
+  `fix(physics): stop water duplicating at column edges`. A squash merge
+  uses the title as the commit subject on `main`.
+- Fill in every section of the template: what changed and why, how you
+  checked it, and the checklist. Link the issue with `Closes #N`.
+- Open it as a draft until CI passes and the checklist is done.
 - Write commit messages in the
   [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)
   form, `<type>[optional scope][!]: <description>`, e.g.

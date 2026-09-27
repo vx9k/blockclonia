@@ -22,8 +22,14 @@
   `[warn] vulkan:` lines. The unit tests cannot see these.
 - Prefer the smallest diff that fits the surrounding code. Match its
   comment density and naming, and don't reformat lines you didn't change.
-- Don't push, force-push or rewrite published history unless asked. Commit
-  on a branch; the maintainer merges.
+- Work goes through pull requests (AGENTS.md, Git): branch from an
+  up-to-date `main` as `<type>/<short-description>`, commit there, push
+  the branch and open the pull request with `gh pr create`. Use a
+  Conventional Commits title and fill in every section of the template.
+  Never push to `main` or force-push a branch under review, and don't
+  merge. The maintainer merges.
+- End the pull request description with the attribution line Claude Code
+  adds, below the checklist.
 - Write every commit message in the Conventional Commits 1.0.0 form that
   AGENTS.md (Git) describes: `<type>[optional scope][!]: <description>`.
   The attribution trailer Claude Code adds (`Co-Authored-By: ...`) is a

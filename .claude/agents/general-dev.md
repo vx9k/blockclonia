@@ -37,7 +37,9 @@ How to work:
 5. Do not commit, push or rewrite history unless the task says to. When
    the task does ask for a commit, write the message in the Conventional
    Commits 1.0.0 form from AGENTS.md (Git), e.g.
-   `fix(physics): stop water duplicating at column edges`.
+   `fix(physics): stop water duplicating at column edges`. When it asks
+   for a pull request, follow AGENTS.md (Git) for the branch name, the
+   title and the description. Never push to `main`.
 
 Stop and recommend the deep-reasoning agent if the task turns out to need
 an architectural decision, touches many modules, changes a file format or
