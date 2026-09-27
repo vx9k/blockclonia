@@ -22,6 +22,17 @@ if(DEFINED ENV{RPI_SYSROOT} AND NOT "$ENV{RPI_SYSROOT}" STREQUAL "")
   set(CMAKE_SYSROOT "$ENV{RPI_SYSROOT}")
 endif()
 
+# pkg-config runs on the build machine and would otherwise read the build
+# machine's .pc files; GLFW built from source finds wayland-client and
+# xkbcommon through it. Point it at the target's, unless the caller has.
+if(NOT DEFINED ENV{PKG_CONFIG_LIBDIR})
+  set(ENV{PKG_CONFIG_LIBDIR}
+      "${CMAKE_SYSROOT}/usr/lib/${MC_TRIPLE}/pkgconfig:${CMAKE_SYSROOT}/usr/share/pkgconfig")
+  if(CMAKE_SYSROOT)
+    set(ENV{PKG_CONFIG_SYSROOT_DIR} "${CMAKE_SYSROOT}")
+  endif()
+endif()
+
 if("$ENV{RPI_COMPILER}" STREQUAL "clang")
   set(CMAKE_C_COMPILER clang)
   set(CMAKE_C_COMPILER_TARGET ${MC_TRIPLE})
