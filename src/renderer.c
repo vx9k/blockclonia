@@ -43,10 +43,10 @@ static const uint32_t SPV_LINE_FRAG[] =
 ;
 static const uint32_t SPV_UI_VERT[] =
 #include "ui.vert.inc"
-;
+    ;
 static const uint32_t SPV_UI_FRAG[] =
 #include "ui.frag.inc"
-;
+    ;
 
 #define VK_CHECK(x)                                                              \
     do {                                                                         \
@@ -727,13 +727,20 @@ static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
     VkDynamicState dyn[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dy = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
                                            .dynamicStateCount = 2, .pDynamicStates = dyn};
-    VkGraphicsPipelineCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .stageCount = 2,
-                                       .pStages = stages, .pVertexInputState = &vin, .pInputAssemblyState = &ia,
-                                       .pViewportState = &vp, .pRasterizationState = &rs,
-                                       .pMultisampleState = &ms, .pDepthStencilState = &ds,
-                                       .pColorBlendState = &cb, .pDynamicState = &dy,
+    VkGraphicsPipelineCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+                                       .stageCount = 2,
+                                       .pStages = stages,
+                                       .pVertexInputState = &vin,
+                                       .pInputAssemblyState = &ia,
+                                       .pViewportState = &vp,
+                                       .pRasterizationState = &rs,
+                                       .pMultisampleState = &ms,
+                                       .pDepthStencilState = &ds,
+                                       .pColorBlendState = &cb,
+                                       .pDynamicState = &dy,
                                        .layout = d->layout ? d->layout : r->layout,
-                                       .renderPass = r->pass, .subpass = 0};
+                                       .renderPass = r->pass,
+                                       .subpass = 0};
     VkPipeline p;
     VK_CHECK(vkCreateGraphicsPipelines(r->dev, VK_NULL_HANDLE, 1, &ci, r->ac, &p));
     return p;
@@ -774,20 +781,41 @@ static void create_pipelines(renderer *r)
     VkVertexInputBindingDescription line_bind = {0, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX};
     VkVertexInputAttributeDescription line_attr = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0};
 
-    pipe_desc d = {bvs, bfs, block_bind, 2, block_attr, 2, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 1, 1, 0,
-                   VK_CULL_MODE_BACK_BIT, VK_NULL_HANDLE};
+    pipe_desc d = {bvs,
+                   bfs,
+                   block_bind,
+                   2,
+                   block_attr,
+                   2,
+                   VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                   1,
+                   1,
+                   0,
+                   VK_CULL_MODE_BACK_BIT,
+                   VK_NULL_HANDLE};
     r->p_opaque = make_pipeline(r, &d);
     d.depth_write = 0;
     d.blend = 1;
     r->p_trans = make_pipeline(r, &d);
-    pipe_desc e = {evs, bfs, ent_bind, 2, ent_attr, 3, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 1, 1, 0,
-                   VK_CULL_MODE_BACK_BIT, VK_NULL_HANDLE};
+    pipe_desc e = {evs,
+                   bfs,
+                   ent_bind,
+                   2,
+                   ent_attr,
+                   3,
+                   VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                   1,
+                   1,
+                   0,
+                   VK_CULL_MODE_BACK_BIT,
+                   VK_NULL_HANDLE};
     r->p_entity = make_pipeline(r, &e);
     e.depth_write = 0;
     e.blend = 1;
     r->p_entity_trans = make_pipeline(r, &e);
-    pipe_desc l = {lvs, lfs, &line_bind, 1, &line_attr, 1, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, 1, 0, 0,
-                   VK_CULL_MODE_NONE, VK_NULL_HANDLE};
+    pipe_desc l = {
+        lvs,           lfs, &line_bind, 1, &line_attr, 1, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, 1, 0, 0, VK_CULL_MODE_NONE,
+        VK_NULL_HANDLE};
     r->p_line_world = make_pipeline(r, &l);
     l.depth_test = 0;
     r->p_line_screen = make_pipeline(r, &l);
@@ -801,14 +829,19 @@ static void create_pipelines(renderer *r)
 
 static void create_ui_pipeline(renderer *r)
 {
-    VkDescriptorSetLayoutBinding b = {.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                      .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT};
+    VkDescriptorSetLayoutBinding b = {.binding = 0,
+                                      .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                      .descriptorCount = 1,
+                                      .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT};
     VkDescriptorSetLayoutCreateInfo dl = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                                          .bindingCount = 1, .pBindings = &b};
+                                          .bindingCount = 1,
+                                          .pBindings = &b};
     VK_CHECK(vkCreateDescriptorSetLayout(r->dev, &dl, r->ac, &r->ui_dsl));
     VkPushConstantRange pcr = {VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push_ui)};
-    VkPipelineLayoutCreateInfo pl = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
-                                     .pSetLayouts = &r->ui_dsl, .pushConstantRangeCount = 1,
+    VkPipelineLayoutCreateInfo pl = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                                     .setLayoutCount = 1,
+                                     .pSetLayouts = &r->ui_dsl,
+                                     .pushConstantRangeCount = 1,
                                      .pPushConstantRanges = &pcr};
     VK_CHECK(vkCreatePipelineLayout(r->dev, &pl, r->ac, &r->ui_layout));
 
@@ -818,7 +851,7 @@ static void create_ui_pipeline(renderer *r)
     VkVertexInputAttributeDescription attr[3] = {{0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(ui_vertex, x)},
                                                  {1, 0, VK_FORMAT_R16G16_UNORM, offsetof(ui_vertex, u)},
                                                  {2, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(ui_vertex, rgba)}};
-    pipe_desc d = {vs, fs, &bind, 1, attr, 3, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, 0, 1, VK_CULL_MODE_NONE,
+    pipe_desc d = {vs,          fs, &bind, 1, attr, 3, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, 0, 1, VK_CULL_MODE_NONE,
                    r->ui_layout};
     r->p_ui = make_pipeline(r, &d);
     vkDestroyShaderModule(r->dev, vs, r->ac);
@@ -830,15 +863,21 @@ static void create_ui_pipeline(renderer *r)
 /* The overlay font: a small R8 atlas built on the CPU at start-up. */
 static void create_font(renderer *r)
 {
-    VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
-                            .format = VK_FORMAT_R8_UNORM, .extent = {UI_ATLAS_W, UI_ATLAS_H, 1}, .mipLevels = 1,
-                            .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+    VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                            .imageType = VK_IMAGE_TYPE_2D,
+                            .format = VK_FORMAT_R8_UNORM,
+                            .extent = {UI_ATLAS_W, UI_ATLAS_H, 1},
+                            .mipLevels = 1,
+                            .arrayLayers = 1,
+                            .samples = VK_SAMPLE_COUNT_1_BIT,
+                            .tiling = VK_IMAGE_TILING_OPTIMAL,
                             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
     VK_CHECK(vkCreateImage(r->dev, &ii, r->ac, &r->font));
     VkMemoryRequirements req;
     vkGetImageMemoryRequirements(r->dev, r->font, &req);
-    VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size,
+    VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                               .allocationSize = req.size,
                                .memoryTypeIndex = find_memtype(r, req.memoryTypeBits,
                                                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0)};
     VK_CHECK(vkAllocateMemory(r->dev, &ai, r->ac, &r->font_mem));
@@ -861,24 +900,32 @@ static void create_font(renderer *r)
     one_shot_end(r, cmd);
     buffer_destroy(r, &st);
 
-    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = r->font,
-                                .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_R8_UNORM,
+    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                .image = r->font,
+                                .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                                .format = VK_FORMAT_R8_UNORM,
                                 .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
     VK_CHECK(vkCreateImageView(r->dev, &vi, r->ac, &r->font_view));
 
     VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
-    VkDescriptorPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1,
-                                     .poolSizeCount = 1, .pPoolSizes = &ps};
+    VkDescriptorPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+                                     .maxSets = 1,
+                                     .poolSizeCount = 1,
+                                     .pPoolSizes = &ps};
     VK_CHECK(vkCreateDescriptorPool(r->dev, &pi, r->ac, &r->ui_dpool));
     VkDescriptorSetAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                                       .descriptorPool = r->ui_dpool, .descriptorSetCount = 1,
+                                       .descriptorPool = r->ui_dpool,
+                                       .descriptorSetCount = 1,
                                        .pSetLayouts = &r->ui_dsl};
     VK_CHECK(vkAllocateDescriptorSets(r->dev, &dai, &r->ui_dset));
     /* The world sampler is nearest-filtered, which is what pixel text wants. */
     VkDescriptorImageInfo dii = {r->sampler, r->font_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet w = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = r->ui_dset,
-                              .dstBinding = 0, .descriptorCount = 1,
-                              .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &dii};
+    VkWriteDescriptorSet w = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                              .dstSet = r->ui_dset,
+                              .dstBinding = 0,
+                              .descriptorCount = 1,
+                              .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                              .pImageInfo = &dii};
     vkUpdateDescriptorSets(r->dev, 1, &w, 0, NULL);
 }
 
@@ -1583,8 +1630,10 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     /* Overlay: one indexed draw of the quads the game wrote this frame. */
     int ui_quads = v->ui_quads < (int)UI_MAX_QUADS ? v->ui_quads : (int)UI_MAX_QUADS;
     if (ui_quads > 0) {
-        push_ui up = {{2.0f / (float)r->extent.width, 2.0f / (float)r->extent.height}, {-1.0f, -1.0f},
-                      r->swap_srgb ? 1.0f : 0.0f, {0, 0, 0}};
+        push_ui up = {{2.0f / (float)r->extent.width, 2.0f / (float)r->extent.height},
+                      {-1.0f, -1.0f},
+                      r->swap_srgb ? 1.0f : 0.0f,
+                      {0, 0, 0}};
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_ui);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->ui_layout, 0, 1, &r->ui_dset, 0, NULL);
         vkCmdPushConstants(cmd, r->ui_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof up, &up);

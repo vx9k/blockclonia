@@ -152,8 +152,7 @@ static inline uint16_t unorm_u(float t) { return (uint16_t)(t * 65535.0f / UI_AT
 static inline uint16_t unorm_v(float t) { return (uint16_t)(t * 65535.0f / UI_ATLAS_H + 0.5f); }
 
 /* Pushes one quad; corners clockwise from the top left. */
-static void quad(ui *u, const float xy[8], uint16_t u0, uint16_t v0, uint16_t u1, uint16_t v1,
-                 const uint32_t col[4])
+static void quad(ui *u, const float xy[8], uint16_t u0, uint16_t v0, uint16_t u1, uint16_t v1, const uint32_t col[4])
 {
     if (u->quads >= u->max_quads) {
         u->overflow++;
@@ -175,8 +174,9 @@ static void quad(ui *u, const float xy[8], uint16_t u0, uint16_t v0, uint16_t u1
 
 static void white_uv(uint16_t *uu, uint16_t *vv)
 {
-    float cx = (float)((WHITE_CELL % COLS) * CELL) + CELL * 0.5f;
-    float cy = (float)((WHITE_CELL / COLS) * CELL) + CELL * 0.5f;
+    const int col = WHITE_CELL % COLS, row = WHITE_CELL / COLS;
+    float cx = (float)(col * CELL) + CELL * 0.5f;
+    float cy = (float)(row * CELL) + CELL * 0.5f;
     *uu = unorm_u(cx);
     *vv = unorm_v(cy);
 }
@@ -215,7 +215,10 @@ void ui_line(ui *u, float x0, float y0, float x1, float y1, float thick, uint32_
     /* Extend by half the thickness so joined segments leave no gaps. */
     float ex = dx / len * thick * 0.5f, ey = dy / len * thick * 0.5f;
     float nx = -ey, ny = ex;
-    x0 -= ex; y0 -= ey; x1 += ex; y1 += ey;
+    x0 -= ex;
+    y0 -= ey;
+    x1 += ex;
+    y1 += ey;
     uint16_t wu, wv;
     white_uv(&wu, &wv);
     float xy[8] = {x0 + nx, y0 + ny, x1 + nx, y1 + ny, x1 - nx, y1 - ny, x0 - nx, y0 - ny};
@@ -260,7 +263,8 @@ float ui_text(ui *u, float x, float y, int size, uint32_t rgba, const char *s)
         }
         if (*s != ' ') {
             int g = glyph_index((unsigned char)*s);
-            float tx = (float)((g % COLS) * CELL), ty = (float)((g / COLS) * CELL);
+            const int col = g % COLS, row = g / COLS;
+            float tx = (float)(col * CELL), ty = (float)(row * CELL);
             float xy[8] = {cx, cy, cx + gw, cy, cx + gw, cy + gh, cx, cy + gh};
             quad(u, xy, unorm_u(tx), unorm_v(ty), unorm_u(tx + UI_GLYPH_W), unorm_v(ty + UI_GLYPH_H), c);
         }

@@ -231,7 +231,7 @@ void health_break_bone(health *h, int part, int open);
 int health_treat(health *h, int part, int what, int water_nearby, char *msg, size_t msg_size);
 
 /* Adds scavenged items (breaking leaves and wood). */
-void health_scavenge(health *h, uint8_t block_id);
+void health_scavenge(health *h, uint8_t id);
 
 /* ---------------------------------------------------------- display */
 
@@ -239,7 +239,6 @@ const char *health_part_name(int part);
 const char *health_bone_name(int part); /* "right forearm", "skull" */
 const char *health_organ_name(int organ);
 const char *health_death_text(int cause);
-const char *health_treat_name(int what);
 
 /* One-line status for a part, e.g. "Closed fracture (splinted), bleeding
  * 12 mL/min". Returns a severity 0 (fine) .. 3 (critical). */

@@ -1,10 +1,14 @@
 /* Unit tests for the engine core (no GPU, no window). */
 #include "gpupool.h"
+#include "health.h"
+#include "hud.h"
 #include "jobs.h"
 #include "mem.h"
 #include "mesher.h"
 #include "physics.h"
 #include "save.h"
+#include "survival.h"
+#include "ui.h"
 #include "world.h"
 
 #include <math.h>
@@ -467,6 +471,382 @@ static void test_raycast(void)
     tw_free(&t);
 }
 
+/* ---------------------------------------------------------------- health */
+
+static health *new_body(uint32_t seed)
+{
+    health *h = mem_alloc(sizeof *h); /* 30 KB: too big for a test's stack */
+    health_init(h, seed);
+    return h;
+}
+
+static health_env calm_env(void)
+{
+    health_env e = {0};
+    e.on_ground = 1;
+    e.airway = AIRWAY_AIR;
+    e.water_temp = SURVIVAL_WATER_TEMP;
+    return e;
+}
+
+/* Steps the body at 60 Hz, like the game. */
+static void live(health *h, const health_env *e, double seconds)
+{
+    for (int i = 0, n = (int)(seconds * 60.0); i < n; i++) health_step(h, e, 1.0 / 60.0);
+}
+
+static float wave_span(const float *w)
+{
+    float lo = w[0], hi = w[0];
+    for (int i = 1; i < HEALTH_WAVE_LEN; i++) {
+        if (w[i] < lo) lo = w[i];
+        if (w[i] > hi) hi = w[i];
+    }
+    return hi - lo;
+}
+
+/* A healthy adult at rest reads like one, and the monitor traces move. */
+static void test_health_rest(void)
+{
+    health *h = new_body(1);
+    health_env e = calm_env();
+    live(h, &e, 120.0);
+    CHECK(!h->dead && h->conscious == CONS_ALERT);
+    CHECK(h->hr > 55.0f && h->hr < 90.0f);
+    CHECK(h->map > 80.0f && h->map < 105.0f);
+    CHECK(h->sbp > h->dbp && h->sbp < 140.0f);
+    CHECK(health_spo2_reading(h) >= 95);
+    CHECK(h->rr > 10.0f && h->rr < 20.0f);
+    CHECK(fabsf(h->temp - 37.0f) < 0.3f);
+    CHECK(wave_span(h->ecg) > 0.8f);   /* QRS complexes */
+    CHECK(wave_span(h->art) > 25.0f);  /* pulse pressure */
+    CHECK(wave_span(h->capno) > 25.0f); /* breaths */
+    char buf[96];
+    for (int p = 0; p < BP_COUNT; p++) {
+        CHECK(health_part_status(h, p, buf, sizeof buf) == 0);
+        CHECK(!strcmp(buf, "OK"));
+    }
+    mem_free(h);
+}
+
+/* Sprinting drives the heart and lungs up and spends the anaerobic
+ * reserve; rest brings them back. */
+static void test_health_exercise(void)
+{
+    health *h = new_body(2);
+    health_env e = calm_env();
+    live(h, &e, 30.0);
+    float hr0 = h->hr;
+    e.speed = 6.5;
+    live(h, &e, 60.0);
+    CHECK(h->hr > 150.0f && h->sbp > 150.0f && h->rr > 25.0f);
+    CHECK(health_stamina(h) < 0.5f);
+    CHECK(h->lactate > 4.0f);
+    health_limits l = health_get_limits(h);
+    CHECK(l.move_scale <= 1.0f);
+    e.speed = 0.0;
+    live(h, &e, 240.0);
+    CHECK(h->hr < hr0 + 30.0f);
+    CHECK(health_stamina(h) > 0.6f);
+    mem_free(h);
+}
+
+/* A cut artery drains blood fast, the heart races to hold pressure, and a
+ * pressure dressing applied early stops most of it. */
+static void test_health_bleeding(void)
+{
+    health *a = new_body(3), *b = new_body(3);
+    health_env e = calm_env();
+    health_cut(a, BP_LLEG, 0.8f, 1, 0.2f);
+    health_cut(b, BP_LLEG, 0.8f, 1, 0.2f);
+    memset(&a->items, 0, sizeof a->items);
+    memset(&b->items, 0, sizeof b->items);
+    b->items.bandages = 1;
+    char msg[128];
+    CHECK(health_treat(b, BP_LLEG, TREAT_BANDAGE, 0, msg, sizeof msg) == 1);
+    CHECK(b->items.bandages == 0);
+    live(a, &e, 60.0);
+    live(b, &e, 60.0);
+    CHECK(a->bleed_ext > 200.0f);
+    CHECK(b->bleed_ext < 0.5f * a->bleed_ext);
+    CHECK(a->blood < BLOOD_NORMAL - 0.4f);
+    CHECK(a->hr > b->hr);
+    live(a, &e, 240.0);
+    live(b, &e, 240.0);
+    CHECK(a->conscious != CONS_ALERT); /* class IV haemorrhage */
+    CHECK(health_spo2_reading(a) < 0); /* no pulse at the finger */
+    CHECK(b->conscious == CONS_ALERT && b->blood > a->blood + 0.5f);
+    /* A second dressing needs supplies: two plant fibres make one. */
+    CHECK(health_treat(a, BP_LLEG, TREAT_BANDAGE, 0, msg, sizeof msg) == 0); /* none left */
+    a->items.fibre = 2;
+    CHECK(health_treat(a, BP_LLEG, TREAT_BANDAGE, 0, msg, sizeof msg) == (a->conscious != CONS_UNCONSCIOUS));
+    CHECK(health_treat(b, BP_HEAD, TREAT_BANDAGE, 0, msg, sizeof msg) == 0); /* no wound there */
+    mem_free(a);
+    mem_free(b);
+}
+
+/* Holding breath under water: oxygen falls, then consciousness, then the
+ * heart stops. Surfacing in time recovers. */
+static void test_health_drowning(void)
+{
+    health *h = new_body(4);
+    health_env e = calm_env();
+    e.airway = AIRWAY_WATER;
+    e.submerged = 1.0;
+    live(h, &e, 45.0);
+    CHECK(!h->breathing && h->conscious == CONS_ALERT);
+    float sat = h->sao2;
+    health *s = new_body(4);
+    *s = *h;
+    health_env air = calm_env();
+    air.submerged = 0.8;
+    live(s, &air, 30.0);
+    CHECK(!s->dead && s->breathing && s->sao2 > 0.93f && s->lung_water < 0.01f);
+    /* Past the breaking point the body gasps and inhales water. */
+    live(h, &e, 60.0);
+    CHECK(h->sao2 < sat - 0.2f);
+    CHECK(h->hr < 70.0f); /* diving reflex */
+    CHECK(h->lung_water > 0.05f);
+    char buf[64];
+    CHECK(health_organ_status(h, ORG_LUNGS, buf, sizeof buf) >= 2);
+    live(h, &e, 420.0);
+    CHECK(h->dead && h->cause == DEATH_DROWNING);
+    mem_free(h);
+    mem_free(s);
+}
+
+/* Falls: a short drop is harmless, a high one breaks legs, and a broken
+ * leg stops sprinting and jumping until it is splinted and healed. */
+static void test_health_fractures(void)
+{
+    health *h = new_body(5);
+    memset(&h->items, 0, sizeof h->items);
+    health_env e = calm_env();
+    health_fall(h, sqrt(2.0 * 9.81 * 1.2), 1.0); /* jumping off a block */
+    live(h, &e, 5.0);
+    int broken = 0;
+    for (int p = 0; p < BP_COUNT; p++) broken += h->part[p].fracture != FX_NONE;
+    CHECK(broken == 0);
+    health_limits l = health_get_limits(h);
+    CHECK(l.can_jump && l.can_sprint && l.move_scale > 0.99f);
+
+    health_break_bone(h, BP_RLEG, 0);
+    live(h, &e, 5.0);
+    CHECK(h->part[BP_RLEG].fracture == FX_CLOSED);
+    l = health_get_limits(h);
+    CHECK(!l.can_sprint && !l.can_jump && l.move_scale < 0.6f);
+    char msg[128], buf[96];
+    CHECK(health_part_status(h, BP_RLEG, buf, sizeof buf) >= 2);
+    CHECK(strstr(buf, "closed fracture") != NULL);
+    float pain = h->part[BP_RLEG].pain;
+    CHECK(health_treat(h, BP_RLEG, TREAT_SPLINT, 0, msg, sizeof msg) == 0); /* nothing to splint with */
+    h->items.sticks = 2;
+    h->items.fibre = 1;
+    CHECK(health_treat(h, BP_RLEG, TREAT_SPLINT, 0, msg, sizeof msg) == 1);
+    CHECK(h->part[BP_RLEG].splinted && h->items.sticks == 0 && h->items.fibre == 0);
+    live(h, &e, 5.0);
+    CHECK(h->part[BP_RLEG].pain < pain);
+    CHECK(health_treat(h, BP_HEAD, TREAT_SPLINT, 0, msg, sizeof msg) == 0);
+
+    /* 20 m onto stone: at best both legs broken. */
+    health *f = new_body(6);
+    health_fall(f, sqrt(2.0 * 9.81 * 20.0), 1.0);
+    live(f, &e, 10.0);
+    CHECK(f->dead || f->part[BP_LLEG].fracture || f->part[BP_RLEG].fracture);
+    mem_free(h);
+    mem_free(f);
+}
+
+/* A dirty wound left alone gets infected, then septic with a fever; the
+ * same wound cleaned and treated with antibiotics does not. */
+static void test_health_infection(void)
+{
+    health *a = new_body(7), *b = new_body(7);
+    health_env e = calm_env();
+    e.speed = 0.0;
+    health_cut(a, BP_RARM, 0.6f, 0, 0.5f);
+    health_cut(b, BP_RARM, 0.6f, 0, 0.5f);
+    char msg[128];
+    b->items.antiseptic = 1;
+    b->items.antibiotics = 1;
+    b->items.bandages = 1;
+    CHECK(health_treat(b, BP_RARM, TREAT_DISINFECT, 0, msg, sizeof msg) == 1);
+    CHECK(health_treat(b, BP_RARM, TREAT_BANDAGE, 0, msg, sizeof msg) == 1);
+    CHECK(health_treat(b, BP_RARM, TREAT_ANTIBIOTIC, 0, msg, sizeof msg) == 1);
+    /* 30 minutes of real time is 36 hours on the survival clock. Food and
+     * water keep both bodies from starving meanwhile. */
+    for (int m = 0; m < 30; m++) {
+        a->stomach_water = b->stomach_water = 0.3f;
+        a->stomach_kcal = b->stomach_kcal = 300.0f;
+        live(a, &e, 60.0);
+        live(b, &e, 60.0);
+    }
+    float inf_a = a->wound_count ? a->wounds[0].infection : 0.0f;
+    float inf_b = b->wound_count ? b->wounds[0].infection : 0.0f;
+    CHECK(inf_a > 0.6f);
+    CHECK(a->sepsis > 0.3f && a->temp > 38.0f && a->hr > 90.0f);
+    CHECK(inf_b < 0.2f && b->sepsis < 0.05f);
+    char buf[96];
+    CHECK(health_part_status(a, BP_RARM, buf, sizeof buf) == 3);
+    CHECK(strstr(buf, "infection") != NULL);
+    mem_free(a);
+    mem_free(b);
+}
+
+/* Thirst and hunger build on the survival clock; drinking and eating fix
+ * them, and scavenging finds the supplies. */
+static void test_health_needs(void)
+{
+    health *h = new_body(8);
+    memset(&h->items, 0, sizeof h->items);
+    health_env e = calm_env();
+    live(h, &e, 600.0); /* half a survival day */
+    float hyd = health_hydration(h), hun = health_hunger(h);
+    CHECK(hyd < 0.9f && hun > 0.2f);
+    char msg[128];
+    CHECK(health_treat(h, BP_CHEST, TREAT_DRINK, 0, msg, sizeof msg) == 0); /* no water in reach */
+    for (int i = 0; i < 4; i++) {
+        CHECK(health_treat(h, BP_CHEST, TREAT_DRINK, 1, msg, sizeof msg) == 1);
+        live(h, &e, 30.0);
+    }
+    CHECK(health_hydration(h) > hyd);
+    CHECK(health_treat(h, BP_CHEST, TREAT_EAT, 0, msg, sizeof msg) == 0); /* no food */
+    health_scavenge(h, B_LOG);
+    CHECK(h->items.sticks == 2);
+    for (int i = 0; i < 60; i++) health_scavenge(h, B_LEAVES);
+    CHECK(h->items.fibre > 10 && h->items.apples > 0);
+    CHECK(health_treat(h, BP_CHEST, TREAT_EAT, 0, msg, sizeof msg) == 1);
+    mem_free(h);
+}
+
+/* The game side: landings from the player physics become injuries, and a
+ * broken leg slows the player's input. */
+static void test_survival(void)
+{
+    test_world t;
+    tw_init(&t);
+    player p;
+    player_input idle = {0};
+    health *h = new_body(9);
+
+    /* Stepping off one block: no injury. */
+    player_spawn(&p, &t.w, 4.5, 4.5);
+    p.pos.y = GROUND + 1.0;
+    for (int i = 0; i < 120; i++) {
+        survival_before b = survival_capture(&p);
+        physics_step(&t.ph, &p, &idle);
+        survival_impacts(h, &t.w, &t.ph, &p, &b);
+    }
+    CHECK(p.on_ground && h->wound_count == 0 && !h->part[BP_LLEG].fracture && !h->part[BP_RLEG].fracture);
+
+    /* 12 m onto grass: the legs take it. */
+    p.pos.y = GROUND + 12.0;
+    p.vel = dv3(0, 0, 0);
+    p.on_ground = 0;
+    float before = h->part[BP_LLEG].integrity + h->part[BP_RLEG].integrity;
+    for (int i = 0; i < 240; i++) {
+        survival_before b = survival_capture(&p);
+        physics_step(&t.ph, &p, &idle);
+        survival_impacts(h, &t.w, &t.ph, &p, &b);
+    }
+    CHECK(p.on_ground);
+    CHECK(h->part[BP_LLEG].integrity + h->part[BP_RLEG].integrity < before - 0.2f);
+
+    /* Environment: air at the eyes on dry land, water when submerged. */
+    health_env e;
+    survival_before b = survival_capture(&p);
+    survival_env(&t.w, &p, &b, 0, &e);
+    CHECK(e.airway == AIRWAY_AIR && e.on_ground);
+    for (int y = GROUND; y < GROUND + 3; y++) world_set(&t.w, 4, y, 4, B_WATER, 0);
+    survival_env(&t.w, &p, &b, 0, &e);
+    CHECK(e.airway == AIRWAY_WATER);
+
+    /* Input limits follow the body; flying ignores them. */
+    health *k = new_body(10);
+    health_break_bone(k, BP_LLEG, 0);
+    player_input in = {.forward = 1.0f, .jump = 1, .sprint = 1};
+    p.submerged = 0.0;
+    survival_limit_input(k, &p, &in);
+    CHECK(in.forward < 0.6f && !in.jump && !in.sprint);
+    player_input fly = {.forward = 1.0f, .jump = 1, .sprint = 1};
+    p.flying = 1;
+    survival_limit_input(k, &p, &fly);
+    CHECK(fly.forward == 1.0f && fly.jump && fly.sprint);
+
+    /* Breaking glass by hand cuts the arm. */
+    health *g = new_body(11);
+    for (int i = 0; i < 3; i++) survival_on_break(g, B_GLASS);
+    CHECK(g->wound_count == 3 && g->wounds[0].part == BP_RARM);
+
+    mem_free(h);
+    mem_free(k);
+    mem_free(g);
+    tw_free(&t);
+}
+
+/* The UI batch: text metrics, wrapping, clipping to the buffer, and whole
+ * HUD/panel/death screens fitting in it. */
+static void test_ui(void)
+{
+    CHECK(ui_text_width("", 1) == 0.0f);
+    CHECK(ui_text_width("abc", 1) == 17.0f); /* 3 x 6 px advance, no trailing gap */
+    CHECK(ui_text_width("abc", 2) == 34.0f);
+    CHECK(ui_text_width("ab\nabcd", 1) == 23.0f);
+    CHECK(ui_scale_for(1280, 720) == 2 && ui_scale_for(640, 360) == 1 && ui_scale_for(320, 200) == 1);
+
+    enum { MAXQ = 8192 };
+    ui_vertex *mem = mem_alloc(sizeof(ui_vertex) * 4 * MAXQ);
+    ui u;
+    ui_begin(&u, mem, MAXQ, 1280, 720);
+    CHECK(u.w == 640.0f && u.h == 360.0f);
+    CHECK(ui_text(&u, 0, 0, 1, 0xffffffffu, "a b") == 17.0f);
+    CHECK(u.quads == 2); /* spaces draw nothing */
+    int lines = ui_text_wrap(&u, 0, 0, 59, 5, 1, 0xffffffffu, "one two three four five six");
+    CHECK(lines == 3); /* 10 columns: "one two", "three four", "five six" */
+    CHECK(ui_text_wrap(&u, 0, 0, 59, 2, 1, 0xffffffffu, "one two three four five six") == 2);
+    CHECK(ui_text_wrap(&u, 0, 0, 29, 3, 1, 0xffffffffu, "unbreakableword") == 3); /* hard breaks */
+
+    /* A full buffer drops quads instead of writing past it. */
+    ui small;
+    ui_begin(&small, mem, 3, 640, 360);
+    ui_text(&small, 0, 0, 1, 0xffffffffu, "abcdef");
+    CHECK(small.quads == 3 && small.overflow == 3);
+    ui none;
+    ui_begin(&none, NULL, MAXQ, 640, 360);
+    ui_rect(&none, 0, 0, 10, 10, 0xffffffffu);
+    CHECK(none.quads == 0);
+
+    /* Real screens, badly hurt, fit the renderer's buffer. */
+    health *h = new_body(12);
+    health_env e = calm_env();
+    health_cut(h, BP_LLEG, 0.8f, 1, 0.3f);
+    health_cut(h, BP_LARM, 0.4f, 0, 0.3f);
+    health_break_bone(h, BP_RARM, 0);
+    health_break_bone(h, BP_RLEG, 1);
+    live(h, &e, 30.0);
+    hud_state s = {0};
+    s.held = "stone";
+    ui_begin(&u, mem, MAXQ, 1280, 720);
+    hud_draw(&u, h, &s);
+    CHECK(u.overflow == 0 && u.quads > 200);
+    s.panel = 1;
+    for (s.sel = 0; s.sel < BP_COUNT; s.sel++) {
+        ui_begin(&u, mem, MAXQ, 1280, 720);
+        hud_draw(&u, h, &s);
+        CHECK(u.overflow == 0 && u.quads > 1000);
+    }
+    health_env drown = calm_env();
+    drown.airway = AIRWAY_WATER;
+    drown.submerged = 1.0;
+    live(h, &drown, 600.0);
+    CHECK(h->dead);
+    ui_begin(&u, mem, MAXQ, 1280, 720);
+    hud_draw(&u, h, &s);
+    CHECK(u.overflow == 0 && u.quads > 20);
+    mem_free(h);
+    mem_free(mem);
+}
+
 int main(void)
 {
     mem_init();
@@ -483,6 +863,15 @@ int main(void)
     test_settle();
     test_fluid();
     test_raycast();
+    test_health_rest();
+    test_health_exercise();
+    test_health_bleeding();
+    test_health_drowning();
+    test_health_fractures();
+    test_health_infection();
+    test_health_needs();
+    test_survival();
+    test_ui();
     printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);
     return g_failed ? 1 : 0;
 }

@@ -72,8 +72,8 @@ static void trace_sweep(ui *u, const float *buf, int pos, float x, float y, floa
 }
 
 /* Scrolling strip of the last `samples` samples, newest on the right. */
-static void trace_scroll(ui *u, const float *buf, int pos, int samples, float x, float y, float w, float h,
-                         float lo, float hi, uint32_t col)
+static void trace_scroll(ui *u, const float *buf, int pos, int samples, float x, float y, float w, float h, float lo,
+                         float hi, uint32_t col)
 {
     int cols = (int)w;
     if (cols < 2) return;
@@ -138,22 +138,28 @@ typedef struct {
 static int collect_alerts(const health *h, alert *a, int max)
 {
     int n = 0;
-#define ADD(sv, ...) do { if (n < max) { snprintf(a[n].text, sizeof a[n].text, __VA_ARGS__); a[n].sev = (sv); n++; } } while (0)
+#define ADD(sv, ...)                                            \
+    do {                                                        \
+        if (n < max) {                                          \
+            snprintf(a[n].text, sizeof a[n].text, __VA_ARGS__); \
+            a[n].sev = (sv);                                    \
+            n++;                                                \
+        }                                                       \
+    } while (0)
     float bleed = h->bleed_ext + h->bleed_int;
     if (h->rhythm == RHYTHM_VF) ADD(3, "CARDIAC ARREST (VF)");
     else if (h->rhythm == RHYTHM_ASYSTOLE) ADD(3, "CARDIAC ARREST");
-    if (bleed >= 5.0f) ADD(bleed > 30.0f ? 3 : 2, "Bleeding %.0f mL/min", bleed);
+    if (bleed >= 5.0f) ADD(bleed > 30.0f ? 3 : 2, "Bleeding %.0f mL/min", (double)bleed);
     if (!h->breathing && h->conscious != CONS_UNCONSCIOUS && h->rhythm == RHYTHM_SINUS)
         ADD(h->sao2 < 0.85f || h->lung_water > 0.02f ? 3 : 1, h->lung_water > 0.02f ? "Drowning" : "Holding breath");
     if (h->sao2 < 0.9f && h->rhythm == RHYTHM_SINUS) ADD(h->sao2 < 0.8f ? 3 : 2, "Low oxygen");
     for (int i = 0; i < BP_COUNT; i++)
-        if (h->part[i].fracture)
-            ADD(2, "Broken %s%s", health_bone_name(i), h->part[i].splinted ? " (splinted)" : "");
+        if (h->part[i].fracture) ADD(2, "Broken %s%s", health_bone_name(i), h->part[i].splinted ? " (splinted)" : "");
     float hyd = health_hydration(h), hun = health_hunger(h);
     if (hyd < 0.35f) ADD(hyd < 0.15f ? 3 : 1, hyd < 0.15f ? "Severely dehydrated" : "Thirsty");
     if (hun > 0.7f) ADD(hun > 0.95f ? 3 : 1, hun > 0.95f ? "Starving" : "Hungry");
-    if (h->temp < 35.0f) ADD(h->temp < 32.0f ? 3 : 2, "Hypothermia %.1f" UI_CH_DEGREE "C", h->temp);
-    else if (h->temp > 38.3f) ADD(h->temp > 40.0f ? 3 : 1, "Fever %.1f" UI_CH_DEGREE "C", h->temp);
+    if (h->temp < 35.0f) ADD(h->temp < 32.0f ? 3 : 2, "Hypothermia %.1f" UI_CH_DEGREE "C", (double)h->temp);
+    else if (h->temp > 38.3f) ADD(h->temp > 40.0f ? 3 : 1, "Fever %.1f" UI_CH_DEGREE "C", (double)h->temp);
     float inf = 0.0f;
     for (int i = 0; i < h->wound_count; i++) inf = inf > h->wounds[i].infection ? inf : h->wounds[i].infection;
     if (h->sepsis > 0.2f) ADD(3, "Sepsis");
@@ -181,7 +187,11 @@ static void hud(ui *u, const health *h, const hud_state *s)
     trace_scroll(u, h->ecg, h->wave_pos, HEALTH_WAVE_LEN / 2, x + 4, y + 14, w - 8, 11, -0.6f, 1.6f, C_ECG);
 
     /* Needs: blood, water, food, stamina. */
-    struct { const char *l; float v; uint32_t c; } bars[4] = {
+    struct {
+        const char *l;
+        float v;
+        uint32_t c;
+    } bars[4] = {
         {UI_CH_DROP, h->blood / BLOOD_NORMAL, ui_rgba(210, 40, 40, 255)},
         {"W", health_hydration(h), ui_rgba(60, 140, 240, 255)},
         {"F", 1.0f - health_hunger(h), ui_rgba(235, 150, 50, 255)},
@@ -197,11 +207,12 @@ static void hud(ui *u, const health *h, const hud_state *s)
     alert al[8];
     int n = collect_alerts(h, al, 6);
     float ay = y + 50;
-    for (int i = 0; i < n; i++, ay += 10) {
+    for (int i = 0; i < n; i++) {
         uint32_t c = SEV[al[i].sev];
         if (al[i].sev == 3 && !blink(h, 1.5)) c = C_TEXT;
         ui_rect(u, x, ay - 1, ui_text_width(al[i].text, 1) + 6, 10, ui_rgba(0, 0, 0, 175));
         ui_text(u, x + 3, ay, 1, c, al[i].text);
+        ay += 10;
     }
     /* Fresh events fade out. */
     for (int i = HEALTH_LOG - 1; i >= 0; i--) {
@@ -229,7 +240,9 @@ static void hud(ui *u, const health *h, const hud_state *s)
 
 /* ----------------------------------------------------------- panel */
 
-typedef struct { float x, y, w, h; } rectf;
+typedef struct {
+    float x, y, w, h;
+} rectf;
 
 /* Back view, so the player's left is on the left. */
 static rectf part_rect(int part, float bx, float by)
@@ -287,9 +300,10 @@ static void body_diagram(ui *u, const health *h, int sel, float bx, float by)
             float dx = p == BP_LARM || p == BP_LLEG ? r.x - 7 : r.x + r.w + 2;
             for (int k = 0; k < drops; k++) ui_text(u, dx, r.y + 2 + (float)k * 8, 1, C_ART, UI_CH_DROP);
         }
-        char num[2] = {(char)('1' + p), 0};
+        const char num[2] = {(char)('1' + p), 0};
         ui_text(u, r.x + (r.w - 5) * 0.5f, r.y + 2, 1, ui_rgba(10, 10, 10, 220), num);
-        if (p == sel) ui_frame(u, r.x - 1, r.y - 1, r.w + 2, r.h + 2, 1, blink(h, 2) ? C_HEAD : ui_rgba(255, 255, 255, 120));
+        if (p == sel)
+            ui_frame(u, r.x - 1, r.y - 1, r.w + 2, r.h + 2, 1, blink(h, 2) ? C_HEAD : ui_rgba(255, 255, 255, 120));
     }
 }
 
@@ -378,7 +392,7 @@ static int advice(const health *h, int part, char *buf, size_t n)
     else if (inf > 0.05f) snprintf(buf, n, "D: clean the wound (antiseptic, or water nearby).");
     else if (p->internal > 5.0f) snprintf(buf, n, "Internal bleeding: rest, keep warm, drink.");
     else if (part == BP_HEAD && (h->concussion > 0.0f || h->confusion > 0.0f)) snprintf(buf, n, "Concussed: rest.");
-    else if (h->pain > 5.0f) snprintf(buf, n, "P: a painkiller eases the pain for 6 h.");
+    else if (h->pain > 5.0f) snprintf(buf, n, "P: a painkiller eases pain for 6 h.");
     else return 0;
     return 1;
 }
@@ -394,11 +408,11 @@ static void panel(ui *u, const health *h, const hud_state *s)
 
     ui_text(u, x0 + 8, y0 + 6, 1, C_HEAD, "HEALTH");
     int mins = (int)(h->t / 60.0);
-    const char *cons = h->conscious == CONS_ALERT ? "Alert" : (h->conscious == CONS_CONFUSED ? "Confused" : "Unconscious");
+    const char *cons = h->conscious == CONS_ALERT ? "Alert"
+                                                  : (h->conscious == CONS_CONFUSED ? "Confused" : "Unconscious");
     snprintf(buf, sizeof buf, "%s   core %.1f" UI_CH_DEGREE "C   alive %d:%02d", cons, (double)h->temp, mins / 60,
              mins % 60);
-    ui_text(u, x0 + pw - 8 - ui_text_width(buf, 1), y0 + 6, 1,
-            h->conscious == CONS_ALERT ? C_DIM : SEV[2], buf);
+    ui_text(u, x0 + pw - 8 - ui_text_width(buf, 1), y0 + 6, 1, h->conscious == CONS_ALERT ? C_DIM : SEV[2], buf);
     ui_rect(u, x0 + 1, y0 + 16, pw - 2, 1, C_BORDER);
 
     /* Column 1: body diagram and per-part status; the selected part gets
@@ -433,7 +447,8 @@ static void panel(ui *u, const health *h, const hud_state *s)
     sy += 11;
     float vol = h->blood / BLOOD_NORMAL;
     snprintf(buf, sizeof buf, "%.2f L", (double)h->blood);
-    labelled_bar(u, ox, sy, "Blood", clamp01((vol - 0.5f) / 0.5f), vol < 0.7f ? SEV[3] : ui_rgba(210, 40, 40, 255), buf);
+    labelled_bar(u, ox, sy, "Blood", clamp01((vol - 0.5f) / 0.5f), vol < 0.7f ? SEV[3] : ui_rgba(210, 40, 40, 255),
+                 buf);
     sy += 10;
     float hyd = health_hydration(h);
     snprintf(buf, sizeof buf, "%.0f%%", (double)(hyd * 100.0f));
@@ -473,15 +488,21 @@ static void panel(ui *u, const health *h, const hud_state *s)
     ui_rect(u, x0 + 1, by - 6, pw - 2, 1, C_BORDER);
     const survival_items *it = &h->items;
     ui_text(u, x0 + 8, by, 1, C_HEAD, "SUPPLIES");
-    struct { const char *name; int n; } sup[9] = {
-        {"Bandages", it->bandages}, {"Splints", it->splints}, {"Antiseptic", it->antiseptic},
-        {"Plant fibre", it->fibre}, {"Sticks", it->sticks}, {"Painkillers", it->painkillers},
-        {"Apples", it->apples}, {NULL, 0}, {"Antibiotics", it->antibiotics},
+    struct {
+        const char *name;
+        int n;
+    } sup[9] = {
+        {"Bandages", it->bandages},       {"Splints", it->splints},
+        {"Antiseptic", it->antiseptic},   {"Plant fibre", it->fibre},
+        {"Sticks", it->sticks},           {"Painkillers", it->painkillers},
+        {"Apples", it->apples},           {NULL, 0},
+        {"Antibiotics", it->antibiotics},
     };
     for (int i = 0; i < 9; i++) {
         if (!sup[i].name) continue;
-        ui_textf(u, x0 + 8 + (float)(i % 3) * 96, by + 11 + (float)(i / 3) * 10, 1, sup[i].n ? C_TEXT : C_DIM,
-                 "%s %d", sup[i].name, sup[i].n);
+        const int col = i % 3, row = i / 3;
+        ui_textf(u, x0 + 8 + (float)col * 96, by + 11 + (float)row * 10, 1, sup[i].n ? C_TEXT : C_DIM, "%s %d",
+                 sup[i].name, sup[i].n);
     }
     ui_text(u, x0 + 8, by + 43, 1, C_DIM, "Leaves give fibre and apples; logs give sticks.");
 
@@ -515,12 +536,13 @@ static void death_screen(ui *u, const health *h)
     ui_text(u, (u->w - ui_text_width(b, 1)) * 0.5f, u->h * 0.3f + 72, 1, C_DIM, b);
     for (int i = 0, n = 0; i < HEALTH_LOG && n < 3; i++) {
         if (!h->log[i][0]) continue;
-        ui_text(u, (u->w - ui_text_width(h->log[i], 1)) * 0.5f, u->h * 0.3f + 90 + (float)n * 10, 1, C_DIM,
-                h->log[i]);
+        ui_text(u, (u->w - ui_text_width(h->log[i], 1)) * 0.5f, u->h * 0.3f + 90 + (float)n * 10, 1, C_DIM, h->log[i]);
         n++;
     }
-    const char *r = "Press Enter to respawn";
-    if (blink(h, 1)) ui_text(u, (u->w - ui_text_width(r, 1)) * 0.5f, u->h * 0.3f + 130, 1, C_HEAD, r);
+    if (blink(h, 1)) {
+        const char *r = "Press Enter to respawn";
+        ui_text(u, (u->w - ui_text_width(r, 1)) * 0.5f, u->h * 0.3f + 130, 1, C_HEAD, r);
+    }
 }
 
 void hud_draw(ui *u, const health *h, const hud_state *s)

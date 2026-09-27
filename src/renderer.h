@@ -5,11 +5,11 @@
 #ifndef MC_RENDERER_H
 #define MC_RENDERER_H
 
-#include <stdint.h>
 #include "mathlib.h"
 #include "physics.h"
 #include "ui.h"
 #include "world.h"
+#include <stdint.h>
 
 typedef struct GLFWwindow GLFWwindow;
 

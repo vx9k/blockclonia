@@ -37,8 +37,10 @@ static double cushion_under(const world *w, const player *p)
     switch (id) {
     case B_LEAVES: return 0.35; /* mostly air and springy twigs */
     case B_SNOW: return 0.6;
-    case B_SAND: case B_GRAVEL: return 0.85;
-    case B_DIRT: case B_GRASS: return 0.92;
+    case B_SAND:
+    case B_GRAVEL: return 0.85;
+    case B_DIRT:
+    case B_GRASS: return 0.92;
     default: return 1.0;
     }
 }
@@ -47,19 +49,19 @@ void survival_impacts(health *h, const world *w, const physics *ph, const player
 {
     if (p->flying || h->dead) return;
     /* Landing on ground: the whole downward speed goes in one stop. */
-    if (!b->on_ground && p->on_ground && b->vel.y < -5.0)
-        health_fall(h, -b->vel.y, cushion_under(w, p));
+    if (!b->on_ground && p->on_ground && b->vel.y < -5.0) health_fall(h, -b->vel.y, cushion_under(w, p));
     /* Hitting water from height: water is soft only when entered slowly. */
-    if (b->submerged < 0.25 && p->submerged >= 0.25 && b->vel.y < -12.0)
-        health_fall(h, -b->vel.y, 0.55);
+    if (b->submerged < 0.25 && p->submerged >= 0.25 && b->vel.y < -12.0) health_fall(h, -b->vel.y, 0.55);
     /* Running or falling sideways into a wall. */
     double dvh = hypot(b->vel.x - p->vel.x, b->vel.z - p->vel.z);
     if (dvh > 6.0 && p->submerged < 0.5) health_blunt(h, BP_CHEST, dvh);
     /* Falling blocks that struck the player. */
     for (int i = 0; i < ph->hit_count; i++) {
         const player_hit *k = &ph->hits[i];
-        double soft = k->block == B_LEAVES ? 0.95 : (k->block == B_SNOW ? 0.7 : (k->block == B_SAND || k->block == B_GRAVEL ? 0.3 : 0.0));
-        health_struck(h, k->mass, k->speed, k->height, soft);
+        double soft = k->block == B_LEAVES
+                          ? 0.95
+                          : (k->block == B_SNOW ? 0.7 : (k->block == B_SAND || k->block == B_GRAVEL ? 0.3 : 0.0));
+        health_struck(h, (double)k->mass, (double)k->speed, (double)k->height, soft);
     }
 }
 
@@ -99,8 +101,9 @@ int survival_water_nearby(const world *w, const player *p, vec3 dir)
 {
     if (p->submerged > 0.1) return 1;
     dvec3 eye = dv3(p->pos.x, p->pos.y + PLAYER_EYE, p->pos.z);
-    for (double t = 0.0; t <= 3.0; t += 0.2) {
-        uint8_t id = block_at(w, dv3(eye.x + dir.x * t, eye.y + dir.y * t, eye.z + dir.z * t));
+    for (int k = 0; k <= 15; k++) { /* 20 cm steps out to 3 m */
+        double t = 0.2 * k;
+        uint8_t id = block_at(w, dv3(eye.x + (double)dir.x * t, eye.y + (double)dir.y * t, eye.z + (double)dir.z * t));
         if (id == B_WATER) return 1;
         if (block_solid(id)) break;
     }

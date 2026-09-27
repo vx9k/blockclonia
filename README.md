@@ -29,6 +29,7 @@ for low-end hardware. All memory comes from [mimalloc](https://github.com/micros
   including water.
 - **Saves**: only columns you changed are written, one RLE-compressed file
   per column, written atomically.
+- **A body that works like one** (press **H**): see [Health](#health).
 
 ## Built for low-end devices
 
@@ -61,7 +62,45 @@ for low-end hardware. All memory comes from [mimalloc](https://github.com/micros
 | Middle click | Pick block |
 | 1–9 or scroll | Select block |
 | F2 | Screenshot (`screenshot.ppm`) |
+| H | Health panel (while open: 1–7 or ↑/↓ pick a body part, B bandage, S splint, D disinfect, P painkiller, A antibiotics) |
+| E / R | Eat an apple / drink (standing in or facing water) |
+| Enter | Respawn after death |
 | Esc | Release cursor, press again to quit |
+
+## Health
+
+The player is a 75 kg adult simulated in real time: a circulation model
+(blood volume, heart rate, stroke volume, vascular resistance, a
+baroreflex), breathing driven by CO₂ and O₂, an oxygen store with a real
+dissociation curve, core temperature, water and energy balance, and
+stamina as an anaerobic reserve. Slow processes (infection, healing,
+thirst, hunger) run on a survival clock 72× faster than real time.
+
+- **The HUD** shows heart rate, blood pressure and SpO₂ with a live ECG
+  strip, bars for blood, water, food and stamina, and alerts. Failing
+  brain oxygen narrows vision; fainting blacks the screen out.
+- **The H panel** has a body diagram and the status of each of the seven
+  parts (fractures, cuts, bleeding rate, infection, internal bleeding,
+  bruising) with advice for the selected one; the organs (brain, heart,
+  lungs, liver, kidneys, gut); blood, hydration, food, glycogen, stamina,
+  pain and temperature; lab-style numbers (Hb, lactate, cardiac output,
+  blood gases); and a bedside monitor with ECG, arterial pressure, pleth
+  and capnography traces that move with every beat and breath.
+- **Injuries come from the physics**: landings (softened by leaves, snow
+  or sand), running into walls, falling blocks by mass and speed, and
+  smashing glass by hand. Cuts clot unless an artery is cut; walking on an
+  unsplinted broken leg bleeds inside and can push the bone through the
+  skin; dirty wounds get infected and can turn septic with a fever.
+- **Treatment uses supplies** from a starting kit and from the world:
+  leaves give plant fibre and apples, logs give sticks, two fibres make an
+  improvised bandage, two sticks and a fibre make a splint.
+- **Vitals respond to what you do**: sprinting raises heart rate, pressure
+  and breathing and spends stamina; bleeding drops pressure while the
+  heart races; holding your breath under water slows the heart (diving
+  reflex) until you black out and inhale water.
+
+You can die of blood loss, drowning, suffocation, head injury, cardiac
+arrest, sepsis, dehydration, starvation, hypothermia or heatstroke.
 
 ## Building
 
@@ -98,7 +137,12 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
             [--threads N] [--pool-mb N] [--gpu N] [--world DIR | --no-save]
             [--validate] [--frames N] [--screenshot F] [--look YAW,PITCH]
             [--spawn X,Z] [--demo] [--bench] [--mem-stats]
+            [--health-panel] [--hurt LIST]
 ```
+
+`--hurt` starts you injured, to try treatments or take screenshots: a
+comma list of `bleed`, `artery`, `fracture`, `open-fracture`, `infection`
+and `concussion`.
 
 For very weak devices start with `--radius 4`. `--demo` builds a tower
 with a timber cantilever in front of you and knocks out its middle.
@@ -138,7 +182,11 @@ corruption rejection, the mesher (greedy merging, worst case, water),
 world edits and mesh invalidation, free fall time against √(2h/g), no
 tunnelling at 60 m/s, wall collision, jump height, friction (ice vs
 stone), cantilever limits, tree felling, sand, buoyancy, water volume
-conservation and raycasting.
+conservation and raycasting; resting and exercising vitals, arterial
+bleeding with and without a dressing, breath-holding and drowning,
+fractures and splints, infection with and without treatment, thirst and
+hunger, landings through the player physics, and the UI batch (text
+metrics, wrapping, buffer overflow, whole screens).
 
 ## Layout
 
@@ -151,6 +199,9 @@ src/mesher.c     greedy mesher with AO     src/texgen.c  procedural textures
 src/physics.c    player, bodies, structure, water, raycast
 src/save.c       world files               src/jobs.c    thread pool
 src/gpupool.c    vertex pool allocator     src/mem.c     mimalloc wrappers
+src/health.c     the body: circulation, breathing, injuries, treatment
+src/survival.c   turns physics events into injuries, limits movement
+src/hud.c        HUD, H panel, monitor     src/ui.c      2D overlay batch and font
 src/log.c        logging, save-on-fatal hook
 shaders/         GLSL, compiled to SPIR-V and embedded at build time
 tests/           unit tests and the save-file fuzzer

@@ -359,7 +359,8 @@ static void apply_hurt(health *h, const char *list)
 {
     char buf[256];
     snprintf(buf, sizeof buf, "%s", list);
-    for (char *t = strtok(buf, ","); t; t = strtok(NULL, ",")) {
+    char *save = NULL;
+    for (char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
         if (!strcmp(t, "bleed")) health_cut(h, BP_LLEG, 0.6f, 0, 0.3f);
         else if (!strcmp(t, "artery")) health_cut(h, BP_LLEG, 0.7f, 1, 0.2f);
         else if (!strcmp(t, "fracture")) health_break_bone(h, BP_RARM, 0);
@@ -469,7 +470,7 @@ int main(int argc, char **argv)
     log_info("spawn at %.1f %.1f %.1f with %d worker threads", pl.pos.x, pl.pos.y, pl.pos.z,
              jobs_worker_count(js));
 
-    health hl;
+    static health hl; /* 23 KB of waveform history: keep it off the stack */
     health_init(&hl, seed ^ 0x9E3779B9u);
     if (o.hurt) apply_hurt(&hl, o.hurt);
     hud_state hs;

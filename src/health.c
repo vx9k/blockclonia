@@ -37,14 +37,14 @@ static float frand(health *h)
     return (float)(x >> 8) * (1.0f / 16777216.0f);
 }
 
-static float clampf_(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
+static float fclamp(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 static float maxf(float a, float b) { return a > b ? a : b; }
 static float minf(float a, float b) { return a < b ? a : b; }
 
 /* 0 below a, 1 above b, smooth in between. */
 static float ramp(float v, float a, float b)
 {
-    float t = clampf_((v - a) / (b - a), 0.0f, 1.0f);
+    float t = fclamp((v - a) / (b - a), 0.0f, 1.0f);
     return t * t * (3.0f - 2.0f * t);
 }
 
@@ -57,7 +57,7 @@ static float lag(float cur, float target, double dt, double tau)
 static float severinghaus(float po2)
 {
     if (po2 <= 0.0f) return 0.0f;
-    double p = po2;
+    double p = (double)po2;
     return (float)(1.0 / (23400.0 / (p * p * p + 150.0 * p) + 1.0));
 }
 
@@ -80,13 +80,13 @@ void health_log(health *h, const char *fmt, ...)
     h->log_age[0] = 0.0f;
 }
 
-static const char *PART_NAMES[BP_COUNT] = {"Head", "Chest", "Abdomen", "Left arm", "Right arm", "Left leg",
-                                           "Right leg"};
-static const char *PART_NAMES_LC[BP_COUNT] = {"head", "chest", "abdomen", "left arm", "right arm", "left leg",
-                                              "right leg"};
-static const char *BONE_NAMES[BP_COUNT] = {"skull", "ribs", "pelvis", "left forearm", "right forearm",
-                                           "left tibia", "right tibia"};
-static const char *ORGAN_NAMES[ORG_COUNT] = {"Brain", "Heart", "Lungs", "Liver", "Kidneys", "Gut"};
+static const char *const PART_NAMES[BP_COUNT] = {"Head",      "Chest",    "Abdomen",  "Left arm",
+                                                 "Right arm", "Left leg", "Right leg"};
+static const char *const PART_NAMES_LC[BP_COUNT] = {"head",      "chest",    "abdomen",  "left arm",
+                                                    "right arm", "left leg", "right leg"};
+static const char *const BONE_NAMES[BP_COUNT] = {"skull",         "ribs",       "pelvis",     "left forearm",
+                                                 "right forearm", "left tibia", "right tibia"};
+static const char *const ORGAN_NAMES[ORG_COUNT] = {"Brain", "Heart", "Lungs", "Liver", "Kidneys", "Gut"};
 
 const char *health_part_name(int part) { return part >= 0 && part < BP_COUNT ? PART_NAMES[part] : "?"; }
 const char *health_bone_name(int part) { return part >= 0 && part < BP_COUNT ? BONE_NAMES[part] : "?"; }
@@ -108,13 +108,6 @@ const char *health_death_text(int cause)
     case DEATH_TRAUMA: return "Crushed";
     default: return "Alive";
     }
-}
-
-const char *health_treat_name(int what)
-{
-    static const char *n[TREAT_COUNT] = {"Bandage", "Splint", "Disinfect", "Painkiller", "Antibiotics",
-                                         "Eat apple", "Drink"};
-    return what >= 0 && what < TREAT_COUNT ? n[what] : "?";
 }
 
 /* --------------------------------------------------------------- init */
@@ -143,8 +136,8 @@ void health_init(health *h, uint32_t seed)
     h->dbp = 80.0f;
     h->symp = 0.15f;
     h->rhythm = RHYTHM_SINUS;
-    h->next_r = 60.0 / HR_REST;
-    h->prev_r = -60.0 / HR_REST;
+    h->next_r = 60.0 / (double)HR_REST;
+    h->prev_r = -60.0 / (double)HR_REST;
     h->beat_pp = 40.0f;
     h->beat_dbp = 80.0f;
 
@@ -166,8 +159,8 @@ void health_init(health *h, uint32_t seed)
     h->icp = 10.0f;
     h->conscious = CONS_ALERT;
 
-    h->items = (survival_items){.bandages = 3, .splints = 1, .antiseptic = 2, .painkillers = 4,
-                                .antibiotics = 1, .apples = 3};
+    h->items =
+        (survival_items){.bandages = 3, .splints = 1, .antiseptic = 2, .painkillers = 4, .antibiotics = 1, .apples = 3};
     for (int i = 0; i < HEALTH_WAVE_LEN; i++) {
         h->art[i] = 80.0f;
         h->pleth[i] = 0.0f;
@@ -191,13 +184,13 @@ static wound *add_wound(health *h, int part, int kind, float depth, int arterial
     memset(w, 0, sizeof *w);
     w->part = (uint8_t)part;
     w->kind = (uint8_t)kind;
-    w->depth = clampf_(depth, 0.0f, 1.0f);
+    w->depth = fclamp(depth, 0.0f, 1.0f);
     w->arterial = (uint8_t)arterial;
     /* Capillary/venous ooze grows with depth; a severed artery pours, and
      * deeper cuts reach bigger arteries (a femoral bleed tops 1 L/min). */
     w->bleed0 = arterial ? 150.0f + 850.0f * w->depth * w->depth : 3.0f + 60.0f * w->depth * w->depth;
     w->bleed = w->bleed0;
-    w->contamination = clampf_(contamination, 0.0f, 1.0f);
+    w->contamination = fclamp(contamination, 0.0f, 1.0f);
     return w;
 }
 
@@ -301,8 +294,8 @@ void health_fall(health *h, double dv, double cushion)
     /* Legs take the landing: bruising, sprained ankles, then fractures. */
     for (int leg = BP_LLEG; leg <= BP_RLEG; leg++) {
         body_part *p = &h->part[leg];
-        p->integrity = maxf(0.0f, p->integrity - clampf_((v - 5.0f) * 0.05f, 0.0f, 0.9f));
-        float t = clampf_((v - 6.5f) / 6.0f, 0.0f, 1.0f);
+        p->integrity = maxf(0.0f, p->integrity - fclamp((v - 5.0f) * 0.05f, 0.0f, 0.9f));
+        float t = fclamp((v - 6.5f) / 6.0f, 0.0f, 1.0f);
         if (frand(h) < t * t) {
             break_bone(h, leg, v > 11.0f && frand(h) < 0.6f * ramp(v, 11.0f, 16.0f));
         } else if (frand(h) < 0.6f * ramp(v, 5.5f, 9.0f)) {
@@ -312,7 +305,7 @@ void health_fall(health *h, double dv, double cushion)
     }
     /* Arms brace the fall (wrist fractures). */
     for (int arm = BP_LARM; arm <= BP_RARM; arm++) {
-        h->part[arm].integrity = maxf(0.0f, h->part[arm].integrity - clampf_((v - 7.0f) * 0.04f, 0.0f, 0.6f));
+        h->part[arm].integrity = maxf(0.0f, h->part[arm].integrity - fclamp((v - 7.0f) * 0.04f, 0.0f, 0.6f));
         if (frand(h) < 0.5f * ramp(v, 8.0f, 14.0f)) break_bone(h, arm, 0);
     }
     /* Hard landings travel up the skeleton. */
@@ -342,10 +335,10 @@ void health_blunt(health *h, int part, double dv)
 void health_struck(health *h, double mass, double speed, double height, double softness)
 {
     if (h->dead || mass <= 0.0 || speed <= 0.0) return;
-    double e = 0.5 * mass * speed * speed * (1.0 - clampf_((float)softness, 0.0f, 0.98f));
+    double e = 0.5 * mass * speed * speed * (1.0 - (double)fclamp((float)softness, 0.0f, 0.98f));
     if (e < 20.0) return;
     /* Severity on a log scale between a harmless and a devastating blow. */
-    #define SEV(lo, hi) (float)((log10(e) - log10(lo)) / (log10(hi) - log10(lo)))
+#define SEV(lo, hi) (float)((log10(e) - log10(lo)) / (log10(hi) - log10(lo)))
     int part;
     if (height >= 0.87) part = BP_HEAD;
     else if (height >= 0.6) part = frand(h) < 0.6f ? BP_CHEST : (frand(h) < 0.5f ? BP_LARM : BP_RARM);
@@ -371,7 +364,7 @@ void health_struck(health *h, double mass, double speed, double height, double s
     case BP_ABDOMEN: abdomen_injury(h, SEV(100.0, 8000.0)); break;
     default: limb_injury(h, part, SEV(50.0, 3000.0)); break;
     }
-    #undef SEV
+#undef SEV
 }
 
 void health_cut(health *h, int part, float severity, int arterial, float contamination)
@@ -380,7 +373,7 @@ void health_cut(health *h, int part, float severity, int arterial, float contami
     wound *w = add_wound(h, part, WOUND_CUT, severity, arterial, contamination);
     h->part[part].integrity = maxf(0.0f, h->part[part].integrity - 0.1f * severity);
     h->hurt_flash = minf(1.0f, h->hurt_flash + 0.3f + severity);
-    if (arterial) health_log(h, "Artery cut on the %s: %.0f mL/min", PART_NAMES_LC[part], w->bleed0);
+    if (arterial) health_log(h, "Artery cut on the %s: %.0f mL/min", PART_NAMES_LC[part], (double)w->bleed0);
     else health_log(h, "%s cut on the %s", severity > 0.5f ? "Deep" : "Shallow", PART_NAMES_LC[part]);
 }
 
@@ -393,11 +386,17 @@ void health_break_bone(health *h, int part, int open)
 
 /* ------------------------------------------------------------ treatment */
 
-int health_treat(health *h, int part, int what, int water_nearby, char *msg, size_t n)
+int health_treat(health *h, int part, int what, int water_nearby, char *msg, size_t msg_size)
 {
     survival_items *it = &h->items;
-    if (h->dead) { snprintf(msg, n, "You are dead"); return 0; }
-    if (h->conscious == CONS_UNCONSCIOUS) { snprintf(msg, n, "You are unconscious"); return 0; }
+    if (h->dead) {
+        snprintf(msg, msg_size, "You are dead");
+        return 0;
+    }
+    if (h->conscious == CONS_UNCONSCIOUS) {
+        snprintf(msg, msg_size, "You are unconscious");
+        return 0;
+    }
     if (part < 0 || part >= BP_COUNT) part = BP_CHEST;
     const char *pn = PART_NAMES_LC[part];
 
@@ -405,14 +404,24 @@ int health_treat(health *h, int part, int what, int water_nearby, char *msg, siz
     case TREAT_BANDAGE: {
         int need = 0;
         for (int i = 0; i < h->wound_count; i++) {
-            wound *w = &h->wounds[i];
+            const wound *w = &h->wounds[i];
             if (w->part == part && (!w->bandage || w->bandage_age > 24.0f || w->bleed > 5.0f)) need = 1;
         }
-        if (!need) { snprintf(msg, n, "No open wound to dress on the %s", pn); return 0; }
+        if (!need) {
+            snprintf(msg, msg_size, "No open wound to dress on the %s", pn);
+            return 0;
+        }
         int kind;
-        if (it->bandages > 0) { it->bandages--; kind = BANDAGE_STERILE; }
-        else if (it->fibre >= 2) { it->fibre -= 2; kind = BANDAGE_IMPROVISED; }
-        else { snprintf(msg, n, "No bandages (2 plant fibre make one)"); return 0; }
+        if (it->bandages > 0) {
+            it->bandages--;
+            kind = BANDAGE_STERILE;
+        } else if (it->fibre >= 2) {
+            it->fibre -= 2;
+            kind = BANDAGE_IMPROVISED;
+        } else {
+            snprintf(msg, msg_size, "No bandages (2 plant fibre make one)");
+            return 0;
+        }
         for (int i = 0; i < h->wound_count; i++) {
             wound *w = &h->wounds[i];
             if (w->part != part) continue;
@@ -420,31 +429,51 @@ int health_treat(health *h, int part, int what, int water_nearby, char *msg, siz
             w->bandage_age = 0.0f;
             if (kind == BANDAGE_IMPROVISED) w->contamination = minf(1.0f, w->contamination + 0.08f);
         }
-        snprintf(msg, n, "Pressure dressing on the %s (%s)", pn, kind == BANDAGE_STERILE ? "sterile" : "improvised");
+        snprintf(msg, msg_size, "Pressure dressing on the %s (%s)", pn,
+                 kind == BANDAGE_STERILE ? "sterile" : "improvised");
         return 1;
     }
     case TREAT_SPLINT: {
         body_part *p = &h->part[part];
-        if (!is_limb(part) && part != BP_ABDOMEN) { snprintf(msg, n, "The %s can't be splinted", pn); return 0; }
+        if (!is_limb(part) && part != BP_ABDOMEN) {
+            snprintf(msg, msg_size, "The %s can't be splinted", pn);
+            return 0;
+        }
         if ((!p->fracture && p->sprain < 0.05f) || p->splinted) {
-            snprintf(msg, n, p->splinted ? "The %s is already splinted" : "Nothing to splint on the %s", pn);
+            snprintf(msg, msg_size, p->splinted ? "The %s is already splinted" : "Nothing to splint on the %s", pn);
             return 0;
         }
         if (it->splints > 0) it->splints--;
-        else if (it->sticks >= 2 && it->fibre >= 1) { it->sticks -= 2; it->fibre -= 1; }
-        else { snprintf(msg, n, "No splint (2 sticks + 1 fibre make one)"); return 0; }
+        else if (it->sticks >= 2 && it->fibre >= 1) {
+            it->sticks -= 2;
+            it->fibre -= 1;
+        } else {
+            snprintf(msg, msg_size, "No splint (2 sticks + 1 fibre make one)");
+            return 0;
+        }
         p->splinted = 1;
-        snprintf(msg, n, part == BP_ABDOMEN ? "Pelvic binder tied" : "Splinted the %s", pn);
+        snprintf(msg, msg_size, part == BP_ABDOMEN ? "Pelvic binder tied" : "Splinted the %s", pn);
         return 1;
     }
     case TREAT_DISINFECT: {
         int any = 0;
         for (int i = 0; i < h->wound_count; i++) any |= h->wounds[i].part == part;
-        if (!any) { snprintf(msg, n, "No wound on the %s", pn); return 0; }
+        if (!any) {
+            snprintf(msg, msg_size, "No wound on the %s", pn);
+            return 0;
+        }
         float c_mul, i_mul;
-        if (it->antiseptic > 0) { it->antiseptic--; c_mul = 0.15f; i_mul = 0.5f; }
-        else if (water_nearby) { c_mul = 0.5f; i_mul = 1.0f; }
-        else { snprintf(msg, n, "No antiseptic, and no water to rinse with"); return 0; }
+        if (it->antiseptic > 0) {
+            it->antiseptic--;
+            c_mul = 0.15f;
+            i_mul = 0.5f;
+        } else if (water_nearby) {
+            c_mul = 0.5f;
+            i_mul = 1.0f;
+        } else {
+            snprintf(msg, msg_size, "No antiseptic, and no water to rinse with");
+            return 0;
+        }
         for (int i = 0; i < h->wound_count; i++) {
             wound *w = &h->wounds[i];
             if (w->part != part) continue;
@@ -453,11 +482,15 @@ int health_treat(health *h, int part, int what, int water_nearby, char *msg, siz
             w->infection *= w->infection < 0.35f ? i_mul : 0.9f;
         }
         h->part[part].pain = minf(PAIN_SCALE, h->part[part].pain + 2.0f);
-        snprintf(msg, n, c_mul < 0.2f ? "Cleaned the %s wounds with antiseptic" : "Rinsed the %s wounds with water", pn);
+        snprintf(msg, msg_size,
+                 c_mul < 0.2f ? "Cleaned the %s wounds with antiseptic" : "Rinsed the %s wounds with water", pn);
         return 1;
     }
     case TREAT_PAINKILLER:
-        if (it->painkillers <= 0) { snprintf(msg, n, "No painkillers left"); return 0; }
+        if (it->painkillers <= 0) {
+            snprintf(msg, msg_size, "No painkillers left");
+            return 0;
+        }
         it->painkillers--;
         /* Doubling up on paracetamol-type drugs strains the liver. */
         if (h->painkiller > 3.0f) {
@@ -465,46 +498,59 @@ int health_treat(health *h, int part, int what, int water_nearby, char *msg, siz
             health_log(h, "Too many painkillers: liver strain");
         }
         h->painkiller = 6.0f;
-        snprintf(msg, n, "Took a painkiller (6 h)");
+        snprintf(msg, msg_size, "Took a painkiller (6 h)");
         return 1;
     case TREAT_ANTIBIOTIC:
-        if (it->antibiotics <= 0) { snprintf(msg, n, "No antibiotics left"); return 0; }
+        if (it->antibiotics <= 0) {
+            snprintf(msg, msg_size, "No antibiotics left");
+            return 0;
+        }
         it->antibiotics--;
         h->antibiotic = 7.0f * 24.0f;
-        snprintf(msg, n, "Started a 7-day course of antibiotics");
+        snprintf(msg, msg_size, "Started a 7-day course of antibiotics");
         return 1;
     case TREAT_EAT:
-        if (it->apples <= 0) { snprintf(msg, n, "No food (apples drop from leaves)"); return 0; }
-        if (h->stomach_kcal > 1200.0f) { snprintf(msg, n, "Too full to eat"); return 0; }
+        if (it->apples <= 0) {
+            snprintf(msg, msg_size, "No food (apples drop from leaves)");
+            return 0;
+        }
+        if (h->stomach_kcal > 1200.0f) {
+            snprintf(msg, msg_size, "Too full to eat");
+            return 0;
+        }
         it->apples--;
         h->stomach_kcal += 95.0f;
         h->stomach_water += 0.085f;
-        snprintf(msg, n, "Ate an apple (95 kcal)");
+        snprintf(msg, msg_size, "Ate an apple (95 kcal)");
         return 1;
     case TREAT_DRINK:
-        if (!water_nearby) { snprintf(msg, n, "No water within reach"); return 0; }
-        if (h->stomach_water > 1.5f) { snprintf(msg, n, "Too full to drink"); return 0; }
+        if (!water_nearby) {
+            snprintf(msg, msg_size, "No water within reach");
+            return 0;
+        }
+        if (h->stomach_water > 1.5f) {
+            snprintf(msg, msg_size, "Too full to drink");
+            return 0;
+        }
         h->stomach_water += 0.25f;
-        snprintf(msg, n, "Drank 250 mL of water");
+        snprintf(msg, msg_size, "Drank 250 mL of water");
         return 1;
-    default:
-        snprintf(msg, n, "?");
-        return 0;
+    default: snprintf(msg, msg_size, "?"); return 0;
     }
 }
 
-void health_scavenge(health *h, uint8_t block)
+void health_scavenge(health *h, uint8_t id)
 {
     survival_items *it = &h->items;
-    if (block == B_LEAVES) {
+    if (id == B_LEAVES) {
         if (frand(h) < 0.5f) it->fibre++;
         if (frand(h) < 1.0f / 6.0f) {
             it->apples++;
             health_log(h, "Found an apple");
         }
-    } else if (block == B_LOG) {
+    } else if (id == B_LOG) {
         it->sticks += 2;
-    } else if (block == B_PLANKS) {
+    } else if (id == B_PLANKS) {
         if (frand(h) < 0.5f) it->sticks++;
     }
 }
@@ -567,7 +613,7 @@ static void write_samples(health *h, const health_env *e, double dt)
         float rr = 60.0f / maxf(h->hr, 1.0f);
 
         if (h->rhythm == RHYTHM_SINUS && !h->dead) {
-            h->beat_phase += (float)(ds * h->hr / 60.0);
+            h->beat_phase += (float)(ds * (double)h->hr / 60.0);
             int fire = 0, pvc = 0;
             if (h->pvc_pending && h->beat_phase >= 0.62f) {
                 fire = pvc = 1;
@@ -584,12 +630,12 @@ static void write_samples(health *h, const health_env *e, double dt)
                 h->beat_pp = (h->sbp - h->dbp) * (pvc ? 0.35f : 1.0f);
                 h->beat_dbp = h->dbp;
                 /* Ischaemic, acidotic, cold or hyperkalaemic hearts throw ectopics. */
-                float p = 0.004f + clampf_((h->ischemia - 0.5f) * 0.1f, 0.0f, 0.4f) +
+                float p = 0.004f + fclamp((h->ischemia - 0.5f) * 0.1f, 0.0f, 0.4f) +
                           (h->lactate > 10.0f ? 0.05f : 0.0f) + (h->organ[ORG_KIDNEYS] < 0.15f ? 0.06f : 0.0f) +
                           (h->temp < 32.0f ? 0.05f : 0.0f);
                 if (!pvc && frand(h) < p) h->pvc_pending = 1;
             }
-            h->next_r = ts + (1.0f - h->beat_phase) * rr;
+            h->next_r = ts + (double)((1.0f - h->beat_phase) * rr);
             float st = h->ischemia > 1.0f ? -0.08f * minf(h->ischemia, 3.0f) : 0.0f;
             ecg = ecg_beat((float)(ts - h->last_r), rr, h->last_beat_pvc, st);
             if (!h->pvc_pending) ecg += ecg_beat((float)(ts - h->next_r), rr, 0, 0.0f);
@@ -602,7 +648,7 @@ static void write_samples(health *h, const health_env *e, double dt)
         }
         /* Baseline wander with breathing, and motion artefact when moving. */
         ecg += 0.04f * sinf(6.2831853f * h->breath_phase) +
-               (frand(h) - 0.5f) * (0.02f + 0.03f * (float)clampf_((float)e->speed, 0.0f, 8.0f));
+               (frand(h) - 0.5f) * (0.02f + 0.03f * (float)fclamp((float)e->speed, 0.0f, 8.0f));
 
         int pulse = h->rhythm == RHYTHM_SINUS && !h->dead;
         if (pulse) {
@@ -613,7 +659,7 @@ static void write_samples(health *h, const health_env *e, double dt)
             float tp = (float)(ts - h->last_r) - 0.22f;
             if (tp < 0.0f) tp += beat_rr;
             /* Vasoconstriction flattens the finger's pulse. */
-            float pi = clampf_(h->beat_pp / 40.0f, 0.0f, 1.5f) * (1.1f - 0.7f * h->symp);
+            float pi = fclamp(h->beat_pp / 40.0f, 0.0f, 1.5f) * (1.1f - 0.7f * h->symp);
             pleth = pi * pulse_wave(tp, maxf(rr, beat_rr), 0.15f);
         } else {
             art = h->map;
@@ -633,7 +679,7 @@ static void write_samples(health *h, const health_env *e, double dt)
         h->capno[i] = capno;
         h->wave_pos = (i + 1) % HEALTH_WAVE_LEN;
         if (h->breathing) {
-            h->breath_phase += (float)(ds * h->rr / 60.0);
+            h->breath_phase += (float)(ds * (double)h->rr / 60.0);
             if (h->breath_phase >= 1.0f) h->breath_phase -= 1.0f;
         }
     }
@@ -695,94 +741,15 @@ static float solve_output(float hr, float contract, float pms, float rvr, float 
     return maxf(0.0f, (pms - rap - rap_extra) / rvr);
 }
 
-void health_step(health *h, const health_env *e, double dt)
+/* Wounds bleed (less as they clot and when dressed), broken bones and torn
+ * organs bleed inside, and plasma and red cells are replaced. */
+static void step_bleeding(health *h, const health_env *e, double dt, float gh, float dehyd)
 {
-    h->t += dt;
-    for (int i = 0; i < HEALTH_LOG; i++) h->log_age[i] += (float)dt;
-    h->hurt_flash = maxf(0.0f, h->hurt_flash - (float)dt * 0.8f);
-    if (h->dead) {
-        h->hr = h->rr = 0.0f;
-        h->breathing = 0;
-        h->map = lag(h->map, 0.0f, dt, 20.0);
-        h->sbp = h->dbp = h->map;
-        write_samples(h, e, dt);
-        return;
-    }
-    const float gh = (float)(dt * HEALTH_CLOCK / 3600.0); /* survival-clock hours this step */
     const float fdt = (float)dt;
-    const int awake = h->conscious != CONS_UNCONSCIOUS;
-    const float dehyd = dehydration(h);
-    const float hb = health_hb(h);
-    const float cao2_rel = (hb / 15.0f) * (h->sao2 / 0.975f);
-    const int arrest = h->rhythm != RHYTHM_SINUS;
-
-    /* ---- metabolism: power demand, stamina, VO2, lactate */
-    float p = BMR_W * (1.0f + 0.1f * maxf(0.0f, h->temp - 37.0f));
-    int swimming = e->submerged > 0.5;
-    if (awake) {
-        if (swimming) p += 60.0f + 450.0f * (float)minf((float)e->speed, 3.0f); /* sculling + strokes */
-        else if (e->on_ground) p += 300.0f * minf((float)e->speed, 9.0f);
-        else p += 60.0f;
-        if (e->jumped) h->wbal -= 1500.0f;
-        h->wbal -= 300.0f * (float)e->actions;
-    }
-    if (h->temp < 36.5f) p += minf(400.0f, 250.0f * (36.5f - h->temp)); /* shivering */
-    float cap = cao2_rel * h->organ[ORG_HEART] * clampf_(h->blood / BLOOD_NORMAL, 0.0f, 1.0f) *
-                (h->glycogen > 50.0f ? 1.0f : 0.7f) * (1.0f - clampf_(dehyd * 3.0f, 0.0f, 0.4f));
-    cap = clampf_(cap, 0.05f, 1.0f);
-    float cp = CRIT_POWER * cap, aer_max = VO2MAX_W * cap;
-    if (p > cp) {
-        h->wbal -= (p - cp) * fdt;
-        h->lactate += (p - cp) / 5000.0f * fdt;
-    } else {
-        float tau = 316.0f + 546.0f * expf(-0.0025f * (cp - p));
-        h->wbal = lag(h->wbal, WPRIME, dt, tau);
-    }
-    h->wbal = clampf_(h->wbal, 0.0f, WPRIME);
-    h->power = lag(h->power, minf(p, aer_max), dt, 25.0); /* VO2 on-kinetics */
-    h->vo2 = h->power / J_PER_ML_O2 * 0.06f;
-    float vo2_frac = h->vo2 / vo2max_l();
-    float do2_rel = (h->co / 4.8f) * cao2_rel;
-    if (do2_rel < 0.5f) h->lactate += (0.5f - do2_rel) * 0.05f * fdt; /* shock: tissues starved of oxygen */
-    /* Prolonged severe hypoperfusion poisons the heart and vessels
-     * (acidosis, inflammatory mediators): past a point, restoring volume
-     * no longer restores pressure. Slowly repaid once perfusion returns. */
-    if (!arrest && do2_rel < 0.4f) h->shock_debt += (0.4f - do2_rel) / 0.4f * fdt / 60.0f;
-    else h->shock_debt = maxf(0.0f, h->shock_debt - fdt / 1800.0f);
-    h->lactate -= (h->lactate - 1.0f) * 0.0012f * h->organ[ORG_LIVER] * fdt;
-    h->lactate = clampf_(h->lactate, 0.5f, 30.0f);
-
-    /* ---- core temperature */
-    float fever_set = 37.0f + 2.5f * h->sepsis;
-    float ctrl = clampf_(1000.0f * (fever_set - h->temp), -900.0f, 60.0f); /* sweating .. vasoconstriction */
-    float immersion = 25.0f * (float)e->submerged * (h->temp - (float)e->water_temp);
-    h->temp += (0.8f * p - 68.0f - immersion + ctrl) / HEAT_CAP * fdt;
-    /* Fever: chills and shut-down skin raise the set point within hours,
-     * which on the survival clock is minutes. */
-    if (fever_set > h->temp + 0.05f) h->temp += (fever_set - h->temp) * minf(1.0f, gh / 1.5f);
-    float sweat = maxf(0.0f, -ctrl) / 2.43e6f * fdt;
-
-    /* ---- water */
-    float absorb = minf(h->stomach_water, 1.2f * gh * h->organ[ORG_GUT]);
-    h->stomach_water -= absorb;
-    h->water += absorb - sweat - 0.104f * gh * (1.0f + 0.1f * maxf(0.0f, h->temp - 37.0f));
-    if (h->water > WATER_NORMAL + 0.5f) h->water -= (h->water - WATER_NORMAL) * 0.5f * gh * h->organ[ORG_KIDNEYS];
-
-    /* ---- energy */
-    float kcal_basal = BMR_W * 3600.0f / 4184.0f * gh;
-    float kcal_ex = maxf(0.0f, p - BMR_W) * fdt / 4184.0f;
-    float carb = 0.4f * kcal_basal + (0.5f + 0.45f * clampf_(p / CRIT_POWER, 0.0f, 1.0f)) * kcal_ex;
-    float digest = minf(h->stomach_kcal, 250.0f * gh * h->organ[ORG_GUT]);
-    h->stomach_kcal -= digest;
-    h->glycogen += digest - carb;
-    h->fat -= kcal_basal + kcal_ex - carb;
-    if (h->glycogen > GLYCOGEN_MAX) { h->fat += h->glycogen - GLYCOGEN_MAX; h->glycogen = GLYCOGEN_MAX; }
-    if (h->glycogen < 0.0f) { h->fat += h->glycogen; h->glycogen = 0.0f; }
-
-    /* ---- bleeding */
-    float coag = sqrtf(h->organ[ORG_LIVER]) * (h->temp < 35.0f ? clampf_(1.0f - (35.0f - h->temp) * 0.15f, 0.3f, 1.0f) : 1.0f) *
-                 clampf_(hct(h) / 0.3f, 0.3f, 1.0f) * (1.0f - 0.5f * h->sepsis);
-    float pressure = clampf_(h->map / MAP_SET, 0.0f, 1.5f);
+    float coag = sqrtf(h->organ[ORG_LIVER]) *
+                 (h->temp < 35.0f ? fclamp(1.0f - (35.0f - h->temp) * 0.15f, 0.3f, 1.0f) : 1.0f) *
+                 fclamp(hct(h) / 0.3f, 0.3f, 1.0f) * (1.0f - 0.5f * h->sepsis);
+    float pressure = fclamp(h->map / MAP_SET, 0.0f, 1.5f);
     float ext = 0.0f;
     for (int i = 0; i < h->wound_count; i++) {
         wound *w = &h->wounds[i];
@@ -791,7 +758,7 @@ void health_step(health *h, const health_env *e, double dt)
         else if (w->bandage == BANDAGE_IMPROVISED) bf = w->arterial ? 0.5f : 0.15f;
         if (w->arterial) tau = w->bandage ? 600.0f : 1e9f;
         else tau = (60.0f + 400.0f * w->depth) / maxf(coag, 0.05f) / (w->bandage ? 2.0f : 1.0f);
-        w->clot += (1.0f - w->clot) * (float)(1.0 - exp(-dt / tau));
+        w->clot += (1.0f - w->clot) * (float)(1.0 - exp(-dt / (double)tau));
         /* Using the limb tears the clot off an undressed wound. */
         if (!w->bandage) {
             if (is_leg(w->part) && e->speed > 2.0) w->clot *= 1.0f - 0.02f * fdt * (float)e->speed;
@@ -805,7 +772,7 @@ void health_step(health *h, const health_env *e, double dt)
         body_part *bp = &h->part[i];
         if (bp->internal <= 0.0f) continue;
         /* Tamponade and clotting slowly contain bleeding into tissue. */
-        bp->internal *= (float)exp(-dt * coag / (300.0 + 3.0 * bp->internal));
+        bp->internal *= (float)exp(-dt * (double)coag / (300.0 + 3.0 * (double)bp->internal));
         if (is_leg(i) && bp->fracture && !bp->splinted && e->speed > 0.5) bp->internal += 0.3f * (float)e->speed * fdt;
         if (bp->internal < 0.05f) bp->internal = 0.0f;
         internal += bp->internal * pressure;
@@ -829,205 +796,42 @@ void health_step(health *h, const health_env *e, double dt)
         h->water -= refill * 0.2f; /* the interstitium pays, which shows up as thirst */
     }
     if (h->rbc < BLOOD_NORMAL * 0.45f) h->rbc += 0.02f / 24.0f * gh * h->organ[ORG_KIDNEYS];
+}
 
-    /* ---- circulation */
-    float veff = h->blood * (1.0f - 0.6f * dehyd);
-    /* Exercise drive: central command reacts at once, the metabolic part
-     * follows oxygen uptake. */
-    float ex = clampf_(0.35f * minf(p / VO2MAX_W, 1.0f) + 0.65f * vo2_frac, 0.0f, 1.0f);
-    float b = clampf_((MAP_SET + 30.0f * ex - h->map) / 30.0f, -1.0f, 1.0f); /* baroreflex resets upward in exercise */
-    float chemo = clampf_((0.92f - h->sao2) / 0.3f, 0.0f, 1.0f) + 0.6f * clampf_((h->paco2 - 45.0f) / 25.0f, 0.0f, 1.0f);
-    int diving = e->airway == AIRWAY_WATER;
-    h->icp = 10.0f + 0.8f * h->ich + 0.012f * h->ich * h->ich;
-    int cushing = h->icp > 30.0f;
-
-    float symp_t = 0.15f + 1.0f * maxf(b, 0.0f) + 0.4f * chemo + 0.03f * h->pain + (diving ? 0.2f : 0.0f) +
-                   (cushing ? 0.5f : 0.0f) - 0.45f * maxf(-b, 0.0f);
-    if (h->organ[ORG_BRAIN] < 0.15f) symp_t = 0.05f; /* autonomic failure */
-    h->symp = lag(h->symp, clampf_(symp_t, 0.0f, 1.0f), dt, 4.0);
-
-    float hr_max = HR_MAX * (0.55f + 0.45f * h->organ[ORG_HEART]);
-    /* Chemoreceptors speed the heart only while the lungs inflate; in
-     * apnoea the same reflex slows it (the diving response). */
-    float drive = 0.95f * ex + 0.85f * maxf(b, 0.0f) + (h->breathing ? 0.5f : -0.2f) * chemo + 0.025f * h->pain +
-                  0.07f * maxf(0.0f, h->temp - 37.0f) + 0.25f * h->sepsis - 0.4f * maxf(-b, 0.0f) +
-                  (h->lactate > 4.0f ? 0.02f * (h->lactate - 4.0f) : 0.0f);
-    float hr_rest = HR_REST * (h->temp < 35.0f ? clampf_(1.0f - (35.0f - h->temp) * 0.08f, 0.3f, 1.0f) : 1.0f);
-    /* Above rest the drive spends the heart-rate reserve; below it, vagal
-     * slowing scales the resting rate. */
-    float hr_t = drive >= 0.0f ? hr_rest + (hr_max - hr_rest) * minf(drive, 1.0f)
-                               : hr_rest * (1.0f + 0.8f * maxf(drive, -0.6f));
-    if (diving && awake) hr_t *= 0.85f;                       /* diving reflex */
-    if (cushing) hr_t = minf(hr_t, 50.0f);                     /* Cushing reflex */
-    if (h->sao2 < 0.5f) hr_t *= 0.35f + 0.65f * h->sao2 / 0.5f; /* hypoxic bradycardia */
-    if (h->organ[ORG_BRAIN] < 0.15f) hr_t = minf(hr_t, 50.0f);
-    if (!arrest) h->hr = lag(h->hr, hr_t, dt, hr_t > h->hr ? 2.5 : 4.0);
-
-    float contract = h->organ[ORG_HEART] * (0.85f + 0.35f * minf(1.0f, h->symp + ex)) *
-                     (h->lactate > 8.0f ? 0.8f : 1.0f) * (h->sao2 < 0.6f ? 0.3f + 0.7f * h->sao2 / 0.6f : 1.0f);
-    contract *= h->hr > 160.0f ? maxf(0.4f, 1.0f - (h->hr - 160.0f) / 200.0f) : 1.0f; /* short diastole */
-    contract /= 1.0f + 0.25f * h->shock_debt * h->shock_debt;
-    float vu = 4.05f - 1.3f * h->symp + 0.5f * h->sepsis;    /* unstressed volume, venoconstriction */
-    float pms = maxf(0.0f, (veff - vu) / CSYS) * (1.0f + 1.3f * ex); /* muscle pump */
-    float rvr = RVR0 * (1.0f - 0.4f * ex);
-    float rap, co = 0.0f;
-    if (!arrest) co = solve_output(h->hr, contract, pms, rvr, 12.0f * h->pneumothorax * h->pneumothorax, &rap);
-    else rap = pms / (1.0f + 0.0f);
-    h->co = co;
-    h->sv = h->hr > 1.0f ? co * 1000.0f / h->hr : 0.0f;
-    h->svr = SVR0 * (0.85f + 0.9f * h->symp) / 0.985f * (1.0f - 0.6f * ex) * (1.0f - 0.5f * h->sepsis) /
-             (1.0f + 0.15f * h->shock_debt * h->shock_debt);
-    float map_t = co * h->svr + rap;
-    h->map = lag(h->map, map_t, dt, 1.0);
-    float pp = arrest ? 0.0f : h->sv / 1.9f * (1.0f + 0.6f * ex + maxf(0.0f, (h->map - MAP_SET) / 150.0f));
-    h->sbp = h->map + pp * 2.0f / 3.0f;
-    h->dbp = h->map - pp / 3.0f;
-
-    /* Myocardial oxygen: rate-pressure product against coronary supply. */
-    if (!arrest) {
-        float demand = h->hr * h->sbp / (HR_REST * 120.0f);
-        float diast = clampf_(1.2f - h->hr / 300.0f, 0.3f, 1.0f) / 0.987f;
-        float coronary = clampf_((h->dbp - 5.0f) / 73.0f, 0.0f, 2.0f) * cao2_rel * diast;
-        float supply = 6.0f * coronary * sqrtf(h->organ[ORG_HEART]);
-        float ratio = demand / maxf(supply, 0.01f);
-        if (ratio > 1.0f) h->ischemia += (ratio - 1.0f) * 0.08f * fdt;
-        else h->ischemia = maxf(0.0f, h->ischemia - 0.02f * fdt);
-        /* Profoundly hypoxic blood starves the myocardium however slowly
-         * it beats: the path from drowning to arrest. */
-        if (h->sao2 < 0.3f) h->ischemia += (0.3f - h->sao2) / 0.3f * 0.05f * fdt;
-        h->ischemia = minf(h->ischemia, 10.0f);
-        if (h->ischemia > 1.5f) h->organ[ORG_HEART] = maxf(0.0f, h->organ[ORG_HEART] - 0.0015f * (h->ischemia - 1.5f) * fdt);
-        float vf = (h->ischemia > 3.0f ? 0.1f * (h->ischemia - 3.0f) : 0.0f) + (h->temp < 28.0f ? 0.05f : 0.0f) +
-                   (h->organ[ORG_KIDNEYS] < 0.05f ? 0.01f : 0.0f);
-        if (frand(h) < vf * fdt) stop_heart(h, RHYTHM_VF, e->airway);
-        else if (h->hr < 20.0f || (h->map < 18.0f && h->co < 0.3f)) stop_heart(h, RHYTHM_ASYSTOLE, e->airway);
-    } else {
-        h->arrest_time += fdt;
-        h->hr = 0.0f;
-        if (h->rhythm == RHYTHM_VF && h->arrest_time > 300.0f) h->rhythm = RHYTHM_ASYSTOLE;
-    }
-
-    /* ---- breathing */
-    float lung_eff = h->organ[ORG_LUNGS] * (1.0f - h->pneumothorax) * (1.0f - clampf_(h->lung_water / 1.5f, 0.0f, 0.9f));
-    int drive_ok = h->organ[ORG_BRAIN] > 0.08f && !(arrest && h->arrest_time > 20.0f);
-    int can_air = e->airway == AIRWAY_AIR;
-    /* Tissues extract less as the store runs dry and the brain shuts down. */
-    h->o2_store = maxf(0.0f, h->o2_store - h->vo2 * clampf_(h->pao2 / 25.0f, 0.3f, 1.0f) / 60.0f * fdt);
-    if (can_air && drive_ok) {
-        h->breathing = 1;
-        float rr_need = 12.0f + 26.0f * vo2_frac;
-        /* Pain and distress add fast, shallow breaths: they raise the rate
-         * far more than they clear CO2. */
-        float shallow = minf(0.5f * h->pain, 6.0f) + 18.0f * h->pneumothorax + 10.0f * h->lung_water;
-        float rr_t = rr_need + 1.2f * maxf(0.0f, h->paco2 - 40.0f) + 60.0f * maxf(0.0f, 0.93f - h->sao2) + shallow +
-                     (h->lactate > 4.0f ? 0.9f * (h->lactate - 4.0f) : 0.0f) + 2.0f * maxf(0.0f, h->temp - 37.5f);
-        if (!awake) rr_t = minf(rr_t, 24.0f);
-        if (h->organ[ORG_BRAIN] < 0.3f) rr_t *= h->organ[ORG_BRAIN] / 0.3f;
-        h->rr = lag(h->rr, clampf_(rr_t, 4.0f, 55.0f), dt, 4.0);
-        float pao2_target = 0.21f * 713.0f - h->paco2 / 0.8f;
-        float store_t = O2_VOL * pao2_target / 713.0f;
-        h->o2_store = lag(h->o2_store, store_t, dt, 6.0 * 14.0 / maxf(h->rr, 4.0f));
-        float alveolar = maxf(h->rr - 0.6f * minf(shallow, maxf(h->rr - rr_need, 0.0f)), 4.0f);
-        h->paco2 = lag(h->paco2, 40.0f * rr_need / alveolar, dt, 20.0);
-        h->apnea_time = 0.0f;
-        h->gasp_timer = 0.0f;
-    } else {
-        h->breathing = 0;
-        h->rr = lag(h->rr, 0.0f, dt, 1.0);
-        h->apnea_time += fdt;
-        h->paco2 += 0.13f * powf(maxf(h->vo2, 0.1f) / 0.254f, 0.6f) * fdt;
-        /* Holding breath ends at the breaking point: an involuntary gasp. */
-        int breakpoint = h->paco2 > 52.0f || h->sao2 < 0.65f || !awake;
-        if (e->airway == AIRWAY_WATER && drive_ok && breakpoint) {
-            h->gasp_timer -= fdt;
-            if (h->gasp_timer <= 0.0f) {
-                h->gasp_timer = 3.0f;
-                h->lung_water += 0.06f;
-                h->organ[ORG_LUNGS] = maxf(0.0f, h->organ[ORG_LUNGS] - 0.03f);
-                if (h->lung_water < 0.07f) health_log(h, "Inhaled water!");
-            }
-        }
-    }
-    h->paco2 = clampf_(h->paco2, 15.0f, 150.0f);
-    h->pao2 = h->o2_store / O2_VOL * 713.0f;
-    float shunt = 0.02f + 0.6f * (1.0f - lung_eff);
-    float delivery = h->co * 13.4f * hb * h->sao2;                /* mL O2/min */
-    float svo2 = delivery > 1.0f ? clampf_(h->sao2 * (1.0f - h->vo2 * 1000.0f / delivery), 0.05f, 0.95f) : 0.1f;
-    h->sao2 = clampf_((1.0f - shunt) * severinghaus(h->pao2) + shunt * svo2, 0.0f, 1.0f);
-    h->spo2_shown = lag(h->spo2_shown, h->sao2, dt, 5.0);
-    h->etco2 = h->breathing ? maxf(0.0f, h->paco2 - 3.0f - 25.0f * maxf(0.0f, 1.0f - h->co / 4.0f)) : 0.0f;
-
-    /* ---- brain */
-    float cpp = h->map - h->icp;
-    float cbf = cpp >= 55.0f ? 1.0f : maxf(0.0f, cpp / 55.0f);
-    cbf *= clampf_(1.0f + 0.025f * (h->paco2 - 40.0f), 0.6f, 1.6f) * (1.0f + 0.5f * maxf(0.0f, 0.9f - h->sao2));
-    cbf *= clampf_(powf(15.0f / maxf(hb, 3.0f), 0.8f), 1.0f, 1.8f); /* thinner blood flows faster */
-    h->brain_o2 = lag(h->brain_o2, cbf * cao2_rel, dt, 8.0);
-    if (h->brain_o2 < 0.3f) h->organ[ORG_BRAIN] -= (0.3f - h->brain_o2) / 0.3f * fdt / 300.0f;
-    if (h->icp > 40.0f) h->organ[ORG_BRAIN] -= fdt / 120.0f;
-    if (h->temp > 41.0f) h->organ[ORG_BRAIN] -= (h->temp - 41.0f) * fdt / 600.0f;
-    h->organ[ORG_BRAIN] = maxf(0.0f, h->organ[ORG_BRAIN]);
-    h->concussion = maxf(0.0f, h->concussion - fdt);
-    h->confusion = maxf(0.0f, h->confusion - fdt);
-
-    /* The brain extracts more oxygen as delivery falls, so function holds
-     * until delivery is roughly halved: confusion near 55%, fainting
-     * below about 40%. Extra flow cannot make up for very low arterial
-     * oxygen, though: oxygen has to diffuse into the tissue, and acute
-     * hypoxaemia blacks people out near SaO2 50% whatever the flow. */
-    float bo = h->brain_o2;
-    int cons = CONS_ALERT;
-    if (bo < 0.55f || h->sao2 < 0.7f || h->blood < 0.7f * BLOOD_NORMAL || h->confusion > 0.0f || h->temp < 33.0f || h->temp > 40.0f || h->sepsis > 0.7f ||
-        h->organ[ORG_BRAIN] < 0.6f || dehyd > 0.1f || h->fat < 2000.0f)
-        cons = CONS_CONFUSED;
-    int out = h->conscious == CONS_UNCONSCIOUS; /* hysteresis */
-    if (bo < (out ? 0.45f : 0.4f) || h->sao2 < (out ? 0.55f : 0.5f) || h->concussion > 0.0f || h->temp < 30.0f || h->temp > 41.5f || h->organ[ORG_BRAIN] < 0.3f ||
-        h->icp > 35.0f || h->sepsis > 0.92f || arrest)
-        cons = CONS_UNCONSCIOUS;
-    if (cons == CONS_UNCONSCIOUS && h->conscious != CONS_UNCONSCIOUS) health_log(h, "Lost consciousness");
-    h->conscious = cons;
-
-    /* ---- organs under stress (real time) */
-    if (h->map < 60.0f) h->organ[ORG_KIDNEYS] -= (60.0f - h->map) / 60.0f * fdt / 1800.0f;
-    if (dehyd > 0.08f) h->organ[ORG_KIDNEYS] -= (dehyd - 0.08f) * fdt / 600.0f;
-    if (h->sepsis > 0.5f) {
-        h->organ[ORG_KIDNEYS] -= (h->sepsis - 0.5f) * fdt / 900.0f;
-        h->organ[ORG_LIVER] -= (h->sepsis - 0.5f) * fdt / 1500.0f;
-    }
-    if (h->map < 50.0f) {
-        h->organ[ORG_LIVER] -= (50.0f - h->map) / 50.0f * fdt / 2400.0f;
-        h->organ[ORG_GUT] -= (50.0f - h->map) / 50.0f * fdt / 1800.0f;
-    }
-    for (int i = 0; i < ORG_COUNT; i++) h->organ[i] = clampf_(h->organ[i], 0.0f, 1.0f);
-
-    /* ---- slow processes on the survival clock: infection and healing */
+/* Contamination, infection, sepsis and wound closure, on the survival clock. */
+static void step_wounds(health *h, const health_env *e, float gh, float dehyd)
+{
     float max_inf = 0.0f;
-    float immune = 0.04f * (h->glycogen < 50.0f ? 0.5f : 1.0f) * (1.0f - clampf_(dehyd * 4.0f, 0.0f, 0.5f)) *
+    float immune = 0.04f * (h->glycogen < 50.0f ? 0.5f : 1.0f) * (1.0f - fclamp(dehyd * 4.0f, 0.0f, 0.5f)) *
                    (1.0f - 0.5f * h->sepsis);
     float abx = h->antibiotic > 0.0f ? 0.3f : 0.0f;
     for (int i = 0; i < h->wound_count; i++) {
         wound *w = &h->wounds[i];
         w->bandage_age += gh;
-        if (!w->bandage) w->contamination += 0.01f * gh;
+        /* An old sterile dressing is as dirty as none; a cloth one lets a little in. */
+        if (!w->bandage || (w->bandage == BANDAGE_STERILE && w->bandage_age > 24.0f)) w->contamination += 0.01f * gh;
         else if (w->bandage == BANDAGE_IMPROVISED) w->contamination += 0.004f * gh;
-        else if (w->bandage_age > 24.0f) w->contamination += 0.01f * gh;
         if (e->submerged > 0.3) w->contamination += 0.2f * gh;
-        w->contamination = clampf_(w->contamination, 0.0f, 1.0f);
+        w->contamination = fclamp(w->contamination, 0.0f, 1.0f);
         float seed = w->contamination > 0.1f ? w->contamination * 0.02f : 0.0f;
-        float grow = 0.12f * w->infection * (1.0f - w->infection) * clampf_(w->contamination / 0.3f, 0.0f, 1.5f);
-        w->infection = clampf_(w->infection + (seed + grow - (immune + abx) * w->infection) * gh, 0.0f, 1.0f);
-        if (w->infection > 0.3f && w->infection - (seed + grow) * gh <= 0.3f) health_log(h, "Wound on the %s is infected", PART_NAMES_LC[w->part]);
+        float grow = 0.12f * w->infection * (1.0f - w->infection) * fclamp(w->contamination / 0.3f, 0.0f, 1.5f);
+        w->infection = fclamp(w->infection + (seed + grow - (immune + abx) * w->infection) * gh, 0.0f, 1.0f);
+        if (w->infection > 0.3f && w->infection - (seed + grow) * gh <= 0.3f)
+            health_log(h, "Wound on the %s is infected", PART_NAMES_LC[w->part]);
         max_inf = maxf(max_inf, w->infection);
         if (w->bleed < 1.0f)
             w->closure += gh / (24.0f * (3.0f + 7.0f * w->depth)) * (w->infection < 0.3f ? 1.0f : 0.3f) *
                           (w->bandage ? 1.2f : 1.0f) * (w->kind == WOUND_OPEN_FRACTURE ? 0.5f : 1.0f);
-        if (w->closure >= 1.0f) {
-            h->wounds[i--] = h->wounds[--h->wound_count];
-        }
+        if (w->closure >= 1.0f) { h->wounds[i--] = h->wounds[--h->wound_count]; }
     }
-    float sepsis_t = clampf_((max_inf - 0.45f) / 0.4f, 0.0f, 1.0f);
-    h->sepsis = clampf_(h->sepsis + (sepsis_t - h->sepsis) * minf(1.0f, 0.1f * gh), 0.0f, 1.0f);
+    float sepsis_t = fclamp((max_inf - 0.45f) / 0.4f, 0.0f, 1.0f);
+    h->sepsis = fclamp(h->sepsis + (sepsis_t - h->sepsis) * minf(1.0f, 0.1f * gh), 0.0f, 1.0f);
+}
 
+/* Bones and bruises heal, splints come off, and each part's pain adds up. */
+static void step_parts(health *h, const health_env *e, double dt, float gh, int awake)
+{
+    const float fdt = (float)dt;
     int moving = e->speed > 0.5;
     for (int i = 0; i < BP_COUNT; i++) {
         body_part *bp = &h->part[i];
@@ -1067,7 +871,7 @@ void health_step(health *h, const health_env *e, double dt)
         bp->pain = pn;
     }
     for (int i = 0; i < h->wound_count; i++) {
-        wound *w = &h->wounds[i];
+        const wound *w = &h->wounds[i];
         h->part[w->part].pain += (1.0f + 3.0f * w->depth) * (1.0f - w->closure) + 3.0f * w->infection;
     }
     h->part[BP_CHEST].pain += 3.0f * h->pneumothorax;
@@ -1081,6 +885,274 @@ void health_step(health *h, const health_env *e, double dt)
     h->pain = awake ? lag(h->pain, pain, dt, 1.0) : 0.0f;
     h->painkiller = maxf(0.0f, h->painkiller - gh);
     h->antibiotic = maxf(0.0f, h->antibiotic - gh);
+}
+
+void health_step(health *h, const health_env *e, double dt)
+{
+    h->t += dt;
+    for (int i = 0; i < HEALTH_LOG; i++) h->log_age[i] += (float)dt;
+    h->hurt_flash = maxf(0.0f, h->hurt_flash - (float)dt * 0.8f);
+    if (h->dead) {
+        h->hr = h->rr = 0.0f;
+        h->breathing = 0;
+        h->map = lag(h->map, 0.0f, dt, 20.0);
+        h->sbp = h->dbp = h->map;
+        write_samples(h, e, dt);
+        return;
+    }
+    const float gh = (float)(dt * HEALTH_CLOCK / 3600.0); /* survival-clock hours this step */
+    const float fdt = (float)dt;
+    const int awake = h->conscious != CONS_UNCONSCIOUS;
+    const float dehyd = dehydration(h);
+    const float hb = health_hb(h);
+    const float cao2_rel = (hb / 15.0f) * (h->sao2 / 0.975f);
+    const int arrest = h->rhythm != RHYTHM_SINUS;
+
+    /* ---- metabolism: power demand, stamina, VO2, lactate */
+    float p = BMR_W * (1.0f + 0.1f * maxf(0.0f, h->temp - 37.0f));
+    int swimming = e->submerged > 0.5;
+    if (awake) {
+        if (swimming) p += 60.0f + 450.0f * (float)minf((float)e->speed, 3.0f); /* sculling + strokes */
+        else if (e->on_ground) p += 300.0f * minf((float)e->speed, 9.0f);
+        else p += 60.0f;
+        if (e->jumped) h->wbal -= 1500.0f;
+        h->wbal -= 300.0f * (float)e->actions;
+    }
+    if (h->temp < 36.5f) p += minf(400.0f, 250.0f * (36.5f - h->temp)); /* shivering */
+    float cap = cao2_rel * h->organ[ORG_HEART] * fclamp(h->blood / BLOOD_NORMAL, 0.0f, 1.0f) *
+                (h->glycogen > 50.0f ? 1.0f : 0.7f) * (1.0f - fclamp(dehyd * 3.0f, 0.0f, 0.4f));
+    cap = fclamp(cap, 0.05f, 1.0f);
+    float cp = CRIT_POWER * cap, aer_max = VO2MAX_W * cap;
+    if (p > cp) {
+        h->wbal -= (p - cp) * fdt;
+        h->lactate += (p - cp) / 5000.0f * fdt;
+    } else {
+        float tau = 316.0f + 546.0f * expf(-0.0025f * (cp - p));
+        h->wbal = lag(h->wbal, WPRIME, dt, (double)tau);
+    }
+    h->wbal = fclamp(h->wbal, 0.0f, WPRIME);
+    h->power = lag(h->power, minf(p, aer_max), dt, 25.0); /* VO2 on-kinetics */
+    h->vo2 = h->power / J_PER_ML_O2 * 0.06f;
+    float vo2_frac = h->vo2 / vo2max_l();
+    float do2_rel = (h->co / 4.8f) * cao2_rel;
+    if (do2_rel < 0.5f) h->lactate += (0.5f - do2_rel) * 0.05f * fdt; /* shock: tissues starved of oxygen */
+    /* Prolonged severe hypoperfusion poisons the heart and vessels
+     * (acidosis, inflammatory mediators): past a point, restoring volume
+     * no longer restores pressure. Slowly repaid once perfusion returns. */
+    if (!arrest && do2_rel < 0.4f) h->shock_debt += (0.4f - do2_rel) / 0.4f * fdt / 60.0f;
+    else h->shock_debt = maxf(0.0f, h->shock_debt - fdt / 1800.0f);
+    h->lactate -= (h->lactate - 1.0f) * 0.0012f * h->organ[ORG_LIVER] * fdt;
+    h->lactate = fclamp(h->lactate, 0.5f, 30.0f);
+
+    /* ---- core temperature */
+    float fever_set = 37.0f + 2.5f * h->sepsis;
+    float ctrl = fclamp(1000.0f * (fever_set - h->temp), -900.0f, 60.0f); /* sweating .. vasoconstriction */
+    float immersion = 25.0f * (float)e->submerged * (h->temp - (float)e->water_temp);
+    h->temp += (0.8f * p - 68.0f - immersion + ctrl) / HEAT_CAP * fdt;
+    /* Fever: chills and shut-down skin raise the set point within hours,
+     * which on the survival clock is minutes. */
+    if (fever_set > h->temp + 0.05f) h->temp += (fever_set - h->temp) * minf(1.0f, gh / 1.5f);
+    float sweat = maxf(0.0f, -ctrl) / 2.43e6f * fdt;
+
+    /* ---- water */
+    float absorb = minf(h->stomach_water, 1.2f * gh * h->organ[ORG_GUT]);
+    h->stomach_water -= absorb;
+    h->water += absorb - sweat - 0.104f * gh * (1.0f + 0.1f * maxf(0.0f, h->temp - 37.0f));
+    if (h->water > WATER_NORMAL + 0.5f) h->water -= (h->water - WATER_NORMAL) * 0.5f * gh * h->organ[ORG_KIDNEYS];
+
+    /* ---- energy */
+    float kcal_basal = BMR_W * 3600.0f / 4184.0f * gh;
+    float kcal_ex = maxf(0.0f, p - BMR_W) * fdt / 4184.0f;
+    float carb = 0.4f * kcal_basal + (0.5f + 0.45f * fclamp(p / CRIT_POWER, 0.0f, 1.0f)) * kcal_ex;
+    float digest = minf(h->stomach_kcal, 250.0f * gh * h->organ[ORG_GUT]);
+    h->stomach_kcal -= digest;
+    h->glycogen += digest - carb;
+    h->fat -= kcal_basal + kcal_ex - carb;
+    if (h->glycogen > GLYCOGEN_MAX) {
+        h->fat += h->glycogen - GLYCOGEN_MAX;
+        h->glycogen = GLYCOGEN_MAX;
+    }
+    if (h->glycogen < 0.0f) {
+        h->fat += h->glycogen;
+        h->glycogen = 0.0f;
+    }
+
+    step_bleeding(h, e, dt, gh, dehyd);
+
+    /* ---- circulation */
+    float veff = h->blood * (1.0f - 0.6f * dehyd);
+    /* Exercise drive: central command reacts at once, the metabolic part
+     * follows oxygen uptake. */
+    float ex = fclamp(0.35f * minf(p / VO2MAX_W, 1.0f) + 0.65f * vo2_frac, 0.0f, 1.0f);
+    float b = fclamp((MAP_SET + 30.0f * ex - h->map) / 30.0f, -1.0f, 1.0f); /* baroreflex resets upward in exercise */
+    float chemo = fclamp((0.92f - h->sao2) / 0.3f, 0.0f, 1.0f) + 0.6f * fclamp((h->paco2 - 45.0f) / 25.0f, 0.0f, 1.0f);
+    int diving = e->airway == AIRWAY_WATER;
+    h->icp = 10.0f + 0.8f * h->ich + 0.012f * h->ich * h->ich;
+    int cushing = h->icp > 30.0f;
+
+    float symp_t = 0.15f + 1.0f * maxf(b, 0.0f) + 0.4f * chemo + 0.03f * h->pain + (diving ? 0.2f : 0.0f) +
+                   (cushing ? 0.5f : 0.0f) - 0.45f * maxf(-b, 0.0f);
+    if (h->organ[ORG_BRAIN] < 0.15f) symp_t = 0.05f; /* autonomic failure */
+    h->symp = lag(h->symp, fclamp(symp_t, 0.0f, 1.0f), dt, 4.0);
+
+    float hr_max = HR_MAX * (0.55f + 0.45f * h->organ[ORG_HEART]);
+    /* Chemoreceptors speed the heart only while the lungs inflate; in
+     * apnoea the same reflex slows it (the diving response). */
+    float drive = 0.95f * ex + 0.85f * maxf(b, 0.0f) + (h->breathing ? 0.5f : -0.2f) * chemo + 0.025f * h->pain +
+                  0.07f * maxf(0.0f, h->temp - 37.0f) + 0.25f * h->sepsis - 0.4f * maxf(-b, 0.0f) +
+                  (h->lactate > 4.0f ? 0.02f * (h->lactate - 4.0f) : 0.0f);
+    float hr_rest = HR_REST * (h->temp < 35.0f ? fclamp(1.0f - (35.0f - h->temp) * 0.08f, 0.3f, 1.0f) : 1.0f);
+    /* Above rest the drive spends the heart-rate reserve; below it, vagal
+     * slowing scales the resting rate. */
+    float hr_t = drive >= 0.0f ? hr_rest + (hr_max - hr_rest) * minf(drive, 1.0f)
+                               : hr_rest * (1.0f + 0.8f * maxf(drive, -0.6f));
+    if (diving && awake) hr_t *= 0.85f;                       /* diving reflex */
+    if (cushing) hr_t = minf(hr_t, 50.0f);                     /* Cushing reflex */
+    if (h->sao2 < 0.5f) hr_t *= 0.35f + 0.65f * h->sao2 / 0.5f; /* hypoxic bradycardia */
+    if (h->organ[ORG_BRAIN] < 0.15f) hr_t = minf(hr_t, 50.0f);
+    if (!arrest) h->hr = lag(h->hr, hr_t, dt, hr_t > h->hr ? 2.5 : 4.0);
+
+    float contract = h->organ[ORG_HEART] * (0.85f + 0.35f * minf(1.0f, h->symp + ex)) *
+                     (h->lactate > 8.0f ? 0.8f : 1.0f) * (h->sao2 < 0.6f ? 0.3f + 0.7f * h->sao2 / 0.6f : 1.0f);
+    contract *= h->hr > 160.0f ? maxf(0.4f, 1.0f - (h->hr - 160.0f) / 200.0f) : 1.0f; /* short diastole */
+    contract /= 1.0f + 0.25f * h->shock_debt * h->shock_debt;
+    float vu = 4.05f - 1.3f * h->symp + 0.5f * h->sepsis;    /* unstressed volume, venoconstriction */
+    float pms = maxf(0.0f, (veff - vu) / CSYS) * (1.0f + 1.3f * ex); /* muscle pump */
+    float rvr = RVR0 * (1.0f - 0.4f * ex);
+    float rap, co = 0.0f;
+    if (!arrest) co = solve_output(h->hr, contract, pms, rvr, 12.0f * h->pneumothorax * h->pneumothorax, &rap);
+    else rap = pms / (1.0f + 0.0f);
+    h->co = co;
+    h->sv = h->hr > 1.0f ? co * 1000.0f / h->hr : 0.0f;
+    h->svr = SVR0 * (0.85f + 0.9f * h->symp) / 0.985f * (1.0f - 0.6f * ex) * (1.0f - 0.5f * h->sepsis) /
+             (1.0f + 0.15f * h->shock_debt * h->shock_debt);
+    float map_t = co * h->svr + rap;
+    h->map = lag(h->map, map_t, dt, 1.0);
+    float pp = arrest ? 0.0f : h->sv / 1.9f * (1.0f + 0.6f * ex + maxf(0.0f, (h->map - MAP_SET) / 150.0f));
+    h->sbp = h->map + pp * 2.0f / 3.0f;
+    h->dbp = h->map - pp / 3.0f;
+
+    /* Myocardial oxygen: rate-pressure product against coronary supply. */
+    if (!arrest) {
+        float demand = h->hr * h->sbp / (HR_REST * 120.0f);
+        float diast = fclamp(1.2f - h->hr / 300.0f, 0.3f, 1.0f) / 0.987f;
+        float coronary = fclamp((h->dbp - 5.0f) / 73.0f, 0.0f, 2.0f) * cao2_rel * diast;
+        float supply = 6.0f * coronary * sqrtf(h->organ[ORG_HEART]);
+        float ratio = demand / maxf(supply, 0.01f);
+        if (ratio > 1.0f) h->ischemia += (ratio - 1.0f) * 0.08f * fdt;
+        else h->ischemia = maxf(0.0f, h->ischemia - 0.02f * fdt);
+        /* Profoundly hypoxic blood starves the myocardium however slowly
+         * it beats: the path from drowning to arrest. */
+        if (h->sao2 < 0.3f) h->ischemia += (0.3f - h->sao2) / 0.3f * 0.05f * fdt;
+        h->ischemia = minf(h->ischemia, 10.0f);
+        if (h->ischemia > 1.5f)
+            h->organ[ORG_HEART] = maxf(0.0f, h->organ[ORG_HEART] - 0.0015f * (h->ischemia - 1.5f) * fdt);
+        float vf = (h->ischemia > 3.0f ? 0.1f * (h->ischemia - 3.0f) : 0.0f) + (h->temp < 28.0f ? 0.05f : 0.0f) +
+                   (h->organ[ORG_KIDNEYS] < 0.05f ? 0.01f : 0.0f);
+        if (frand(h) < vf * fdt) stop_heart(h, RHYTHM_VF, e->airway);
+        else if (h->hr < 20.0f || (h->map < 18.0f && h->co < 0.3f)) stop_heart(h, RHYTHM_ASYSTOLE, e->airway);
+    } else {
+        h->arrest_time += fdt;
+        h->hr = 0.0f;
+        if (h->rhythm == RHYTHM_VF && h->arrest_time > 300.0f) h->rhythm = RHYTHM_ASYSTOLE;
+    }
+
+    /* ---- breathing */
+    float lung_eff = h->organ[ORG_LUNGS] * (1.0f - h->pneumothorax) * (1.0f - fclamp(h->lung_water / 1.5f, 0.0f, 0.9f));
+    int drive_ok = h->organ[ORG_BRAIN] > 0.08f && !(arrest && h->arrest_time > 20.0f);
+    int can_air = e->airway == AIRWAY_AIR;
+    /* Tissues extract less as the store runs dry and the brain shuts down. */
+    h->o2_store = maxf(0.0f, h->o2_store - h->vo2 * fclamp(h->pao2 / 25.0f, 0.3f, 1.0f) / 60.0f * fdt);
+    if (can_air && drive_ok) {
+        h->breathing = 1;
+        float rr_need = 12.0f + 26.0f * vo2_frac;
+        /* Pain and distress add fast, shallow breaths: they raise the rate
+         * far more than they clear CO2. */
+        float shallow = minf(0.5f * h->pain, 6.0f) + 18.0f * h->pneumothorax + 10.0f * h->lung_water;
+        float rr_t = rr_need + 1.2f * maxf(0.0f, h->paco2 - 40.0f) + 60.0f * maxf(0.0f, 0.93f - h->sao2) + shallow +
+                     (h->lactate > 4.0f ? 0.9f * (h->lactate - 4.0f) : 0.0f) + 2.0f * maxf(0.0f, h->temp - 37.5f);
+        if (!awake) rr_t = minf(rr_t, 24.0f);
+        if (h->organ[ORG_BRAIN] < 0.3f) rr_t *= h->organ[ORG_BRAIN] / 0.3f;
+        h->rr = lag(h->rr, fclamp(rr_t, 4.0f, 55.0f), dt, 4.0);
+        float pao2_target = 0.21f * 713.0f - h->paco2 / 0.8f;
+        float store_t = O2_VOL * pao2_target / 713.0f;
+        h->o2_store = lag(h->o2_store, store_t, dt, 6.0 * 14.0 / (double)maxf(h->rr, 4.0f));
+        float alveolar = maxf(h->rr - 0.6f * minf(shallow, maxf(h->rr - rr_need, 0.0f)), 4.0f);
+        h->paco2 = lag(h->paco2, 40.0f * rr_need / alveolar, dt, 20.0);
+        h->apnea_time = 0.0f;
+        h->gasp_timer = 0.0f;
+    } else {
+        h->breathing = 0;
+        h->rr = lag(h->rr, 0.0f, dt, 1.0);
+        h->apnea_time += fdt;
+        h->paco2 += 0.13f * powf(maxf(h->vo2, 0.1f) / 0.254f, 0.6f) * fdt;
+        /* Holding breath ends at the breaking point: an involuntary gasp. */
+        int breakpoint = h->paco2 > 52.0f || h->sao2 < 0.65f || !awake;
+        if (e->airway == AIRWAY_WATER && drive_ok && breakpoint) {
+            h->gasp_timer -= fdt;
+            if (h->gasp_timer <= 0.0f) {
+                h->gasp_timer = 3.0f;
+                h->lung_water += 0.06f;
+                h->organ[ORG_LUNGS] = maxf(0.0f, h->organ[ORG_LUNGS] - 0.03f);
+                if (h->lung_water < 0.07f) health_log(h, "Inhaled water!");
+            }
+        }
+    }
+    h->paco2 = fclamp(h->paco2, 15.0f, 150.0f);
+    h->pao2 = h->o2_store / O2_VOL * 713.0f;
+    float shunt = 0.02f + 0.6f * (1.0f - lung_eff);
+    float delivery = h->co * 13.4f * hb * h->sao2;                /* mL O2/min */
+    float svo2 = delivery > 1.0f ? fclamp(h->sao2 * (1.0f - h->vo2 * 1000.0f / delivery), 0.05f, 0.95f) : 0.1f;
+    h->sao2 = fclamp((1.0f - shunt) * severinghaus(h->pao2) + shunt * svo2, 0.0f, 1.0f);
+    h->spo2_shown = lag(h->spo2_shown, h->sao2, dt, 5.0);
+    h->etco2 = h->breathing ? maxf(0.0f, h->paco2 - 3.0f - 25.0f * maxf(0.0f, 1.0f - h->co / 4.0f)) : 0.0f;
+
+    /* ---- brain */
+    float cpp = h->map - h->icp;
+    float cbf = cpp >= 55.0f ? 1.0f : maxf(0.0f, cpp / 55.0f);
+    cbf *= fclamp(1.0f + 0.025f * (h->paco2 - 40.0f), 0.6f, 1.6f) * (1.0f + 0.5f * maxf(0.0f, 0.9f - h->sao2));
+    cbf *= fclamp(powf(15.0f / maxf(hb, 3.0f), 0.8f), 1.0f, 1.8f); /* thinner blood flows faster */
+    h->brain_o2 = lag(h->brain_o2, cbf * cao2_rel, dt, 8.0);
+    if (h->brain_o2 < 0.3f) h->organ[ORG_BRAIN] -= (0.3f - h->brain_o2) / 0.3f * fdt / 300.0f;
+    if (h->icp > 40.0f) h->organ[ORG_BRAIN] -= fdt / 120.0f;
+    if (h->temp > 41.0f) h->organ[ORG_BRAIN] -= (h->temp - 41.0f) * fdt / 600.0f;
+    h->organ[ORG_BRAIN] = maxf(0.0f, h->organ[ORG_BRAIN]);
+    h->concussion = maxf(0.0f, h->concussion - fdt);
+    h->confusion = maxf(0.0f, h->confusion - fdt);
+
+    /* The brain extracts more oxygen as delivery falls, so function holds
+     * until delivery is roughly halved: confusion near 55%, fainting
+     * below about 40%. Extra flow cannot make up for very low arterial
+     * oxygen, though: oxygen has to diffuse into the tissue, and acute
+     * hypoxaemia blacks people out near SaO2 50% whatever the flow. */
+    float bo = h->brain_o2;
+    int cons = CONS_ALERT;
+    if (bo < 0.55f || h->sao2 < 0.7f || h->blood < 0.7f * BLOOD_NORMAL || h->confusion > 0.0f || h->temp < 33.0f ||
+        h->temp > 40.0f || h->sepsis > 0.7f || h->organ[ORG_BRAIN] < 0.6f || dehyd > 0.1f || h->fat < 2000.0f)
+        cons = CONS_CONFUSED;
+    int out = h->conscious == CONS_UNCONSCIOUS; /* hysteresis */
+    if (bo < (out ? 0.45f : 0.4f) || h->sao2 < (out ? 0.55f : 0.5f) || h->concussion > 0.0f || h->temp < 30.0f ||
+        h->temp > 41.5f || h->organ[ORG_BRAIN] < 0.3f || h->icp > 35.0f || h->sepsis > 0.92f || arrest)
+        cons = CONS_UNCONSCIOUS;
+    if (cons == CONS_UNCONSCIOUS && h->conscious != CONS_UNCONSCIOUS) health_log(h, "Lost consciousness");
+    h->conscious = cons;
+
+    /* ---- organs under stress (real time) */
+    if (h->map < 60.0f) h->organ[ORG_KIDNEYS] -= (60.0f - h->map) / 60.0f * fdt / 1800.0f;
+    if (dehyd > 0.08f) h->organ[ORG_KIDNEYS] -= (dehyd - 0.08f) * fdt / 600.0f;
+    if (h->sepsis > 0.5f) {
+        h->organ[ORG_KIDNEYS] -= (h->sepsis - 0.5f) * fdt / 900.0f;
+        h->organ[ORG_LIVER] -= (h->sepsis - 0.5f) * fdt / 1500.0f;
+    }
+    if (h->map < 50.0f) {
+        h->organ[ORG_LIVER] -= (50.0f - h->map) / 50.0f * fdt / 2400.0f;
+        h->organ[ORG_GUT] -= (50.0f - h->map) / 50.0f * fdt / 1800.0f;
+    }
+    for (int i = 0; i < ORG_COUNT; i++) h->organ[i] = fclamp(h->organ[i], 0.0f, 1.0f);
+
+    /* ---- slow processes on the survival clock: infection and healing */
+    step_wounds(h, e, gh, dehyd);
+    step_parts(h, e, dt, gh, awake);
 
     /* Recovery. */
     if (h->brain_o2 > 0.8f) h->organ[ORG_BRAIN] += 0.0005f * gh;
@@ -1090,7 +1162,7 @@ void health_step(health *h, const health_env *e, double dt)
     if (h->sepsis < 0.3f) h->organ[ORG_LIVER] += 0.004f * gh;
     if (h->map > 65.0f && dehyd < 0.05f) h->organ[ORG_KIDNEYS] += 0.003f * gh;
     h->organ[ORG_GUT] += 0.005f * gh;
-    for (int i = 0; i < ORG_COUNT; i++) h->organ[i] = clampf_(h->organ[i], 0.0f, 1.0f);
+    for (int i = 0; i < ORG_COUNT; i++) h->organ[i] = fclamp(h->organ[i], 0.0f, 1.0f);
     h->pneumothorax = maxf(0.0f, h->pneumothorax - (h->pneumothorax < 0.3f ? 0.01f : 0.005f) * gh);
     h->ich = maxf(0.0f, h->ich - 0.2f * gh);
 
@@ -1149,19 +1221,19 @@ health_limits health_get_limits(const health *h)
 int health_spo2_reading(const health *h)
 {
     if (h->dead || h->rhythm != RHYTHM_SINUS || h->beat_pp < 10.0f || h->map < 35.0f) return -1;
-    return (int)lroundf(clampf_(h->spo2_shown, 0.0f, 1.0f) * 100.0f);
+    return (int)lroundf(fclamp(h->spo2_shown, 0.0f, 1.0f) * 100.0f);
 }
 
-float health_hydration(const health *h) { return clampf_(1.0f - dehydration(h) / 0.15f, 0.0f, 1.0f); }
+float health_hydration(const health *h) { return fclamp(1.0f - dehydration(h) / 0.15f, 0.0f, 1.0f); }
 
 float health_hunger(const health *h)
 {
-    return clampf_(1.5f * (1.0f - h->glycogen / GLYCOGEN_MAX) - h->stomach_kcal / 800.0f, 0.0f, 1.0f);
+    return fclamp(1.5f * (1.0f - h->glycogen / GLYCOGEN_MAX) - h->stomach_kcal / 800.0f, 0.0f, 1.0f);
 }
 
 float health_stamina(const health *h) { return h->wbal / WPRIME; }
 
-static void cat(char *buf, size_t n, size_t *len, const char *fmt, ...)
+__attribute__((format(printf, 4, 5))) static void cat(char *buf, size_t n, size_t *len, const char *fmt, ...)
 {
     if (*len >= n) return;
     va_list ap;
@@ -1182,7 +1254,7 @@ int health_part_status(const health *h, int part, char *buf, size_t n)
         SEP();
         cat(buf, n, &len, "%s fracture%s", p->fracture == FX_OPEN ? "open" : "closed",
             p->splinted ? " (splinted)" : "");
-        sev = sev > 2 ? sev : 2;
+        sev = 2;
     }
     if (p->sprain > 0.05f) {
         SEP();
@@ -1204,7 +1276,7 @@ int health_part_status(const health *h, int part, char *buf, size_t n)
         SEP();
         if (wounds == 1) cat(buf, n, &len, arterial ? "cut artery" : "wound");
         else cat(buf, n, &len, "%d wounds%s", wounds, arterial ? ", artery" : "");
-        if (bleed >= 1.0f) cat(buf, n, &len, " bleeding %.0f mL/min", bleed);
+        if (bleed >= 1.0f) cat(buf, n, &len, " bleeding %.0f mL/min", (double)bleed);
         if (bandaged) cat(buf, n, &len, bandaged == wounds ? " (dressed)" : " (partly dressed)");
         sev = sev > 1 ? sev : 1;
         if (bleed > 30.0f || arterial) sev = 3;
@@ -1216,7 +1288,7 @@ int health_part_status(const health *h, int part, char *buf, size_t n)
     }
     if (p->internal > 1.0f) {
         SEP();
-        cat(buf, n, &len, "internal bleeding %.0f mL/min", p->internal);
+        cat(buf, n, &len, "internal bleeding %.0f mL/min", (double)p->internal);
         sev = p->internal > 20.0f ? 3 : (sev > 2 ? sev : 2);
     }
     if (p->integrity < 0.95f) {
@@ -1237,27 +1309,43 @@ int health_organ_status(const health *h, int organ, char *buf, size_t n)
     int sev = f > 0.85f ? 0 : (f > 0.6f ? 1 : (f > 0.3f ? 2 : 3));
     switch (organ) {
     case ORG_BRAIN:
-        if (h->icp > 25.0f) { s = "raised pressure"; sev = 3; }
-        else if (h->conscious == CONS_UNCONSCIOUS) { s = "unresponsive"; sev = sev > 2 ? sev : 2; }
-        else if (h->conscious == CONS_CONFUSED) { s = h->concussion > 0 || h->confusion > 0 ? "concussed" : "confused"; sev = sev > 1 ? sev : 1; }
-        else s = f > 0.85f ? "normal" : "damaged";
+        if (h->icp > 25.0f) {
+            s = "raised pressure";
+            sev = 3;
+        } else if (h->conscious == CONS_UNCONSCIOUS) {
+            s = "unresponsive";
+            sev = sev > 2 ? sev : 2;
+        } else if (h->conscious == CONS_CONFUSED) {
+            s = h->concussion > 0 || h->confusion > 0 ? "concussed" : "confused";
+            sev = sev > 1 ? sev : 1;
+        } else s = f > 0.85f ? "normal" : "damaged";
         break;
     case ORG_HEART:
-        if (h->rhythm == RHYTHM_VF) { s = "FIBRILLATING"; sev = 3; }
-        else if (h->rhythm == RHYTHM_ASYSTOLE) { s = "STOPPED"; sev = 3; }
-        else if (h->ischemia > 1.0f) { s = "ischaemic"; sev = sev > 2 ? sev : 2; }
-        else s = f > 0.85f ? "sinus rhythm" : "weakened";
+        if (h->rhythm == RHYTHM_VF) {
+            s = "FIBRILLATING";
+            sev = 3;
+        } else if (h->rhythm == RHYTHM_ASYSTOLE) {
+            s = "STOPPED";
+            sev = 3;
+        } else if (h->ischemia > 1.0f) {
+            s = "ischaemic";
+            sev = sev > 2 ? sev : 2;
+        } else s = f > 0.85f ? "sinus rhythm" : "weakened";
         break;
     case ORG_LUNGS:
-        if (h->pneumothorax > 0.05f) { s = "partly collapsed"; sev = sev > 2 ? sev : 2; }
-        else if (h->lung_water > 0.05f) { s = "water inhaled"; sev = sev > 2 ? sev : 2; }
-        else if (!h->breathing) { s = "not breathing"; sev = 3; }
-        else s = f > 0.85f ? "clear" : "contused";
+        if (h->pneumothorax > 0.05f) {
+            s = "partly collapsed";
+            sev = sev > 2 ? sev : 2;
+        } else if (h->lung_water > 0.05f) {
+            s = "water inhaled";
+            sev = sev > 2 ? sev : 2;
+        } else if (!h->breathing) {
+            s = "not breathing";
+            sev = 3;
+        } else s = f > 0.85f ? "clear" : "contused";
         break;
-    case ORG_KIDNEYS: s = f > 0.85f ? "normal" : (f > 0.3f ? "injured" : "failing"); break;
-    case ORG_LIVER: s = f > 0.85f ? "normal" : (f > 0.3f ? "injured" : "failing"); break;
     default: s = f > 0.85f ? "normal" : (f > 0.3f ? "injured" : "failing"); break;
     }
-    snprintf(buf, n, "%3.0f%%  %s", f * 100.0f, s);
+    snprintf(buf, n, "%3.0f%%  %s", (double)(f * 100.0f), s);
     return sev;
 }
