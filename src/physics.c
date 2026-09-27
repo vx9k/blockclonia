@@ -1,6 +1,6 @@
 #include "physics.h"
-#include "mem.h"
 #include "log.h"
+#include "mem.h"
 #include "noise.h"
 
 #include <math.h>
@@ -126,8 +126,10 @@ static int pq_push(pos_queue *q, ipos p)
             warned = 1;
             return 0;
         }
-        pq_grow(q);
-        return pq_push(q, p);
+        pq_grow(q); /* rehashes: find p's slot again */
+        mask = q->set_cap - 1;
+        h = hash_pos(p) & mask;
+        while (q->set[h]) h = (h + 1) & mask;
     }
     q->items[q->count++] = p;
     q->set[h] = (uint32_t)q->count;
@@ -271,12 +273,6 @@ static double sweep(const physics *ph, aabb box, int axis, double delta, int fla
     return delta;
 }
 
-double physics_sweep(const physics *ph, aabb box, int axis, double delta, int skip_body,
-                     int include_player)
-{
-    return sweep(ph, box, axis, delta, SWEEP_BODIES | (include_player ? SWEEP_PLAYER : 0), skip_body);
-}
-
 /* Fraction of the box's height that is under water, sampled on the box's
  * central column (good enough for bodies up to one block wide). */
 static double water_fraction(const world *w, aabb box)
@@ -315,14 +311,14 @@ static double ground_friction(const physics *ph, const player *p)
         uint8_t id = world_get(ph->w, (int)floor(p->pos.x + off[i][0] * 0.99), y,
                                (int)floor(p->pos.z + off[i][1] * 0.99));
         if (!block_solid(id)) continue;
-        double mu = id == B_UNLOADED ? 0.6 : block_get(id)->friction;
+        double mu = id == B_UNLOADED ? 0.6 : (double)block_get(id)->friction;
         if (i == 0) return mu; /* standing squarely on one block */
         if (mu > best) best = mu;
     }
     return best > 0 ? best : 0.6; /* standing on a falling body */
 }
 
-static void player_move(physics *ph, player *p, double dt)
+static void player_move(const physics *ph, player *p, double dt)
 {
     aabb box = player_box(p);
     double dy = p->vel.y * dt;
@@ -346,14 +342,15 @@ static void player_move(physics *ph, player *p, double dt)
     p->pos.z = clampd(p->pos.z, -WORLD_LIMIT, WORLD_LIMIT);
 }
 
-static void player_step(physics *ph, player *p, const player_input *in)
+static void player_step(const physics *ph, player *p, const player_input *in)
 {
     const double dt = PHYS_DT;
     p->prev_pos = p->pos;
 
-    double sy = sin(p->yaw), cy = cos(p->yaw);
-    double fx = in->forward * sy + in->right * cy;
-    double fz = -in->forward * cy + in->right * sy;
+    double sy = sin((double)p->yaw), cy = cos((double)p->yaw);
+    double fwd = (double)in->forward, side = (double)in->right;
+    double fx = fwd * sy + side * cy;
+    double fz = -fwd * cy + side * sy;
     double len = hypot(fx, fz);
     if (len > 1.0) { fx /= len; fz /= len; len = 1.0; }
 
@@ -470,7 +467,7 @@ static void bodies_step(physics *ph)
             ph->bodies[i--] = ph->bodies[--ph->body_count];
             continue;
         }
-        double rho = block_get(b->block)->density;
+        double rho = (double)block_get(b->block)->density;
         aabb box = {b->pos, dv3(b->pos.x + 1, b->pos.y + 1, b->pos.z + 1)};
         double sub = water_fraction(ph->w, box);
 
@@ -533,10 +530,7 @@ void physics_settle_bodies(physics *ph, const column *only)
     ph->suppress_struct--;
 }
 
-void physics_on_column_unload(void *user, column *c)
-{
-    physics_settle_bodies(user, c);
-}
+void physics_on_column_unload(void *user, const column *c) { physics_settle_bodies(user, c); }
 
 /* ------------------------------------------------------------ structure */
 
@@ -550,10 +544,10 @@ static void queue_structure(physics *ph, int x, int y, int z)
 
 int physics_check_structure(physics *ph, int x, int y, int z)
 {
-    const int R = STRUCT_RADIUS;
-    const int x0 = x - R, z0 = z - R;
-    const int y0 = y - R < 0 ? 0 : y - R;
-    const int y1 = y + R >= WORLD_H ? WORLD_H - 1 : y + R;
+    const int rad = STRUCT_RADIUS;
+    const int x0 = x - rad, z0 = z - rad;
+    const int y0 = y - rad < 0 ? 0 : y - rad;
+    const int y1 = y + rad >= WORLD_H ? WORLD_H - 1 : y + rad;
     const int ny = y1 - y0 + 1;
     world *w = ph->w;
     int8_t *s = ph->st_s;
@@ -823,14 +817,14 @@ ray_hit physics_raycast(const world *w, dvec3 o, vec3 dir, double max_dist)
     ray_hit r = {0};
     int x = (int)floor(o.x), y = (int)floor(o.y), z = (int)floor(o.z);
     int px = x, py = y, pz = z;
-    double dx = dir.x, dy = dir.y, dz = dir.z;
+    double dx = (double)dir.x, dy = (double)dir.y, dz = (double)dir.z;
     int sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1;
-    double tdx = dx != 0 ? fabs(1.0 / dx) : INFINITY;
-    double tdy = dy != 0 ? fabs(1.0 / dy) : INFINITY;
-    double tdz = dz != 0 ? fabs(1.0 / dz) : INFINITY;
-    double tmx = dx != 0 ? ((dx > 0 ? (x + 1 - o.x) : (o.x - x)) * tdx) : INFINITY;
-    double tmy = dy != 0 ? ((dy > 0 ? (y + 1 - o.y) : (o.y - y)) * tdy) : INFINITY;
-    double tmz = dz != 0 ? ((dz > 0 ? (z + 1 - o.z) : (o.z - z)) * tdz) : INFINITY;
+    double tdx = dx != 0 ? fabs(1.0 / dx) : HUGE_VAL;
+    double tdy = dy != 0 ? fabs(1.0 / dy) : HUGE_VAL;
+    double tdz = dz != 0 ? fabs(1.0 / dz) : HUGE_VAL;
+    double tmx = dx != 0 ? ((dx > 0 ? (x + 1 - o.x) : (o.x - x)) * tdx) : HUGE_VAL;
+    double tmy = dy != 0 ? ((dy > 0 ? (y + 1 - o.y) : (o.y - y)) * tdy) : HUGE_VAL;
+    double tmz = dz != 0 ? ((dz > 0 ? (z + 1 - o.z) : (o.z - z)) * tdz) : HUGE_VAL;
     double t = 0.0;
     for (int steps = 0; steps < 256 && t <= max_dist; steps++) {
         uint8_t id = world_get(w, x, y, z);

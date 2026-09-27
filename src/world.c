@@ -209,8 +209,6 @@ static void gen_run(job *j)
     column_recount(g->c);
 }
 
-static void unload_column(world *w, column *c);
-
 static void gen_done(job *j)
 {
     gen_job *g = (gen_job *)j;
@@ -246,7 +244,7 @@ static void request_column(world *w, int cx, int cz)
     jobs_submit(w->jobs, &g->base);
 }
 
-static void store_column(world *w, column *c)
+static void store_column(const world *w, column *c)
 {
     if (!c->unsaved || !w->save_dir[0]) return;
     if (save_store_column(w->save_dir, c) != 0)

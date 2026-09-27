@@ -102,12 +102,7 @@ aabb player_box(const player *p);
 /* Voxel raycast (Amanatides-Woo). Returns 1 on hit, with the block and the
  * empty cell in front of the hit face. */
 typedef struct { int hit; ipos block, before; uint8_t id; } ray_hit;
-ray_hit physics_raycast(const world *w, dvec3 origin, vec3 dir, double max_dist);
-
-/* Move `box` along one axis, stopping at solid blocks and body obstacles.
- * Returns the distance actually travelled. Exposed for tests. */
-double physics_sweep(const physics *ph, aabb box, int axis, double delta, int skip_body,
-                     int include_player);
+ray_hit physics_raycast(const world *w, dvec3 o, vec3 dir, double max_dist);
 
 /* Runs a structural check around (x,y,z) immediately. Returns the number of
  * blocks that became falling bodies. Exposed for tests. */
@@ -119,6 +114,6 @@ void physics_fluid_tick(physics *ph);
  * one column) so they survive a save. */
 void physics_settle_bodies(physics *ph, const column *only);
 /* Hook for world->on_column_unload. */
-void physics_on_column_unload(void *user, column *c);
+void physics_on_column_unload(void *user, const column *c);
 
 #endif

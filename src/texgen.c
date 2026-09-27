@@ -2,8 +2,6 @@
 #include "block.h"
 #include "noise.h"
 
-#include <string.h>
-
 typedef struct { uint8_t r, g, b, a; } rgba;
 
 static uint8_t clamp8(int v) { return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v)); }

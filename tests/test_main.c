@@ -128,7 +128,7 @@ static int file_is(const char *path, const char *text)
     FILE *f = fopen(path, "rb");
     if (!f) return 0;
     size_t n = fread(buf, 1, sizeof buf - 1, f);
-    fclose(f);
+    (void)fclose(f);
     return n == strlen(text) && memcmp(buf, text, n) == 0;
 }
 
@@ -136,15 +136,14 @@ static int file_is(const char *path, const char *text)
 static void test_save_files(void)
 {
     char dir[] = "/tmp/mc_test_XXXXXX";
-    if (!mkdtemp(dir)) {
-        CHECK(!"mkdtemp");
-        return;
-    }
+    int made = mkdtemp(dir) != NULL;
+    CHECK(made);
+    if (!made) return;
     char victim[128], p[160];
     snprintf(victim, sizeof victim, "%s/victim.txt", dir);
     FILE *f = fopen(victim, "wb");
-    fputs("precious", f);
-    fclose(f);
+    CHECK(f && fputs("precious", f) >= 0);
+    if (f) (void)fclose(f);
 
     snprintf(p, sizeof p, "%s/level.dat", dir);
     CHECK(symlink(victim, p) == 0);
@@ -243,7 +242,7 @@ static void test_world_basics(void)
     CHECK(world_surface_y(&t.w, 4, 4) == GROUND);
     CHECK(world_set(&t.w, 3, 13, 3, B_BRICK, 0));
     CHECK(world_get(&t.w, 3, 13, 3) == B_BRICK);
-    column *c = world_column(&t.w, 0, 0);
+    const column *c = world_column(&t.w, 0, 0);
     CHECK(c && c->modified && c->unsaved && c->dirty[0]);
     /* Edits on a column border dirty the neighbour's section too. */
     column *n = world_column(&t.w, -1, 0);

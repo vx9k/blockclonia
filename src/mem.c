@@ -9,23 +9,13 @@
 static void *raw_malloc(size_t size) { return malloc(size); }
 static void *raw_calloc(size_t count, size_t size) { return calloc(count, size); }
 static void *raw_realloc(void *ptr, size_t size) { return realloc(ptr, size); }
-static void *raw_malloc_aligned(size_t size, size_t align)
-{
-    void *p = NULL;
-    if (align < sizeof(void *)) align = sizeof(void *);
-    return posix_memalign(&p, align, size) == 0 ? p : NULL;
-}
 #else
 static void *raw_malloc(size_t size) { return mi_malloc(size); }
 static void *raw_calloc(size_t count, size_t size) { return mi_calloc(count, size); }
 static void *raw_realloc(void *ptr, size_t size) { return mi_realloc(ptr, size); }
-static void *raw_malloc_aligned(size_t size, size_t align) { return mi_malloc_aligned(size, align); }
 #endif
 
-static void oom(size_t size)
-{
-    log_fatal("out of memory allocating %zu bytes", size);
-}
+_Noreturn static void oom(size_t size) { log_fatal("out of memory allocating %zu bytes", size); }
 
 void *mem_alloc(size_t size)
 {
@@ -44,13 +34,6 @@ void *mem_calloc(size_t count, size_t size)
 void *mem_realloc(void *ptr, size_t size)
 {
     void *p = raw_realloc(ptr, size);
-    if (!p && size) oom(size);
-    return p;
-}
-
-void *mem_alloc_aligned(size_t size, size_t align)
-{
-    void *p = raw_malloc_aligned(size, align);
     if (!p && size) oom(size);
     return p;
 }

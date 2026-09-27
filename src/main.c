@@ -56,25 +56,26 @@ static const uint8_t HOTBAR[] = {B_STONE, B_DIRT, B_GRASS, B_PLANKS, B_LOG, B_GL
 
 /* ---------------------------------------------------------- arguments */
 
-static int parse_int(const char *s, long lo, long hi, long *out)
+/* long long: `long` is 32-bit on 32-bit ARM, where (long)UINT32_MAX is -1. */
+static int parse_int(const char *s, long long lo, long long hi, long long *out)
 {
     char *end;
     errno = 0;
-    long v = strtol(s, &end, 10);
+    long long v = strtoll(s, &end, 10);
     if (errno || end == s || *end || v < lo || v > hi) return 0;
     *out = v;
     return 1;
 }
 
 /* "<a><sep><b>" with both integers in [lo, hi], e.g. 1280x720 or -40,12. */
-static int parse_int_pair(const char *s, char sep, long lo, long hi, long *a, long *b)
+static int parse_int_pair(const char *s, char sep, long long lo, long long hi, long long *a, long long *b)
 {
     char *end;
     errno = 0;
-    long x = strtol(s, &end, 10);
+    long long x = strtoll(s, &end, 10);
     if (errno || end == s || *end != sep || x < lo || x > hi) return 0;
     const char *t = end + 1;
-    long y = strtol(t, &end, 10);
+    long long y = strtoll(t, &end, 10);
     if (errno || end == t || *end || y < lo || y > hi) return 0;
     *a = x;
     *b = y;
@@ -131,11 +132,11 @@ static int parse_args(int argc, char **argv, options *o)
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
         const char *v = i + 1 < argc ? argv[i + 1] : NULL;
-        long n;
+        long long n;
 #define NEED_VALUE() do { if (!v) { fprintf(stderr, "%s needs a value\n", a); return 0; } i++; } while (0)
         if (!strcmp(a, "--seed")) {
             NEED_VALUE();
-            if (!parse_int(v, 0, (long)UINT32_MAX, &n)) goto bad;
+            if (!parse_int(v, 0, (long long)UINT32_MAX, &n)) goto bad;
             o->seed = (uint32_t)n;
             o->have_seed = 1;
         } else if (!strcmp(a, "--radius")) {
@@ -144,7 +145,7 @@ static int parse_args(int argc, char **argv, options *o)
             o->radius = (int)n;
         } else if (!strcmp(a, "--size")) {
             NEED_VALUE();
-            long w, h;
+            long long w, h;
             if (!parse_int_pair(v, 'x', 64, 16384, &w, &h)) goto bad;
             o->width = (int)w;
             o->height = (int)h;
@@ -186,7 +187,7 @@ static int parse_args(int argc, char **argv, options *o)
             o->have_look = 1;
         } else if (!strcmp(a, "--spawn")) {
             NEED_VALUE();
-            long x, z;
+            long long x, z;
             if (!parse_int_pair(v, ',', -(WORLD_LIMIT - 64), WORLD_LIMIT - 64, &x, &z)) goto bad;
             o->spawn_x = (int)x;
             o->spawn_z = (int)z;
@@ -416,7 +417,6 @@ int main(int argc, char **argv)
     demo_state demo = {0};
     double prev = glfwGetTime(), acc = 0.0, title_t = prev, save_t = prev;
     int frame = 0, fps_frames = 0;
-    double fps = 0.0;
     char title[256];
 
     while (!glfwWindowShouldClose(win)) {
@@ -513,10 +513,10 @@ int main(int argc, char **argv)
             glfwWaitEventsTimeout(0.05);
         }
 
-        frame++;
+        if (frame < INT_MAX) frame++; /* int overflow is UB; only --frames and the demo read it */
         fps_frames++;
         if (now - title_t >= 0.5) {
-            fps = fps_frames / (now - title_t);
+            double fps = fps_frames / (now - title_t);
             fps_frames = 0;
             title_t = now;
             render_stats rs = renderer_stats(rd);

@@ -23,7 +23,6 @@
 void *mem_alloc(size_t size);
 void *mem_calloc(size_t count, size_t size);
 void *mem_realloc(void *ptr, size_t size);
-void *mem_alloc_aligned(size_t size, size_t align);
 #ifdef MC_MEM_LIBC
 /* Sanitizer builds: libc malloc, which ASan and valgrind can track. */
 static inline void mem_free(void *ptr) { free(ptr); }

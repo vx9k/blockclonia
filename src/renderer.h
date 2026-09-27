@@ -53,7 +53,6 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
 
 void renderer_request_screenshot(renderer *r, const char *path);
 void renderer_on_resize(renderer *r);
-const char *renderer_device_name(const renderer *r);
 render_stats renderer_stats(const renderer *r);
 
 #endif

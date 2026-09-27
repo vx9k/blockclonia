@@ -1,6 +1,5 @@
 #include "save.h"
 #include "mem.h"
-#include "log.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -201,9 +200,8 @@ int save_load_column(const char *dir, column *c)
     uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
     long len = read_regular(path, buf, SAVE_MAX_FILE);
     int r = 0; /* missing: generate */
-    if (len > SAVE_MAX_FILE) r = -1;
-    else if (len >= 0) r = save_decode_column(c, buf, (size_t)len) == 0 ? 1 : -1;
-    else if (errno != ENOENT) r = -1; /* exists but is not a readable regular file */
+    if (len >= 0 && len <= SAVE_MAX_FILE) r = save_decode_column(c, buf, (size_t)len) == 0 ? 1 : -1;
+    else if (len >= 0 || errno != ENOENT) r = -1; /* too big, or not a readable regular file */
     mem_free(buf);
     return r;
 }
@@ -237,7 +235,8 @@ int save_read_seed(const char *dir, uint32_t *seed)
     long len = read_regular(path, (uint8_t *)buf, sizeof buf - 1);
     if (len < 0 || len > (long)sizeof buf - 1) return -1;
     buf[len] = '\0';
-    if (strncmp(buf, "seed ", 5) != 0) return -1;
+    /* strtoul would accept spaces, '+' and '-' (negation wraps): digits only. */
+    if (strncmp(buf, "seed ", 5) != 0 || buf[5] < '0' || buf[5] > '9') return -1;
     char *end;
     errno = 0;
     unsigned long v = strtoul(buf + 5, &end, 10);

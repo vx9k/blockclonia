@@ -12,8 +12,6 @@ typedef struct { double x, y, z; } dvec3;
 typedef struct { float m[16]; } mat4;
 
 static inline vec3 v3(float x, float y, float z) { return (vec3){x, y, z}; }
-static inline vec3 v3_add(vec3 a, vec3 b) { return v3(a.x + b.x, a.y + b.y, a.z + b.z); }
-static inline vec3 v3_sub(vec3 a, vec3 b) { return v3(a.x - b.x, a.y - b.y, a.z - b.z); }
 static inline vec3 v3_scale(vec3 a, float s) { return v3(a.x * s, a.y * s, a.z * s); }
 static inline float v3_dot(vec3 a, vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 static inline float v3_len(vec3 a) { return sqrtf(v3_dot(a, a)); }
@@ -29,7 +27,6 @@ static inline vec3 v3_norm(vec3 a)
 
 static inline dvec3 dv3(double x, double y, double z) { return (dvec3){x, y, z}; }
 static inline dvec3 dv3_add(dvec3 a, dvec3 b) { return dv3(a.x + b.x, a.y + b.y, a.z + b.z); }
-static inline dvec3 dv3_sub(dvec3 a, dvec3 b) { return dv3(a.x - b.x, a.y - b.y, a.z - b.z); }
 static inline dvec3 dv3_scale(dvec3 a, double s) { return dv3(a.x * s, a.y * s, a.z * s); }
 static inline double dv3_len(dvec3 a) { return sqrt(a.x * a.x + a.y * a.y + a.z * a.z); }
 static inline dvec3 dv3_lerp(dvec3 a, dvec3 b, double t)
@@ -40,10 +37,6 @@ static inline dvec3 dv3_lerp(dvec3 a, dvec3 b, double t)
 static inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 static inline double clampd(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
 static inline int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
-
-/* Floor division / modulo that behave for negative numbers. */
-static inline int floordiv(int a, int b) { int q = a / b; return (a % b != 0 && ((a < 0) != (b < 0))) ? q - 1 : q; }
-static inline int floormod(int a, int b) { int m = a % b; return m < 0 ? m + b : m; }
 
 static inline mat4 m4_identity(void)
 {

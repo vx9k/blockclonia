@@ -19,7 +19,7 @@ option(MC_BUILD_FUZZ "Build libFuzzer targets (clang only)" OFF)
 find_package(Threads REQUIRED)
 find_package(mimalloc 2.0 REQUIRED)
 
-set(MC_WARNINGS -Wall -Wextra -Wshadow -Wstrict-prototypes -Wformat=2)
+include(cmake/warnings.cmake)
 
 # ---------------------------------------------------------------- core
 # Everything that does not touch Vulkan or a window: tests and the fuzzer
@@ -69,7 +69,7 @@ foreach(shader block.vert block.frag entity.vert line.vert line.frag)
   set(out ${SHADER_OUT}/${shader}.inc)
   add_custom_command(
     OUTPUT ${out}
-    COMMAND ${GLSLC} -O --target-env=vulkan1.0 -mfmt=c -I ${SHADER_DIR} -o ${out} ${SHADER_DIR}/${shader}
+    COMMAND ${GLSLC} -O -Werror --target-env=vulkan1.0 -mfmt=c -I ${SHADER_DIR} -o ${out} ${SHADER_DIR}/${shader}
     DEPENDS ${SHADER_DIR}/${shader} ${SHADER_DIR}/push_vert.glsl ${SHADER_DIR}/push_frag.glsl
     COMMENT "Compiling shader ${shader}"
     VERBATIM)
@@ -102,7 +102,7 @@ if(MC_BUILD_FUZZ)
     message(FATAL_ERROR "MC_BUILD_FUZZ needs clang")
   endif()
   add_executable(fuzz_save tests/fuzz_save.c)
-  target_compile_options(fuzz_save PRIVATE -fsanitize=fuzzer,address,undefined)
+  target_compile_options(fuzz_save PRIVATE ${MC_WARNINGS} -fsanitize=fuzzer,address,undefined)
   target_link_options(fuzz_save PRIVATE -fsanitize=fuzzer,address,undefined)
   target_link_libraries(fuzz_save PRIVATE mccore)
 endif()

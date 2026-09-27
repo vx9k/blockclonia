@@ -1,6 +1,5 @@
 #include "bench.h"
 #include "jobs.h"
-#include "log.h"
 #include "mem.h"
 #include "mesher.h"
 #include "physics.h"
@@ -19,21 +18,21 @@ static double now_s(void)
 
 int bench_run(uint32_t seed)
 {
-    const int N = 16; /* 16 x 16 columns */
+    const int side = 16; /* 16 x 16 columns */
     printf("blockclonia benchmark (seed %u, single thread)\n", seed);
 
     /* Terrain generation. */
-    column **cols = mem_calloc((size_t)N * N, sizeof *cols);
+    column **cols = mem_calloc((size_t)side * (size_t)side, sizeof *cols);
     double t0 = now_s();
-    for (int z = 0; z < N; z++)
-        for (int x = 0; x < N; x++) {
+    for (int z = 0; z < side; z++)
+        for (int x = 0; x < side; x++) {
             column *c = column_alloc(x, z);
             worldgen_column(seed, c);
             column_recount(c);
-            cols[z * N + x] = c;
+            cols[z * side + x] = c;
         }
     double gen = now_s() - t0;
-    printf("  worldgen: %.3f ms/column\n", gen * 1000.0 / (N * N));
+    printf("  worldgen: %.3f ms/column\n", gen * 1000.0 / (side * side));
 
     /* Meshing, via a real world so gather/mesh paths are exercised. */
     jobs *js = jobs_create(0);
@@ -47,7 +46,7 @@ int bench_run(uint32_t seed)
     t0 = now_s();
     for (int cz = -4; cz <= 4; cz++)
         for (int cx = -4; cx <= 4; cx++) {
-            column *c = world_column(&w, cx, cz);
+            const column *c = world_column(&w, cx, cz);
             if (!c) continue;
             for (int sy = 0; sy < SECTIONS; sy++) {
                 /* Build the padded input the same way the mesher job does. */
@@ -114,7 +113,7 @@ int bench_run(uint32_t seed)
     mem_free(out);
     world_destroy(&w);
     jobs_destroy(js);
-    for (int i = 0; i < N * N; i++) column_free(cols[i]);
+    for (int i = 0; i < side * side; i++) column_free(cols[i]);
     mem_free(cols);
     return 0;
 }

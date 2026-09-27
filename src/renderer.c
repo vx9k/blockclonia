@@ -505,8 +505,9 @@ static VkPresentModeKHR choose_present_mode(renderer *r)
     vkGetPhysicalDeviceSurfacePresentModesKHR(r->pd, r->surf, &n, m);
     VkPresentModeKHR best = VK_PRESENT_MODE_FIFO_KHR;
     for (uint32_t i = 0; i < n; i++) {
-        if (m[i] == VK_PRESENT_MODE_MAILBOX_KHR) best = m[i];
-        else if (m[i] == VK_PRESENT_MODE_IMMEDIATE_KHR && best == VK_PRESENT_MODE_FIFO_KHR) best = m[i];
+        if (m[i] == VK_PRESENT_MODE_MAILBOX_KHR ||
+            (m[i] == VK_PRESENT_MODE_IMMEDIATE_KHR && best == VK_PRESENT_MODE_FIFO_KHR))
+            best = m[i];
     }
     mem_free(m);
     return best;
@@ -1027,9 +1028,9 @@ static int on_mesh_ready(void *user, column *c, int sy, const uint32_t *verts, c
     if (!nverts) return 1;
 
     if (r->pool_host_visible) {
-        memcpy((uint8_t *)r->pool[blk].buf.map + (VkDeviceSize)start * sizeof(uint32_t), verts, bytes);
+        memcpy((uint8_t *)r->pool[blk].buf.map + (size_t)start * sizeof(uint32_t), verts, (size_t)bytes);
     } else {
-        memcpy((uint8_t *)f->staging.map + f->staging_used, verts, bytes);
+        memcpy((uint8_t *)f->staging.map + f->staging_used, verts, (size_t)bytes);
         copy_list *cl = &f->copies[blk];
         if (cl->count == cl->cap) {
             cl->cap = cl->cap ? cl->cap * 2 : 64;
@@ -1142,7 +1143,6 @@ void renderer_destroy(renderer *r)
 }
 
 void renderer_on_resize(renderer *r) { r->resized = 1; }
-const char *renderer_device_name(const renderer *r) { return r->props.deviceName; }
 render_stats renderer_stats(const renderer *r) { return r->stats; }
 
 void renderer_request_screenshot(renderer *r, const char *path)
@@ -1198,22 +1198,23 @@ static void write_screenshot(renderer *r, const gbuf *b)
         return;
     }
     uint32_t w = r->extent.width, h = r->extent.height;
-    fprintf(fp, "P6\n%u %u\n255\n", w, h);
+    int ok = fprintf(fp, "P6\n%u %u\n255\n", w, h) > 0;
     const uint8_t *px = b->map;
     int bgr = r->swap_fmt == VK_FORMAT_B8G8R8A8_SRGB || r->swap_fmt == VK_FORMAT_B8G8R8A8_UNORM;
     uint8_t *row = mem_alloc((size_t)w * 3);
-    for (uint32_t y = 0; y < h; y++) {
+    for (uint32_t y = 0; y < h && ok; y++) {
         for (uint32_t x = 0; x < w; x++) {
             const uint8_t *p = px + ((size_t)y * w + x) * 4;
             row[x * 3 + 0] = bgr ? p[2] : p[0];
             row[x * 3 + 1] = p[1];
             row[x * 3 + 2] = bgr ? p[0] : p[2];
         }
-        fwrite(row, 1, (size_t)w * 3, fp);
+        ok = fwrite(row, 1, (size_t)w * 3, fp) == (size_t)w * 3;
     }
     mem_free(row);
-    fclose(fp);
-    log_info("screenshot saved to %s", r->shot_path);
+    ok &= fclose(fp) == 0;
+    if (ok) log_info("screenshot saved to %s", r->shot_path);
+    else log_error("writing screenshot %s failed", r->shot_path);
 }
 
 /* Issues one section range, split where 16-bit indices run out. */
@@ -1374,7 +1375,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     int n_opaque_bodies = 0, n_trans_bodies = 0;
     VkDeviceSize body_off = dyn_used;
     if (ph && ph->body_count) {
-        body_instance *bi_ = (body_instance *)(dyn + body_off);
+        body_instance *insts = (body_instance *)(dyn + body_off);
         int nb = ph->body_count;
         for (int i = 0; i < nb; i++) {
             const body *b = &ph->bodies[i];
@@ -1382,9 +1383,9 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
             const block_def *bd = block_get(b->block);
             int trans = (bd->flags & BF_TRANSLUCENT) != 0;
             int slot = trans ? nb - 1 - n_trans_bodies++ : n_opaque_bodies++;
-            bi_[slot] = (body_instance){(float)(p.x - v->eye.x), (float)(p.y - v->eye.y), (float)(p.z - v->eye.z),
-                                        (uint32_t)bd->tex[0] | (uint32_t)bd->tex[2] << 8 |
-                                            (uint32_t)bd->tex[3] << 16};
+            insts[slot] = (body_instance){(float)(p.x - v->eye.x), (float)(p.y - v->eye.y), (float)(p.z - v->eye.z),
+                                          (uint32_t)bd->tex[0] | (uint32_t)bd->tex[2] << 8 |
+                                              (uint32_t)bd->tex[3] << 16};
         }
         dyn_used += (VkDeviceSize)nb * sizeof(body_instance);
         if (n_opaque_bodies) {

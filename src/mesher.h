@@ -40,7 +40,7 @@ typedef struct {
 
 /* Writes opaque quads first, then translucent ones. `out` must hold
  * MESH_MAX_QUADS * 4 vertices. Returns total quad count. */
-uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *counts);
+uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *mc);
 uint32_t mesh_section(const mesh_input *in, uint32_t *out, uint32_t *opaque_quads,
                       uint32_t *trans_quads);
 

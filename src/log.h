@@ -4,16 +4,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define log_info(...)  do { fprintf(stderr, "[info] " __VA_ARGS__); fputc('\n', stderr); } while (0)
-#define log_warn(...)  do { fprintf(stderr, "[warn] " __VA_ARGS__); fputc('\n', stderr); } while (0)
-#define log_error(...) do { fprintf(stderr, "[error] " __VA_ARGS__); fputc('\n', stderr); } while (0)
-#define log_fatal(...)                                                   \
-    do {                                                                 \
-        fprintf(stderr, "[fatal] " __VA_ARGS__);                         \
-        fputc('\n', stderr);                                             \
-        log_run_fatal_hook();                                            \
-        abort();                                                         \
+/* flockfile keeps the message and its newline together when worker threads
+ * log at the same time as the main thread. */
+/* clang-format off */
+#define MC_LOG_LINE(...)                        \
+    do {                                        \
+        flockfile(stderr);                      \
+        (void)fprintf(stderr, __VA_ARGS__);     \
+        (void)fputc('\n', stderr);              \
+        funlockfile(stderr);                    \
     } while (0)
+#define log_info(...)  MC_LOG_LINE("[info] " __VA_ARGS__)
+#define log_warn(...)  MC_LOG_LINE("[warn] " __VA_ARGS__)
+#define log_error(...) MC_LOG_LINE("[error] " __VA_ARGS__)
+#define log_fatal(...) do { MC_LOG_LINE("[fatal] " __VA_ARGS__); log_run_fatal_hook(); abort(); } while (0)
+/* clang-format on */
 
 /* Registers a function to run before a fatal error aborts, such as saving
  * the world after the GPU device is lost. It runs only when the error is

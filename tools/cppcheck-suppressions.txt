@@ -1,0 +1,8 @@
+# cppcheck 2.13 suppressions for blockclonia.
+# Right shift of a negative int is implementation-defined (not undefined);
+# world.h pins the behaviour with a _Static_assert.
+shiftNegativeLHS:*/src/world.h
+# Informational noise from --enable=all.
+missingIncludeSystem
+checkersReport
+unmatchedSuppression

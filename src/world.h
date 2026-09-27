@@ -96,12 +96,12 @@ typedef struct world {
     void (*on_block_changed)(void *user, int x, int y, int z, uint8_t old_id, uint8_t new_id);
     /* Called with edit_user just before a loaded column is saved and freed,
      * so state living outside it (falling bodies) can be written back. */
-    void (*on_column_unload)(void *user, column *c);
+    void (*on_column_unload)(void *user, const column *c);
     /* Test hook: replaces terrain generation when set. */
     void (*generator)(uint32_t seed, column *c);
 } world;
 
-void world_init(world *w, uint32_t seed, int radius, struct jobs *jobs, const char *save_dir);
+void world_init(world *w, uint32_t seed, int radius, struct jobs *js, const char *save_dir);
 void world_destroy(world *w);
 
 /* Inline: every physics query goes through these. */

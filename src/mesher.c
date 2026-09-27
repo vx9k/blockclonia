@@ -22,9 +22,8 @@ void mesher_init(void)
     for (int i = 0; i < 256; i++) {
         uint8_t c;
         if (i == B_AIR) c = C_AIR;
-        else if (i >= B_COUNT) c = C_OPAQUE; /* unknown/unloaded: hide faces */
         else if (i == B_WATER) c = C_WATER;
-        else if (g_blocks[i].flags & BF_OPAQUE) c = C_OPAQUE;
+        else if (i >= B_COUNT || (g_blocks[i].flags & BF_OPAQUE)) c = C_OPAQUE; /* unknown/unloaded: hide faces */
         else c = C_TRANS;
         g_class[i] = c;
     }
@@ -55,7 +54,7 @@ static inline uint32_t face_key(const mesh_input *in, const uint8_t *cls, int pi
     uint8_t cn = cls[ni];
     if (cn == C_OPAQUE && cb != C_WATER) return 0; /* hidden: the common case, decided first */
     uint8_t b = in->blocks[pi];
-    uint32_t key = K_PRESENT | g_blocks[b].tex[f];
+    uint32_t key = K_PRESENT | block_get(b)->tex[f]; /* ids >= B_COUNT read as stone */
 
     if (cb == C_WATER) {
         int level = in->meta[pi] ? in->meta[pi] : WATER_FULL;
@@ -121,8 +120,8 @@ uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *m
                     for (int y = 0; y < h; y++)
                         for (int x = 0; x < w; x++) mask[j + y][i + x] = 0;
 
-                    int ao[4] = {(int)(K_AO(k) & 3), (int)(K_AO(k) >> 2 & 3),
-                                 (int)(K_AO(k) >> 4 & 3), (int)(K_AO(k) >> 6 & 3)};
+                    const int ao[4] = {(int)(K_AO(k) & 3), (int)(K_AO(k) >> 2 & 3), (int)(K_AO(k) >> 4 & 3),
+                                       (int)(K_AO(k) >> 6 & 3)};
                     static const int CU[4] = {0, 1, 1, 0}, CV[4] = {0, 0, 1, 1};
                     /* Counter-clockwise seen from outside the face. */
                     int order[4] = {0, 1, 2, 3};
