@@ -69,6 +69,8 @@ for low-end hardware. All memory comes from [mimalloc](https://github.com/micros
 
 ## Health
 
+![the H panel](docs/health.png)
+
 The player is a 75 kg adult simulated in real time: a circulation model
 (blood volume, heart rate, stroke volume, vascular resistance, a
 baroreflex), breathing driven by CO₂ and O₂, an oxygen store with a real
