@@ -89,7 +89,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build ca-certificates glslc \
+            build-essential cmake ninja-build ca-certificates glslc file \
             libvulkan-dev libglfw3-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
       # bookworm's mimalloc (2.0.x) predates the options mem.c uses, so

@@ -214,7 +214,8 @@ if(MC_BUILD_TESTS)
     # A real frame loop on Mesa's software Vulkan driver under Xvfb, with the
     # validation layer: catches renderer regressions on machines without a GPU.
     find_program(MC_XVFB_RUN xvfb-run)
-    find_file(MC_LVP_ICD lvp_icd.json
+    # Debian names the ICD file per architecture (lvp_icd.aarch64.json).
+    find_file(MC_LVP_ICD NAMES lvp_icd.json lvp_icd.${CMAKE_SYSTEM_PROCESSOR}.json
       PATHS /usr/share/vulkan/icd.d /etc/vulkan/icd.d NO_DEFAULT_PATH)
     if(MC_XVFB_RUN AND MC_LVP_ICD AND NOT CMAKE_CROSSCOMPILING)
       add_test(NAME render_smoke
