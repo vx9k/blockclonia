@@ -54,7 +54,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev \
-            mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
+            mesa-vulkan-drivers vulkan-validationlayers xvfb xauth \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev libwayland-bin libxkbcommon-dev
+      # Ubuntu's GLFW 3.3 and mimalloc 2.1 are older than the pinned
+      # releases, so the preset's MC_DEPS=AUTO builds both from source
+      # (GLFW needs the X11 and Wayland headers and wayland-scanner).
       - run: cmake --preset asan -DMC_WERROR=ON
       - run: cmake --build --preset asan
       - run: ctest --preset asan
@@ -70,7 +75,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             ninja-build glslc glslang-tools libvulkan-dev libglfw3-dev libmimalloc-dev \
-            clang clang-tidy clang-format cppcheck
+            clang clang-tidy clang-format cppcheck \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev libwayland-bin libxkbcommon-dev # GLFW from source, as in sanitize
       - name: tools/lint.sh
         env:
           MC_FORMAT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
