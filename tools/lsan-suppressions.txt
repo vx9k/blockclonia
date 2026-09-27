@@ -1,0 +1,8 @@
+# LeakSanitizer suppressions for the render_smoke test under MC_SANITIZE.
+# Xlib keeps allocations from XOpenDisplay, XrmInitialize and the input
+# method alive until exit, and GLFW unloads libX11 before LeakSanitizer
+# reports, so the frames below GLFW show as <unknown module>. A match
+# anywhere in the stack suppresses the report, so this covers only leaks
+# that start in GLFW's X11 set-up.
+leak:_glfwInitX11
+leak:_glfwConnectX11
