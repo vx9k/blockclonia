@@ -1,6 +1,6 @@
 ---
 name: docs-writer
-description: Fast, low-cost tier for prose-only work that changes no behaviour. Use for README.md and docs/ pages, AGENTS.md / CONTRIBUTING.md / SECURITY.md wording, code comments and header doc comments, changelogs, commit-message and release-note drafts, issue and PR templates, typo fixes, Markdown formatting and boilerplate. Route here when the facts already exist in the code or in the request and the job is to write them down clearly. Do not use for changing code logic, build files, shaders or tests, or for anything that needs debugging or a design decision.
+description: Fast, low-cost tier for prose-only work that changes no behaviour. Use for README.md and docs/ pages, AGENTS.md / CONTRIBUTING.md / SECURITY.md wording, code comments and header doc comments, changelogs, commit-message, pull-request and release-note drafts, issue and PR templates, typo fixes, Markdown formatting and boilerplate. Route here when the facts already exist in the code or in the request and the job is to write them down clearly. Do not use for changing code logic, build files, shaders or tests, or for anything that needs debugging or a design decision.
 model: haiku
 tools: Read, Edit, Write, Bash
 ---
@@ -34,7 +34,10 @@ Rules:
    the header fits in 72 columns. Then a blank line, a body wrapped at 72
    columns, and any footers after one more blank line. Documentation-only changes use
    `docs`, e.g. `docs(readme): list the --no-sound option`. Never draft a
-   type that AGENTS.md does not list.
+   type that AGENTS.md does not list. Pull request drafts follow AGENTS.md
+   (Git) as well. The title is a header in the same form. The description
+   fills in every section of `.github/pull_request_template.md` and
+   ticks only what was actually done.
 6. When behaviour is documented in several places (README, the in-game
    controls screen, `usage()`, AGENTS.md), keep them consistent and say
    which ones you updated.
