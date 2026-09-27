@@ -5,6 +5,10 @@
 #include "mesher.h"
 #include "texgen.h"
 
+/* GLFW_INCLUDE_VULKAN adds vulkan.h on top of the default OpenGL header;
+ * GLFW_INCLUDE_NONE drops GL/gl.h, which Pi images without Mesa's GL
+ * development package don't have. */
+#define GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 

@@ -250,6 +250,10 @@ if(MC_BUILD_TESTS)
         LABELS render TIMEOUT 120
         ENVIRONMENT "VK_ICD_FILENAMES=${MC_LVP_ICD}"
         FAIL_REGULAR_EXPRESSION "\\[(error|fatal)\\]|\\[warn\\] vulkan:|validation requested but")
+      if(MC_SANITIZE)
+        set_property(TEST render_smoke APPEND PROPERTY ENVIRONMENT
+          "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tools/lsan-suppressions.txt")
+      endif()
     endif()
   endif()
 endif()

@@ -252,9 +252,9 @@ cmake --build --preset native
 
 - If the distro's mimalloc or GLFW is older than 3.5 (most distros today),
   the default `MC_DEPS=AUTO` downloads and compiles the pinned releases.
-  Building GLFW needs the X11 and Wayland headers (`libx11-dev
-  libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libwayland-dev
-  libxkbcommon-dev`). `-DMC_DEPS=SYSTEM` forbids downloads; `FETCH` always
+  Building GLFW needs the X11 and Wayland headers and `wayland-scanner`
+  (`libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+  libwayland-dev libwayland-bin libxkbcommon-dev`). `-DMC_DEPS=SYSTEM` forbids downloads; `FETCH` always
   uses the pinned releases. For a reproducible build, set
   `MC_MIMALLOC_SHA256`, `MC_GLFW_SHA256` and `MC_MINIAUDIO_SHA256` (see
   [SECURITY.md](SECURITY.md#supply-chain)).
