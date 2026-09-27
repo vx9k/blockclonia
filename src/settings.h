@@ -29,6 +29,7 @@ typedef struct {
 #define SETTINGS_RD_MIN 2
 #define SETTINGS_RD_MAX 32
 
+/* The values a fresh install starts with. */
 void settings_default(settings *s);
 /* Parses text into s (fields not mentioned keep their value). Returns the
  * number of keys applied. */

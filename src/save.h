@@ -20,6 +20,7 @@ int save_decode_column(column *c, const uint8_t *data, size_t len);
 int save_load_column(const char *dir, column *c);
 int save_store_column(const char *dir, const column *c);
 
+/* Creates dir if it does not exist; 0 on success. */
 int save_ensure_dir(const char *dir);
 /* Reads/writes the world seed in <dir>/level.dat. read returns 0 if found. */
 int save_read_seed(const char *dir, uint32_t *seed);

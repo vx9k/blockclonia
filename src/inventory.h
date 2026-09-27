@@ -17,6 +17,7 @@ typedef struct {
     int selected;        /* hotbar slot in hand */
 } inventory;
 
+/* Empty, first hotbar slot selected. */
 void inv_init(inventory *inv);
 /* The survival kit a new player starts with. */
 void inv_starting_kit(inventory *inv);
@@ -24,6 +25,7 @@ void inv_starting_kit(inventory *inv);
 /* Adds items, filling matching stacks first, then empty slots (hotbar
  * first). Returns how many did not fit. */
 int inv_add(inventory *inv, int id, int count);
+/* How many of an item are in the slots (not the cursor). */
 int inv_count(const inventory *inv, int id);
 /* Removes up to count, from the last slot backwards so the hotbar is used
  * last. Returns how many were removed. */
@@ -62,6 +64,7 @@ int inv_craft(inventory *inv, int r, int near_fire);
 /* ---------------------------------------------------------- persistence */
 
 #define INV_ENCODED_SIZE (8 + 2 * (INV_SLOTS + 1))
+/* Writes INV_ENCODED_SIZE bytes; returns that, or 0 if cap is smaller. */
 size_t inv_encode(const inventory *inv, uint8_t *out, size_t cap);
 /* 0 on success; -1 (inventory untouched) if the bytes are malformed. */
 int inv_decode(inventory *inv, const uint8_t *in, size_t len);

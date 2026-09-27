@@ -14,6 +14,8 @@ typedef struct job {
 
 typedef struct jobs jobs;
 
+/* Starts `workers` threads; with 0, jobs_submit runs each job and its
+ * completion inline. */
 jobs *jobs_create(int workers);
 void jobs_destroy(jobs *js);    /* drains queued jobs, then joins workers */
 void jobs_submit(jobs *js, job *j);
@@ -30,6 +32,7 @@ void jobs_wait_idle(jobs *js);
  * thread (worker or main) and freed when the pool is destroyed. */
 void *jobs_scratch(size_t size);
 
+/* Online CPU cores, at least 1. */
 int cpu_count(void);
 
 #endif

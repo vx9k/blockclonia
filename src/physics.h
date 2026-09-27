@@ -165,15 +165,24 @@ typedef struct physics {
     int fluid_updates;
 } physics;
 
+/* Allocates the body, item and fluid queues; w must outlive ph. */
 void physics_init(physics *ph, world *w);
 void physics_destroy(physics *ph);
 
 /* Hook for world->on_block_changed. */
 void physics_on_block_changed(void *user, int x, int y, int z, uint8_t old_id, uint8_t new_id);
 
+/* One fixed step of PHYS_DT: the player, falling bodies, dropped items,
+ * queued structural checks (at least one, more while STRUCT_BUDGET_S
+ * allows) and this step's share of the 10 Hz fluid tick. The per-step
+ * event lists (hits, shatters, splashes, thuds) are cleared, then refilled
+ * for the caller to turn into injuries, effects and sounds. */
 void physics_step(physics *ph, player *p, const player_input *in);
 
+/* Resets the player and stands them on the surface at (x, z), centred in
+ * the block; at the top of the world if that column is not loaded. */
 void player_spawn(player *p, const world *w, double x, double z);
+/* The player's collision box at its current position. */
 aabb player_box(const player *p);
 
 /* Voxel raycast (Amanatides-Woo). Returns 1 on hit, with the block and the
@@ -185,6 +194,8 @@ ray_hit physics_raycast(const world *w, dvec3 o, vec3 dir, double max_dist);
  * blocks that became falling bodies. Exposed for tests. */
 int physics_check_structure(physics *ph, int x, int y, int z);
 
+/* Runs one whole fluid tick at once (tests and --bench); the game spreads
+ * each tick over the physics steps instead. */
 void physics_fluid_tick(physics *ph);
 
 /* Drops an item stack at pos (centre) with an initial velocity. delay is

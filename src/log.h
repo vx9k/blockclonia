@@ -1,3 +1,7 @@
+/* Logging to stderr: one line per message with a [info], [warn], [error]
+ * or [fatal] prefix, safe to call from worker threads. log_fatal runs the
+ * fatal hook (saving the world) and aborts; it is for states the game
+ * cannot continue from, such as a lost GPU device, never for bad input. */
 #ifndef MC_LOG_H
 #define MC_LOG_H
 

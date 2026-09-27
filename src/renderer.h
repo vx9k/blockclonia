@@ -74,7 +74,11 @@ typedef struct {
 
 typedef struct renderer renderer;
 
+/* Creates the instance, device, swapchain, pipelines and GPU resources for
+ * win. There is no error return: a Vulkan failure at start-up is fatal
+ * (log_fatal), since the game cannot run without a device. */
 renderer *renderer_create(GLFWwindow *win, const render_opts *o);
+/* Waits for the GPU and frees everything; NULL is ignored. */
 void renderer_destroy(renderer *r);
 
 /* Installs the mesh upload/free hooks on the world. */
@@ -92,7 +96,10 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
  * Returns NULL, with *max_quads 0, when no frame is active. */
 ui_vertex *renderer_ui_buffer(renderer *r, int *max_quads, int *fb_w, int *fb_h);
 
+/* Saves the next presented frame to path as a binary PPM. The first
+ * request rebuilds the swapchain so its images can be read back. */
 void renderer_request_screenshot(renderer *r, const char *path);
+/* The framebuffer changed size: the swapchain is rebuilt next frame. */
 void renderer_on_resize(renderer *r);
 /* Switches between FIFO (FIFO_RELAXED where offered) and the fastest mode;
  * rebuilds the swapchain. */

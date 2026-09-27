@@ -17,6 +17,7 @@ typedef struct {
     float fps;                 /* smoothed */
 } debug_frames;
 
+/* Records one frame time and updates the smoothed fps. */
 void debug_frames_push(debug_frames *f, float ms);
 
 typedef struct {
@@ -57,6 +58,7 @@ typedef struct {
     int width, height;
 } debug_info;
 
+/* Draws the whole overlay from d (renderer lines it has no data for are left out). */
 void debug_draw(ui *u, const debug_info *d);
 
 /* "north", "south-east", ... for a yaw in radians (0 = -Z = north). */

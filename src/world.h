@@ -101,7 +101,12 @@ typedef struct world {
     void (*generator)(uint32_t seed, column *c);
 } world;
 
+/* An empty world: columns stream in from world_update. radius is clamped
+ * to 2..32 columns; js runs generation and meshing; save_dir NULL means
+ * nothing is loaded or saved. */
 void world_init(world *w, uint32_t seed, int radius, struct jobs *js, const char *save_dir);
+/* Waits for outstanding jobs and frees everything. Does not save: call
+ * world_save_all first. */
 void world_destroy(world *w);
 
 /* Inline: every physics query goes through these. */
@@ -120,7 +125,9 @@ static inline uint8_t world_get(const world *w, int x, int y, int z)
     return c->blocks[col_index(x & (CHUNK_W - 1), y, z & (CHUNK_W - 1))];
 }
 
+/* The 0..7 meta value of a cell (see block_has_meta); 0 when unloaded. */
 uint8_t world_get_meta(const world *w, int x, int y, int z);
+/* Water in a cell, 0 (none) .. WATER_FULL. */
 int world_water_level(const world *w, int x, int y, int z);
 
 /* Raw edit: marks meshes dirty and the column modified, then fires
@@ -154,6 +161,9 @@ void worldgen_column(uint32_t seed, column *c);
 /* Terrain surface height before trees/water; cheap, needs nothing loaded. */
 int worldgen_height(uint32_t seed, int x, int z);
 
+/* Column lifetime. alloc returns a COL_LOADING column whose blocks are
+ * not initialised yet; recount refreshes the per-section block counts that
+ * let meshing skip empty and fully buried sections. */
 column *column_alloc(int cx, int cz);
 void column_free(column *c);
 void column_recount(column *c);

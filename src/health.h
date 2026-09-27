@@ -240,6 +240,8 @@ typedef struct health {
     float log_age[HEALTH_LOG];
 } health;
 
+/* A healthy, rested and fed adult. seed drives the model's own random
+ * numbers, so a run with the same inputs replays exactly. */
 void health_init(health *h, uint32_t seed);
 
 /* Advances the body by dt seconds of real time. */
@@ -301,6 +303,7 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
 
 /* ---------------------------------------------------------- display */
 
+/* Display names (static strings). */
 const char *health_part_name(int part);
 const char *health_bone_name(int part); /* "right forearm", "skull" */
 const char *health_organ_name(int organ);
@@ -320,6 +323,8 @@ float health_hb(const health *h);         /* g/dL */
 float health_skin_mean(const health *h); /* degrees C, area-weighted */
 float health_part_area(int part); /* share of the body surface (rule of nines) */
 
+/* Adds a printf-style line to the event log the HUD shows; the oldest
+ * line drops off. */
 void health_log(health *h, const char *fmt, ...)
 #if defined(__GNUC__)
     __attribute__((format(printf, 2, 3)))

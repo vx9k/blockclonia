@@ -33,7 +33,10 @@ static inline void mem_free(void *ptr) { mi_free(ptr); }
 /* Overflow-checked count * size for array allocations. Aborts on overflow. */
 size_t mem_array_size(size_t count, size_t size);
 
+/* Tunes mimalloc for small-memory devices (reserve in 64 MiB steps,
+ * commit on demand). Call first thing in main. */
 void mem_init(void);
+/* mimalloc's statistics to stderr (--mem-stats). */
 void mem_print_stats(void);
 /* Resident and committed bytes of the process, from mimalloc; 0 when
  * unknown (sanitizer builds). */

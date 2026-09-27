@@ -33,6 +33,7 @@
 
 typedef struct thermo thermo;
 
+/* The clock at THERMO_DAY_START and no local heat anywhere. */
 thermo *thermo_create(uint32_t seed);
 void thermo_destroy(thermo *t);
 

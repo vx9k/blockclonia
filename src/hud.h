@@ -44,6 +44,7 @@ typedef struct {
 /* Advances the alert animation by dt seconds of real time. */
 void hud_update(hud_state *s, const health *h, float dt);
 
+/* The HUD, plus the H panel or the death screen when they are showing. */
 void hud_draw(ui *u, const health *h, const hud_state *s);
 
 #endif

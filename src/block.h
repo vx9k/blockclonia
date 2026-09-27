@@ -106,16 +106,21 @@ typedef struct {
 
 extern const block_def g_blocks[B_COUNT];
 
+/* Properties of a block. Unknown ids read as stone, so a damaged save can
+ * never index past the table. */
 static inline const block_def *block_get(uint8_t id)
 {
     return &g_blocks[id < B_COUNT ? id : B_STONE];
 }
 
+/* Collides with the player and bodies. Unloaded space counts as solid, so
+ * nothing falls out of the loaded world. */
 static inline int block_solid(uint8_t id)
 {
     return id == B_UNLOADED || (id < B_COUNT && (g_blocks[id].flags & BF_SOLID));
 }
 
+/* Hides the faces behind it (meshing, ambient occlusion). */
 static inline int block_opaque(uint8_t id)
 {
     return id < B_COUNT && (g_blocks[id].flags & BF_OPAQUE);

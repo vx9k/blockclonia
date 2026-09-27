@@ -17,6 +17,7 @@ typedef struct {
     uint32_t used;
 } gpupool;
 
+/* A pool of `total` units, allocated in multiples of `granule`. */
 void gpupool_init(gpupool *p, uint32_t total, uint32_t granule);
 void gpupool_destroy(gpupool *p);
 /* Returns the start (in units) or GPUPOOL_FAIL. `*got` receives the rounded

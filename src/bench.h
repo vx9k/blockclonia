@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 
+/* Prints timings to stdout; returns the process exit code (0). */
 int bench_run(uint32_t seed);
 
 #endif
