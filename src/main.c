@@ -94,7 +94,6 @@ typedef struct {
 
 static input_state g_in;
 
-
 /* ---------------------------------------------------------- arguments */
 
 /* long long: `long` is 32-bit on 32-bit ARM, where (long)UINT32_MAX is -1. */
@@ -177,9 +176,13 @@ static int parse_flag(options *o, const char *a)
         const char *name;
         int *field;
     } flags[] = {
-        {"--play", &o->play},        {"--debug", &o->debug},      {"--validate", &o->validate},
-        {"--demo", &o->demo},        {"--health-panel", &o->open_panel},
-        {"--bench", &o->bench},      {"--mem-stats", &o->mem_stats},
+        {"--play", &o->play},
+        {"--debug", &o->debug},
+        {"--validate", &o->validate},
+        {"--demo", &o->demo},
+        {"--health-panel", &o->open_panel},
+        {"--bench", &o->bench},
+        {"--mem-stats", &o->mem_stats},
     };
     for (size_t i = 0; i < sizeof flags / sizeof flags[0]; i++)
         if (strcmp(a, flags[i].name) == 0) {
@@ -338,11 +341,18 @@ static void menu_key(int key, int action)
 {
     if (action != GLFW_PRESS && action != GLFW_REPEAT) return;
     switch (key) {
-    case GLFW_KEY_UP: case GLFW_KEY_W: g_in.ui_up = 1; break;
-    case GLFW_KEY_DOWN: case GLFW_KEY_S: case GLFW_KEY_TAB: g_in.ui_dn = 1; break;
-    case GLFW_KEY_LEFT: case GLFW_KEY_A: g_in.ui_left = 1; break;
-    case GLFW_KEY_RIGHT: case GLFW_KEY_D: g_in.ui_right = 1; break;
-    case GLFW_KEY_ENTER: case GLFW_KEY_KP_ENTER: case GLFW_KEY_SPACE: g_in.ui_enter = 1; break;
+    case GLFW_KEY_UP:
+    case GLFW_KEY_W: g_in.ui_up = 1; break;
+    case GLFW_KEY_DOWN:
+    case GLFW_KEY_S:
+    case GLFW_KEY_TAB: g_in.ui_dn = 1; break;
+    case GLFW_KEY_LEFT:
+    case GLFW_KEY_A: g_in.ui_left = 1; break;
+    case GLFW_KEY_RIGHT:
+    case GLFW_KEY_D: g_in.ui_right = 1; break;
+    case GLFW_KEY_ENTER:
+    case GLFW_KEY_KP_ENTER:
+    case GLFW_KEY_SPACE: g_in.ui_enter = 1; break;
     case GLFW_KEY_ESCAPE: g_in.ui_back = 1; break;
     default: break;
     }
@@ -350,7 +360,8 @@ static void menu_key(int key, int action)
 
 static void key_cb(GLFWwindow *win, int key, int sc, int action, int mods)
 {
-    (void)sc; (void)win;
+    (void)sc;
+    (void)win;
     if (key < 0 || key > GLFW_KEY_LAST) return;
     if (action == GLFW_PRESS) g_in.keys[key] = 1;
     else if (action == GLFW_RELEASE) g_in.keys[key] = 0;
@@ -424,8 +435,7 @@ static void mouse_button_cb(GLFWwindow *win, int button, int action, int mods)
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         g_in.click_break = 1;
         g_in.attack = 1;
-    }
-    else if (button == GLFW_MOUSE_BUTTON_RIGHT) g_in.click_place = 1;
+    } else if (button == GLFW_MOUSE_BUTTON_RIGHT) g_in.click_place = 1;
     else if (button == GLFW_MOUSE_BUTTON_MIDDLE) g_in.click_pick = 1;
 }
 
@@ -526,7 +536,8 @@ static void give_items(inventory *inv, const char *list)
             const char *name = item_get(id)->name;
             size_t k = 0;
             for (; name[k] && t[k]; k++) {
-                char a = (char)tolower((unsigned char)name[k]), b = t[k] == '_' ? ' ' : (char)tolower((unsigned char)t[k]);
+                char a = (char)tolower((unsigned char)name[k]),
+                     b = t[k] == '_' ? ' ' : (char)tolower((unsigned char)t[k]);
                 if (a != b) break;
             }
             if (!name[k] && !t[k]) {
@@ -643,8 +654,8 @@ static void demo_step(world *w, physics *ph, fx_state *fx, const player *p, demo
         static const int IDS[] = {B_LOG, I_APPLE, I_BANDAGE, B_GLASS, I_STICK, B_SAND, I_WATER_BUCKET, B_BRICK};
         for (int i = 0; i < 8; i++) {
             double a = -0.9 + 0.25 * i;
-            physics_drop_item(ph, dv3(p->pos.x + sin(a) * 3.0, p->pos.y + 1.5, p->pos.z - cos(a) * 3.0),
-                              dv3(0, 1.0, 0), IDS[i], 1 + i, 10.0f);
+            physics_drop_item(ph, dv3(p->pos.x + sin(a) * 3.0, p->pos.y + 1.5, p->pos.z - cos(a) * 3.0), dv3(0, 1.0, 0),
+                              IDS[i], 1 + i, 10.0f);
         }
     }
     if (frame == 100) fx_break(fx, B_GRASS, (int)floor(p->pos.x), (int)floor(p->pos.y), (int)floor(p->pos.z) - 3, 14);
@@ -803,8 +814,12 @@ static void game_init_world(game *g)
     if (workers > 8 && o->threads < 0) workers = 8;
     g->js = jobs_create(workers);
 
-    render_opts ro = {.vsync = o->vsync, .validate = o->validate, .render_radius = o->radius,
-                      .gpu_index = o->gpu, .pool_mb = o->pool_mb, .screenshots = o->screenshot != NULL};
+    render_opts ro = {.vsync = o->vsync,
+                      .validate = o->validate,
+                      .render_radius = o->radius,
+                      .gpu_index = o->gpu,
+                      .pool_mb = o->pool_mb,
+                      .screenshots = o->screenshot != NULL};
     g->rd = renderer_create(g->win, &ro);
 
     world_init(&g->w, g->seed, o->radius, g->js, o->world_dir);
@@ -974,7 +989,8 @@ static void frame_simulate(game *g, const player_input *in, double dt)
         for (int k = 0; k < g->ph.shatter_count; k++)
             fx_break(g->fx, g->ph.shatter_block[k], g->ph.shatter_pos[k].x, g->ph.shatter_pos[k].y,
                      g->ph.shatter_pos[k].z, 24);
-        for (int k = 0; k < g->ph.splash_count; k++) fx_splash(g->fx, g->ph.splash_pos[k], (double)g->ph.splash_speed[k]);
+        for (int k = 0; k < g->ph.splash_count; k++)
+            fx_splash(g->fx, g->ph.splash_pos[k], (double)g->ph.splash_speed[k]);
         health_step(&g->hl, &env, PHYS_DT);
         g->acc -= PHYS_DT;
         steps++;
@@ -999,9 +1015,12 @@ static void frame_interact(game *g, double dt)
     g->hit = physics_raycast(&g->w, g->eye, g->look, REACH);
     health_limits lim = health_get_limits(&g->hl);
     int hands = !g->frozen && (pl->flying || (lim.has_control && lim.can_act));
-    interact_input ii = {.attack = g_in.attack && !g->frozen, .attack_click = g_in.click_break,
-                         .use_click = g_in.click_place, .pick_click = g_in.click_pick && !g->frozen,
-                         .drop = g->frozen ? 0 : g_in.drop, .can_act = hands,
+    interact_input ii = {.attack = g_in.attack && !g->frozen,
+                         .attack_click = g_in.click_break,
+                         .use_click = g_in.click_place,
+                         .pick_click = g_in.click_pick && !g->frozen,
+                         .drop = g->frozen ? 0 : g_in.drop,
+                         .can_act = hands,
                          .speed = pl->flying ? 1.0f : 0.4f + 0.6f * lim.move_scale,
                          .dt = g->in_menu ? 0.0f : (float)dt};
     interact_out io = interact_frame(&g->ia, &g->w, &g->ph, g->th, pl, &g->inv, g->fx, g->eye, g->look, g->hit, &ii);
@@ -1046,8 +1065,11 @@ static render_view build_view(game *g, double now, double dt, double alpha)
 {
     const player *pl = &g->pl;
     dvec3 ip = dv3_lerp(pl->prev_pos, pl->pos, alpha);
-    render_view v = {.eye = dv3(ip.x, ip.y + PLAYER_EYE, ip.z), .yaw = pl->yaw, .pitch = pl->pitch,
-                     .fov = (float)g->st.fov * (float)(MC_PI / 180.0), .has_selection = g->hit.hit && !g->in_menu,
+    render_view v = {.eye = dv3(ip.x, ip.y + PLAYER_EYE, ip.z),
+                     .yaw = pl->yaw,
+                     .pitch = pl->pitch,
+                     .fov = (float)g->st.fov * (float)(MC_PI / 180.0),
+                     .has_selection = g->hit.hit && !g->in_menu,
                      .selection = g->hit.block};
     int on_title = g_in.screen == SCREEN_TITLE;
     v.eye.x += (double)g->pose.dx;
@@ -1130,7 +1152,8 @@ static void draw_debug(game *g, ui *u, int fb_w, int fb_h, double alpha)
     di.ty = g->hit.block.y;
     di.tz = g->hit.block.z;
     di.target_id = g->hit.id;
-    di.target_temp = g->hit.hit ? thermo_block_temp(g->th, &g->w, g->hit.block.x, g->hit.block.y, g->hit.block.z) : 0.0f;
+    di.target_temp = g->hit.hit ? thermo_block_temp(g->th, &g->w, g->hit.block.x, g->hit.block.y, g->hit.block.z)
+                                : 0.0f;
     di.seed = g->seed;
     di.radius = g->w.radius;
     di.threads = jobs_worker_count(g->js);
@@ -1157,8 +1180,14 @@ static void draw_debug(game *g, ui *u, int fb_w, int fb_h, double alpha)
 /* Menus take the mouse: returns the action, applied here. */
 static void run_menu(game *g, ui *u, float mx, float my, double dt)
 {
-    menu_input mi = {.mouse_down = g_in.ui_down, .click = g_in.ui_click, .up = g_in.ui_up, .down = g_in.ui_dn,
-                     .left = g_in.ui_left, .right = g_in.ui_right, .enter = g_in.ui_enter, .back = g_in.ui_back,
+    menu_input mi = {.mouse_down = g_in.ui_down,
+                     .click = g_in.ui_click,
+                     .up = g_in.ui_up,
+                     .down = g_in.ui_dn,
+                     .left = g_in.ui_left,
+                     .right = g_in.ui_right,
+                     .enter = g_in.ui_enter,
+                     .back = g_in.ui_back,
                      .dt = (float)dt};
     mi.mx = mx;
     mi.my = my;
@@ -1230,9 +1259,13 @@ static int draw_overlay(game *g, double dt, double alpha)
     float mx, my;
     cursor_ui(g, &u, fb_w, fb_h, &mx, &my);
     if (g_in.inv_open && !g->in_menu && !g->hl.dead) {
-        invui_input in = {mx, my, g_in.ui_click, g_in.ui_rclick,
+        invui_input in = {mx,
+                          my,
+                          g_in.ui_click,
+                          g_in.ui_rclick,
                           g_in.keys[GLFW_KEY_LEFT_SHIFT] || g_in.keys[GLFW_KEY_RIGHT_SHIFT],
-                          thermo_near_fire(g->th, &g->w, g->pl.pos, 3.0), (float)dt};
+                          thermo_near_fire(g->th, &g->w, g->pl.pos, 3.0),
+                          (float)dt};
         toss(g, invui_screen(&u, &g->iu, &g->inv, &in).drop);
     }
     if (g_in.debug && !on_title) draw_debug(g, &u, fb_w, fb_h, alpha);

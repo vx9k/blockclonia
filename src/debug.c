@@ -112,7 +112,8 @@ void debug_draw(ui *u, const debug_info *d)
     line(&lc, C_TEXT, "%s%s%s  submerged %.0f%%", d->flying ? "flying" : (d->on_ground ? "on ground" : "airborne"),
          d->sprinting ? ", sprinting" : "", d->sneaking ? ", sneaking" : "", d->submerged * 100.0);
     int mins = (int)(d->day_time * 24.0 * 60.0);
-    line(&lc, C_TEXT, "Time %02d:%02d   air %.1f" UI_CH_DEGREE "C   skin %.1f" UI_CH_DEGREE "C   core %.2f" UI_CH_DEGREE "C",
+    line(&lc, C_TEXT,
+         "Time %02d:%02d   air %.1f" UI_CH_DEGREE "C   skin %.1f" UI_CH_DEGREE "C   core %.2f" UI_CH_DEGREE "C",
          mins / 60, mins % 60, (double)d->air_temp, (double)d->feels_like, (double)d->body_temp);
     gap(&lc);
     if (d->has_target) {

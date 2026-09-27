@@ -1,8 +1,8 @@
 #include "physics.h"
 #include "entity.h"
+#include "item.h"
 #include "log.h"
 #include "mem.h"
-#include "item.h"
 #include "noise.h"
 
 #include <math.h>
@@ -617,8 +617,8 @@ static void bounce(physics *ph, body *b, double impact, double e)
 static void record_shatter(physics *ph, const body *b)
 {
     if (ph->shatter_count >= MAX_SHATTERS) return;
-    ph->shatter_pos[ph->shatter_count] =
-        (ipos){(int)floor(b->pos.x + 0.5), (int)floor(b->pos.y + 0.5), (int)floor(b->pos.z + 0.5)};
+    ph->shatter_pos[ph->shatter_count] = (ipos){(int)floor(b->pos.x + 0.5), (int)floor(b->pos.y + 0.5),
+                                                (int)floor(b->pos.z + 0.5)};
     ph->shatter_block[ph->shatter_count++] = b->block;
 }
 
@@ -632,8 +632,8 @@ static void check_splash(physics *ph, aabb before, aabb after)
     if (water_fraction(ph->w, before) * h > 1e-3) return;
     double wet = water_fraction(ph->w, after) * h;
     if (wet <= 0.0) return;
-    ph->splash_pos[ph->splash_count] =
-        dv3((after.min.x + after.max.x) * 0.5, after.min.y + wet, (after.min.z + after.max.z) * 0.5);
+    ph->splash_pos[ph->splash_count] = dv3((after.min.x + after.max.x) * 0.5, after.min.y + wet,
+                                           (after.min.z + after.max.z) * 0.5);
     ph->splash_speed[ph->splash_count++] = (float)v;
 }
 
@@ -806,9 +806,7 @@ static void bodies_step(physics *ph, player *pl)
         if (dv3_len(b->vel) < 0.05) b->rest_time += (float)dt;
         else b->rest_time = 0.0f;
 
-        if ((settled || b->rest_time > 1.0f) && solidify(ph, b)) {
-            ph->bodies[i--] = ph->bodies[--ph->body_count];
-        }
+        if ((settled || b->rest_time > 1.0f) && solidify(ph, b)) { ph->bodies[i--] = ph->bodies[--ph->body_count]; }
     }
 }
 
@@ -843,14 +841,9 @@ void physics_on_column_unload(void *user, const column *c) { physics_settle_bodi
 /* ---------------------------------------------------------------- items */
 
 static double item_density(int id)
-{
-    return item_is_block(id) ? (double)block_get((uint8_t)id)->density : (double)item_get(id)->density;
-}
+{ return item_is_block(id) ? (double)block_get((uint8_t)id)->density : (double)item_get(id)->density; }
 
-static double item_restitution(int id)
-{
-    return item_is_block(id) ? (double)block_get((uint8_t)id)->restitution : 0.3;
-}
+static double item_restitution(int id) { return item_is_block(id) ? (double)block_get((uint8_t)id)->restitution : 0.3; }
 
 int physics_drop_item(physics *ph, dvec3 pos, dvec3 vel, int id, int count, float delay)
 {

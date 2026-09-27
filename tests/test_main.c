@@ -2,11 +2,11 @@
 #include "camera.h"
 #include "debug.h"
 #include "fx.h"
-#include "interact.h"
-#include "inventory.h"
 #include "gpupool.h"
 #include "health.h"
 #include "hud.h"
+#include "interact.h"
+#include "inventory.h"
 #include "jobs.h"
 #include "mem.h"
 #include "menu.h"
@@ -14,8 +14,8 @@
 #include "physics.h"
 #include "save.h"
 #include "settings.h"
-#include "test_util.h"
 #include "survival.h"
+#include "test_util.h"
 #include "ui.h"
 #include "world.h"
 
@@ -25,7 +25,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
 
 /* --------------------------------------------------------------- tests */
 
@@ -219,7 +218,6 @@ static void test_world_basics(void)
     CHECK(n->dirty[0]);
     tw_free(&t);
 }
-
 
 static void test_player_physics(void)
 {
@@ -535,7 +533,6 @@ static void test_raycast(void)
 }
 
 /* ---------------------------------------------------------------- health */
-
 
 static float wave_span(const float *w)
 {
@@ -901,10 +898,7 @@ static void test_ui(void)
     mem_free(mem);
 }
 
-static int test_accept(void *user, int id, int count)
-{
-    return count - inv_add(user, id, count);
-}
+static int test_accept(void *user, int id, int count) { return count - inv_add(user, id, count); }
 
 /* Field by field: the struct has padding, so memcmp is not a comparison. */
 static int inv_equal(const inventory *a, const inventory *b)
@@ -1110,8 +1104,8 @@ static void test_interact(void)
     interact_input use = {.use_click = 1, .can_act = 1, .speed = 1.0f, .dt = 1.0f / 60.0f};
     hit = physics_raycast(&t.w, eye, dir, 5.0);
     interact_out o = interact_frame(&s, &t.w, &t.ph, NULL, &p, &inv, fx, eye, dir, hit, &use);
-    CHECK(o.actions == 1 && inv_count(&inv, B_PLANKS) == 1 && world_get(&t.w, hit.before.x, hit.before.y,
-                                                                           hit.before.z) == B_PLANKS);
+    CHECK(o.actions == 1 && inv_count(&inv, B_PLANKS) == 1 &&
+          world_get(&t.w, hit.before.x, hit.before.y, hit.before.z) == B_PLANKS);
     /* Buckets carry a whole cell of water: scooping and pouring conserve it. */
     for (int x = 6; x <= 8; x++)
         for (int z = -4; z <= -2; z++) world_set(&t.w, x, GROUND - 1, z, B_WATER, 0);

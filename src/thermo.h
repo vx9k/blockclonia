@@ -24,9 +24,9 @@
 #ifndef MC_THERMO_H
 #define MC_THERMO_H
 
-#include <stdint.h>
 #include "mathlib.h"
 #include "world.h"
+#include <stdint.h>
 
 #define THERMO_MAX_CELLS 16384
 #define THERMO_DAY_START 0.33 /* 08:00 */

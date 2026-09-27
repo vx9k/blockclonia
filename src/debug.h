@@ -5,9 +5,9 @@
 #ifndef MC_DEBUG_H
 #define MC_DEBUG_H
 
+#include "ui.h"
 #include <stddef.h>
 #include <stdint.h>
-#include "ui.h"
 
 #define DEBUG_HIST 240
 

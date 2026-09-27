@@ -4,8 +4,8 @@
 #ifndef MC_ITEM_H
 #define MC_ITEM_H
 
-#include <stdint.h>
 #include "block.h"
+#include <stdint.h>
 
 #define I_NONE 0
 #define ITEM_FIRST 64 /* below: block ids */

@@ -47,8 +47,7 @@ camera_pose camera_update(camera_anim *c, const player *p, float landing, float 
         o.dx = rx * lateral;
         o.dz = rz * lateral;
         o.dy += vertical + c->dip;
-        o.roll = c->roll + 0.012f * c->bob * s +
-                 0.02f * c->swim * sinf((float)c->t * 1.3f);
+        o.roll = c->roll + 0.012f * c->bob * s + 0.02f * c->swim * sinf((float)c->t * 1.3f);
         o.pitch_add = -0.006f * c->bob * s * s;
         o.dy += 0.04f * c->swim * sinf((float)c->t * 0.9f);
     }

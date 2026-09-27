@@ -31,32 +31,61 @@ typedef enum {
 #define B_UNLOADED 0xFF
 
 enum {
-    BF_SOLID       = 1 << 0, /* collides with bodies */
-    BF_OPAQUE      = 1 << 1, /* hides neighbouring faces */
+    BF_SOLID = 1 << 0, /* collides with bodies */
+    BF_OPAQUE = 1 << 1, /* hides neighbouring faces */
     BF_TRANSLUCENT = 1 << 2, /* drawn in the blended pass */
-    BF_GRANULAR    = 1 << 3, /* only supported from directly below (sand) */
-    BF_FLUID       = 1 << 4,
-    BF_ANCHOR      = 1 << 5, /* never falls (bedrock) */
-    BF_BRITTLE     = 1 << 6, /* shatters instead of landing when it hits hard */
-    BF_BURNING     = 1 << 7, /* a heat source, drawn at full brightness */
+    BF_GRANULAR = 1 << 3, /* only supported from directly below (sand) */
+    BF_FLUID = 1 << 4,
+    BF_ANCHOR = 1 << 5, /* never falls (bedrock) */
+    BF_BRITTLE = 1 << 6, /* shatters instead of landing when it hits hard */
+    BF_BURNING = 1 << 7, /* a heat source, drawn at full brightness */
 };
 
 /* Texture layers in the block texture array. */
 typedef enum {
-    T_STONE, T_DIRT, T_GRASS_TOP, T_GRASS_SIDE, T_SAND, T_GRAVEL, T_LOG_SIDE,
-    T_LOG_TOP, T_LEAVES, T_PLANKS, T_GLASS, T_BRICK, T_SNOW, T_ICE, T_WATER,
+    T_STONE,
+    T_DIRT,
+    T_GRASS_TOP,
+    T_GRASS_SIDE,
+    T_SAND,
+    T_GRAVEL,
+    T_LOG_SIDE,
+    T_LOG_TOP,
+    T_LEAVES,
+    T_PLANKS,
+    T_GLASS,
+    T_BRICK,
+    T_SNOW,
+    T_ICE,
+    T_WATER,
     T_BEDROCK,
     /* Items, drawn on thin cards when dropped or held (transparent outside
      * the shape). */
-    T_ITEM_STICK, T_ITEM_FIBRE, T_ITEM_BANDAGE, T_ITEM_SPLINT, T_ITEM_ANTISEPTIC,
-    T_ITEM_PAINKILLER, T_ITEM_ANTIBIOTIC, T_ITEM_APPLE, T_ITEM_BUCKET, T_ITEM_WATER_BUCKET,
+    T_ITEM_STICK,
+    T_ITEM_FIBRE,
+    T_ITEM_BANDAGE,
+    T_ITEM_SPLINT,
+    T_ITEM_ANTISEPTIC,
+    T_ITEM_PAINKILLER,
+    T_ITEM_ANTIBIOTIC,
+    T_ITEM_APPLE,
+    T_ITEM_BUCKET,
+    T_ITEM_WATER_BUCKET,
     /* The first-person arm. */
-    T_SKIN, T_SLEEVE,
+    T_SKIN,
+    T_SLEEVE,
     /* Break progress overlay, four stages (transparent between cracks). */
-    T_CRACK0, T_CRACK1, T_CRACK2, T_CRACK3,
+    T_CRACK0,
+    T_CRACK1,
+    T_CRACK2,
+    T_CRACK3,
     /* Flames, four frames the block shader cycles through. */
-    T_FIRE0, T_FIRE1, T_FIRE2, T_FIRE3,
-    T_CAMPFIRE_BASE, T_ASH,
+    T_FIRE0,
+    T_FIRE1,
+    T_FIRE2,
+    T_FIRE3,
+    T_CAMPFIRE_BASE,
+    T_ASH,
     T_COUNT
 } tex_id;
 

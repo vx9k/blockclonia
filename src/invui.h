@@ -5,9 +5,9 @@
 #ifndef MC_INVUI_H
 #define MC_INVUI_H
 
-#include <stddef.h>
 #include "inventory.h"
 #include "ui.h"
+#include <stddef.h>
 
 typedef struct {
     float open_t;        /* s since the screen opened */

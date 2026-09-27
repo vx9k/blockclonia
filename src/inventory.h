@@ -4,9 +4,9 @@
 #ifndef MC_INVENTORY_H
 #define MC_INVENTORY_H
 
+#include "item.h"
 #include <stddef.h>
 #include <stdint.h>
-#include "item.h"
 
 #define INV_HOTBAR 9
 #define INV_SLOTS 36     /* 0..8 hotbar, 9..35 the rest */

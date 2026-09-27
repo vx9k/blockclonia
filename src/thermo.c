@@ -239,10 +239,7 @@ static double sun_sin(const thermo *t) { return SUN_LAT_COS * cos(2.0 * MC_PI * 
 
 static double daylight_frac(const thermo *t) { return smooth(sun_sin(t), TWILIGHT_SIN, FULL_DAY_SIN); }
 
-float thermo_daylight(const thermo *t)
-{
-    return (float)(NIGHT_LIGHT + (1.0 - NIGHT_LIGHT) * daylight_frac(t));
-}
+float thermo_daylight(const thermo *t) { return (float)(NIGHT_LIGHT + (1.0 - NIGHT_LIGHT) * daylight_frac(t)); }
 
 /* Night blue to the renderer's day sky, with the orange of a low sun (long
  * paths through the air scatter the blue away) around sunrise and sunset. */
@@ -286,7 +283,8 @@ static double cell_ambient(const thermo *t, const world *w, int x, int y, int z,
 float thermo_ambient(const thermo *t, const world *w, double x, double y, double z)
 {
     double yy = (y == y) ? clampd(y, -1.0, (double)WORLD_H) : (double)SEA_LEVEL;
-    int s = sheltered(w, coord(x, -WORLD_LIMIT, WORLD_LIMIT), coord(yy, -1, WORLD_H), coord(z, -WORLD_LIMIT, WORLD_LIMIT));
+    int s = sheltered(w, coord(x, -WORLD_LIMIT, WORLD_LIMIT), coord(yy, -1, WORLD_H),
+                      coord(z, -WORLD_LIMIT, WORLD_LIMIT));
     return (float)ambient(yy, s, diurnal(t));
 }
 
@@ -430,9 +428,7 @@ static int doused(const world *w, int x, int y, int z)
 }
 
 static double flame_dist(const fire *f, dvec3 p)
-{
-    return dv3_len(dv3(p.x - ((double)f->x + 0.5), p.y - ((double)f->y + 0.5), p.z - ((double)f->z + 0.5)));
-}
+{ return dv3_len(dv3(p.x - ((double)f->x + 0.5), p.y - ((double)f->y + 0.5), p.z - ((double)f->z + 0.5))); }
 
 /* Burns fuel, puts out doused fires and forgets ones that are gone. Block
  * edits are collected and applied after the loop, since they call back into
@@ -492,7 +488,8 @@ static void scan_fires(thermo *t, const world *w, dvec3 player)
             const uint8_t *hit = memchr(b, B_CAMPFIRE, (size_t)(end - b));
             if (!hit) break;
             int i = (int)(hit - c->blocks);
-            fire_register(t, cx * CHUNK_W + (i & (CHUNK_W - 1)), i / COL_AREA, cz * CHUNK_W + ((i / CHUNK_W) & (CHUNK_W - 1)));
+            fire_register(t, cx * CHUNK_W + (i & (CHUNK_W - 1)), i / COL_AREA,
+                          cz * CHUNK_W + ((i / CHUNK_W) & (CHUNK_W - 1)));
             b = hit + 1;
         }
     }
@@ -741,7 +738,8 @@ static void convert(thermo *t, world *w)
             /* Heat beyond the latent warms the meltwater. */
             double extra = lat - melt_energy(old);
             c->lat = 0.0;
-            c->dev = -c->amb + fmax(extra, 0.0) / (RHO_CP_WATER * (double)(e->meta ? e->meta : WATER_FULL) / WATER_FULL);
+            c->dev = -c->amb +
+                     fmax(extra, 0.0) / (RHO_CP_WATER * (double)(e->meta ? e->meta : WATER_FULL) / WATER_FULL);
         } else {
             /* Skin over water: the rest of the latent heat is still to go. */
             c->lat = fmax(melt_energy(B_ICE) - lat, 0.0);

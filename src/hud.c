@@ -219,8 +219,8 @@ static void alerts_needs(const health *h, alert_list *l)
     if (h->temp < 35.0f)
         add_alert(l, KEY, h->temp < 32.0f ? 3 : 2, "Hypothermia %.1f" UI_CH_DEGREE "C", (double)h->temp);
     else if (h->temp > 38.3f)
-        add_alert(l, KEY, h->temp > 40.0f ? 3 : 1, "%s %.1f" UI_CH_DEGREE "C", h->sepsis > 0.1f ? "Fever" : "Overheating",
-                  (double)h->temp);
+        add_alert(l, KEY, h->temp > 40.0f ? 3 : 1, "%s %.1f" UI_CH_DEGREE "C",
+                  h->sepsis > 0.1f ? "Fever" : "Overheating", (double)h->temp);
     float cold = 99.0f;
     for (int i = 0; i < BP_COUNT; i++) cold = h->part[i].skin < cold ? h->part[i].skin : cold;
     if (h->wet > 0.5f)
@@ -248,9 +248,7 @@ static int collect_alerts(const health *h, alert *a, int max)
 }
 
 static float approach(float cur, float target, float dt, float tau)
-{
-    return cur + (target - cur) * (1.0f - expf(-dt / tau));
-}
+{ return cur + (target - cur) * (1.0f - expf(-dt / tau)); }
 
 void hud_update(hud_state *s, const health *h, float dt)
 {
@@ -701,15 +699,17 @@ static void panel(ui *u, const health *h, const hud_state *s)
         const char *name;
         int id;
     } sup[9] = {
-        {"Bandages", I_BANDAGE},     {"Splints", I_SPLINT},         {"Antiseptic", I_ANTISEPTIC},
-        {"Plant fibre", I_FIBRE},    {"Sticks", I_STICK},           {"Painkillers", I_PAINKILLER},
-        {"Apples", I_APPLE},         {"Water bucket", I_WATER_BUCKET}, {"Antibiotics", I_ANTIBIOTIC},
+        {"Bandages", I_BANDAGE},       {"Splints", I_SPLINT},
+        {"Antiseptic", I_ANTISEPTIC},  {"Plant fibre", I_FIBRE},
+        {"Sticks", I_STICK},           {"Painkillers", I_PAINKILLER},
+        {"Apples", I_APPLE},           {"Water bucket", I_WATER_BUCKET},
+        {"Antibiotics", I_ANTIBIOTIC},
     };
     for (int i = 0; i < 9; i++) {
         const int col = i % 3, row = i / 3;
         int n = s->inv ? inv_count(s->inv, sup[i].id) : 0;
-        ui_textf(u, x0 + 8 + (float)col * 96, by + 11 + (float)row * 10, 1, n ? C_TEXT : C_DIM, "%s %d",
-                 sup[i].name, n);
+        ui_textf(u, x0 + 8 + (float)col * 96, by + 11 + (float)row * 10, 1, n ? C_TEXT : C_DIM, "%s %d", sup[i].name,
+                 n);
     }
     ui_text(u, x0 + 8, by + 43, 1, C_DIM, "Leaves give fibre and apples. Craft in the inventory (Tab).");
 

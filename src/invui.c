@@ -78,9 +78,9 @@ void invui_icon(ui *u, int id, float x, float y, float size, float alpha)
     if (item_is_block(id)) {
         /* Isometric cube: top diamond, left and right faces. */
         float s = size, h = s * 0.5f, q = s * 0.25f;
-        face(u, &g_face[id][0][0][0], x + h, y, h, q, -h, q, alpha);          /* top: back corner, right edge, left edge */
-        face(u, &g_face[id][1][0][0], x, y + q, h, q, 0.0f, h, alpha);         /* left */
-        face(u, &g_face[id][2][0][0], x + h, y + h, h, -q, 0.0f, h, alpha);    /* right */
+        face(u, &g_face[id][0][0][0], x + h, y, h, q, -h, q, alpha); /* top: back corner, right edge, left edge */
+        face(u, &g_face[id][1][0][0], x, y + q, h, q, 0.0f, h, alpha); /* left */
+        face(u, &g_face[id][2][0][0], x + h, y + h, h, -q, 0.0f, h, alpha); /* right */
         return;
     }
     /* Items: the sprite, one rectangle per run of equal texels in a row. */
@@ -92,7 +92,8 @@ void invui_icon(ui *u, int id, float x, float y, float size, float alpha)
             uint32_t c = sp[ty * 16 + tx];
             int run = 1;
             while (tx + run < 16 && sp[ty * 16 + tx + run] == c) run++;
-            if ((c >> 24) >= 8) ui_rect(u, x + (float)tx * px, y + (float)ty * px, (float)run * px, px, ui_alpha(c, alpha));
+            if ((c >> 24) >= 8)
+                ui_rect(u, x + (float)tx * px, y + (float)ty * px, (float)run * px, px, ui_alpha(c, alpha));
             tx += run;
         }
 }
@@ -175,9 +176,7 @@ void invui_hotbar(ui *u, invui *s, const inventory *inv, float dt)
 /* ------------------------------------------------------------ screen */
 
 static int inside(const invui_input *in, float x, float y, float w, float h)
-{
-    return in->mx >= x && in->mx < x + w && in->my >= y && in->my < y + h;
-}
+{ return in->mx >= x && in->mx < x + w && in->my >= y && in->my < y + h; }
 
 static void tooltip(ui *u, float mx, float my, const char *title, const char *line, uint32_t line_col)
 {
@@ -224,8 +223,7 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
         if (i == inv->selected) ui_rect(u, x + 1, y + SLOT - 2, SLOT - 2, 1, ui_alpha(C_ECG, st));
         slot_item(u, &inv->slot[i], x, y - s->pop[i] * 2.0f, 1.0f + 0.15f * s->pop[i], st);
     }
-    ui_text(u, x0 + 8, y0 + 24 + 4 * (SLOT + GAP) + 10, 1, ui_alpha(C_DIM, fade),
-            "Right: split  Shift: move");
+    ui_text(u, x0 + 8, y0 + 24 + 4 * (SLOT + GAP) + 10, 1, ui_alpha(C_DIM, fade), "Right: split  Shift: move");
 
     if (hover >= 0 && (in->click || in->rclick)) {
         inv_click(inv, hover, in->rclick ? 1 : 0, in->shift && in->click);
@@ -260,17 +258,15 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
             invui_icon(u, rc->in[m].id, ix, ry + 1, 16, a);
             int have = inv_count(inv, rc->in[m].id);
             snprintf(b, sizeof b, "%d", rc->in[m].count);
-            ui_text_shadow(u, ix + 12, ry + 9, 1,
-                           ui_alpha(have >= rc->in[m].count ? C_HEAD : C_ART, st), b);
+            ui_text_shadow(u, ix + 12, ry + 9, 1, ui_alpha(have >= rc->in[m].count ? C_HEAD : C_ART, st), b);
             ix += 26;
         }
         if (rc->needs_fire)
-            ui_text(u, cx + cw - 4 - ui_text_width("fire", 1), ry + 5, 1,
-                    ui_alpha(in->near_fire ? C_CO2 : C_DIM, st), "fire");
+            ui_text(u, cx + cw - 4 - ui_text_width("fire", 1), ry + 5, 1, ui_alpha(in->near_fire ? C_CO2 : C_DIM, st),
+                    "fire");
         if (hot && in->click && ok) {
             int n = 0;
-            while (inv_craft(inv, k, in->near_fire) && ++n < (in->shift ? 64 : 1)) {
-            }
+            while (inv_craft(inv, k, in->near_fire) && ++n < (in->shift ? 64 : 1)) {}
             if (n) {
                 r.crafted = k;
                 r.changed = 1;

@@ -773,12 +773,13 @@ static void create_pipelines(renderer *r)
     /* Entities: a static unit cube instanced per body, item or particle. */
     VkVertexInputBindingDescription ent_bind[2] = {{0, sizeof(uint32_t), VK_VERTEX_INPUT_RATE_VERTEX},
                                                    {1, sizeof(entity_instance), VK_VERTEX_INPUT_RATE_INSTANCE}};
-    VkVertexInputAttributeDescription ent_attr[5] = {
-        {0, 0, VK_FORMAT_R32_UINT, 0},
-        {1, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(entity_instance, pos)},
-        {2, 1, VK_FORMAT_R32_UINT, offsetof(entity_instance, tex)},
-        {3, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(entity_instance, rot)},
-        {4, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(entity_instance, scale)}};
+    VkVertexInputAttributeDescription ent_attr[5] = {{0, 0, VK_FORMAT_R32_UINT, 0},
+                                                     {1, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(entity_instance, pos)},
+                                                     {2, 1, VK_FORMAT_R32_UINT, offsetof(entity_instance, tex)},
+                                                     {3, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
+                                                      offsetof(entity_instance, rot)},
+                                                     {4, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
+                                                      offsetof(entity_instance, scale)}};
     VkVertexInputBindingDescription line_bind = {0, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX};
     VkVertexInputAttributeDescription line_attr = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0};
 

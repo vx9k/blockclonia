@@ -114,9 +114,7 @@ static void test_bounce(void)
 static float quat_len(const float q[4]) { return sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]); }
 
 static float spin_rate(const body *b)
-{
-    return sqrtf(b->spin[0] * b->spin[0] + b->spin[1] * b->spin[1] + b->spin[2] * b->spin[2]);
-}
+{ return sqrtf(b->spin[0] * b->spin[0] + b->spin[1] * b->spin[1] + b->spin[2] * b->spin[2]); }
 
 /* A stone arm along +X whose pillar is knocked out: every block tumbles,
  * rolling outward (spin about -Z for +X), faster further out, and the

@@ -1064,9 +1064,7 @@ static void step_wounds(health *h, const health_env *e, float gh, float dehyd)
  * Henriques-Moritz damage integral. */
 
 static float sat_vp(float t) /* kPa, Tetens over water, and over ice below 0 C */
-{
-    return t >= 0.0f ? 0.6108f * expf(17.27f * t / (t + 237.3f)) : 0.6108f * expf(21.87f * t / (t + 265.5f));
-}
+{ return t >= 0.0f ? 0.6108f * expf(17.27f * t / (t + 237.3f)) : 0.6108f * expf(21.87f * t / (t + 265.5f)); }
 
 /* How much of a part is under water when `s` of the body is (feet first). */
 static float part_submerged(int part, float s)

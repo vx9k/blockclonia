@@ -37,9 +37,9 @@
 #ifndef MC_HEALTH_H
 #define MC_HEALTH_H
 
+#include "inventory.h"
 #include <stddef.h>
 #include <stdint.h>
-#include "inventory.h"
 
 #define HEALTH_CLOCK 72.0     /* survival-clock speed-up for slow processes */
 #define HEALTH_WAVE_HZ 240    /* monitor waveform sample rate */
@@ -195,20 +195,20 @@ typedef struct health {
     float lactate;                    /* mmol/L */
     float shock_debt;                 /* minutes of starved tissue: past ~3, shock turns irreversible */
     float temp;                       /* core, degrees C */
-    float vaso;                       /* 0 vasoconstricted .. 1 dilated skin */
-    float sweat_w;                    /* W of sweat being evaporated */
-    float sweat_acc;                  /* L of sweat not yet taken from body water */
-    float wet;                        /* 0..1 clothing soaked */
-    float heat_loss;                  /* W from the core to the skin and water, for display */
-    float burn_tbsa;                  /* % of body surface with 2nd/3rd degree burns */
+    float vaso; /* 0 vasoconstricted .. 1 dilated skin */
+    float sweat_w; /* W of sweat being evaporated */
+    float sweat_acc; /* L of sweat not yet taken from body water */
+    float wet; /* 0..1 clothing soaked */
+    float heat_loss; /* W from the core to the skin and water, for display */
+    float burn_tbsa; /* % of body surface with 2nd/3rd degree burns */
     /* The surroundings the body felt on its last step (HUD). */
-    float air_temp, radiant;          /* degrees C, W/m^2 */
+    float air_temp, radiant; /* degrees C, W/m^2 */
     int in_fire;
 
     /* Crush syndrome. */
-    float reperfused;                 /* kg of dead muscle whose contents are washing out */
-    float myoglobin;                  /* g in the plasma */
-    float potassium;                  /* mmol/L in the plasma */
+    float reperfused; /* kg of dead muscle whose contents are washing out */
+    float myoglobin; /* g in the plasma */
+    float potassium; /* mmol/L in the plasma */
 
     /* Nervous system. */
     float brain_o2;                   /* 0..1 of normal cerebral oxygen delivery */
@@ -317,8 +317,8 @@ float health_hydration(const health *h);  /* 0..1, 1 = fully hydrated */
 float health_hunger(const health *h);     /* 0..1, 1 = starving */
 float health_stamina(const health *h);    /* 0..1 anaerobic reserve */
 float health_hb(const health *h);         /* g/dL */
-float health_skin_mean(const health *h);  /* degrees C, area-weighted */
-float health_part_area(int part);         /* share of the body surface (rule of nines) */
+float health_skin_mean(const health *h); /* degrees C, area-weighted */
+float health_part_area(int part); /* share of the body surface (rule of nines) */
 
 void health_log(health *h, const char *fmt, ...)
 #if defined(__GNUC__)

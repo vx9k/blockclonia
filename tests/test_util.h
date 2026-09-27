@@ -12,13 +12,13 @@
 
 extern int g_failed, g_checks;
 
-#define CHECK(cond)                                                              \
-    do {                                                                         \
-        g_checks++;                                                              \
-        if (!(cond)) {                                                           \
-            g_failed++;                                                          \
-            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);      \
-        }                                                                        \
+#define CHECK(cond)                                                         \
+    do {                                                                    \
+        g_checks++;                                                         \
+        if (!(cond)) {                                                      \
+            g_failed++;                                                     \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+        }                                                                   \
     } while (0)
 
 #define GROUND 13 /* first air block in the flat test world */

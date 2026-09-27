@@ -29,9 +29,7 @@ static inline float ease_out_back(float t)
 
 /* Exponential approach of `cur` to `target`; `rate` is 1/time-constant. */
 static inline float anim_approach(float cur, float target, float rate, float dt)
-{
-    return target + (cur - target) * expf(-rate * dt);
-}
+{ return target + (cur - target) * expf(-rate * dt); }
 
 /* Critically damped spring, for camera offsets that should settle without
  * wobbling (landing dip). vel is the spring's own state. */

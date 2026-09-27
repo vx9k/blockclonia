@@ -144,8 +144,8 @@ static uint32_t block_tex(uint8_t b)
 
 static uint32_t same_tex(uint8_t layer) { return (uint32_t)layer * 0x010101u; }
 
-void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *crack, dvec3 eye, double alpha,
-                       float time, entity_instance *out, int max, int *n_opaque, int *n_trans)
+void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *crack, dvec3 eye, double alpha, float time,
+                       entity_instance *out, int max, int *n_opaque, int *n_trans)
 {
     /* Opaque from the front of out[], translucent collected in a second
      * pass so the caller gets [opaque..., translucent...]. */

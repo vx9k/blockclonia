@@ -95,9 +95,15 @@ static inline mat4 m4_view_rot_roll(float yaw, float pitch, float roll)
     vec3 r2 = v3(right.x * c + up.x * s, right.y * c + up.y * s, right.z * c + up.z * s);
     vec3 u2 = v3(up.x * c - right.x * s, up.y * c - right.y * s, up.z * c - right.z * s);
     mat4 r = m4_identity();
-    r.m[0] = r2.x; r.m[4] = r2.y; r.m[8] = r2.z;
-    r.m[1] = u2.x; r.m[5] = u2.y; r.m[9] = u2.z;
-    r.m[2] = -fwd.x; r.m[6] = -fwd.y; r.m[10] = -fwd.z;
+    r.m[0] = r2.x;
+    r.m[4] = r2.y;
+    r.m[8] = r2.z;
+    r.m[1] = u2.x;
+    r.m[5] = u2.y;
+    r.m[9] = u2.z;
+    r.m[2] = -fwd.x;
+    r.m[6] = -fwd.y;
+    r.m[10] = -fwd.z;
     return r;
 }
 
