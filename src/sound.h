@@ -78,7 +78,7 @@ void sound_update(sound *s, float dt);
 
 /* The audio callback: mixes `frames` interleaved frames into out. Called
  * on the audio thread (or by tests); lock-free, allocation-free. */
-void sound_render(void *s, float *out, uint32_t frames);
+void sound_render(void *user, float *out, uint32_t frames);
 
 /* For the F3 overlay: voices playing, the mixer's share of real time. */
 void sound_stats(const sound *s, int *voices, float *load);

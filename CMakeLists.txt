@@ -163,6 +163,7 @@ set(MC_CORE_SOURCES
   src/save.c
   src/settings.c
   src/sound.c
+  src/sound_synth.c
   src/survival.c
   src/texgen.c
   src/thermo.c
