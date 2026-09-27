@@ -1161,7 +1161,7 @@ static void test_settings(void)
     int n = settings_format(&s, buf, (int)sizeof buf);
     CHECK(n > 0 && n < (int)sizeof buf);
     settings_default(&t);
-    CHECK(settings_parse(&t, buf) == 10);
+    CHECK(settings_parse(&t, buf) == 14);
     CHECK(memcmp(&s, &t, sizeof s) == 0);
     /* Out of range, junk and unknown keys are ignored; the rest applies. */
     settings_default(&t);
@@ -1251,7 +1251,7 @@ static void test_menu(void)
         c.my = (float)y;
         c.click = 1;
         got = menu_run(&m, &u, mem, &s, &c, 1);
-        if (got != MENU_NONE && got != MENU_QUIT) {
+        if ((got != MENU_NONE && got != MENU_QUIT) || m.screen != SCREEN_PAUSE) {
             menu_open(&m, SCREEN_PAUSE);
             menu_run(&m, &u, mem, &s, &idle, 30);
             got = MENU_NONE;

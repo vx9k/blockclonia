@@ -45,9 +45,17 @@ static int can_place(const world *w, const physics *ph, const player *pl, ipos t
     return cur == B_AIR || cur == B_WATER;
 }
 
+static void emit(interact_out *o, int kind, uint8_t block, dvec3 at)
+{
+    if (o->ev_count < INTERACT_MAX_EVENTS) o->ev[o->ev_count++] = (interact_event){kind, block, at};
+}
+
+static dvec3 centre(ipos b) { return dv3(b.x + 0.5, b.y + 0.5, b.z + 0.5); }
+
 static void do_break(interact *s, world *w, physics *ph, const player *pl, fx_state *fx, ipos b, uint8_t id,
                      interact_out *o)
 {
+    emit(o, IE_BREAK, id, centre(b));
     world_set_player(w, b.x, b.y, b.z, B_AIR, 0);
     const block_def *d = block_get(id);
     fx_break(fx, id, b.x, b.y, b.z, (d->flags & BF_BRITTLE) ? 20 : 12);
@@ -84,6 +92,7 @@ static void use_item(interact *s, world *w, physics *ph, thermo *th, const playe
             if (!creative) inv_use_held(inv, 1);
             s->swing = 1.0f;
             o->msg = "Fed the fire";
+            emit(o, IE_FEED, B_CAMPFIRE, centre(hit.block));
         } else {
             o->msg = "The fire has all the fuel it can take";
         }
@@ -101,6 +110,7 @@ static void use_item(interact *s, world *w, physics *ph, thermo *th, const playe
         }
         world_set_player(w, c.x, c.y, c.z, B_AIR, 0); /* a bucket takes the whole cell: volume is conserved */
         inv_set_held(inv, I_WATER_BUCKET, 1);
+        emit(o, IE_FILL, B_WATER, centre(c));
         s->swing = 1.0f;
         o->actions++;
         return;
@@ -126,6 +136,7 @@ static void use_item(interact *s, world *w, physics *ph, thermo *th, const playe
     world_set_player(w, t.x, t.y, t.z, d->block, 0);
     o->actions++;
     s->swing = 1.0f;
+    emit(o, d->block == B_WATER ? IE_POUR : IE_PLACE, d->block, centre(t));
     if (held->id == I_WATER_BUCKET) inv_set_held(inv, I_BUCKET, 1);
     else if (!creative) inv_use_held(inv, 1);
 }
@@ -152,7 +163,8 @@ static void pick(inventory *inv, const player *pl, uint8_t id)
 interact_out interact_frame(interact *s, world *w, physics *ph, thermo *th, const player *pl, inventory *inv,
                             fx_state *fx, dvec3 eye, vec3 dir, ray_hit hit, const interact_input *in)
 {
-    interact_out o = {0, 0, 0, 0, NULL};
+    interact_out o;
+    memset(&o, 0, sizeof o);
     s->swing = s->swing > 0.0f ? fmaxf(0.0f, s->swing - in->dt * 3.5f) : 0.0f;
     s->swinging = 0;
 
@@ -185,6 +197,7 @@ interact_out interact_frame(interact *s, world *w, physics *ph, thermo *th, cons
                                hit.block.y + 0.5 + (hit.before.y - hit.block.y) * 0.52,
                                hit.block.z + 0.5 + (hit.before.z - hit.block.z) * 0.52);
                 fx_chip(fx, hit.id, at);
+                emit(&o, IE_DIG, hit.id, at);
                 s->chip_t = 0.25f;
                 s->swing = 1.0f;
             }
@@ -207,7 +220,10 @@ interact_out interact_frame(interact *s, world *w, physics *ph, thermo *th, cons
             dvec3 p = dv3(eye.x + (double)dir.x * 0.4, eye.y - 0.3 + (double)dir.y * 0.4, eye.z + (double)dir.z * 0.4);
             dvec3 v = dv3(pl->vel.x + (double)dir.x * 4.5, pl->vel.y + (double)dir.y * 4.5 + 1.0,
                           pl->vel.z + (double)dir.z * 4.5);
-            if (physics_drop_item(ph, p, v, held->id, n, 1.2f)) inv_use_held(inv, n);
+            if (physics_drop_item(ph, p, v, held->id, n, 1.2f)) {
+                emit(&o, IE_DROP, item_is_block(held->id) ? held->id : 0, p);
+                inv_use_held(inv, n);
+            }
             s->swing = 1.0f;
         }
     }

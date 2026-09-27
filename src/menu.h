@@ -44,6 +44,9 @@ typedef struct {
     float last_mx, last_my;
     char footer[160];  /* title screen, bottom left: versions and seed */
     char status[160];  /* pause screen: a line about the survivor */
+    int tab;           /* settings: 0 video, 1 controls, 2 audio */
+    int clicked;       /* a button or setting was used this frame (UI sound) */
+    int hovered;       /* the focus moved to another item this frame (UI sound) */
 } menu;
 
 void menu_init(menu *m);

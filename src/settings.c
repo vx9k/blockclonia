@@ -23,6 +23,10 @@ static const field FIELDS[] = {
     {"vsync", 0, 1},
     {"render_distance", SETTINGS_RD_MIN, SETTINGS_RD_MAX},
     {"show_hints", 0, 1},
+    {"filtering", 0, 1},
+    {"volume_master", 0, 100},
+    {"volume_effects", 0, 100},
+    {"volume_ambient", 0, 100},
 };
 #define NFIELDS ((int)(sizeof FIELDS / sizeof FIELDS[0]))
 
@@ -38,6 +42,10 @@ void settings_default(settings *s)
     s->vsync = 1;
     s->render_distance = 8;
     s->show_hints = 1;
+    s->filtering = 1;
+    s->volume_master = 80;
+    s->volume_effects = 100;
+    s->volume_ambient = 70;
 }
 
 static int *field_ptr(settings *s, int i)
@@ -52,7 +60,11 @@ static int *field_ptr(settings *s, int i)
     case 6: return &s->gui_scale;
     case 7: return &s->vsync;
     case 8: return &s->render_distance;
-    default: return &s->show_hints;
+    case 9: return &s->show_hints;
+    case 10: return &s->filtering;
+    case 11: return &s->volume_master;
+    case 12: return &s->volume_effects;
+    default: return &s->volume_ambient;
     }
 }
 

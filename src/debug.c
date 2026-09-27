@@ -133,6 +133,10 @@ void debug_draw(ui *u, const debug_info *d)
     column_ctx rc = {u, 4, 1};
     line(&rc, C_TEXT, "%s", d->versions ? d->versions : "");
     line(&rc, C_TEXT, "GPU %s", d->gpu ? d->gpu : "?");
+    if (d->api) line(&rc, C_DIM, "%s", d->api);
+    if (d->gpu_ms > 0.0f) line(&rc, C_TEXT, "GPU frame %.2f ms", (double)d->gpu_ms);
+    if (d->vram_budget_mb)
+        line(&rc, C_TEXT, "VRAM %u / %u MB (budget)", d->vram_used_mb, d->vram_budget_mb);
     line(&rc, C_TEXT, "Display %dx%d  UI scale %.0f  quads %d", d->width, d->height, (double)u->scale, d->ui_quads);
     gap(&rc);
     if (d->rss || d->commit)
@@ -145,6 +149,9 @@ void debug_draw(ui *u, const debug_info *d)
     line(&rc, C_TEXT, "Bodies %d  items %d  particles %d", d->bodies, d->items, d->particles);
     line(&rc, C_TEXT, "Fluid cells %d/tick  heat cells %d  fires %d", d->fluid_updates, d->heat_cells, d->fires);
     if (d->last_collapse) line(&rc, C_TEXT, "Last collapse %d blocks", d->last_collapse);
+    gap(&rc);
+    line(&rc, C_TEXT, "Sound %s  voices %d  mixer %.1f%%", d->audio ? d->audio : "off", d->snd_voices,
+         (double)d->snd_load * 100.0);
 
     if (f) frame_graph(u, f, u->w - 184, u->h - 52, 180, 48);
     axes(u, d->yaw, d->pitch);

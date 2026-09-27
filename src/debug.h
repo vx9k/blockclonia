@@ -48,6 +48,12 @@ typedef struct {
     size_t rss, commit;        /* bytes; 0 if unknown */
     const char *gpu;
     const char *versions;      /* "mimalloc 3.5.3, GLFW 3.5.1 ..." */
+    const char *api;           /* "Vulkan 1.4: ..." (renderer features in use) */
+    const char *audio;         /* output device, or "off" */
+    int snd_voices;
+    float snd_load;            /* mixer time / real time */
+    float gpu_ms;              /* GPU time of a frame, 0 if unknown */
+    uint32_t vram_used_mb, vram_budget_mb;
     int width, height;
 } debug_info;
 

@@ -37,7 +37,7 @@ void menu_open(menu *m, int screen)
     }
     m->screen = screen;
     m->age = 0.0f;
-    m->focus = 0;
+    m->focus = screen == SCREEN_SETTINGS ? 3 : 0; /* past the three tabs, on the first setting */
     m->drag = -1;
     for (int i = 0; i < MENU_MAX_ITEMS; i++) m->hover[i] = 0.0f;
 }
@@ -83,7 +83,9 @@ static int button(ctx *c, float x, float y, float w, const char *label)
     float hv = hover_of(c, i);
     cell(c->u, x + dx, y, w, ROW_H, hv, a);
     ui_text(c->u, x + dx + 8 + 3.0f * hv, y + 6, 1, ui_alpha(pal_mix(C_TEXT, C_HEAD, hv), a), label);
-    return (hot && c->in->click) || c->activate == i;
+    int pressed = (hot && c->in->click) || c->activate == i;
+    c->m->clicked |= pressed;
+    return pressed;
 }
 
 static int slider(ctx *c, float x, float y, float w, const char *label, int *v, int lo, int hi, int step,
@@ -95,7 +97,10 @@ static int slider(ctx *c, float x, float y, float w, const char *label, int *v, 
     float hv = hover_of(c, i);
     int old = *v;
     const float tx = x + 8, tw = w - 16;
-    if (hot && c->in->click) c->m->drag = i;
+    if (hot && c->in->click) {
+        c->m->drag = i;
+        c->m->clicked = 1;
+    }
     if (c->m->drag == i) {
         if (!c->in->mouse_down) {
             c->m->drag = -1;
@@ -128,7 +133,10 @@ static int cycle(ctx *c, float x, float y, float w, const char *label, int *v, c
     float dx, a = entry(c, i, &dx);
     float hv = hover_of(c, i);
     int old = *v;
-    if ((hot && c->in->click) || c->activate == i) *v = (*v + 1) % count;
+    if ((hot && c->in->click) || c->activate == i) {
+        *v = (*v + 1) % count;
+        c->m->clicked = 1;
+    }
     if (c->m->focus == i && c->adjust) *v = (*v + c->adjust + count) % count;
     cell(c->u, x + dx, y, w, ROW_H, hv, a);
     ui_text(c->u, x + dx + 8 + 3.0f * hv, y + 6, 1, ui_alpha(pal_mix(C_TEXT, C_HEAD, hv), a), label);
@@ -258,44 +266,76 @@ static void backdrop(ctx *c)
     }
 }
 
+/* A tab heading: highlighted when it is the open one. */
+static int tab_button(ctx *c, float x, float y, float w, const char *label, int active)
+{
+    int hot;
+    int i = item(c, x, y, w, ROW_H, &hot);
+    float dx, a = entry(c, i, &dx);
+    float hv = hover_of(c, i);
+    ui *u = c->u;
+    ui_rect(u, x, y, w, ROW_H, ui_alpha(active ? ui_rgba(30, 44, 40, 240) : ui_rgba(14, 16, 20, 200), a));
+    ui_frame(u, x, y, w, ROW_H, 1, ui_alpha(pal_mix(C_BORDER, C_ECG, active ? 1.0f : hv * 0.7f), a));
+    ui_text(u, x + (w - ui_text_width(label, 1)) * 0.5f, y + 6, 1, ui_alpha(active ? C_HEAD : C_TEXT, a), label);
+    if (c->m->focus == i && c->adjust) c->m->tab = (c->m->tab + c->adjust + 3) % 3;
+    return (hot && c->in->click) || c->activate == i;
+}
+
+static int settings_video(ctx *c, settings *s, float rx, float ry, float rw)
+{
+    static const char *const ONOFF[] = {"Off", "On"};
+    static const char *const GUI[] = {"Auto", "1x", "2x", "3x", "4x"};
+    int changed = 0;
+    changed |= slider(c, rx, ry, rw, "Field of view", &s->fov, SETTINGS_FOV_MIN, SETTINGS_FOV_MAX, 1, UI_CH_DEGREE);
+    changed |= cycle(c, rx, ry + 20, rw, "View bobbing", &s->view_bob, ONOFF, 2);
+    changed |= cycle(c, rx, ry + 40, rw, "Sprint FOV effect", &s->fov_effects, ONOFF, 2);
+    changed |= slider(c, rx, ry + 60, rw, "Render distance (restart)", &s->render_distance, SETTINGS_RD_MIN,
+                      SETTINGS_RD_MAX, 1, "");
+    changed |= cycle(c, rx, ry + 80, rw, "VSync", &s->vsync, ONOFF, 2);
+    changed |= cycle(c, rx, ry + 100, rw, "Texture filtering (distance)", &s->filtering, ONOFF, 2);
+    changed |= cycle(c, rx, ry + 120, rw, "GUI scale", &s->gui_scale, GUI, SETTINGS_GUI_MAX + 1);
+    return changed;
+}
+
+static int settings_controls(ctx *c, settings *s, float rx, float ry, float rw)
+{
+    static const char *const ONOFF[] = {"Off", "On"};
+    static const char *const SPRINT[] = {"Hold", "Toggle"};
+    int changed = 0;
+    changed |= slider(c, rx, ry, rw, "Mouse sensitivity", &s->sensitivity, SETTINGS_SENS_MIN, SETTINGS_SENS_MAX, 5,
+                      "%");
+    changed |= cycle(c, rx, ry + 20, rw, "Invert mouse", &s->invert_y, ONOFF, 2);
+    changed |= cycle(c, rx, ry + 40, rw, "Sprint", &s->sprint_toggle, SPRINT, 2);
+    changed |= cycle(c, rx, ry + 60, rw, "Key hints", &s->show_hints, ONOFF, 2);
+    return changed;
+}
+
+static int settings_audio(ctx *c, settings *s, float rx, float ry, float rw)
+{
+    int changed = 0;
+    changed |= slider(c, rx, ry, rw, "Master volume", &s->volume_master, 0, 100, 5, "%");
+    changed |= slider(c, rx, ry + 20, rw, "Effects", &s->volume_effects, 0, 100, 5, "%");
+    changed |= slider(c, rx, ry + 40, rw, "Ambience (wind, water, fire)", &s->volume_ambient, 0, 100, 5, "%");
+    return changed;
+}
+
 static void settings_screen(ctx *c, settings *s)
 {
     ui *u = c->u;
     menu *m = c->m;
     backdrop(c);
     float x, y;
-    const float w = 300, h = 288;
+    const float w = 300, h = 222;
     panel(u, m->age, w, h, &x, &y, "SETTINGS");
-    static const char *const ONOFF[] = {"Off", "On"};
-    static const char *const SPRINT[] = {"Hold", "Toggle"};
-    static const char *const GUI[] = {"Auto", "1x", "2x", "3x", "4x"};
-    float rx = x + 8, rw = w - 16, ry = y + 24;
-    int changed = 0;
-    ui_text(u, rx, ry, 1, C_DIM, "VIEW");
-    ry += 11;
-    changed |= slider(c, rx, ry, rw, "Field of view", &s->fov, SETTINGS_FOV_MIN, SETTINGS_FOV_MAX, 1, UI_CH_DEGREE);
-    ry += 20;
-    changed |= cycle(c, rx, ry, rw, "View bobbing", &s->view_bob, ONOFF, 2);
-    ry += 20;
-    changed |= cycle(c, rx, ry, rw, "Sprint FOV effect", &s->fov_effects, ONOFF, 2);
-    ry += 20;
-    changed |= slider(c, rx, ry, rw, "Render distance (restart)", &s->render_distance, SETTINGS_RD_MIN, SETTINGS_RD_MAX,
-                      1, "");
-    ry += 20;
-    changed |= cycle(c, rx, ry, rw, "VSync", &s->vsync, ONOFF, 2);
-    ry += 24;
-    ui_text(u, rx, ry, 1, C_DIM, "CONTROLS AND INTERFACE");
-    ry += 11;
-    changed |= slider(c, rx, ry, rw, "Mouse sensitivity", &s->sensitivity, SETTINGS_SENS_MIN, SETTINGS_SENS_MAX, 5,
-                      "%");
-    ry += 20;
-    changed |= cycle(c, rx, ry, rw, "Invert mouse", &s->invert_y, ONOFF, 2);
-    ry += 20;
-    changed |= cycle(c, rx, ry, rw, "Sprint", &s->sprint_toggle, SPRINT, 2);
-    ry += 20;
-    changed |= cycle(c, rx, ry, rw, "GUI scale", &s->gui_scale, GUI, SETTINGS_GUI_MAX + 1);
-    ry += 20;
-    changed |= cycle(c, rx, ry, rw, "Key hints", &s->show_hints, ONOFF, 2);
+    static const char *const TABS[3] = {"Video", "Controls", "Audio"};
+    float tw = (w - 16 - 8) / 3.0f;
+    for (int t = 0; t < 3; t++)
+        if (tab_button(c, x + 8 + (float)t * (tw + 4), y + 22, tw, TABS[t], m->tab == t)) m->tab = t;
+    float rx = x + 8, rw = w - 16, ry = y + 48;
+    int changed;
+    if (m->tab == 0) changed = settings_video(c, s, rx, ry, rw);
+    else if (m->tab == 1) changed = settings_controls(c, s, rx, ry, rw);
+    else changed = settings_audio(c, s, rx, ry, rw);
     if (button(c, x + w - 8 - 90, y + h - 8 - ROW_H, 90, "Done")) menu_open(m, m->back_to);
     if (changed) c->action = MENU_SETTINGS;
 }
@@ -341,6 +381,8 @@ static void controls_screen(ctx *c)
 menu_action menu_frame(menu *m, ui *u, const menu_input *in, settings *s)
 {
     ctx c = {m, u, in, 0, -1, 0, 0, MENU_NONE};
+    int focus0 = m->focus, screen0 = m->screen, tab0 = m->tab;
+    m->clicked = m->hovered = 0;
     m->age += in->dt;
     m->time += (double)in->dt;
     c.mouse_moved = in->mx >= 0.0f && (fabsf(in->mx - m->last_mx) + fabsf(in->my - m->last_my) > 0.5f);
@@ -370,5 +412,7 @@ menu_action menu_frame(menu *m, ui *u, const menu_input *in, settings *s)
         if (screen == SCREEN_PAUSE) c.action = MENU_RESUME;
         else if (screen == SCREEN_SETTINGS || screen == SCREEN_CONTROLS) menu_open(m, m->back_to);
     }
+    m->hovered = m->focus != focus0 && m->screen == screen0 && m->items > 0;
+    m->clicked |= m->screen != screen0 || m->tab != tab0;
     return c.action;
 }

@@ -17,7 +17,9 @@
 #include "physics.h"
 #include "renderer.h"
 #include "save.h"
+#include "audio_device.h"
 #include "settings.h"
+#include "sound.h"
 #include "survival.h"
 #include "thermo.h"
 #include "ui.h"
@@ -61,6 +63,7 @@ typedef struct {
     const char *screen;  /* open this screen at start (screenshots) */
     int debug;           /* start with F3 on */
     const char *give;    /* items to start with: "stone:32,apple:3" */
+    int no_sound;
     int have_time;       /* --time */
     double time_of_day;  /* 0..1 */
 } options;
@@ -166,7 +169,8 @@ static void usage(void)
            "                    open-fracture, infection, concussion, burn, dislocation,\n"
            "                    abrasion, crush\n"
            "  --bench           run CPU benchmarks and exit (no window)\n"
-           "  --mem-stats       print mimalloc statistics at exit\n");
+           "  --mem-stats       print mimalloc statistics at exit\n"
+           "  --no-sound        do not open an audio device\n");
 }
 
 /* Options that take no value. */
@@ -183,6 +187,7 @@ static int parse_flag(options *o, const char *a)
         {"--health-panel", &o->open_panel},
         {"--bench", &o->bench},
         {"--mem-stats", &o->mem_stats},
+        {"--no-sound", &o->no_sound},
     };
     for (size_t i = 0; i < sizeof flags / sizeof flags[0]; i++)
         if (strcmp(a, flags[i].name) == 0) {
@@ -728,6 +733,13 @@ typedef struct {
     int inv_was_open;
     double title_t, save_t;
     int fps_frames;
+    sound *snd;
+    audio_device *audio;
+    int last_step;            /* stride half-cycles, for footsteps */
+    float landing;            /* hardest landing this frame, m/s */
+    float swim_t, prev_hurt, prev_breath;
+    double last_beat;         /* health.last_r of the last heartbeat heard */
+    int snd_inv_open;
 
     /* This frame. */
     int in_menu, frozen;
@@ -739,6 +751,126 @@ typedef struct {
 } game;
 
 static game g_game;
+
+/* ---------------------------------------------------------------- sound */
+
+static uint8_t block_under(const world *w, const player *p)
+{
+    return world_get(w, (int)floor(p->pos.x), (int)floor(p->pos.y - 0.05), (int)floor(p->pos.z));
+}
+
+/* Wind rises with height and with the air rushing past a falling or
+ * flying body, and drops away under a roof. */
+static float wind_level(const world *w, const player *p, dvec3 eye)
+{
+    float height = clampf((float)(eye.y - SEA_LEVEL) / 60.0f, 0.0f, 1.0f);
+    float rush = clampf((float)dv3_len(p->vel) / 30.0f, 0.0f, 1.0f);
+    float wind = 0.25f + 0.45f * height + 0.6f * rush;
+    for (int dy = 1; dy <= 8; dy++)
+        if (block_opaque(world_get(w, (int)floor(eye.x), (int)floor(eye.y) + dy, (int)floor(eye.z)))) {
+            wind *= 0.2f;
+            break;
+        }
+    return clampf(wind, 0.0f, 1.0f);
+}
+
+/* Water within a few metres (a coarse 5x3x5 sample), or all around. */
+static float water_level(const world *w, const player *p, dvec3 eye)
+{
+    if (p->submerged > 0.6) return 1.0f;
+    int n = 0;
+    for (int dz = -4; dz <= 4; dz += 2)
+        for (int dy = -2; dy <= 2; dy += 2)
+            for (int dx = -4; dx <= 4; dx += 2)
+                n += world_get(w, (int)floor(eye.x) + dx, (int)floor(eye.y) + dy, (int)floor(eye.z) + dz) == B_WATER;
+    return clampf((float)n / 18.0f, 0.0f, 1.0f);
+}
+
+static void apply_volumes(game *g)
+{
+    sound_set_volumes(g->snd, (float)g->st.volume_master / 100.0f, (float)g->st.volume_effects / 100.0f,
+                      (float)g->st.volume_ambient / 100.0f);
+}
+
+/* Per-step physics events worth hearing (they are cleared by the next step). */
+static void sound_step_events(game *g)
+{
+    const physics *ph = &g->ph;
+    for (int k = 0; k < ph->shatter_count; k++) {
+        dvec3 p = dv3(ph->shatter_pos[k].x + 0.5, ph->shatter_pos[k].y + 0.5, ph->shatter_pos[k].z + 0.5);
+        sound_play(g->snd, SND_SHATTER, &p, ph->shatter_block[k], 1.0f);
+    }
+    for (int k = 0; k < ph->splash_count; k++)
+        sound_play(g->snd, SND_SPLASH, &ph->splash_pos[k], B_WATER, ph->splash_speed[k] / 10.0f);
+    for (int k = 0; k < ph->thud_count; k++)
+        sound_play(g->snd, SND_THUD, &ph->thud_pos[k], ph->thud_block[k], ph->thud_speed[k] / 10.0f);
+}
+
+static void sound_interact_events(game *g, const interact_out *io)
+{
+    static const int MAP[] = {[IE_DIG] = SND_DIG,         [IE_BREAK] = SND_BREAK,   [IE_PLACE] = SND_PLACE,
+                              [IE_FILL] = SND_BUCKET_FILL, [IE_POUR] = SND_BUCKET_POUR, [IE_FEED] = SND_FIRE_FEED,
+                              [IE_DROP] = SND_DROP};
+    for (int i = 0; i < io->ev_count; i++) {
+        const interact_event *e = &io->ev[i];
+        if (e->kind >= 0 && e->kind <= IE_DROP) sound_play(g->snd, MAP[e->kind], &e->at, e->block, 0.8f);
+    }
+}
+
+/* The body: footsteps with the stride, landings, swimming, being hurt, the
+ * heart when it pounds and laboured breathing. */
+static void sound_body(game *g, double dt)
+{
+    const player *pl = &g->pl;
+    const health *h = &g->hl;
+    dvec3 feet = pl->pos;
+    int step = (int)floorf(g->cam.stride / (float)MC_PI);
+    if (step != g->last_step && pl->on_ground && !pl->flying && g->cam.bob > 0.2f) {
+        float pace = (float)hypot(pl->vel.x, pl->vel.z) / (float)SPRINT_SPEED;
+        sound_play(g->snd, SND_STEP, &feet, block_under(&g->w, pl), pl->sneaking ? 0.25f : 0.35f + 0.65f * pace);
+    }
+    g->last_step = step;
+    if (g->landing > 2.5f) sound_play(g->snd, SND_LAND, &feet, block_under(&g->w, pl), g->landing / 10.0f);
+    g->swim_t -= (float)dt;
+    if (pl->submerged > 0.3 && !pl->flying && g_in.keys[GLFW_KEY_SPACE] && g->swim_t <= 0.0f) {
+        sound_play(g->snd, SND_SWIM, &feet, B_WATER, 0.6f);
+        g->swim_t = 0.7f;
+    }
+    if (h->hurt_flash > g->prev_hurt + 0.1f && !h->dead)
+        sound_play(g->snd, SND_HURT, NULL, 0, clampf(h->hurt_flash, 0.2f, 1.0f));
+    g->prev_hurt = h->hurt_flash;
+    /* The heart is heard when it races, stumbles or labours against low
+     * pressure; each sound is one simulated beat. */
+    if (h->last_r != g->last_beat) {
+        g->last_beat = h->last_r;
+        float felt = fmaxf((h->hr - 105.0f) / 60.0f, (95.0f - h->sbp) / 40.0f);
+        if (felt > 0.0f && !h->dead) sound_play(g->snd, SND_HEARTBEAT, NULL, 0, clampf(0.25f + felt, 0.0f, 1.0f));
+    }
+    /* A breath at the start of each breathing cycle when out of breath. */
+    int breath_start = h->breath_phase < g->prev_breath;
+    g->prev_breath = h->breath_phase;
+    float effort = fmaxf(1.0f - health_stamina(h) * 2.5f, (h->rr - 22.0f) / 18.0f);
+    if (breath_start && effort > 0.0f && h->breathing && !h->dead && pl->submerged < 0.9)
+        sound_play(g->snd, SND_BREATH, NULL, 0, clampf(effort, 0.0f, 1.0f));
+}
+
+/* Once a frame: the ears, the ambience and the body's own sounds. */
+static void frame_sound(game *g, double dt, const render_view *v)
+{
+    sound_listener(g->snd, v->eye, v->yaw, v->pitch, v->underwater);
+    int on_title = g_in.screen == SCREEN_TITLE;
+    float wind = wind_level(&g->w, &g->pl, v->eye), water = water_level(&g->w, &g->pl, v->eye);
+    sound_ambience(g->snd, wind * (on_title ? 0.6f : 1.0f), water);
+    dvec3 fires[SOUND_MAX_FIRES];
+    int nf = thermo_fires_near(g->th, &g->w, v->eye, 24.0, fires, SOUND_MAX_FIRES);
+    sound_fires(g->snd, fires, nf);
+    if (!g->in_menu && !on_title) sound_body(g, dt);
+    /* The inventory screen opening and closing. */
+    if (g_in.inv_open != g->snd_inv_open) sound_play(g->snd, g_in.inv_open ? SND_UI_OPEN : SND_UI_CLOSE, NULL, 0, 0.6f);
+    g->snd_inv_open = g_in.inv_open;
+    sound_update(g->snd, (float)dt);
+}
+
 
 /* Drops a stack in front of the player (inventory closed with a stack on
  * the cursor, or thrown out of the window). */
@@ -876,6 +1008,10 @@ static void game_init(game *g)
     viewmodel_init(&g->vm);
     camera_init(&g->cam);
     g->death_rng = g->seed;
+    g->snd = sound_create(g->seed, SOUND_RATE, SOUND_CHANNELS);
+    apply_volumes(g);
+    g->audio = g->o.no_sound ? NULL : audio_device_open(sound_render, g->snd, SOUND_RATE, SOUND_CHANNELS);
+    log_info("sound: %s", g->audio ? audio_device_name(g->audio) : "off");
 
     g_in.treat = -1;
     g_in.slot = -1;
@@ -991,12 +1127,14 @@ static void frame_simulate(game *g, const player_input *in, double dt)
                      g->ph.shatter_pos[k].z, 24);
         for (int k = 0; k < g->ph.splash_count; k++)
             fx_splash(g->fx, g->ph.splash_pos[k], (double)g->ph.splash_speed[k]);
+        sound_step_events(g);
         health_step(&g->hl, &env, PHYS_DT);
         g->acc -= PHYS_DT;
         steps++;
     }
     if (steps == MAX_STEPS_PER_FRAME) g->acc = 0.0; /* too slow to keep up: slow down time instead */
-    if (steps) physics_pickup(&g->ph, accept_item, &g->inv);
+    g->landing = landing;
+    if (steps && physics_pickup(&g->ph, accept_item, &g->inv)) sound_play(g->snd, SND_PICKUP, NULL, 0, 0.7f);
     if (!g->in_menu) {
         thermo_step(g->th, &g->w, dt, g->pl.pos);
         fx_step(g->fx, &g->w, dt);
@@ -1025,6 +1163,7 @@ static void frame_interact(game *g, double dt)
                          .dt = g->in_menu ? 0.0f : (float)dt};
     interact_out io = interact_frame(&g->ia, &g->w, &g->ph, g->th, pl, &g->inv, g->fx, g->eye, g->look, g->hit, &ii);
     g->actions += io.actions;
+    sound_interact_events(g, &io);
     if (io.broke) survival_on_break(&g->hl, io.broken_id);
     if (io.eat) g_in.treat = TREAT_EAT;
     if (io.msg) {
@@ -1039,7 +1178,10 @@ static void frame_interact(game *g, double dt)
         if (!g->hl.dead) {
             int water = survival_water_nearby(&g->w, pl, g->look) || inv_held(&g->inv)->id == I_WATER_BUCKET;
             int ok = health_treat(&g->hl, &g->inv, g_in.sel_part, g_in.treat, water, g->hs.msg, sizeof g->hs.msg);
-            if (ok && (g_in.treat == TREAT_EAT || g_in.treat == TREAT_DRINK)) g->eat_anim = 1.0f;
+            if (ok && (g_in.treat == TREAT_EAT || g_in.treat == TREAT_DRINK)) {
+                g->eat_anim = 1.0f;
+                sound_play(g->snd, g_in.treat == TREAT_EAT ? SND_EAT : SND_DRINK, NULL, 0, 0.8f);
+            }
             g->hs.msg_age = 0.0f;
         }
         g_in.treat = -1;
@@ -1172,6 +1314,9 @@ static void draw_debug(game *g, ui *u, int fb_w, int fb_h, double alpha)
     mem_process_info(&di.rss, &di.commit);
     di.gpu = renderer_device_name(g->rd);
     di.versions = g->versions;
+    di.api = renderer_api_string(g->rd);
+    di.audio = g->audio ? audio_device_name(g->audio) : "off";
+    sound_stats(g->snd, &di.snd_voices, &di.snd_load);
     di.width = fb_w;
     di.height = fb_h;
     debug_draw(u, &di);
@@ -1211,10 +1356,13 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     case MENU_QUIT: glfwSetWindowShouldClose(g->win, GLFW_TRUE); break;
     case MENU_SETTINGS:
         renderer_set_vsync(g->rd, g->st.vsync);
+        apply_volumes(g);
         g->settings_dirty = 1;
         break;
     default: break;
     }
+    if (g->mn.clicked) sound_play(g->snd, SND_UI_CLICK, NULL, 0, 0.7f);
+    else if (g->mn.hovered) sound_play(g->snd, SND_UI_HOVER, NULL, 0, 0.4f);
     if (g_in.screen != SCREEN_NONE) g_in.screen = g->mn.screen;
     if (g->settings_dirty && g_in.screen != SCREEN_SETTINGS) {
         if (settings_save(&g->st, g->o.config) != 0) log_warn("could not save settings to %s", g->o.config);
@@ -1266,7 +1414,10 @@ static int draw_overlay(game *g, double dt, double alpha)
                           g_in.keys[GLFW_KEY_LEFT_SHIFT] || g_in.keys[GLFW_KEY_RIGHT_SHIFT],
                           thermo_near_fire(g->th, &g->w, g->pl.pos, 3.0),
                           (float)dt};
-        toss(g, invui_screen(&u, &g->iu, &g->inv, &in).drop);
+        invui_result ir = invui_screen(&u, &g->iu, &g->inv, &in);
+        toss(g, ir.drop);
+        if (ir.crafted >= 0) sound_play(g->snd, SND_CRAFT, NULL, 0, 0.8f);
+        else if (ir.changed) sound_play(g->snd, SND_UI_CLICK, NULL, 0, 0.5f);
     }
     if (g_in.debug && !on_title) draw_debug(g, &u, fb_w, fb_h, alpha);
     if (g->in_menu) run_menu(g, &u, mx, my, dt);
@@ -1291,6 +1442,7 @@ static void frame_render(game *g, double now, double dt)
     world_schedule(&g->w);
     double alpha = g->acc / PHYS_DT;
     render_view v = build_view(g, now, dt, alpha);
+    frame_sound(g, dt, &v);
     v.ui_quads = draw_overlay(g, dt, alpha);
     renderer_end_frame(g->rd, &g->w, &g->ph, &v, alpha);
 }
@@ -1331,6 +1483,8 @@ static void game_shutdown(game *g)
     world_save_all(&g->w);
     if (!g->hl.dead) save_player(&g->sc);
     jobs_wait_idle(g->js);
+    audio_device_close(g->audio); /* stops the callback before the mixer goes */
+    sound_destroy(g->snd);
     mem_free(g->ents);
     mem_free(g->fx);
     world_destroy(&g->w);

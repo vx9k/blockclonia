@@ -792,6 +792,11 @@ static void bodies_step(physics *ph, player *pl)
         check_splash(ph, start, box);
 
         int settled = 0, bounced = 0;
+        if (landed && impact > 1.0 && ph->thud_count < MAX_SPLASHES) {
+            ph->thud_pos[ph->thud_count] = dv3(box.min.x + 0.5, box.min.y, box.min.z + 0.5);
+            ph->thud_speed[ph->thud_count] = (float)impact;
+            ph->thud_block[ph->thud_count++] = b->block;
+        }
         if (landed) {
             double e = (double)def->restitution;
             if (impact > BOUNCE_MIN_SPEED && impact * e > BOUNCE_MIN_UP && b->bounces < MAX_BOUNCES) {
@@ -1241,7 +1246,7 @@ void physics_step(physics *ph, player *p, const player_input *in)
     ph->pl = p;
     ph->hit_count = 0;
     ph->pinned_mass = ph->pinned_height = 0.0f;
-    ph->shatter_count = ph->splash_count = 0;
+    ph->shatter_count = ph->splash_count = ph->thud_count = 0;
     player_step(ph, p, in);
     {
         aabb now = player_box(p), was = now;

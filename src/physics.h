@@ -154,6 +154,10 @@ typedef struct physics {
     dvec3 splash_pos[MAX_SPLASHES];   /* on the surface, centred on what went in */
     float splash_speed[MAX_SPLASHES]; /* downward m/s when it crossed the surface */
     int splash_count;
+    dvec3 thud_pos[MAX_SPLASHES];     /* falling blocks hitting the ground (sound) */
+    float thud_speed[MAX_SPLASHES];   /* m/s of the impact */
+    uint8_t thud_block[MAX_SPLASHES];
+    int thud_count;
     int magnet;                   /* pull nearby items to the player (alive, not in a menu) */
     /* Stats for the HUD/bench. */
     int last_collapse;

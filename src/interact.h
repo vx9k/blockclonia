@@ -33,12 +33,25 @@ typedef struct {
     float dt;
 } interact_input;
 
+/* Things the hands did this frame that can be heard. */
+typedef enum { IE_DIG, IE_BREAK, IE_PLACE, IE_FILL, IE_POUR, IE_FEED, IE_DROP } interact_event_kind;
+
+typedef struct {
+    int kind;            /* interact_event_kind */
+    uint8_t block;       /* the material involved */
+    dvec3 at;            /* where, world coordinates */
+} interact_event;
+
+#define INTERACT_MAX_EVENTS 4
+
 typedef struct {
     int actions;         /* blocks broken or placed, for the health model */
     int broke;           /* a block was broken by hand (not flying) */
     uint8_t broken_id;
     int eat;             /* right-clicked food: eat it */
     const char *msg;     /* short feedback, or NULL */
+    interact_event ev[INTERACT_MAX_EVENTS];
+    int ev_count;
 } interact_out;
 
 void interact_init(interact *s, uint32_t seed);
