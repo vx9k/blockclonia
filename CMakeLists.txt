@@ -20,6 +20,7 @@ endif()
 
 # ---------------------------------------------------------------- options
 option(MC_BUILD_GAME  "Build the game (needs Vulkan headers/loader, GLFW and glslc)" ON)
+option(MC_SOUND       "Sound output through miniaudio (fetched like GLFW; off: silent build)" ON)
 option(MC_BUILD_TESTS "Build unit tests" ON)
 option(MC_BUILD_FUZZ  "Build libFuzzer targets (clang only)" OFF)
 option(MC_VK_MIMALLOC "Compile mimalloc-backed VkAllocationCallbacks (enabled at run time with MC_VK_ALLOC=1)" ON)
@@ -144,6 +145,7 @@ set(MC_CORE_SOURCES
   src/camera.c
   src/debug.c
   src/fx.c
+  src/gpucaps.c
   src/gpupool.c
   src/health.c
   src/hud.c
@@ -160,6 +162,7 @@ set(MC_CORE_SOURCES
   src/physics.c
   src/save.c
   src/settings.c
+  src/sound.c
   src/survival.c
   src/texgen.c
   src/thermo.c
@@ -203,7 +206,12 @@ endif()
 
 # ---------------------------------------------------------------- game
 if(MC_BUILD_GAME)
-  add_executable(blockclonia src/main.c src/renderer.c)
+  if(MC_SOUND_ENABLED)
+    add_executable(blockclonia src/main.c src/renderer.c src/audio_device.c)
+    target_link_libraries(blockclonia PRIVATE mc::miniaudio)
+  else()
+    add_executable(blockclonia src/main.c src/renderer.c src/audio_null.c)
+  endif()
   target_link_libraries(blockclonia PRIVATE mccore Vulkan::Vulkan mc::glfw mc_warnings)
 
   include(Shaders)
@@ -218,7 +226,7 @@ endif()
 if(MC_BUILD_TESTS)
   enable_testing()
   add_executable(mc_tests tests/test_main.c tests/test_util.c tests/test_thermo.c tests/test_health2.c
-                          tests/test_bodies.c tests/test_visual.c)
+                          tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_gpucaps.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)
   set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT 120)

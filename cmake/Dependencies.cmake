@@ -19,6 +19,8 @@ set(MC_MIMALLOC_VERSION 3.5.3 CACHE STRING "mimalloc release used when fetching"
 set(MC_MIMALLOC_SHA256 "" CACHE STRING "Optional SHA256 of the mimalloc archive")
 set(MC_GLFW_VERSION 3.5.1 CACHE STRING "GLFW release used when fetching")
 set(MC_GLFW_SHA256 "" CACHE STRING "Optional SHA256 of the GLFW archive")
+set(MC_MINIAUDIO_VERSION 0.11.25 CACHE STRING "miniaudio release used when fetching")
+set(MC_MINIAUDIO_SHA256 "" CACHE STRING "Optional SHA256 of the miniaudio archive")
 
 if(POLICY CMP0135) # CMake 3.24+: extracted files get the extraction time
   cmake_policy(SET CMP0135 NEW)
@@ -187,5 +189,68 @@ if(MC_BUILD_GAME)
     _mc_fetch_glfw()
     target_link_libraries(mc_glfw INTERFACE glfw)
     message(STATUS "blockclonia: GLFW ${MC_GLFW_VERSION} (built from source)")
+  endif()
+endif()
+
+# ---------------------------------------------------------------- miniaudio
+# Sound output only: the game mixes its own procedural sounds and hands
+# miniaudio a callback. miniaudio loads the platform's audio library at run
+# time (ALSA, PulseAudio, PipeWire through Pulse, WASAPI, CoreAudio, AAudio),
+# so nothing new is linked. Its implementation is compiled once, trimmed to
+# the device API, in a target of its own without the game's warnings.
+# Provides mc::miniaudio and sets MC_SOUND_ENABLED.
+set(MC_SOUND_ENABLED OFF)
+if(MC_BUILD_GAME AND MC_SOUND)
+  set(_ma_dir "")
+  if(NOT MC_DEPS STREQUAL "FETCH")
+    find_path(MC_MINIAUDIO_INCLUDE miniaudio.h PATH_SUFFIXES miniaudio)
+    if(MC_MINIAUDIO_INCLUDE)
+      set(_ma_dir "${MC_MINIAUDIO_INCLUDE}")
+      message(STATUS "blockclonia: miniaudio (system, ${_ma_dir})")
+    endif()
+  endif()
+  if(NOT _ma_dir AND NOT MC_DEPS STREQUAL "SYSTEM")
+    _mc_hash_arg(hash "${MC_MINIAUDIO_SHA256}")
+    # Header only: SOURCE_SUBDIR names a directory without a CMakeLists.txt,
+    # so the sources are fetched and its own CMake project is never added.
+    FetchContent_Declare(miniaudio
+      URL https://github.com/mackron/miniaudio/archive/refs/tags/${MC_MINIAUDIO_VERSION}.tar.gz
+      ${hash}
+      SOURCE_SUBDIR no-cmake-project)
+    FetchContent_MakeAvailable(miniaudio)
+    set(_ma_dir "${miniaudio_SOURCE_DIR}")
+    message(STATUS "blockclonia: miniaudio ${MC_MINIAUDIO_VERSION} (fetched)")
+  endif()
+  if(_ma_dir)
+    set(_ma_impl "${CMAKE_CURRENT_BINARY_DIR}/miniaudio_impl.c")
+    file(WRITE "${_ma_impl}.in"
+"/* Generated: miniaudio's implementation, device playback only. */
+#define MA_NO_DECODING
+#define MA_NO_ENCODING
+#define MA_NO_GENERATION
+#define MA_NO_RESOURCE_MANAGER
+#define MA_NO_NODE_GRAPH
+#define MA_NO_ENGINE
+#define MA_NO_WAV
+#define MA_NO_FLAC
+#define MA_NO_MP3
+#define MINIAUDIO_IMPLEMENTATION
+#include \"miniaudio.h\"
+")
+    configure_file("${_ma_impl}.in" "${_ma_impl}" COPYONLY)
+    add_library(mc_miniaudio_impl STATIC "${_ma_impl}")
+    target_include_directories(mc_miniaudio_impl SYSTEM PUBLIC "${_ma_dir}")
+    if(NOT MSVC)
+      target_compile_options(mc_miniaudio_impl PRIVATE -w)
+      target_link_libraries(mc_miniaudio_impl PUBLIC ${CMAKE_DL_LIBS} Threads::Threads m)
+    endif()
+    target_compile_definitions(mc_miniaudio_impl PUBLIC MA_NO_DECODING MA_NO_ENCODING MA_NO_GENERATION
+                               MA_NO_RESOURCE_MANAGER MA_NO_NODE_GRAPH MA_NO_ENGINE)
+    add_library(mc_miniaudio INTERFACE)
+    add_library(mc::miniaudio ALIAS mc_miniaudio)
+    target_link_libraries(mc_miniaudio INTERFACE mc_miniaudio_impl)
+    set(MC_SOUND_ENABLED ON)
+  else()
+    message(STATUS "blockclonia: miniaudio not found and MC_DEPS=SYSTEM: building without sound")
   endif()
 endif()

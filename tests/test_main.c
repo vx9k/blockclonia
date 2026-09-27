@@ -1314,6 +1314,8 @@ int main(void)
     test_health2_all();
     test_bodies_all();
     test_visual_all();
+    test_sound_all();
+    test_gpucaps_all();
     printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);
     return g_failed ? 1 : 0;
 }
