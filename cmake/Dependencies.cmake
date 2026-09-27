@@ -63,16 +63,26 @@ set(MC_MIMALLOC_DLL "") # Windows: DLLs to ship next to the exe
 # an older mimalloc can package the game: mem.c needs mi_option_arena_reserve
 # and mi_option_arena_eager_commit, which appeared in 2.1.0 and remain in 3.x.
 set(MC_MIMALLOC_MIN_AUTO 3.5 CACHE STRING "Oldest system mimalloc MC_DEPS=AUTO will use")
-if(NOT MC_DEPS STREQUAL "FETCH")
+if(MC_DEPS STREQUAL "AUTO")
+  # The minimum goes in the call: CMake loads a package's targets only when
+  # its version file accepts it, so a rejected system copy leaves no
+  # imported mimalloc targets behind to collide with the ones the fetched
+  # release defines. mimalloc's version file also rejects other major
+  # versions, which then build the pinned release too.
+  find_package(mimalloc ${MC_MIMALLOC_MIN_AUTO} CONFIG QUIET)
+  if(NOT mimalloc_FOUND AND mimalloc_CONSIDERED_VERSIONS)
+    list(REMOVE_DUPLICATES mimalloc_CONSIDERED_VERSIONS)
+    list(JOIN mimalloc_CONSIDERED_VERSIONS ", " _mi_seen)
+    message(STATUS "blockclonia: system mimalloc ${_mi_seen} is not "
+                   "${MC_MIMALLOC_MIN_AUTO}+; building ${MC_MIMALLOC_VERSION} instead")
+  endif()
+elseif(MC_DEPS STREQUAL "SYSTEM")
   # No version in the call: mimalloc's version file rejects any other major
-  # version. Checked by hand instead.
+  # version. Checked by hand instead; SYSTEM never fetches, so nothing can
+  # collide with the targets this loads.
   find_package(mimalloc CONFIG QUIET)
   if(mimalloc_FOUND AND mimalloc_VERSION VERSION_LESS 2.1)
     message(STATUS "blockclonia: system mimalloc ${mimalloc_VERSION} is too old (need 2.1+)")
-    set(mimalloc_FOUND FALSE)
-  elseif(mimalloc_FOUND AND MC_DEPS STREQUAL "AUTO" AND mimalloc_VERSION VERSION_LESS MC_MIMALLOC_MIN_AUTO)
-    message(STATUS "blockclonia: system mimalloc ${mimalloc_VERSION} is older than "
-                   "${MC_MIMALLOC_MIN_AUTO}; building ${MC_MIMALLOC_VERSION} instead")
     set(mimalloc_FOUND FALSE)
   endif()
 endif()
@@ -155,13 +165,19 @@ if(MC_BUILD_GAME)
   # Same policy as mimalloc: AUTO wants the pinned 3.5 series, SYSTEM
   # accepts any 3.3+ (everything the game calls exists since 3.3).
   set(MC_GLFW_MIN_AUTO 3.5 CACHE STRING "Oldest system GLFW MC_DEPS=AUTO will use")
-  if(NOT MC_DEPS STREQUAL "FETCH")
-    find_package(glfw3 3.3 CONFIG QUIET)
-    if(glfw3_FOUND AND MC_DEPS STREQUAL "AUTO" AND glfw3_VERSION VERSION_LESS MC_GLFW_MIN_AUTO)
-      message(STATUS "blockclonia: system GLFW ${glfw3_VERSION} is older than "
+  if(MC_DEPS STREQUAL "AUTO")
+    # The minimum goes in the call so a system GLFW that is too old never
+    # defines its imported glfw target, which would collide with the target
+    # of the same name that the fetched release creates.
+    find_package(glfw3 ${MC_GLFW_MIN_AUTO} CONFIG QUIET)
+    if(NOT glfw3_FOUND AND glfw3_CONSIDERED_VERSIONS)
+      list(REMOVE_DUPLICATES glfw3_CONSIDERED_VERSIONS)
+      list(JOIN glfw3_CONSIDERED_VERSIONS ", " _glfw_seen)
+      message(STATUS "blockclonia: system GLFW ${_glfw_seen} is older than "
                      "${MC_GLFW_MIN_AUTO}; building ${MC_GLFW_VERSION} instead")
-      set(glfw3_FOUND FALSE)
     endif()
+  elseif(MC_DEPS STREQUAL "SYSTEM")
+    find_package(glfw3 3.3 CONFIG QUIET)
   endif()
 
   if(glfw3_FOUND)
