@@ -208,6 +208,28 @@ static void test_mesher(void)
     for (uint32_t i = 0; i < t * 4; i++) found_drop |= (out[i] >> 28) == 4;
     CHECK(found_drop);
 
+    /* Full water beside a half-full block shows the step between the two
+     * surfaces: one side face from the higher surface (1/8 below the top)
+     * down to the lower one (4/8), on the higher block only. */
+    fill_input(in, B_AIR);
+    in->blocks[mesh_pidx(2, 2, 2)] = B_WATER;
+    in->blocks[mesh_pidx(3, 2, 2)] = B_WATER;
+    in->meta[mesh_pidx(3, 2, 2)] = 4;
+    mesh_section(in, out, &o, &t);
+    CHECK(t == 11);
+    int top = 0, foot = 0;
+    for (uint32_t i = 0; i < t * 4; i++) {
+        uint32_t v = out[i], x = v & 31u, y = (v >> 5) & 31u, face = (v >> 15) & 7u, dr = v >> 28;
+        if (face > 1 || x != 3) continue;
+        top += y == 3 && dr == 1;
+        foot += y == 3 && dr == 4;
+    }
+    CHECK(top == 2 && foot == 2);
+    /* Level surfaces have no step between them. */
+    in->meta[mesh_pidx(3, 2, 2)] = 0;
+    mesh_section(in, out, &o, &t);
+    CHECK(t == 8); /* tops and bottoms merge */
+
     mem_free(in);
     mem_free(out);
 }

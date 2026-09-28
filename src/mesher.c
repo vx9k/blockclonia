@@ -12,6 +12,8 @@
 #define K_TEX(k)    ((k) & 0xFFu)
 #define K_AO(k)     (((k) >> 8) & 0xFFu)
 #define K_DROP(k)   (((k) >> 16) & 0xFu)
+/* On the side face of a step down to lower water: the lower surface's drop. */
+#define K_BASE(k) (((k) >> 20) & 0xFu)
 
 enum { C_OPAQUE = 1, C_TRANS = 2, C_WATER = 4, C_AIR = 8 };
 
@@ -47,6 +49,16 @@ static inline int corner_ao(const uint8_t *cls, int n, int ou, int ov)
     return (s1 && s2) ? 0 : 3 - (s1 + s2 + cr);
 }
 
+/* How far a water surface sits below its block top, in 1/8 block: none
+ * under more water, else the missing levels, and at least one so even a
+ * full block's surface shows below the bank. */
+static inline int water_drop(const mesh_input *in, const uint8_t *cls, int i)
+{
+    if (cls[i + STRIDE[1]] == C_WATER) return 0;
+    int level = in->meta[i] ? in->meta[i] : WATER_FULL;
+    return WATER_FULL - level > 0 ? WATER_FULL - level : 1;
+}
+
 static inline uint32_t face_key(const mesh_input *in, const uint8_t *cls, int pi, int ni, int f, int su, int sv)
 {
     uint8_t cb = cls[pi];
@@ -64,12 +76,18 @@ static inline uint32_t face_key(const mesh_input *in, const uint8_t *cls, int pi
 
     if (cb == C_WATER) {
         int level = in->meta[pi] ? in->meta[pi] : WATER_FULL;
-        int above_water = cls[pi + STRIDE[1]] == C_WATER;
-        if (cn == C_WATER || (cn == C_OPAQUE && !(f == 2 && level < WATER_FULL))) return 0;
-        int drop = above_water ? 0 : (WATER_FULL - level > 0 ? WATER_FULL - level : 1);
-        key |= K_TRANS | (uint32_t)drop << 16 | (uint32_t)3 << 8 | (uint32_t)3 << 10 |
+        if (cn == C_OPAQUE && !(f == 2 && level < WATER_FULL)) return 0;
+        int drop = water_drop(in, cls, pi), base = 0;
+        if (cn == C_WATER) {
+            /* Beside lower water, the step between the two surfaces shows:
+             * a side face from this surface down to the neighbour's. */
+            if (f == 2 || f == 3) return 0;
+            base = water_drop(in, cls, ni);
+            if (base <= drop) return 0;
+        }
+        key |= K_TRANS | (uint32_t)drop << 16 | (uint32_t)base << 20 | (uint32_t)3 << 8 | (uint32_t)3 << 10 |
                (uint32_t)3 << 12 | (uint32_t)3 << 14;
-        if (f != 2 && f != 3 && drop) key |= K_NOMERGE;
+        if (f != 2 && f != 3 && (drop || base)) key |= K_NOMERGE;
         return key;
     }
     if (cb == C_TRANS) {
@@ -155,12 +173,17 @@ uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *m
                         p[d] = plane;
                         p[u] = i + CU[c] * w;
                         p[v] = j + CV[c] * h;
-                        /* Only vertices on the top edge of a water block drop. */
+                        /* Only vertices on the top edge of a water block
+                         * drop, except that a step's bottom edge sits on the
+                         * lower surface: one block up, then dropped. */
                         int drop = (int)K_DROP(k);
-                        if (drop && d != 1) {
+                        if (d != 1) {
                             int top_edge = (u == 1) ? CU[c] : CV[c];
-                            if (!top_edge) drop = 0;
-                        } else if (drop && f == 3) {
+                            if (!top_edge) {
+                                drop = (int)K_BASE(k);
+                                p[1] += drop != 0;
+                            }
+                        } else if (f == 3) {
                             drop = 0;
                         }
                         dst[n] = pack_vertex(p, f, ao[c], (int)K_TEX(k), drop);
