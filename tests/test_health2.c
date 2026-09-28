@@ -108,7 +108,7 @@ static void burn_times(double flux, double t[4])
     t[1] = t[2] = t[3] = -1.0;
     for (int i = 0; i < 60 * 60 && h->part[BP_HEAD].burn < 3; i++) {
         health_step(h, &e, 1.0 / 60.0);
-        for (int k = 1; k <= h->part[BP_HEAD].burn; k++)
+        for (int k = 1; k <= h->part[BP_HEAD].burn && k <= 3; k++)
             if (t[k] < 0.0) t[k] = (i + 1) / 60.0;
     }
     mem_free(h);
