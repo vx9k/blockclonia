@@ -400,13 +400,15 @@ static void debug_health_screen(ctx *c)
     ry += 22;
     const float bw = (rw - 6) * 0.5f;
     for (int i = 0; i < HEALTH_DEBUG_COUNT; i++) {
-        float bx = rx + (float)(i % 2) * (bw + 6), by = ry + (float)(i / 2) * ROW_H;
+        int row = i / 2; /* two buttons per row: integer grid position, not a fraction */
+        float bx = rx + (float)(i % 2) * (bw + 6), by = ry + (float)row * ROW_H;
         if (button(c, bx, by, bw, HEALTH_DEBUG_KINDS[i].label)) {
             m->debug_kind = i;
             c->action = MENU_DEBUG_INJURE;
         }
     }
-    float by = ry + (float)((HEALTH_DEBUG_COUNT + 1) / 2) * ROW_H + 6;
+    int rows = (HEALTH_DEBUG_COUNT + 1) / 2; /* rows used above, rounded up */
+    float by = ry + (float)rows * ROW_H + 6;
     if (button(c, rx, by, bw, "Heal (reset to new)")) c->action = MENU_DEBUG_RESET;
     if (button(c, rx + bw + 6, by, bw, "Back")) c->action = MENU_RESUME;
 }

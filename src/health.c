@@ -1819,8 +1819,8 @@ void health_injure(health *h, int kind, int part)
     if (h->dead || kind < 0 || kind >= HEALTH_DEBUG_COUNT) return;
     const health_debug_kind *k = &HEALTH_DEBUG_KINDS[kind];
     int p = k->default_part;
-    if (k->part_kind == HDBG_ANY && part >= 0 && part < BP_COUNT) p = part;
-    else if (k->part_kind == HDBG_ARM && is_arm(part)) p = part;
+    if ((k->part_kind == HDBG_ANY && part >= 0 && part < BP_COUNT) || (k->part_kind == HDBG_ARM && is_arm(part)))
+        p = part;
     switch (kind) {
     case 0: health_cut(h, p, 0.6f, 0, 0.3f); break;                    /* bleed */
     case 1: health_cut(h, p, 0.7f, 1, 0.2f); break;                    /* artery */

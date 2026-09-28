@@ -4,10 +4,12 @@
 shiftNegativeLHS:*/src/world.h
 # miniaudio.h and mimalloc.h come from the dependency include paths, which
 # cppcheck does not search the same way; with a fetched mimalloc 3.x it also
-# reports that header's inline mi_*_csize functions against test_sound.c.
-# The compilers' -Wunused-function (with -Werror) still covers that file.
+# reports that header's inline mi_*_csize functions against whichever test
+# file happens to be built next to it (test_sound.c, test_health_debug.c).
+# The compilers' -Wunused-function (with -Werror) still covers those files.
 missingInclude:*/src/audio_device.c
 unusedFunction:*/tests/test_sound.c
+unusedFunction:*/tests/test_health_debug.c
 # Informational noise from --enable=all.
 missingIncludeSystem
 checkersReport
