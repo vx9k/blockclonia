@@ -101,6 +101,7 @@ void debug_draw(ui *u, const debug_info *d)
     const debug_frames *f = d->frames;
     line(&lc, C_HEAD, "blockclonia  %.0f fps  (%.2f ms, physics %.2f ms)", f ? (double)f->fps : 0.0,
          f && f->fps > 0.0f ? 1000.0 / (double)f->fps : 0.0, (double)d->phys_ms);
+    line(&lc, C_DIM, "K: debug health menu (trigger any injury, or heal)");
     gap(&lc);
     line(&lc, C_TEXT, "XYZ %.3f / %.3f / %.3f", d->x, d->y, d->z);
     int bx = (int)floor(d->x), by = (int)floor(d->y), bz = (int)floor(d->z);
