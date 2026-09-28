@@ -172,11 +172,11 @@ static void add_chirp(float *buf, int n, int at, int len, float f0, float f1, fl
 static void add_thump(float *buf, int n, int at, float f, float amp, float d, rng_t *r)
 {
     int len = secs(d * 6.0f);
-    float ph = 0.0f, drop = 1.0f, dc = expf(-1.0f / (0.015f * FS));
+    float ph = 0.0f, fall = 1.0f, dc = expf(-1.0f / (0.015f * FS));
     env e = env_start(0.002f, d);
     for (int i = 0; i < len && at + i < n; i++) {
-        ph += TAU * f * (1.0f + 0.6f * drop) / FS;
-        drop = drop > 1e-20f ? drop * dc : 0.0f;
+        ph += TAU * f * (1.0f + 0.6f * fall) / FS;
+        fall = fall > 1e-20f ? fall * dc : 0.0f;
         buf[at + i] += amp * sinf(ph) * env_next(&e);
     }
     add_noise(buf, n, at, len, amp * 0.3f, 0.0f, f * 3.0f, 0.001f, d * 0.6f, r);

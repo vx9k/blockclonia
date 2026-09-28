@@ -199,7 +199,7 @@ static void title_screen(ctx *c)
     const char *logo = "BLOCKCLONIA";
     float lx = x0;
     for (int i = 0; logo[i]; i++) {
-        char ch[2] = {logo[i], 0};
+        const char ch[2] = {logo[i], 0};
         float t = ease_out_back((m->age - 0.05f * (float)i) / 0.45f);
         float bob = sinf((float)m->time * 1.6f + (float)i * 0.55f) * 1.2f;
         float ly = y0 + bob - (1.0f - t) * 10.0f;
@@ -405,6 +405,8 @@ menu_action menu_frame(menu *m, ui *u, const menu_input *in, settings *s)
     case SCREEN_CONTROLS: controls_screen(&c); break;
     default: break;
     }
+    /* The screen functions can switch screens through c.m. */
+    /* cppcheck-suppress knownConditionTrueFalse */
     if (m->screen == screen) m->items = c.n;
     else m->items = 0; /* switched: the new screen lays out next frame */
 

@@ -542,7 +542,7 @@ static void give_items(inventory *inv, const char *list)
             size_t k = 0;
             for (; name[k] && t[k]; k++) {
                 char a = (char)tolower((unsigned char)name[k]),
-                     b = t[k] == '_' ? ' ' : (char)tolower((unsigned char)t[k]);
+                     b = (char)(t[k] == '_' ? ' ' : tolower((unsigned char)t[k]));
                 if (a != b) break;
             }
             if (!name[k] && !t[k]) {

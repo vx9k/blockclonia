@@ -78,8 +78,6 @@ float ui_textf(ui *u, float x, float y, int size, uint32_t rgba, const char *fmt
 #endif
     ;
 float ui_text_width(const char *s, int size);
-/* Text centred on x. */
-void ui_text_center(ui *u, float x, float y, int size, uint32_t rgba, const char *s);
 /* Text with a one-pixel drop shadow, for text over the 3D view. */
 float ui_text_shadow(ui *u, float x, float y, int size, uint32_t rgba, const char *s);
 /* Word-wraps text into lines at most `width` wide; returns lines drawn. */
