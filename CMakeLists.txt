@@ -109,7 +109,7 @@ if(MC_BUILD_GAME)
 elseif(MC_VK_MIMALLOC)
   find_package(Vulkan QUIET) # headers only, for the allocation callbacks
 endif()
-include(Dependencies) # mc::mimalloc, and mc::glfw when MC_BUILD_GAME
+include(Dependencies) # mc::mimalloc, mc::sqlite, and mc::glfw when MC_BUILD_GAME
 
 # ---------------------------------------------------------------- LTO
 # Set after the dependencies so only our own targets are affected, and for
@@ -177,7 +177,7 @@ set(MC_CORE_SOURCES
 function(mc_add_core name)
   add_library(${name} STATIC ${MC_CORE_SOURCES})
   target_include_directories(${name} PUBLIC src)
-  target_link_libraries(${name} PUBLIC Threads::Threads PRIVATE mc_warnings)
+  target_link_libraries(${name} PUBLIC Threads::Threads mc::sqlite PRIVATE mc_warnings)
   if(NOT MC_SANITIZE)
     target_link_libraries(${name} PUBLIC mc::mimalloc)
   endif()

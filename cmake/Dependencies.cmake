@@ -1,7 +1,7 @@
 # Third-party libraries.
 #
 # Vulkan (headers, loader, glslc) always comes from the system or the Vulkan
-# SDK. GLFW and mimalloc come from, depending on MC_DEPS:
+# SDK. GLFW, mimalloc and SQLite come from, depending on MC_DEPS:
 #   AUTO    the system (or vcpkg/Conan/Homebrew via CMAKE_PREFIX_PATH or a
 #           toolchain file) if a usable version is found, else the pinned
 #           release below, downloaded and built as part of this project
@@ -9,7 +9,7 @@
 #   FETCH   always the pinned release (Windows/macOS builds, portable Linux
 #           tarballs, reproducible CI)
 #
-# Provides the interface targets mc::mimalloc and mc::glfw.
+# Provides the interface targets mc::mimalloc, mc::sqlite and mc::glfw.
 
 include(FetchContent)
 
@@ -21,6 +21,12 @@ set(MC_GLFW_VERSION 3.5.1 CACHE STRING "GLFW release used when fetching")
 set(MC_GLFW_SHA256 "" CACHE STRING "Optional SHA256 of the GLFW archive")
 set(MC_MINIAUDIO_VERSION 0.11.25 CACHE STRING "miniaudio release used when fetching")
 set(MC_MINIAUDIO_SHA256 "" CACHE STRING "Optional SHA256 of the miniaudio archive")
+# sqlite.org files each release under the year it came out in and publishes
+# SHA3-256 hashes; this SHA256 is of the zip whose SHA3-256 matched.
+set(MC_SQLITE_VERSION 3.53.4 CACHE STRING "SQLite release used when fetching")
+set(MC_SQLITE_YEAR 2026 CACHE STRING "Year directory of that release on sqlite.org")
+set(MC_SQLITE_SHA256 "1e71ddf93849c6a6ecf58b827c0692073d2dd7ee40196158068f7b29f422e87d"
+    CACHE STRING "SHA256 of the SQLite amalgamation zip")
 
 if(POLICY CMP0135) # CMake 3.24+: extracted files get the extraction time
   cmake_policy(SET CMP0135 NEW)
@@ -156,6 +162,56 @@ function(mc_copy_runtime_dlls target)
       COMMAND_EXPAND_LISTS VERBATIM)
   endif()
 endfunction()
+
+# ---------------------------------------------------------------- SQLite
+# World saves (save_db.c), so the core needs it, game or not. 3.31 is the
+# oldest release with SQLITE_OPEN_NOFOLLOW and trusted_schema, which opening
+# shared world files safely relies on; Debian bookworm has 3.40.
+set(MC_SQLITE_MIN 3.31 CACHE STRING "Oldest system SQLite used")
+add_library(mc_sqlite INTERFACE)
+add_library(mc::sqlite ALIAS mc_sqlite)
+set(MC_SQLITE_SYSTEM OFF)
+if(NOT MC_DEPS STREQUAL "FETCH")
+  find_package(SQLite3 ${MC_SQLITE_MIN} QUIET)
+endif()
+if(SQLite3_FOUND)
+  if(TARGET SQLite3::SQLite3) # CMake 4.1+
+    target_link_libraries(mc_sqlite INTERFACE SQLite3::SQLite3)
+  else()
+    target_link_libraries(mc_sqlite INTERFACE SQLite::SQLite3)
+  endif()
+  set(MC_SQLITE_SYSTEM ON)
+  message(STATUS "blockclonia: SQLite ${SQLite3_VERSION} (system)")
+elseif(MC_DEPS STREQUAL "SYSTEM")
+  message(FATAL_ERROR "SQLite ${MC_SQLITE_MIN}+ not found and MC_DEPS=SYSTEM. Install it "
+                      "(Debian/Ubuntu: libsqlite3-dev) or use MC_DEPS=AUTO.")
+else()
+  # The amalgamation: one C file, built here without the game's warnings.
+  string(REPLACE "." ";" _sq_v "${MC_SQLITE_VERSION}")
+  list(GET _sq_v 0 _sq_major)
+  list(GET _sq_v 1 _sq_minor)
+  list(GET _sq_v 2 _sq_patch)
+  math(EXPR _sq_id "${_sq_major} * 1000000 + ${_sq_minor} * 10000 + ${_sq_patch} * 100")
+  _mc_hash_arg(hash "${MC_SQLITE_SHA256}")
+  FetchContent_Declare(sqlite
+    URL https://www.sqlite.org/${MC_SQLITE_YEAR}/sqlite-amalgamation-${_sq_id}.zip
+    ${hash}
+    SOURCE_SUBDIR no-cmake-project)
+  FetchContent_MakeAvailable(sqlite)
+  add_library(mc_sqlite_impl STATIC "${sqlite_SOURCE_DIR}/sqlite3.c")
+  target_include_directories(mc_sqlite_impl SYSTEM PUBLIC "${sqlite_SOURCE_DIR}")
+  # Nothing the game does needs extension loading, double-quoted strings,
+  # shared cache or allocation statistics; leaving them out shrinks what a
+  # crafted world file can reach.
+  target_compile_definitions(mc_sqlite_impl PRIVATE SQLITE_OMIT_LOAD_EXTENSION SQLITE_DQS=0
+                             SQLITE_OMIT_SHARED_CACHE SQLITE_OMIT_DEPRECATED SQLITE_DEFAULT_MEMSTATUS=0)
+  if(NOT MSVC)
+    target_compile_options(mc_sqlite_impl PRIVATE -w)
+    target_link_libraries(mc_sqlite_impl PUBLIC Threads::Threads m)
+  endif()
+  target_link_libraries(mc_sqlite INTERFACE mc_sqlite_impl)
+  message(STATUS "blockclonia: SQLite ${MC_SQLITE_VERSION} (built from source)")
+endif()
 
 # ---------------------------------------------------------------- GLFW
 if(MC_BUILD_GAME)
