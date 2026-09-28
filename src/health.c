@@ -21,7 +21,11 @@
 #define SVR0 18.75f          /* systemic vascular resistance at rest */
 #define CSYS 0.2f            /* L/mmHg, systemic compliance */
 #define SV_MAX 207.8f        /* mL; SV = SV_MAX * contractility * (RAP+1)/(RAP+4) */
-#define ARREST_DEATH_S 60.0f /* no CPR or defibrillator in this world */
+#define ARREST_DEATH_S 60.0f /* arrest called when nothing here can restart the heart (no CPR) */
+#define DEFIB_ANALYSE_S 6.0f /* AEDs take 5-15 s to analyse a rhythm */
+#define DEFIB_CHARGE_S 6.0f  /* and under 10 s to charge */
+#define DEFIB_CLEAR_S 3.0f   /* the "stand clear" countdown of a fully automatic AED */
+#define DEFIB_J 150.0f       /* biphasic: the fixed dose of many public-access AEDs */
 
 static const float PAIN_SCALE = 10.0f;
 #define DEG "\x7f" /* the UI font's degree sign */
@@ -743,6 +747,19 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
         }
         return 1;
     }
+    case TREAT_DEFIB:
+        if (h->defib.phase != DEFIB_OFF) {
+            health_pads(h, 0);
+            snprintf(msg, msg_size, "Took the defibrillator pads off");
+            return 1;
+        }
+        if (inv_count(inv, I_DEFIBRILLATOR) <= 0) {
+            snprintf(msg, msg_size, "No defibrillator");
+            return 0;
+        }
+        health_pads(h, 1);
+        snprintf(msg, msg_size, "Defibrillator pads on: it shocks by itself if the heart fibrillates");
+        return 1;
     default: snprintf(msg, msg_size, "?"); return 0;
     }
 }
@@ -1418,6 +1435,129 @@ static void step_parts(health *h, const health_env *e, double dt, float gh, int 
     h->antibiotic = maxf(0.0f, h->antibiotic - gh);
 }
 
+/* ------------------------------------------------------ defibrillation */
+
+void health_pads(health *h, int on)
+{
+    defib_state *d = &h->defib;
+    if (!on || h->dead) {
+        memset(d, 0, sizeof *d);
+        return;
+    }
+    if (d->phase != DEFIB_OFF) return;
+    memset(d, 0, sizeof *d);
+    d->seen = -1;
+    d->since_shock = 1e9f;
+    d->phase = DEFIB_ANALYSE; /* an AED analyses as soon as its pads are on */
+    d->timer = DEFIB_ANALYSE_S;
+}
+
+void health_arrest(health *h, int rhythm)
+{
+    if (h->dead || (rhythm != RHYTHM_VF && rhythm != RHYTHM_ASYSTOLE)) return;
+    stop_heart(h, rhythm, AIRWAY_AIR);
+}
+
+/* Chance that one shock stops VF and a beat comes back: about 90% in the
+ * first seconds, about 10% less for every minute of fibrillation without
+ * CPR (Larsen et al. 1993). A heart colder than about 30 C seldom responds
+ * until it is rewarmed (ERC 2021). */
+static float shock_success(const health *h)
+{
+    float p = 0.9f - 0.1f * h->arrest_time / 60.0f;
+    return fclamp(p * (0.3f + 0.7f * ramp(h->temp, 28.0f, 31.0f)), 0.02f, 0.9f);
+}
+
+void health_shock(health *h)
+{
+    if (h->dead) return;
+    /* Current crowds at the pad edges: the skin under them (two pads, ~6%
+     * of the chest) reddens after a few shocks and blisters after many. */
+    body_part *chest = &h->part[BP_CHEST];
+    chest->burn_area = maxf(chest->burn_area, 0.06f);
+    chest->burn_omega = minf(1e6f, chest->burn_omega + 0.12f + 0.12f * frand(h));
+    burn_degree(h, BP_CHEST);
+    chest->pain_spike = PAIN_SCALE; /* every chest muscle jerks */
+    if (h->rhythm == RHYTHM_VF) {
+        float u = frand(h), p = shock_success(h);
+        /* After a few minutes the starved myocardium tends to answer a
+         * shock with asystole rather than a beat (Weisfeldt and Becker 2002). */
+        float asys = (1.0f - p) * 0.8f * ramp(h->arrest_time, 120.0f, 360.0f);
+        if (u < p) {
+            h->rhythm = RHYTHM_SINUS;
+            h->hr = HR_REST; /* the sinus node restarts; the baroreflex takes it from there */
+            h->beat_phase = 0.9f;
+            h->pvc_pending = 0;
+            health_log(h, "Shock restored a heartbeat");
+        } else if (u < p + asys) {
+            h->rhythm = RHYTHM_ASYSTOLE;
+            health_log(h, "Shock stopped the fibrillation, but no beat: asystole");
+        } else {
+            health_log(h, "Shock did not stop the fibrillation");
+        }
+    } else if (h->rhythm == RHYTHM_SINUS) {
+        /* A beating heart gains nothing. On the upstroke of the T wave, where
+         * the ventricle is half recovered, a shock can start VF: why
+         * cardioversion is synchronised to the R wave. */
+        float qt = sqrtf(60.0f / maxf(h->hr, 1.0f)), since = (float)(h->t - h->last_r);
+        h->hurt_flash = 1.0f;
+        if (since > 0.2f * qt && since < 0.25f * qt && frand(h) < 0.5f) {
+            stop_heart(h, RHYTHM_VF, AIRWAY_AIR);
+            h->cause = DEATH_CARDIAC;
+        }
+    }
+}
+
+/* The defibrillator on the physics clock. Nobody else is there to press a
+ * button, so it works like a fully automatic AED: it watches the rhythm
+ * through the pads, analyses a pulseless one, charges for VF and shocks
+ * after a countdown, then analyses again. It disarms if the rhythm stops
+ * being shockable. Hydrogel pads let go of wet skin, and no AED may shock
+ * in water. */
+static void step_defib(health *h, const health_env *e, float fdt)
+{
+    defib_state *d = &h->defib;
+    if (d->phase == DEFIB_OFF) return;
+    if (part_submerged(BP_CHEST, (float)e->submerged) > 0.5f) {
+        health_pads(h, 0);
+        health_log(h, "The defibrillator pads came off in the water");
+        return;
+    }
+    int shockable = h->rhythm == RHYTHM_VF;
+    d->since_shock += fdt;
+    d->timer -= fdt;
+    if (d->phase == DEFIB_MONITOR) {
+        if (h->rhythm != RHYTHM_SINUS && h->rhythm != d->seen) {
+            d->phase = DEFIB_ANALYSE;
+            d->timer = DEFIB_ANALYSE_S;
+        }
+    } else if (d->phase == DEFIB_ANALYSE) {
+        if (d->timer > 0.0f) return;
+        d->seen = h->rhythm;
+        d->advice = shockable;
+        d->phase = shockable ? DEFIB_CHARGE : DEFIB_MONITOR;
+        d->timer = DEFIB_CHARGE_S;
+    } else if (!shockable) {
+        d->phase = DEFIB_MONITOR;
+        d->seen = h->rhythm;
+        d->advice = 0;
+        d->joules = 0.0f;
+    } else if (d->phase == DEFIB_CHARGE) {
+        d->joules = DEFIB_J * fclamp(1.0f - d->timer / DEFIB_CHARGE_S, 0.0f, 1.0f);
+        if (d->timer <= 0.0f) {
+            d->phase = DEFIB_CLEAR;
+            d->timer = DEFIB_CLEAR_S;
+        }
+    } else if (d->timer <= 0.0f) {
+        health_shock(h);
+        d->shocks++;
+        d->since_shock = 0.0f;
+        d->joules = 0.0f;
+        d->phase = DEFIB_ANALYSE;
+        d->timer = DEFIB_ANALYSE_S;
+    }
+}
+
 void health_step(health *h, const health_env *e, double dt)
 {
     h->t += dt;
@@ -1431,6 +1571,7 @@ void health_step(health *h, const health_env *e, double dt)
         write_samples(h, e, dt);
         return;
     }
+    step_defib(h, e, (float)dt);
     const float gh = (float)(dt * HEALTH_CLOCK / 3600.0); /* survival-clock hours this step */
     const float fdt = (float)dt;
     const int awake = h->conscious != CONS_UNCONSCIOUS;
@@ -1706,7 +1847,9 @@ void health_step(health *h, const health_env *e, double dt)
     h->ich = maxf(0.0f, h->ich - 0.2f * gh);
 
     /* ---- death */
-    if (arrest && h->arrest_time >= ARREST_DEATH_S) die(h, h->cause ? h->cause : DEATH_CARDIAC);
+    /* VF under defibrillator pads is worth waiting for until the brain dies. */
+    int shockable = h->defib.phase != DEFIB_OFF && h->rhythm == RHYTHM_VF;
+    if (arrest && !shockable && h->arrest_time >= ARREST_DEATH_S) die(h, h->cause ? h->cause : DEATH_CARDIAC);
     else if (h->organ[ORG_BRAIN] <= 0.0f) die(h, h->ich > 20.0f ? DEATH_HEAD_INJURY : arrest_cause(h, e->airway));
     else if (h->fat <= 0.0f) die(h, DEATH_STARVATION);
     else if (h->temp >= 43.5f) die(h, DEATH_HYPERTHERMIA);
@@ -1758,12 +1901,6 @@ health_limits health_get_limits(const health *h)
     l.can_act = arms_ok > 0;
     l.has_control = 1;
     return l;
-}
-
-void health_arrest(health *h, int rhythm)
-{
-    if (h->dead) return;
-    stop_heart(h, rhythm, AIRWAY_AIR);
 }
 
 /* -------------------------------------------------- debug injuries */

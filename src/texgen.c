@@ -110,6 +110,18 @@ static const sprite SPRITES[] = {
       {'Q', {120, 170, 250, 255}},
       {'w', {170, 128, 76, 255}},
       {'h', {130, 136, 146, 255}}}},
+    /* An AED: green case, the heart-and-bolt sign, an orange shock button. */
+    {T_ITEM_DEFIBRILLATOR,
+     {"................", "....hhhhhhhh....", "....h......h....", "..############..", "..#gggggggggg#..",
+      "..#ggwwggwwgg#..", "..#gwwwwwwwwg#..", "..#gwwwwrwwwg#..", "..#ggwwrrwwgg#..", "..#gggwrwwggg#..",
+      "..#ggggwwgggg#..", "..#gggggggggg#..", "..#googgggggg#..", "..############..", "................",
+      "................"},
+     {{'#', {40, 44, 48, 255}},
+      {'g', {40, 160, 90, 255}},
+      {'w', {240, 240, 235, 255}},
+      {'r', {215, 40, 40, 255}},
+      {'o', {245, 150, 30, 255}},
+      {'h', {120, 125, 130, 255}}}},
 };
 
 static int sprite_texel(int layer, int x, int y, rgba *out)

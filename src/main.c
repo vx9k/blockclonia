@@ -178,7 +178,8 @@ static void usage(void)
            "  --time HH         start at this hour of the day (0-23)\n"
            "  --demo            scripted structural-collapse demo\n"
            "  --health-panel    start with the health panel (H) open\n"
-           "  --hurt LIST       start injured: comma list of %s\n"
+           "  --hurt LIST       start injured: comma list of %s,\n"
+           "                    pads (defibrillator pads on the chest)\n"
            "  --bench           run CPU benchmarks and exit (no window)\n"
            "  --mem-stats       print mimalloc statistics at exit\n"
            "  --no-sound        do not open an audio device\n",
@@ -653,6 +654,12 @@ static void apply_hurt(health *h, const char *list)
     snprintf(buf, sizeof buf, "%s", list);
     char *save = NULL;
     for (char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
+        /* "pads" puts a defibrillator's pads on rather than causing an
+         * injury, so it isn't in HEALTH_DEBUG_KINDS with the rest. */
+        if (!strcmp(t, "pads")) {
+            health_pads(h, 1);
+            continue;
+        }
         int kind = health_debug_find(t);
         if (kind < 0) log_warn("--hurt: unknown injury '%s'", t);
         else health_injure(h, kind, -1);
@@ -1192,6 +1199,7 @@ static void frame_interact(game *g, double dt)
     sound_interact_events(g, &io);
     if (io.broke) survival_on_break(&g->hl, io.broken_id);
     if (io.eat) g_in.treat = TREAT_EAT;
+    if (io.defib) g_in.treat = TREAT_DEFIB;
     if (io.msg) {
         snprintf(g->hs.msg, sizeof g->hs.msg, "%s", io.msg);
         g->hs.msg_age = 0.0f;
@@ -1212,6 +1220,9 @@ static void frame_interact(game *g, double dt)
         }
         g_in.treat = -1;
     }
+    /* The pads are cabled to the device: they come off when it is dropped. */
+    if (g->hl.defib.phase != DEFIB_OFF && !inv_count(&g->inv, I_DEFIBRILLATOR) && g->inv.cursor.id != I_DEFIBRILLATOR)
+        health_pads(&g->hl, 0);
     if (g_in.respawn) {
         if (g->hl.dead) {
             drop_everything(&g->ph, &g->inv, pl, &g->death_rng);

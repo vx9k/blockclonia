@@ -115,6 +115,10 @@ static void use_item(interact *s, world *w, const physics *ph, thermo *th, const
         o->actions++;
         return;
     }
+    if (held->id == I_DEFIBRILLATOR && held->count) {
+        o->defib = 1;
+        return;
+    }
     if (!hit.hit || !held->count) {
         if (held->id == I_APPLE && held->count) o->eat = 1;
         return;

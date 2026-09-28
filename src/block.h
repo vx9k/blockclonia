@@ -86,6 +86,9 @@ typedef enum {
     T_FIRE3,
     T_CAMPFIRE_BASE,
     T_ASH,
+    /* Items added later go last, so the layers the shaders animate keep
+     * their numbers. */
+    T_ITEM_DEFIBRILLATOR,
     T_COUNT
 } tex_id;
 

@@ -13,6 +13,7 @@ void inv_starting_kit(inventory *inv)
     inv_add(inv, I_PAINKILLER, 4);
     inv_add(inv, I_ANTIBIOTIC, 1);
     inv_add(inv, I_APPLE, 3);
+    inv_add(inv, I_DEFIBRILLATOR, 1);
     /* The kit lives in the backpack; the hand starts empty. */
     for (int i = 0; i < INV_HOTBAR; i++) {
         if (!inv->slot[i].count) continue;

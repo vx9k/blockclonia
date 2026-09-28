@@ -1418,6 +1418,7 @@ int main(void)
     test_sound_all();
     test_gpucaps_all();
     test_health_debug_all();
+    test_defib_all();
     printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);
     return g_failed ? 1 : 0;
 }
