@@ -501,6 +501,164 @@ static void test_hud(void)
     mem_free(mem);
 }
 
+/* -------------------------------------------------------------- variance */
+
+static health *varied_body(uint32_t seed)
+{
+    health *h = mem_alloc(sizeof *h);
+    health_init_varied(h, seed);
+    return h;
+}
+
+/* health_init (what new_body uses) must stay the neutral reference body:
+ * the mean of every varied parameter, and no short-term noise, whatever
+ * seed it's given. Everything else in this file checks exact numbers
+ * against it, so this is what keeps that meaningful. */
+static void test_variance_neutral(void)
+{
+    for (uint32_t seed = 1; seed <= 5; seed++) {
+        health *h = new_body(seed * 97 + 3);
+        CHECK(h->base.vary == 0);
+        CHECK(h->base.hr_rest == 64.0f && h->base.map_set == 93.0f);
+        CHECK(h->base.pain_gain == 1.0f && h->base.clot_gain == 1.0f && h->base.metab_gain == 1.0f);
+        CHECK(h->base.cold_bias == 0.0f);
+        mem_free(h);
+    }
+}
+
+/* Checks the state that matters for replay: the constitution, the fluid,
+ * circulatory, respiratory and metabolic scalars, both rng streams and
+ * the wound the test inflicts. Not a memcmp of the whole struct: that
+ * compares padding bytes too, which need not match. */
+static int bodies_match(const health *a, const health *b)
+{
+    const health_baseline *x = &a->base, *y = &b->base;
+    if (x->hr_rest != y->hr_rest || x->map_set != y->map_set || x->pain_gain != y->pain_gain) return 0;
+    if (x->clot_gain != y->clot_gain || x->metab_gain != y->metab_gain || x->cold_bias != y->cold_bias) return 0;
+    if (x->vary != y->vary) return 0;
+    if (a->rng != b->rng || a->vrng != b->vrng) return 0;
+    if (a->hr != b->hr || a->map != b->map || a->sbp != b->sbp || a->dbp != b->dbp) return 0;
+    if (a->rr != b->rr || a->sao2 != b->sao2 || a->spo2_shown != b->spo2_shown) return 0;
+    if (a->temp != b->temp || a->blood != b->blood || a->water != b->water || a->power != b->power) return 0;
+    if (a->wound_count != b->wound_count) return 0;
+    for (int i = 0; i < a->wound_count; i++)
+        if (a->wounds[i].bleed != b->wounds[i].bleed || a->wounds[i].clot != b->wounds[i].clot) return 0;
+    return 1;
+}
+
+/* A varied body's constitution and its whole trajectory (including the
+ * short-term noise) must replay exactly from the seed alone. */
+static void test_variance_replay(void)
+{
+    health *a = varied_body(4242), *b = varied_body(4242);
+    CHECK(bodies_match(a, b));
+    health_env e = calm_env();
+    for (int i = 0; i < 3; i++) {
+        live(a, &e, 5.0);
+        live(b, &e, 5.0);
+        health_cut(a, BP_LARM, 0.4f, 0, 0.1f);
+        health_cut(b, BP_LARM, 0.4f, 0, 0.1f);
+    }
+    CHECK(bodies_match(a, b));
+    mem_free(a);
+    mem_free(b);
+}
+
+/* Different seeds draw different, but still physiological, constitutions,
+ * and a sweep of seeds spreads across most of each range: a body seeded
+ * unhashed would cluster near one end (small seeds give a near-zero first
+ * draw from the xorshift rng). */
+static void test_variance_range(void)
+{
+    float hr_lo = 1e9f, hr_hi = -1e9f, map_lo = 1e9f, map_hi = -1e9f;
+    for (uint32_t seed = 1; seed <= 200; seed++) {
+        health *h = varied_body(seed);
+        CHECK(h->base.vary == 1);
+        CHECK(h->base.hr_rest >= 55.0f && h->base.hr_rest <= 85.0f);
+        CHECK(h->base.map_set >= 85.0f && h->base.map_set <= 101.0f);
+        CHECK(h->base.pain_gain >= 0.8f && h->base.pain_gain <= 1.2f);
+        CHECK(h->base.clot_gain >= 0.75f && h->base.clot_gain <= 1.35f);
+        CHECK(h->base.metab_gain >= 0.92f && h->base.metab_gain <= 1.1f);
+        CHECK(h->base.cold_bias >= -0.4f && h->base.cold_bias <= 0.4f);
+        hr_lo = fminf(hr_lo, h->base.hr_rest);
+        hr_hi = fmaxf(hr_hi, h->base.hr_rest);
+        map_lo = fminf(map_lo, h->base.map_set);
+        map_hi = fmaxf(map_hi, h->base.map_set);
+        mem_free(h);
+    }
+    CHECK(hr_hi - hr_lo > 25.0f);   /* covers most of the 30 bpm range */
+    CHECK(map_hi - map_lo > 13.0f); /* covers most of the 16 mmHg range */
+}
+
+/* At rest, the emergent heart rate, pressure, saturation and core
+ * temperature stay physiological across seeds, and two seeds with very
+ * different resting heart rates settle at visibly different heart rates:
+ * the baroreflex doesn't erase the difference. */
+static void test_variance_emergent(void)
+{
+    health *lo = NULL, *hi = NULL;
+    float lo_hr = 1e9f, hi_hr = -1e9f;
+    /* 60 s is plenty: the circulatory lags settle in a handful of seconds
+     * (baroreflex tau 4 s, heart rate tau 2.5-4 s, MAP tau 1 s). */
+    for (uint32_t seed = 1; seed <= 16; seed++) {
+        health *h = varied_body(seed);
+        health_env e = calm_env();
+        live(h, &e, 60.0);
+        CHECK(h->hr > 45.0f && h->hr < 110.0f);
+        CHECK(h->map > 65.0f && h->map < 115.0f);
+        CHECK(h->sao2 > 0.94f);
+        CHECK(fabsf(h->temp - 37.0f) < 0.5f);
+        if (h->base.hr_rest < (lo ? lo->base.hr_rest : 1e9f)) {
+            if (lo) mem_free(lo);
+            lo = h;
+            lo_hr = h->hr;
+        } else if (h->base.hr_rest > (hi ? hi->base.hr_rest : -1e9f)) {
+            if (hi) mem_free(hi);
+            hi = h;
+            hi_hr = h->hr;
+        } else {
+            mem_free(h);
+        }
+    }
+    CHECK(hi_hr - lo_hr > 5.0f);
+    mem_free(lo);
+    mem_free(hi);
+}
+
+/* Short-term variability wanders both ways around the baseline and stays
+ * bounded; a neutral body (health_init) shows none of it. */
+static void test_variance_shortterm(void)
+{
+    health *h = varied_body(99);
+    health_env e = calm_env();
+    live(h, &e, 30.0); /* let the baroreflex settle first */
+    float lo = 1e9f, hi = -1e9f, first = h->hr;
+    int moved = 0;
+    for (int i = 0; i < 600; i++) {
+        health_step(h, &e, 1.0 / 60.0);
+        lo = fminf(lo, h->hr);
+        hi = fmaxf(hi, h->hr);
+        if (fabsf(h->hr - first) > 0.05f) moved = 1;
+    }
+    CHECK(moved);                     /* the HUD doesn't look frozen */
+    CHECK(hi - lo < 15.0f);           /* bounded: no runaway wander */
+    CHECK(lo > h->base.hr_rest - 30.0f && hi < h->base.hr_rest + 60.0f);
+
+    health *ref = new_body(99);
+    live(ref, &e, 30.0);
+    float rhr0 = ref->hr, ref_lo = rhr0, ref_hi = rhr0;
+    for (int i = 0; i < 600; i++) {
+        health_step(ref, &e, 1.0 / 60.0);
+        ref_lo = fminf(ref_lo, ref->hr);
+        ref_hi = fmaxf(ref_hi, ref->hr);
+    }
+    /* Settled, it only drifts by the lag's residual convergence, nowhere
+     * near the varied body's beat-to-beat wander. */
+    CHECK(ref_hi - ref_lo < 0.05f);
+    mem_free(h);
+    mem_free(ref);
+}
+
 void test_health2_all(void)
 {
     test_mild_air();
@@ -512,4 +670,9 @@ void test_health2_all(void)
     test_crush();
     test_wetness();
     test_hud();
+    test_variance_neutral();
+    test_variance_replay();
+    test_variance_range();
+    test_variance_emergent();
+    test_variance_shortterm();
 }
