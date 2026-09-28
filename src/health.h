@@ -11,6 +11,11 @@
  *   constricts vessels when pressure falls, so haemorrhage walks through
  *   the textbook shock classes by itself. A myocardium starved of oxygen
  *   throws ectopic beats and can fibrillate.
+ * - Pressure out of range for too long: a hypertensive crisis loads the
+ *   left ventricle and can bleed into the brain; hypotension starves the
+ *   coronaries. Both add to a myocardial strain dose that makes the heart
+ *   irritable (atrial fibrillation, ventricular tachycardia, heart block,
+ *   VF) and wears off once the pressure is back to normal.
  * - Respiration: an oxygen store drained by metabolism and refilled by
  *   breathing, arterial saturation from the Severinghaus dissociation
  *   curve, a pulmonary shunt for damaged or flooded lungs, CO2 retention
@@ -25,9 +30,9 @@
  *   bleeding, pneumothorax, crush injury and crush syndrome, wound
  *   contamination, infection and sepsis.
  * - Resuscitation: an automated defibrillator's pads on the chest watch
- *   the rhythm and shock ventricular fibrillation by themselves; the
- *   chance that a shock brings a heartbeat back falls with every minute
- *   of arrest. Nothing restarts asystole.
+ *   the rhythm and shock ventricular fibrillation and pulseless VT by
+ *   themselves; the chance that a shock brings a heartbeat back falls
+ *   with every minute of arrest. Nothing restarts asystole or PEA.
  * - Heat and cold: a skin temperature per body part between the core and
  *   the surroundings (convection, radiation, clothing that stops
  *   insulating when wet, evaporation, the ground under the feet), with
@@ -59,7 +64,21 @@
 typedef enum { BP_HEAD, BP_CHEST, BP_ABDOMEN, BP_LARM, BP_RARM, BP_LLEG, BP_RLEG, BP_COUNT } body_part_id;
 typedef enum { ORG_BRAIN, ORG_HEART, ORG_LUNGS, ORG_LIVER, ORG_KIDNEYS, ORG_GUT, ORG_COUNT } organ_id;
 typedef enum { FX_NONE, FX_CLOSED, FX_OPEN } fracture_kind;
-typedef enum { RHYTHM_SINUS, RHYTHM_VF, RHYTHM_ASYSTOLE } rhythm_kind;
+/* Cardiac rhythms. Only ever append: tests and logs refer to them by
+ * number. VT has a pulse; RHYTHM_PVT is the same arrhythmia fast enough
+ * that the ventricle no longer ejects. RHYTHM_AVB3 is complete heart
+ * block with a slow ventricular escape rhythm. */
+typedef enum {
+    RHYTHM_SINUS,
+    RHYTHM_VF,
+    RHYTHM_ASYSTOLE,
+    RHYTHM_AF,
+    RHYTHM_VT,
+    RHYTHM_PVT,
+    RHYTHM_PEA,
+    RHYTHM_AVB3,
+    RHYTHM_COUNT
+} rhythm_kind;
 typedef enum { AIRWAY_AIR, AIRWAY_WATER, AIRWAY_BLOCKED } airway_state;
 typedef enum { CONS_UNCONSCIOUS, CONS_CONFUSED, CONS_ALERT } consciousness;
 typedef enum { WOUND_CUT, WOUND_OPEN_FRACTURE, WOUND_ABRASION, WOUND_BURN, WOUND_FROSTBITE } wound_kind;
@@ -205,6 +224,10 @@ typedef struct health {
     float hr, sv, co, svr, map, sbp, dbp;
     float symp;                       /* sympathetic tone 0..1 */
     float ischemia;                   /* myocardial oxygen debt */
+    float strain;                     /* myocardial strain dose from pressure out of range, ~crisis-minutes */
+    float catechol;                   /* ng/mL of circulating adrenaline above the resting level */
+    float surge;                      /* s left of an endogenous catecholamine surge */
+    float rr_k;                       /* this beat's R-R interval against the mean (AF is irregular) */
     int rhythm;
     float arrest_time;                /* s without circulation */
     float beat_phase;
@@ -340,11 +363,21 @@ void health_crush(health *h, int part, double mass_kg, double dt);
  * heat unless the part already has a larger burn. */
 void health_burn(health *h, int part, double omega);
 
-/* Stops the heart in the given rhythm (RHYTHM_VF or RHYTHM_ASYSTOLE),
- * as if it had happened on its own; exposed for the debug menu and for
- * items (a taser, a lightning strike) that need to cause an arrest
- * directly instead of waiting for ischemia to. */
+/* Stops the heart in the given pulseless rhythm (RHYTHM_VF, _ASYSTOLE,
+ * _PVT or _PEA), as if it had happened on its own; exposed for the debug
+ * menu and for items (a taser, a lightning strike) that need to cause an
+ * arrest directly instead of waiting for ischemia to. Ignores rhythms
+ * that keep a pulse. */
 void health_arrest(health *h, int rhythm);
+
+/* 1 for rhythms that pump blood (sinus, AF, VT, heart block). */
+int health_rhythm_perfusing(int rhythm);
+/* 1 for the rhythms an AED shocks: VF and pulseless VT. */
+int health_rhythm_shockable(int rhythm);
+/* "Atrial fibrillation"; and the monitor's label, "AF" (at most 12
+ * characters). Static strings, "?" for an unknown rhythm. */
+const char *health_rhythm_name(int rhythm);
+const char *health_rhythm_short(int rhythm);
 
 /* -------------------------------------------------- debug injuries */
 
@@ -368,7 +401,7 @@ typedef struct {
 } health_debug_kind;
 
 extern const health_debug_kind HEALTH_DEBUG_KINDS[];
-#define HEALTH_DEBUG_COUNT 22
+#define HEALTH_DEBUG_COUNT 29
 
 /* Looks a --hurt token up in HEALTH_DEBUG_KINDS; returns -1 if there is
  * no such name. */
@@ -391,15 +424,18 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
 
 /* Puts a defibrillator's pads on the chest (on = 1) or takes them off.
  * With the pads on it runs by itself, like a fully automatic AED: it
- * analyses a pulseless rhythm, charges for VF and shocks after a
- * countdown, and never shocks a rhythm it did not find shockable. While
- * it can still shock VF, the arrest is not called after a minute. */
+ * analyses any rhythm other than sinus, charges for VF or pulseless VT
+ * and shocks after a countdown, and never shocks a rhythm it did not
+ * find shockable. While it can still shock, the arrest is not called
+ * after a minute. */
 void health_pads(health *h, int on);
 
-/* One 150 J biphasic shock through the pads. VF may stop and a beat
- * return, less likely the longer the heart has fibrillated; asystole
- * stays; a beating heart gains nothing and fibrillates if the shock lands
- * on the T wave. The skin under the pads burns a little each time. */
+/* One unsynchronised 150 J biphasic shock through the pads. VF or
+ * pulseless VT may stop and a beat return, less likely the longer the
+ * arrest has lasted; asystole and PEA stay. A beating heart fibrillates
+ * if the shock lands on the T wave; otherwise sinus rhythm and heart
+ * block gain nothing, AF and VT may convert to sinus. The skin under the
+ * pads burns a little each time. */
 void health_shock(health *h);
 
 /* ---------------------------------------------------------- display */

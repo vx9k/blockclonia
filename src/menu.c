@@ -385,29 +385,33 @@ static void controls_screen(ctx *c)
  * overlay up), so it has no back_to to return to: Back and Esc both just
  * resume. Doesn't touch health.h's health struct: it only hands the
  * caller an index into HEALTH_DEBUG_KINDS through m->debug_kind. */
+/* The part selector, every entry, Heal and Back each hold a hover slot. */
+_Static_assert(HEALTH_DEBUG_COUNT + 3 <= MENU_MAX_ITEMS, "raise MENU_MAX_ITEMS for the debug health screen");
+
 static void debug_health_screen(ctx *c)
 {
     ui *u = c->u;
     menu *m = c->m;
     ui_rect(u, 0, 0, u->w, u->h, ui_rgba(0, 0, 0, (int)(150.0f * ease_out_cubic(m->age / 0.25f))));
     float x, y;
-    const float w = 460, h = 296;
+    /* Three columns keep every entry on a 640x360 screen. */
+    const int cols = 3, rows = (HEALTH_DEBUG_COUNT + cols - 1) / cols;
+    const float w = 620, h = 44 + (float)rows * ROW_H + 6 + ROW_H + 8;
     panel(u, m->age, w, h, &x, &y, "DEBUG: HEALTH");
     static const char *const PARTS[BP_COUNT] = {"Head",      "Chest",    "Abdomen",  "Left arm",
                                                 "Right arm", "Left leg", "Right leg"};
     float rx = x + 8, rw = w - 16, ry = y + 22;
     cycle(c, rx, ry, rw, "Part (for entries that need one)", &m->debug_part, PARTS, BP_COUNT);
     ry += 22;
-    const float bw = (rw - 6) * 0.5f;
+    const float bw = (rw - 6.0f * (float)(cols - 1)) / (float)cols;
     for (int i = 0; i < HEALTH_DEBUG_COUNT; i++) {
-        int row = i / 2; /* two buttons per row: integer grid position, not a fraction */
-        float bx = rx + (float)(i % 2) * (bw + 6), by = ry + (float)row * ROW_H;
+        int row = i / cols; /* integer grid position, not a fraction */
+        float bx = rx + (float)(i % cols) * (bw + 6), by = ry + (float)row * ROW_H;
         if (button(c, bx, by, bw, HEALTH_DEBUG_KINDS[i].label)) {
             m->debug_kind = i;
             c->action = MENU_DEBUG_INJURE;
         }
     }
-    int rows = (HEALTH_DEBUG_COUNT + 1) / 2; /* rows used above, rounded up */
     float by = ry + (float)rows * ROW_H + 6;
     if (button(c, rx, by, bw, "Heal (reset to new)")) c->action = MENU_DEBUG_RESET;
     if (button(c, rx + bw + 6, by, bw, "Back")) c->action = MENU_RESUME;

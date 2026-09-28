@@ -70,7 +70,10 @@ static void test_each_kind_persists(void)
          * thawed yet. */
         int frost_kind = !strcmp(k->name, "frostnip") || !strcmp(k->name, "frostbite") ||
                          !strcmp(k->name, "deep-frostbite");
-        double seconds = frost_kind ? 2.0 : 10.0;
+        /* Rhythms that keep a pulse can stop or change by themselves (VT
+         * turns pulseless or back to sinus): check them sooner. */
+        int pulsed_rhythm = !strcmp(k->name, "afib") || !strcmp(k->name, "vtach") || !strcmp(k->name, "heart-block");
+        double seconds = frost_kind || pulsed_rhythm ? 2.0 : 10.0;
         int part = k->part_kind == HDBG_ANY ? BP_CHEST : k->default_part;
         health_injure(h, i, part);
         int used_part = k->part_kind == HDBG_ANY ? BP_CHEST : k->default_part;
@@ -103,8 +106,12 @@ static void test_each_kind_persists(void)
             ok = h->blood < BLOOD_NORMAL * 0.8f;
         else if (!strcmp(k->name, "sepsis"))
             ok = h->sepsis > 0.1f;
-        else if (!strcmp(k->name, "vfib") || !strcmp(k->name, "asystole"))
-            ok = h->rhythm != RHYTHM_SINUS;
+        else if (!strcmp(k->name, "vfib") || !strcmp(k->name, "asystole") || !strcmp(k->name, "pvt") ||
+                 !strcmp(k->name, "pea"))
+            ok = !health_rhythm_perfusing(h->rhythm);
+        else if (pulsed_rhythm) ok = h->rhythm != RHYTHM_SINUS;
+        else if (!strcmp(k->name, "crisis")) ok = h->catechol > 1.0f && h->surge > 0.0f && h->sbp > 160.0f;
+        else if (!strcmp(k->name, "strain")) ok = h->strain > 5.0f;
         else
             ok = 0; /* an entry was added without teaching this test about it */
         CHECK(ok);
@@ -178,25 +185,25 @@ static int health_equal(const health *a, const health *b)
            a->stomach_kcal == b->stomach_kcal && a->glycogen == b->glycogen && a->fat == b->fat &&
            a->bleed_ext == b->bleed_ext && a->bleed_int == b->bleed_int && a->hr == b->hr && a->sv == b->sv &&
            a->co == b->co && a->svr == b->svr && a->map == b->map && a->sbp == b->sbp && a->dbp == b->dbp &&
-           a->symp == b->symp && a->ischemia == b->ischemia && a->rhythm == b->rhythm &&
-           a->arrest_time == b->arrest_time && a->beat_phase == b->beat_phase && a->pvc_pending == b->pvc_pending &&
-           a->last_beat_pvc == b->last_beat_pvc && a->last_r == b->last_r && a->prev_r == b->prev_r &&
-           a->next_r == b->next_r && a->beat_pp == b->beat_pp && a->beat_dbp == b->beat_dbp && a->rr == b->rr &&
-           a->breath_phase == b->breath_phase && a->breathing == b->breathing && a->o2_store == b->o2_store &&
-           a->pao2 == b->pao2 && a->sao2 == b->sao2 && a->spo2_shown == b->spo2_shown && a->paco2 == b->paco2 &&
-           a->etco2 == b->etco2 && a->lung_water == b->lung_water && a->pneumothorax == b->pneumothorax &&
-           a->apnea_time == b->apnea_time && a->gasp_timer == b->gasp_timer && a->power == b->power &&
-           a->vo2 == b->vo2 && a->wbal == b->wbal && a->lactate == b->lactate && a->shock_debt == b->shock_debt &&
-           a->temp == b->temp && a->vaso == b->vaso && a->sweat_w == b->sweat_w && a->sweat_acc == b->sweat_acc &&
-           a->wet == b->wet && a->heat_loss == b->heat_loss && a->burn_tbsa == b->burn_tbsa &&
-           a->air_temp == b->air_temp && a->radiant == b->radiant && a->in_fire == b->in_fire &&
-           a->reperfused == b->reperfused && a->myoglobin == b->myoglobin && a->potassium == b->potassium &&
-           a->brain_o2 == b->brain_o2 && a->ich == b->ich && a->ich_rate == b->ich_rate && a->icp == b->icp &&
-           a->concussion == b->concussion && a->confusion == b->confusion && a->pain == b->pain &&
-           a->painkiller == b->painkiller && a->antibiotic == b->antibiotic && a->sepsis == b->sepsis &&
-           a->conscious == b->conscious && a->dead == b->dead && a->cause == b->cause &&
-           a->hurt_flash == b->hurt_flash && a->t == b->t && a->rng == b->rng && a->wave_pos == b->wave_pos &&
-           a->wave_acc == b->wave_acc;
+           a->symp == b->symp && a->ischemia == b->ischemia && a->strain == b->strain && a->catechol == b->catechol &&
+           a->surge == b->surge && a->rr_k == b->rr_k && a->rhythm == b->rhythm && a->arrest_time == b->arrest_time &&
+           a->beat_phase == b->beat_phase && a->pvc_pending == b->pvc_pending && a->last_beat_pvc == b->last_beat_pvc &&
+           a->last_r == b->last_r && a->prev_r == b->prev_r && a->next_r == b->next_r && a->beat_pp == b->beat_pp &&
+           a->beat_dbp == b->beat_dbp && a->rr == b->rr && a->breath_phase == b->breath_phase &&
+           a->breathing == b->breathing && a->o2_store == b->o2_store && a->pao2 == b->pao2 && a->sao2 == b->sao2 &&
+           a->spo2_shown == b->spo2_shown && a->paco2 == b->paco2 && a->etco2 == b->etco2 &&
+           a->lung_water == b->lung_water && a->pneumothorax == b->pneumothorax && a->apnea_time == b->apnea_time &&
+           a->gasp_timer == b->gasp_timer && a->power == b->power && a->vo2 == b->vo2 && a->wbal == b->wbal &&
+           a->lactate == b->lactate && a->shock_debt == b->shock_debt && a->temp == b->temp && a->vaso == b->vaso &&
+           a->sweat_w == b->sweat_w && a->sweat_acc == b->sweat_acc && a->wet == b->wet &&
+           a->heat_loss == b->heat_loss && a->burn_tbsa == b->burn_tbsa && a->air_temp == b->air_temp &&
+           a->radiant == b->radiant && a->in_fire == b->in_fire && a->reperfused == b->reperfused &&
+           a->myoglobin == b->myoglobin && a->potassium == b->potassium && a->brain_o2 == b->brain_o2 &&
+           a->ich == b->ich && a->ich_rate == b->ich_rate && a->icp == b->icp && a->concussion == b->concussion &&
+           a->confusion == b->confusion && a->pain == b->pain && a->painkiller == b->painkiller &&
+           a->antibiotic == b->antibiotic && a->sepsis == b->sepsis && a->conscious == b->conscious &&
+           a->dead == b->dead && a->cause == b->cause && a->hurt_flash == b->hurt_flash && a->t == b->t &&
+           a->rng == b->rng && a->wave_pos == b->wave_pos && a->wave_acc == b->wave_acc;
 }
 
 /* Determinism: the same sequence of debug injuries on two bodies seeded

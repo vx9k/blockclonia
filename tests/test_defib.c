@@ -204,6 +204,128 @@ static void test_device_vf(void)
     mem_free(h);
 }
 
+/* Puts a body into rhythm r the way the game can: an arrest for the
+ * pulseless ones, the debug entries for the ones that keep a pulse. */
+static void enter_rhythm(health *h, int r)
+{
+    if (!health_rhythm_perfusing(r)) health_arrest(h, r);
+    else if (r == RHYTHM_AF) health_injure(h, health_debug_find("afib"), -1);
+    else if (r == RHYTHM_VT) health_injure(h, health_debug_find("vtach"), -1);
+    else if (r == RHYTHM_AVB3) health_injure(h, health_debug_find("heart-block"), -1);
+}
+
+/* What counts as shockable: VF and pulseless VT, nothing else; and which
+ * rhythms pump. Every rhythm has a monitor label that fits under the
+ * bedside monitor's heart rate (84 px). */
+static void test_rhythm_table(void)
+{
+    for (int r = 0; r < RHYTHM_COUNT; r++) {
+        CHECK(health_rhythm_shockable(r) == (r == RHYTHM_VF || r == RHYTHM_PVT));
+        CHECK(health_rhythm_perfusing(r) ==
+              (r == RHYTHM_SINUS || r == RHYTHM_AF || r == RHYTHM_VT || r == RHYTHM_AVB3));
+        CHECK(strcmp(health_rhythm_name(r), "?") != 0 && ui_text_width(health_rhythm_short(r), 1) <= 83.0f);
+    }
+    CHECK(!health_rhythm_shockable(RHYTHM_COUNT) && !health_rhythm_perfusing(-1));
+    CHECK(!strcmp(health_rhythm_short(RHYTHM_COUNT), "?"));
+    /* health_arrest takes only the pulseless rhythms. */
+    health *h = new_body(60);
+    health_arrest(h, RHYTHM_AF);
+    health_arrest(h, RHYTHM_COUNT);
+    CHECK(h->rhythm == RHYTHM_SINUS);
+    health_arrest(h, RHYTHM_PEA);
+    health_env e = calm_env();
+    live(h, &e, 1.0);
+    CHECK(h->rhythm == RHYTHM_PEA && h->hr == 0.0f && health_spo2_reading(h) == -1);
+    mem_free(h);
+}
+
+/* The AED's analysis advises a shock for VF and pulseless VT only, and
+ * over a minute with a non-shockable rhythm it never delivers one. */
+static void test_device_classifies(void)
+{
+    health_env e = calm_env();
+    for (int r = 1; r < RHYTHM_COUNT; r++) {
+        health *h = new_body(700 + (uint32_t)r);
+        health_pads(h, 1);
+        live(h, &e, 7.0);
+        CHECK(h->defib.phase == DEFIB_MONITOR && h->defib.seen == RHYTHM_SINUS && h->defib.advice == 0);
+        enter_rhythm(h, r);
+        CHECK(h->rhythm == r);
+        live(h, &e, 6.5);
+        /* VT can stop, and pulseless VT turn into VF, while it analyses:
+         * the advice follows what it saw. */
+        CHECK(h->defib.seen == r || r == RHYTHM_VT || r == RHYTHM_PVT);
+        CHECK(h->defib.advice == health_rhythm_shockable(h->defib.seen));
+        if (h->defib.seen == r) CHECK(h->defib.advice == health_rhythm_shockable(r));
+        CHECK((h->defib.phase == DEFIB_CHARGE) == health_rhythm_shockable(h->defib.seen));
+        if (r == RHYTHM_AF || r == RHYTHM_AVB3 || r == RHYTHM_PEA || r == RHYTHM_ASYSTOLE) {
+            live(h, &e, 60.0);
+            CHECK(h->defib.shocks == 0 && h->part[BP_CHEST].burn_omega == 0.0f);
+        }
+        mem_free(h);
+    }
+    /* Pulseless VT under the pads is shocked, and like VF usually comes back. */
+    int back = 0;
+    for (int i = 0; i < 40; i++) {
+        health *v = new_body(7100 + (uint32_t)i);
+        health_pads(v, 1);
+        live(v, &e, 7.0);
+        health_arrest(v, RHYTHM_PVT);
+        live(v, &e, 70.0);
+        CHECK(v->defib.shocks >= 1);
+        back += !v->dead && v->rhythm == RHYTHM_SINUS;
+        mem_free(v);
+    }
+    CHECK(back >= 30);
+}
+
+/* A shock through a rhythm with a pulse: AF converts about half the time,
+ * VT most of the time, heart block never; any of them can land on a T
+ * wave. Asystole and PEA stay. */
+static void test_shock_other_rhythms(void)
+{
+    health_env e = calm_env();
+    int af_sinus = 0, vt_sinus = 0, vt_vf = 0, block_kept = 0, pea_kept = 0;
+    const int n = 200;
+    for (int i = 0; i < n; i++) {
+        health *h = new_body(8000 + (uint32_t)i);
+        live(h, &e, 2.0);
+        enter_rhythm(h, RHYTHM_AF);
+        live(h, &e, 1.0);
+        health_shock(h);
+        af_sinus += h->rhythm == RHYTHM_SINUS;
+        mem_free(h);
+
+        h = new_body(9000 + (uint32_t)i);
+        live(h, &e, 2.0);
+        enter_rhythm(h, RHYTHM_VT);
+        live(h, &e, 0.5);
+        if (h->rhythm == RHYTHM_VT) {
+            health_shock(h);
+            vt_sinus += h->rhythm == RHYTHM_SINUS;
+            vt_vf += h->rhythm == RHYTHM_VF;
+        }
+        mem_free(h);
+
+        h = new_body(10000 + (uint32_t)i);
+        live(h, &e, 2.0);
+        enter_rhythm(h, RHYTHM_AVB3);
+        live(h, &e, 0.5);
+        health_shock(h);
+        block_kept += h->rhythm == RHYTHM_AVB3 || h->rhythm == RHYTHM_VF;
+        mem_free(h);
+
+        h = new_body(11000 + (uint32_t)i);
+        health_arrest(h, RHYTHM_PEA);
+        health_shock(h);
+        pea_kept += h->rhythm == RHYTHM_PEA;
+        mem_free(h);
+    }
+    CHECK(af_sinus > n * 35 / 100 && af_sinus < n * 65 / 100);
+    CHECK(vt_sinus > n * 55 / 100 && vt_vf > n * 8 / 100 && vt_vf < n * 25 / 100);
+    CHECK(block_kept == n && pea_kept == n);
+}
+
 /* The item: in the starting kit, one per slot, carried by the INV1 save,
  * needed for the treatment but not used up, and put on by right-click. */
 static void test_defib_item(void)
@@ -257,6 +379,9 @@ static void test_defib_item(void)
 
 void test_defib_all(void)
 {
+    test_rhythm_table();
+    test_device_classifies();
+    test_shock_other_rhythms();
     test_shock_outcomes();
     test_shock_beating_heart();
     test_device_normal_rhythm();
