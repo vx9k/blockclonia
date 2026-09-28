@@ -24,6 +24,10 @@
  *   bleeding, abrasions, internal bleeding, concussion and intracranial
  *   bleeding, pneumothorax, crush injury and crush syndrome, wound
  *   contamination, infection and sepsis.
+ * - Resuscitation: an automated defibrillator's pads on the chest watch
+ *   the rhythm and shock ventricular fibrillation by themselves; the
+ *   chance that a shock brings a heartbeat back falls with every minute
+ *   of arrest. Nothing restarts asystole.
  * - Heat and cold: a skin temperature per body part between the core and
  *   the surroundings (convection, radiation, clothing that stops
  *   insulating when wet, evaporation, the ground under the feet), with
@@ -89,6 +93,7 @@ typedef enum {
     TREAT_DRINK,
     TREAT_COOL,           /* cool a burn under water (needs water nearby) */
     TREAT_REDUCE,         /* pop a dislocated joint back in */
+    TREAT_DEFIB,          /* defibrillator pads on the chest, or off again */
     TREAT_COUNT
 } treatment;
 
@@ -137,6 +142,19 @@ typedef struct {
     float crush_next;     /* kg reported for the coming step (health_crush) */
 } body_part;
 
+/* An automated external defibrillator with its pads on the chest. */
+typedef enum { DEFIB_OFF, DEFIB_MONITOR, DEFIB_ANALYSE, DEFIB_CHARGE, DEFIB_CLEAR } defib_phase;
+
+typedef struct {
+    int phase;            /* defib_phase; DEFIB_OFF while the pads are off */
+    int seen;             /* rhythm found by the last analysis, -1 before one */
+    int advice;           /* last analysis: 1 shock advised, 0 no shock advised */
+    int shocks;           /* delivered since the pads went on */
+    float timer;          /* s left in the phase */
+    float joules;         /* charge stored for the next shock */
+    float since_shock;    /* s since the last shock */
+} defib_state;
+
 /* What the rest of the game tells the body each step. */
 typedef struct {
     double speed;         /* horizontal speed, m/s */
@@ -178,6 +196,7 @@ typedef struct health {
     int pvc_pending, last_beat_pvc;
     double last_r, prev_r, next_r;    /* beat times, s */
     float beat_pp, beat_dbp;          /* pulse pressure and diastolic of the last beat */
+    defib_state defib;
 
     /* Respiration. */
     float rr, breath_phase;
@@ -340,6 +359,21 @@ void health_injure(health *h, int kind, int part);
  * supplies from the inventory. Returns 1 if something was done; msg
  * explains either way. */
 int health_treat(health *h, inventory *inv, int part, int what, int water_nearby, char *msg, size_t msg_size);
+
+/* ---------------------------------------------------- defibrillation */
+
+/* Puts a defibrillator's pads on the chest (on = 1) or takes them off.
+ * With the pads on it runs by itself, like a fully automatic AED: it
+ * analyses a pulseless rhythm, charges for VF and shocks after a
+ * countdown, and never shocks a rhythm it did not find shockable. While
+ * it can still shock VF, the arrest is not called after a minute. */
+void health_pads(health *h, int on);
+
+/* One 150 J biphasic shock through the pads. VF may stop and a beat
+ * return, less likely the longer the heart has fibrillated; asystole
+ * stays; a beating heart gains nothing and fibrillates if the shock lands
+ * on the T wave. The skin under the pads burns a little each time. */
+void health_shock(health *h);
 
 /* ---------------------------------------------------------- display */
 

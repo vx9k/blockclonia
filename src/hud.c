@@ -151,12 +151,34 @@ __attribute__((format(printf, 4, 5))) static void add_alert(alert_list *l, uint3
  * unique. */
 #define KEY ((uint32_t)__LINE__ * 16u)
 
+/* What the defibrillator is doing, as its voice prompts put it. */
+static int defib_prompt(const health *h, char *buf, size_t n)
+{
+    const defib_state *d = &h->defib;
+    int arrest = h->rhythm != RHYTHM_SINUS;
+    switch (d->phase) {
+    case DEFIB_ANALYSE: snprintf(buf, n, "Defibrillator: analysing rhythm"); return arrest ? 3 : 1;
+    case DEFIB_CHARGE: snprintf(buf, n, "Defibrillator: shock advised, charging %.0f J", (double)d->joules); return 3;
+    case DEFIB_CLEAR: snprintf(buf, n, "Defibrillator: stand clear, shock in %.0f", ceil((double)d->timer)); return 3;
+    default: break;
+    }
+    if (d->shocks && d->since_shock < 5.0f) snprintf(buf, n, "Defibrillator: shock %d delivered", d->shocks);
+    else if (arrest) snprintf(buf, n, "Defibrillator: no shock advised");
+    else snprintf(buf, n, "Defibrillator pads on");
+    return arrest || d->since_shock < 5.0f ? 3 : 0;
+}
+
 /* Heart, breathing, blood, fire and weight on the body. */
 static void alerts_vital(const health *h, alert_list *l)
 {
     float bleed = h->bleed_ext + h->bleed_int;
     if (h->rhythm == RHYTHM_VF) add_alert(l, KEY, 3, "CARDIAC ARREST (VF)");
     else if (h->rhythm == RHYTHM_ASYSTOLE) add_alert(l, KEY, 3, "CARDIAC ARREST");
+    if (h->defib.phase != DEFIB_OFF) {
+        char t[64];
+        int sev = defib_prompt(h, t, sizeof t);
+        add_alert(l, KEY, sev, "%s", t);
+    }
     if (h->in_fire) add_alert(l, KEY, 3, "ON FIRE");
     float pinned = 0.0f;
     for (int i = 0; i < BP_COUNT; i++) pinned += h->part[i].crush_load;
@@ -520,7 +542,8 @@ static void monitor(ui *u, const health *h, float x, float y, float w)
 
     /* ECG, lead II. */
     float ry = y + 2;
-    ui_text(u, x + 3, ry + 1, 1, ui_alpha(C_ECG, 0.7f), "II");
+    /* Through the defibrillator's pads, as a monitor labels that lead. */
+    ui_text(u, x + 3, ry + 1, 1, ui_alpha(C_ECG, 0.7f), h->defib.phase != DEFIB_OFF ? "Pads" : "II");
     trace_sweep(u, h->ecg, h->wave_pos, x + 3, ry + 9, tw, row - 12, -0.6f, 1.6f, C_ECG);
     int hr_alarm = arrest || h->hr > 130.0f || h->hr < 45.0f;
     uint32_t c = hr_alarm && blink(h, 2) ? C_ART : C_ECG;
