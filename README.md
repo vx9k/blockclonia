@@ -53,7 +53,7 @@ Every texture and sound is generated at start-up, and all memory comes from
 | Space | Jump / swim up (in fly mode: up) |
 | F | Toggle fly mode (no injuries while flying) |
 | Left click (hold) | Break the block; takes the material's hardness in seconds |
-| Right click | Place the held block, use the held item (fill or empty a bucket, eat an apple, feed a campfire) |
+| Right click | Place the held block, use the held item (fill or empty a bucket, eat an apple, feed a campfire, put a defibrillator's pads on or take them off) |
 | Middle click | Pick the targeted block into the hand |
 | 1–9 or scroll | Select a hotbar slot |
 | Q / Ctrl+Q | Drop one item / the whole stack |
@@ -157,7 +157,11 @@ thirst, hunger) run on the survival clock.
   infection and sepsis.
 - **Treatment uses supplies** from a starting kit and from the world:
   leaves give plant fibre and apples, planks give sticks, two fibres make
-  an improvised bandage, and two sticks and a fibre make a splint.
+  an improvised bandage, and two sticks and a fibre make a splint. A
+  defibrillator in the kit is put on with a right click; once its pads are
+  on the chest it runs like a fully automatic AED, analysing the rhythm
+  and shocking ventricular fibrillation by itself, less likely to bring a
+  heartbeat back the longer the heart has been fibrillating.
 - **Vitals respond to what you do**: sprinting raises heart rate, pressure
   and breathing and spends stamina; bleeding drops pressure while the
   heart races; holding your breath under water slows the heart (the diving
@@ -288,9 +292,10 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
 - `--hurt` starts you injured, to try treatments or take screenshots: a
   comma list of names (`--help` lists them all: bleeds, fractures, burns
   of each degree, frostbite, dislocation, crush, infection, hypothermia,
-  hyperthermia, pain, shock, sepsis and cardiac arrest). The same names,
-  as buttons, are the debug health menu (F3, then K) picks from, to
-  trigger any of them on a live body and to heal.
+  hyperthermia, pain, shock, sepsis and cardiac arrest, plus `pads` to
+  start with a defibrillator's pads on). The injury names, as buttons, are
+  what the debug health menu (F3, then K) picks from, to trigger any of
+  them on a live body and to heal.
 - For very weak devices start with `--radius 4`. `--demo` builds a tower
   with a timber cantilever in front of you and knocks out its middle.
   `--bench` runs CPU benchmarks without opening a window.
@@ -340,8 +345,8 @@ The unit tests (about 2400 checks, no window or GPU needed) cover:
 - **health**: resting and exercising vitals, arterial bleeding with and
   without a dressing, breath-holding and drowning, fractures and splints,
   dislocations, abrasions, crush injuries, burns and cooling them, cold
-  and wet clothing, infection, thirst and hunger, and landings through
-  the player physics;
+  and wet clothing, infection, thirst and hunger, defibrillation of
+  ventricular fibrillation and landings through the player physics;
 - **interface and sound**: the UI batch (text metrics, wrapping,
   overflow), the menus, the inventory and crafting, the HUD, the view
   model's animations, the camera, the synthesized sound bank and the
