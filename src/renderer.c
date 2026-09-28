@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include "gpucaps.h"
 #include "gpupool.h"
 #include "log.h"
 #include "mem.h"
@@ -136,6 +137,11 @@ struct renderer {
     VkPhysicalDevice pd;
     VkPhysicalDeviceProperties props;
     VkPhysicalDeviceMemoryProperties memprops;
+    uint32_t instance_api;        /* the apiVersion the instance was created with */
+    /* The version in use (caps.device_api). The offer holds only the two
+     * versions: no optional feature is implemented yet, so none is enabled. */
+    gpu_choice caps;
+    char api[160];                /* gpucaps_summary(caps), for F3 */
     VkDevice dev;
     VkQueue queue;
     uint32_t qfam;
@@ -325,6 +331,27 @@ static int has_layer(const char *name)
     return found;
 }
 
+/* The loader's version, or 0 (read as 1.0) without vkEnumerateInstanceVersion:
+ * that is a 1.0 loader, which fails vkCreateInstance for any apiVersion above
+ * 1.0. */
+static uint32_t loader_api(void)
+{
+    PFN_vkEnumerateInstanceVersion fn = (PFN_vkEnumerateInstanceVersion)
+        vkGetInstanceProcAddr(NULL, "vkEnumerateInstanceVersion");
+    uint32_t v = 0;
+    if (!fn || fn(&v) != VK_SUCCESS) v = 0;
+    return v;
+}
+
+/* MC_VK_API=1.0 .. 1.4 caps the version to test the fallbacks; 0 is no cap. */
+static uint32_t api_cap(void)
+{
+    uint32_t cap = 0;
+    const char *s = getenv("MC_VK_API");
+    if (s && s[0] && !gpucaps_parse_api(s, &cap)) log_warn("MC_VK_API=%s ignored: use 1.0 to 1.4", s);
+    return cap;
+}
+
 static void create_instance(renderer *r, int validate)
 {
     uint32_t glfw_count = 0;
@@ -346,9 +373,14 @@ static void create_instance(renderer *r, int validate)
         }
     }
 
-    VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = "blockclonia",
-                             .applicationVersion = 1, .pEngineName = "blockclonia", .engineVersion = 1,
-                             .apiVersion = VK_API_VERSION_1_0};
+    /* The headers cap it too: the renderer cannot use what they don't define. */
+    r->instance_api = gpucaps_instance_api(loader_api(), VK_HEADER_VERSION_COMPLETE, api_cap());
+    VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+                             .pApplicationName = "blockclonia",
+                             .applicationVersion = 1,
+                             .pEngineName = "blockclonia",
+                             .engineVersion = 1,
+                             .apiVersion = r->instance_api};
     VkInstanceCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &app,
                                .enabledExtensionCount = n, .ppEnabledExtensionNames = exts,
                                .enabledLayerCount = nl, .ppEnabledLayerNames = layers};
@@ -434,8 +466,12 @@ static void pick_device(renderer *r, int want_index)
     find_queue(r, r->pd, &r->qfam);
     vkGetPhysicalDeviceProperties(r->pd, &r->props);
     vkGetPhysicalDeviceMemoryProperties(r->pd, &r->memprops);
-    log_info("GPU: %s (Vulkan %u.%u)", r->props.deviceName, VK_VERSION_MAJOR(r->props.apiVersion),
-             VK_VERSION_MINOR(r->props.apiVersion));
+    gpu_offer offer = {.instance_api = r->instance_api, .device_api = r->props.apiVersion};
+    gpucaps_choose(&offer, 0, &r->caps);
+    gpucaps_summary(&r->caps, r->api, sizeof r->api);
+    log_info("GPU: %s (%s; device %u.%u, instance %u.%u)", r->props.deviceName, r->api,
+             GPU_API_MAJOR(r->props.apiVersion), GPU_API_MINOR(r->props.apiVersion), GPU_API_MAJOR(r->instance_api),
+             GPU_API_MINOR(r->instance_api));
 }
 
 static void create_device(renderer *r)
@@ -1323,11 +1359,7 @@ void renderer_set_vsync(renderer *r, int on)
 
 const char *renderer_device_name(const renderer *r) { return r->props.deviceName; }
 
-const char *renderer_api_string(const renderer *r)
-{
-    (void)r;
-    return "Vulkan 1.0";
-}
+const char *renderer_api_string(const renderer *r) { return r->api; }
 render_stats renderer_stats(const renderer *r) { return r->stats; }
 
 void renderer_request_screenshot(renderer *r, const char *path)

@@ -44,6 +44,44 @@ static void test_versions(void)
     CHECK(GPU_API_MAJOR(GPU_API(1, 3) | 275u) == 1 && GPU_API_MINOR(GPU_API(1, 3) | 275u) == 3);
 }
 
+/* The renderer's sequence: instance from the loader, the headers and
+ * MC_VK_API, then an offer holding only the two versions (no optional
+ * feature is implemented yet). The renderer used to request 1.0 and show
+ * "Vulkan 1.0" whatever the system offered. */
+static uint32_t renderer_api(uint32_t loader, uint32_t headers, const char *env, uint32_t device, char *s, size_t n)
+{
+    uint32_t cap = 0;
+    (void)gpucaps_parse_api(env, &cap);
+    gpu_offer o;
+    memset(&o, 0, sizeof o);
+    o.instance_api = gpucaps_instance_api(loader, headers, cap);
+    o.device_api = device;
+    gpu_choice c;
+    gpucaps_choose(&o, 0, &c);
+    CHECK(c.enabled == 0 && c.instance_api == o.instance_api);
+    gpucaps_summary(&c, s, n);
+    return c.device_api;
+}
+
+static void test_renderer_versions(void)
+{
+    char s[64];
+    uint32_t v14 = GPU_API(1, 4) | 357u, v13 = GPU_API(1, 3) | 275u, pi = GPU_API(1, 3) | 239u;
+    /* Loader and headers 1.4.357, Mesa 26 at 1.4.363. */
+    CHECK(renderer_api(v14, v14, NULL, GPU_API(1, 4) | 363u, s, sizeof s) == GPU_API(1, 4));
+    CHECK(strcmp(s, "Vulkan 1.4") == 0);
+    CHECK(renderer_api(v13, v13, NULL, GPU_API(1, 4) | 363u, s, sizeof s) == GPU_API(1, 3)); /* Ubuntu 24.04 */
+    CHECK(renderer_api(pi, pi, NULL, GPU_API(1, 2) | 255u, s, sizeof s) == GPU_API(1, 2)); /* Pi 4, bookworm */
+    CHECK(strcmp(s, "Vulkan 1.2") == 0);
+    /* A 1.0 loader (no vkEnumerateInstanceVersion) and MC_VK_API=1.0. */
+    CHECK(renderer_api(0, v14, NULL, GPU_API(1, 4), s, sizeof s) == GPU_API(1, 0));
+    CHECK(renderer_api(v14, v14, "1.0", GPU_API(1, 4), s, sizeof s) == GPU_API(1, 0));
+    CHECK(strcmp(s, "Vulkan 1.0") == 0);
+    /* A malformed MC_VK_API caps nothing. */
+    CHECK(renderer_api(v14, v14, "1.5", GPU_API(1, 4), s, sizeof s) == GPU_API(1, 4));
+    CHECK(renderer_api(v14, v14, "", GPU_API(1, 4), s, sizeof s) == GPU_API(1, 4));
+}
+
 static void test_parse_api(void)
 {
     uint32_t v = 7;
@@ -304,6 +342,7 @@ static void test_pipeline_cache_header(void)
 void test_gpucaps_all(void)
 {
     test_versions();
+    test_renderer_versions();
     test_parse_api();
     test_parse_disable();
     test_choose_full();
