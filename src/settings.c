@@ -127,7 +127,7 @@ int settings_format(const settings *s, char *out, int cap)
 
 int settings_load(settings *s, const char *path)
 {
-    char buf[4096]; /* the file is ~300 bytes; room for comments a player adds */
+    char buf[SETTINGS_MAX_FILE + 1];
     long n = save_read_file(path, buf, sizeof buf - 1);
     if (n < 0) return -1;
     buf[n] = '\0';

@@ -32,4 +32,15 @@ int save_write_seed(const char *dir, uint32_t seed);
 long save_read_file(const char *path, void *buf, size_t cap);
 int save_write_file(const char *path, const void *data, size_t len);
 
+/* Moving files from where older builds kept them: both copy through the
+ * checks above, never overwrite, and leave the source alone.
+ * copy_file copies a file of at most cap bytes: 1 copied, 0 nothing to
+ * copy (from missing, unusable or too big, or `to` exists), -1 write
+ * failed. copy_world copies a world folder's level.dat, player.dat and
+ * c.X.Z.bin files into the existing directory `to` and skips anything
+ * else: returns the files copied, 0 if `from` has no valid level.dat or
+ * `to` has one already. */
+int save_copy_file(const char *from, const char *to, size_t cap);
+int save_copy_world(const char *from, const char *to);
+
 #endif

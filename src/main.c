@@ -1,5 +1,6 @@
 /* blockclonia: entry point, input, and the fixed-timestep game loop. */
 #include "anim.h"
+#include "audio_device.h"
 #include "bench.h"
 #include "camera.h"
 #include "debug.h"
@@ -14,10 +15,10 @@
 #include "mem.h"
 #include "menu.h"
 #include "mesher.h"
+#include "paths.h"
 #include "physics.h"
 #include "renderer.h"
 #include "save.h"
-#include "audio_device.h"
 #include "settings.h"
 #include "sound.h"
 #include "survival.h"
@@ -96,6 +97,7 @@ typedef struct {
 } input_state;
 
 static input_state g_in;
+static paths g_paths; /* where files go unless --config or --world say otherwise */
 
 /* ---------------------------------------------------------- arguments */
 
@@ -163,14 +165,16 @@ static void usage(void)
            "  --threads N       worker threads (default: cores - 1)\n"
            "  --pool-mb N       GPU vertex pool size (default: from radius)\n"
            "  --gpu N           Vulkan device index\n"
-           "  --world DIR       save directory (default ./world)\n"
+           "  --world DIR       save directory (default $XDG_DATA_HOME/blockclonia/worlds/world,\n"
+           "                    or ~/.local/share/blockclonia/worlds/world)\n"
            "  --no-save         do not load or save the world\n"
            "  --validate        enable Vulkan validation layers\n"
            "  --frames N        quit after N frames\n"
            "  --screenshot F    write a PPM of the last frame to F\n"
            "  --look YAW,PITCH  initial view angles in degrees\n"
            "  --spawn X,Z       spawn position (default: nearest dry land)\n"
-           "  --config FILE     settings file (default ./blockclonia.cfg)\n"
+           "  --config FILE     settings file (default $XDG_CONFIG_HOME/blockclonia/blockclonia.cfg,\n"
+           "                    or ~/.config/blockclonia/blockclonia.cfg)\n"
            "  --play            skip the title screen\n"
            "  --screen NAME     open title, pause, settings, controls or debug-health at start\n"
            "  --debug           start with the F3 overlay on\n"
@@ -313,8 +317,9 @@ static int parse_args(int argc, char **argv, options *o)
     o->vsync = 1;
     o->gpu = -1;
     o->threads = -1;
-    o->world_dir = "world";
-    o->config = "blockclonia.cfg";
+    paths_resolve(&g_paths);
+    o->world_dir = g_paths.world;
+    o->config = g_paths.config;
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
         if (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) {
@@ -932,6 +937,25 @@ static void open_start_screen(game *g)
     }
 }
 
+/* Creates the default directories and copies files older builds kept in
+ * the working directory there, once. The copies leave the originals alone
+ * and never overwrite, so running an old build again still finds its own. */
+static void use_xdg_paths(const options *o)
+{
+    char dir[PATHS_MAX];
+    if (o->config == g_paths.config && g_paths.xdg_config && paths_parent(o->config, dir, sizeof dir) == 0) {
+        if (paths_make_dirs(dir) != 0) log_warn("cannot create %s", dir);
+        int r = save_copy_file("blockclonia.cfg", o->config, SETTINGS_MAX_FILE);
+        if (r > 0) log_info("copied ./blockclonia.cfg to %s; settings are kept there now", o->config);
+        if (r < 0) log_warn("could not copy ./blockclonia.cfg to %s", o->config);
+    }
+    if (o->world_dir == g_paths.world && g_paths.xdg_world && !o->bench) {
+        if (paths_make_dirs(o->world_dir) != 0) log_warn("cannot create %s", o->world_dir);
+        int n = save_copy_world("world", o->world_dir);
+        if (n > 0) log_info("copied %d files from ./world to %s; the world is kept there now", n, o->world_dir);
+    }
+}
+
 static uint32_t choose_seed(options *o)
 {
     uint32_t seed = o->have_seed ? o->seed : (uint32_t)time(NULL) * 2654435761u;
@@ -981,7 +1005,8 @@ static void game_init_world(game *g)
                       .render_radius = o->radius,
                       .gpu_index = o->gpu,
                       .pool_mb = o->pool_mb,
-                      .screenshots = o->screenshot != NULL};
+                      .screenshots = o->screenshot != NULL,
+                      .pipeline_cache = g_paths.pipelines};
     g->rd = renderer_create(g->win, &ro);
 
     world_init(&g->w, g->seed, o->radius, g->js, o->world_dir);
@@ -1547,6 +1572,7 @@ int main(int argc, char **argv)
     if (!parse_args(argc, argv, &g->o)) return 2;
     mem_init();
     mesher_init();
+    use_xdg_paths(&g->o);
 
     settings_default(&g->st);
     if (settings_load(&g->st, g->o.config) == 0) log_info("settings from %s", g->o.config);

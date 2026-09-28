@@ -159,6 +159,7 @@ set(MC_CORE_SOURCES
   src/menu.c
   src/mesher.c
   src/noise.c
+  src/paths.c
   src/physics.c
   src/save.c
   src/settings.c
@@ -228,7 +229,7 @@ if(MC_BUILD_TESTS)
   enable_testing()
   add_executable(mc_tests tests/test_main.c tests/test_util.c tests/test_thermo.c tests/test_health2.c
                           tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_gpucaps.c
-                          tests/test_health_debug.c tests/test_defib.c)
+                          tests/test_health_debug.c tests/test_defib.c tests/test_paths.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)
   set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT 120)
