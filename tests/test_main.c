@@ -165,6 +165,20 @@ static void test_mesher(void)
     for (int x = 5; x < 9; x++) in->blocks[mesh_pidx(x, 5, 5)] = B_STONE;
     CHECK(mesh_section(in, out, &o, &t) == 6);
 
+    /* Leaves sway and nothing else does: a log and a leaf side by side both
+     * keep the faces between them, and leaves never merge, since a merged
+     * quad's straight edge would not follow the sway of its neighbours. */
+    fill_input(in, B_AIR);
+    in->blocks[mesh_pidx(5, 5, 5)] = B_LOG;
+    in->blocks[mesh_pidx(6, 5, 5)] = B_LEAVES;
+    CHECK(mesh_section(in, out, &o, &t) == 12);
+    in->blocks[mesh_pidx(5, 5, 5)] = B_LEAVES;
+    CHECK(mesh_section(in, out, &o, &t) == 10 && o == 10);
+    /* Unloaded space next to a leaf still hides its face. */
+    in->blocks[mesh_pidx(-1, 5, 5)] = B_UNLOADED;
+    in->blocks[mesh_pidx(0, 5, 5)] = B_LEAVES;
+    CHECK(mesh_section(in, out, &o, &t) == 15);
+
     /* Fully buried section has nothing to draw. */
     fill_input(in, B_STONE);
     CHECK(mesh_section(in, out, &o, &t) == 0);
