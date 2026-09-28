@@ -5,7 +5,8 @@
  *   bits 15-17 face (0..5: +X -X +Y -Y +Z -Z)
  *   bits 18-19 ambient occlusion (0 = darkest, 3 = unoccluded)
  *   bits 20-27 texture layer
- *   bits 28-31 vertical drop in 1/8 block (water surfaces)
+ *   bits 28-31 vertical drop in 1/8 block (water surfaces, and the foot of
+ *              the side face on a step down to lower water)
  * Quads are 4 consecutive vertices, drawn with a shared index buffer. */
 #ifndef MC_MESHER_H
 #define MC_MESHER_H
