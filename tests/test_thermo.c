@@ -39,7 +39,7 @@ static void advance(thermo *th, world *w, double seconds, double dt, dvec3 eye)
     for (int i = 0, n = (int)(seconds / dt + 0.5); i < n; i++) thermo_step(th, w, dt, eye);
 }
 
-static float sky_sum(thermo *th)
+static float sky_sum(const thermo *th)
 {
     float c[3];
     thermo_sky(th, c);
@@ -222,7 +222,7 @@ static void test_fuel(void)
  * a film h = 10 W/(m^2 K) in series with half the block (k = 2.2 ice,
  * 0.15 snow), and the grass below (k = 0.8), all at the temperatures the
  * field settled to. */
-static double melt_power(thermo *th, const world *w, int x, int fx, double k)
+static double melt_power(const thermo *th, const world *w, int x, int fx, double k)
 {
     double tf2 = 1100.0 * 1100.0, ts2 = 306.0 * 306.0;
     double rad = 0.9 * 0.09 * 5.670374e-8 * (tf2 * tf2 - ts2 * ts2) * 0.5 / 6.0;

@@ -602,7 +602,7 @@ static void collapse_spin(body *b, int dx, int dz)
  * hashed direction) and the off-centre impulse sets it spinning: omega =
  * J r / I with J = m v (1 + e), I = m a^2 / 6 for a 1 m cube and the
  * contact about r = 3 cm off the centre line. */
-static void bounce(physics *ph, body *b, double impact, double e)
+static void bounce(const physics *ph, body *b, double impact, double e)
 {
     double up = impact * e;
     uint32_t h = body_hash(ph, b, b->bounces);
@@ -687,7 +687,7 @@ static double tip_move(double o)
  * rests on the ledge and drops straight down. That move stays inside cells
  * the box already overlaps, so it cannot enter a block. Returns 1 once it
  * has stopped where it can set. */
-static int ground_contact(physics *ph, body *b)
+static int ground_contact(const physics *ph, body *b)
 {
     const double dt = PHYS_DT;
     int x = (int)floor(b->pos.x + 0.5), y = (int)floor(b->pos.y + 0.5), z = (int)floor(b->pos.z + 0.5);

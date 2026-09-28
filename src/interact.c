@@ -81,10 +81,10 @@ static int fuel_units(int id)
     }
 }
 
-static void use_item(interact *s, world *w, physics *ph, thermo *th, const player *pl, inventory *inv, dvec3 eye,
+static void use_item(interact *s, world *w, const physics *ph, thermo *th, const player *pl, inventory *inv, dvec3 eye,
                      vec3 dir, ray_hit hit, interact_out *o)
 {
-    item_stack *held = inv_held(inv);
+    const item_stack *held = inv_held(inv);
     int creative = pl->flying;
     /* Feeding a fire comes before placing: logs and planks are blocks too. */
     if (th && hit.hit && hit.id == B_CAMPFIRE && held->count && fuel_units(held->id)) {

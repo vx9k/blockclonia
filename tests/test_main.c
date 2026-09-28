@@ -1196,9 +1196,10 @@ static void test_review_fixes(void)
     CHECK(world_get(&t.w, -6, GROUND + 2, -6) == B_CAMPFIRE && world_get_meta(&t.w, -6, GROUND + 2, -6) == 3);
 
     /* 600 translucent cards and a crack in a list of 300: the crack is in. */
-    for (int i = 0; i < 300; i++)
-        physics_drop_item(&t.ph, dv3(2.5 + (i % 10) * 0.3, GROUND + 0.2, 2.5 + (i / 10) * 0.3), dv3(0, 0, 0),
-                          I_APPLE, 2, 0.0f);
+    for (int i = 0; i < 300; i++) {
+        int col = i % 10, row = i / 10; /* a 10-wide grid of drops */
+        physics_drop_item(&t.ph, dv3(2.5 + col * 0.3, GROUND + 0.2, 2.5 + row * 0.3), dv3(0, 0, 0), I_APPLE, 2, 0.0f);
+    }
     entity_instance *ents = mem_alloc(sizeof(entity_instance) * 300);
     fx_crack cr = {1, 1, GROUND - 1, 1, 0.9f};
     int no = 0, nt = 0;

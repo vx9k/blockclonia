@@ -293,9 +293,6 @@ float ui_text(ui *u, float x, float y, int size, uint32_t rgba, const char *s)
     return widest > 0.0f ? widest - (float)size : 0.0f;
 }
 
-void ui_text_center(ui *u, float x, float y, int size, uint32_t rgba, const char *s)
-{ ui_text(u, x - ui_text_width(s, size) * 0.5f, y, size, rgba, s); }
-
 float ui_text_shadow(ui *u, float x, float y, int size, uint32_t rgba, const char *s)
 {
     ui_text(u, x + (float)size, y + (float)size, size, ui_alpha(ui_rgba(0, 0, 0, 255), (float)(rgba >> 24) / 400.0f),

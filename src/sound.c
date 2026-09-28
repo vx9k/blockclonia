@@ -36,6 +36,8 @@ typedef enum { CMD_PLAY, CMD_LISTENER, CMD_AMBIENCE, CMD_FIRE, CMD_FIRE_COUNT, C
 
 typedef struct {
     uint8_t type, id, material, positional;
+    /* pad fills the header to 8 bytes before the floats. */
+    /* cppcheck-suppress unusedStructMember */
     uint8_t variant, index, underwater, pad;
     float a, b, c;          /* intensity/pitch, yaw/pitch, wind/water, volumes */
     double x, y, z;         /* world position */
@@ -515,8 +517,9 @@ static void mix_chunk(sound *s, float *out, int frames)
      * the gain ramps across the chunk, and a soft clip catches the rest. */
     float target = peak * s->limit > 0.95f ? 0.95f / peak
                                            : s->limit + (1.0f - s->limit) * (1.0f - expf(-chunk_s / 0.3f));
-    float g = s->limit, dg = (target - g) / (float)frames;
-    for (int i = 0; i < frames; i++, g += dg) {
+    float dg = (target - s->limit) / (float)frames;
+    for (int i = 0; i < frames; i++) {
+        float g = s->limit + dg * (float)i;
         for (int ch = 0; ch < 2; ch++) {
             float x = s->fx[2 * i + ch] * g, m = fabsf(x);
             if (m > 0.9f) x = copysignf(0.9f + 0.1f * tanhf((m - 0.9f) / 0.1f), x);
