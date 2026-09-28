@@ -140,11 +140,19 @@ static void track_pops(invui *s, const inventory *inv, float dt)
     }
 }
 
+/* The first slot's corner. */
+static void hotbar_origin(const ui *u, float *x0, float *y0)
+{
+    *x0 = floorf((u->w - (INV_HOTBAR * SLOT + (INV_HOTBAR - 1) * GAP)) * 0.5f);
+    *y0 = u->h - SLOT - 4;
+}
+
 void invui_hotbar(ui *u, invui *s, const inventory *inv, float dt)
 {
     track_pops(s, inv, dt);
     const float w = INV_HOTBAR * SLOT + (INV_HOTBAR - 1) * GAP;
-    const float x0 = floorf((u->w - w) * 0.5f), y0 = u->h - SLOT - 4;
+    float x0, y0;
+    hotbar_origin(u, &x0, &y0);
     ui_rect(u, x0 - 3, y0 - 3, w + 6, SLOT + 6, ui_rgba(0, 0, 0, 120));
     if (s->last_sel < 0) s->sel_x = (float)inv->selected;
     s->sel_x = anim_approach(s->sel_x, (float)inv->selected, 22.0f, dt);

@@ -159,6 +159,14 @@ void ui_set_scale(ui *u, int scale, int fb_w, int fb_h)
     u->h = (float)fb_h / u->scale;
 }
 
+void ui_fit(ui *u, float w, float h)
+{
+    const float fb_w = roundf(u->w * u->scale), fb_h = roundf(u->h * u->scale);
+    while (u->scale > 1.0f && (fb_w / u->scale < w || fb_h / u->scale < h)) u->scale -= 1.0f;
+    u->w = fb_w / u->scale;
+    u->h = fb_h / u->scale;
+}
+
 static inline uint16_t unorm_u(float t) { return (uint16_t)(t * 65535.0f / UI_ATLAS_W + 0.5f); }
 static inline uint16_t unorm_v(float t) { return (uint16_t)(t * 65535.0f / UI_ATLAS_H + 0.5f); }
 
