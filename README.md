@@ -185,9 +185,10 @@ or burns.
 
 ## Settings
 
-Settings are saved in `blockclonia.cfg` (or the file given with
-`--config`) as one `key value` pair per line. Unknown keys and out-of-range
-values are ignored.
+Settings are saved in `blockclonia.cfg` under the config directory (or
+the file given with `--config`) as one `key value` pair per line. See
+"Where files live" below for the exact path. Unknown keys and
+out-of-range values are ignored.
 
 | Tab | Setting | Range |
 |---|---|---|
@@ -299,6 +300,8 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
 - For very weak devices start with `--radius 4`. `--demo` builds a tower
   with a timber cantilever in front of you and knocks out its middle.
   `--bench` runs CPU benchmarks without opening a window.
+- `--world` and `--config` default to the XDG paths described in "Where
+  files live" below, instead of a fixed name in the working directory.
 - `blockclonia --help` lists everything.
 
 Headless (no GPU), with Mesa's software rasterizer:
@@ -307,6 +310,28 @@ Headless (no GPU), with Mesa's software rasterizer:
 xvfb-run -a env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
   ./build/native/blockclonia --frames 300 --screenshot shot.ppm --no-save --no-sound
 ```
+
+## Where files live
+
+blockclonia follows the XDG Base Directory Specification:
+
+- Settings: `$XDG_CONFIG_HOME/blockclonia/blockclonia.cfg`, falling back
+  to `~/.config/blockclonia/blockclonia.cfg`.
+- Worlds: `$XDG_DATA_HOME/blockclonia/worlds/world/`, falling back to
+  `~/.local/share/blockclonia/worlds/world/`.
+- The Vulkan pipeline cache:
+  `$XDG_CACHE_HOME/blockclonia/blockclonia.pipelines`, falling back to
+  `~/.cache/blockclonia/blockclonia.pipelines`.
+
+An `XDG_*` variable is ignored when it is empty or not an absolute path,
+as the spec requires; the game then falls back to the `$HOME`-based path
+above. `--world` and `--config` still take any path directly.
+
+The first time the game finds a settings file or world where older
+builds kept them (`./blockclonia.cfg`, `./world`), it copies them into
+the new location once and keeps using it from there on; the originals
+are left in place, so an older build run from the same directory still
+finds its own copy.
 
 ## Memory allocation
 
