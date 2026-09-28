@@ -1441,6 +1441,49 @@ static uint32_t facing_groups(vec3 o)
            (uint32_t)(o.y + 16 > 0) << 3 | (uint32_t)(o.z < 0) << 4 | (uint32_t)(o.z + 16 > 0) << 5;
 }
 
+/* Collects the visible sections into r->vis and returns how many. The
+ * world's spiral is sorted by distance and sections go nearest the eye
+ * height first, so the list is roughly front to back without sorting. Each
+ * origin is written to the dynamic buffer as that draw's instance
+ * attribute. */
+static int collect_visible(renderer *r, const world *w, const render_view *v, const frustum *fr, float (*origins)[4])
+{
+    int nvis = 0;
+    int ccx = chunk_of((int)floor(v->eye.x)), ccz = chunk_of((int)floor(v->eye.z));
+    int ey = (int)floor(v->eye.y) / SECTION_H;
+    if (ey < 0) ey = 0;
+    if (ey >= SECTIONS) ey = SECTIONS - 1;
+    int rad = r->radius;
+    if (r->vis_cap < w->spiral_count * SECTIONS) {
+        mem_free(r->vis);
+        r->vis_cap = w->spiral_count * SECTIONS;
+        r->vis = mem_alloc(mem_array_size((size_t)r->vis_cap, sizeof(visible)));
+    }
+    for (int i = 0; i < w->spiral_count; i++) {
+        int dx = w->spiral[i][0], dz = w->spiral[i][1];
+        if (dx * dx + dz * dz > rad * rad) break;
+        const column *c = world_column(w, ccx + dx, ccz + dz);
+        if (!c) continue;
+        float ox = (float)((double)(c->cx * CHUNK_W) - v->eye.x), oz = (float)((double)(c->cz * CHUNK_W) - v->eye.z);
+        if (!frustum_box(fr, v3(ox, (float)-v->eye.y, oz), v3(CHUNK_W, WORLD_H, CHUNK_W))) continue;
+        for (int k = 0; k < 2 * SECTIONS; k++) {
+            int sy = ey + ((k & 1) ? (k + 1) / 2 : -(k / 2));
+            if (sy < 0 || sy >= SECTIONS) continue;
+            const section_mesh *m = &c->mesh[sy];
+            if (!m->vtx_capacity) continue;
+            vec3 o = v3(ox, (float)((double)(sy * SECTION_H) - v->eye.y), oz);
+            if (!frustum_box(fr, o, v3(16, 16, 16))) continue;
+            if (nvis == r->vis_cap || nvis == MAX_VIS) break;
+            origins[nvis][0] = o.x;
+            origins[nvis][1] = o.y;
+            origins[nvis][2] = o.z;
+            origins[nvis][3] = 0.0f;
+            r->vis[nvis++] = (visible){m, facing_groups(o)};
+        }
+    }
+    return nvis;
+}
+
 void renderer_end_frame(renderer *r, const world *w, const physics *ph, const render_view *v, double alpha)
 {
     if (!r->frame_active) return;
@@ -1505,45 +1548,9 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    /* Collect visible sections. The world's spiral is sorted by distance and
-     * sections go nearest the eye height first, so the list is roughly
-     * front to back without sorting. Each origin is written to the dynamic
-     * buffer as that draw's instance attribute. */
     uint8_t *dyn = f->dyn.map;
     float (*origins)[4] = (float (*)[4])dyn;
-    int nvis = 0;
-    int ccx = chunk_of((int)floor(v->eye.x)), ccz = chunk_of((int)floor(v->eye.z));
-    int ey = (int)floor(v->eye.y) / SECTION_H;
-    if (ey < 0) ey = 0;
-    if (ey >= SECTIONS) ey = SECTIONS - 1;
-    int rad = r->radius;
-    if (r->vis_cap < w->spiral_count * SECTIONS) {
-        mem_free(r->vis);
-        r->vis_cap = w->spiral_count * SECTIONS;
-        r->vis = mem_alloc(mem_array_size((size_t)r->vis_cap, sizeof(visible)));
-    }
-    for (int i = 0; i < w->spiral_count; i++) {
-        int dx = w->spiral[i][0], dz = w->spiral[i][1];
-        if (dx * dx + dz * dz > rad * rad) break;
-        const column *c = world_column(w, ccx + dx, ccz + dz);
-        if (!c) continue;
-        float ox = (float)((double)(c->cx * CHUNK_W) - v->eye.x), oz = (float)((double)(c->cz * CHUNK_W) - v->eye.z);
-        if (!frustum_box(&fr, v3(ox, (float)-v->eye.y, oz), v3(CHUNK_W, WORLD_H, CHUNK_W))) continue;
-        for (int k = 0; k < 2 * SECTIONS; k++) {
-            int sy = ey + ((k & 1) ? (k + 1) / 2 : -(k / 2));
-            if (sy < 0 || sy >= SECTIONS) continue;
-            const section_mesh *m = &c->mesh[sy];
-            if (!m->vtx_capacity) continue;
-            vec3 o = v3(ox, (float)((double)(sy * SECTION_H) - v->eye.y), oz);
-            if (!frustum_box(&fr, o, v3(16, 16, 16))) continue;
-            if (nvis == r->vis_cap || nvis == MAX_VIS) break;
-            origins[nvis][0] = o.x;
-            origins[nvis][1] = o.y;
-            origins[nvis][2] = o.z;
-            origins[nvis][3] = 0.0f;
-            r->vis[nvis++] = (visible){m, facing_groups(o)};
-        }
-    }
+    int nvis = collect_visible(r, w, v, &fr, origins);
     VkDeviceSize dyn_used = (VkDeviceSize)nvis * sizeof origins[0];
 
     render_stats st = {0};
@@ -1577,13 +1584,14 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
      * overlays, one static cube instanced per entity. Opaque instances are
      * packed from the front and translucent ones (glass, ice, item cards,
      * cracks) from the back, so each group is one draw. */
-    int n_opaque = 0, n_trans = 0;
+    int n_trans = 0;
     VkDeviceSize ent_off = dyn_used;
     int nb = ph ? ph->body_count : 0;
     int ng_o = v->ents ? clampi(v->ent_opaque, 0, RENDER_MAX_ENTS) : 0;
     int ng_t = v->ents ? clampi(v->ent_trans, 0, RENDER_MAX_ENTS - ng_o) : 0;
     int total = nb + ng_o + ng_t;
     if (total) {
+        int n_opaque = 0;
         entity_instance *insts = (entity_instance *)(dyn + ent_off);
         for (int i = 0; i < nb; i++) {
             const body *b = &ph->bodies[i];
