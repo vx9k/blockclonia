@@ -144,9 +144,15 @@ limiter.
 
 ## Saving
 
-- The `world/` folder holds `level.dat` (the seed), `player.dat`
-  (position, view, time of day, inventory) and one `c.X.Z.bin` per edited
-  column (RLE, with a checksum).
+- Each world lives in one SQLite database, `world.db`, in the `world/`
+  folder, holding the seed, the player (position, view, time of day,
+  inventory) and one row per edited column (`save_db.c`); `save.c` still
+  encodes and decodes the payloads. A folder written by an older build
+  (`level.dat`, `player.dat`, `c.X.Z.bin`) is imported into the database
+  the first time it is opened, leaving the old files in place.
+- SQLite's exclusive locking mode keeps a world open in only one game at
+  a time; a second instance pointed at the same folder disables saving
+  instead of sharing the database.
 - The game saves every 60 seconds, when a column unloads, when you leave
   to the title screen, on quit, and from the fatal-error hook
   (`log_set_fatal_hook`), so a lost GPU device doesn't lose the world.
