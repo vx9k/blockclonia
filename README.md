@@ -62,6 +62,7 @@ Every texture and sound is generated at start-up, and all memory comes from
 | E / R | Eat an apple / drink (standing in or facing water, or holding a water bucket) |
 | F2 | Screenshot (`screenshot.ppm`) |
 | F3 | Debug overlay |
+| K (with F3 on) | Debug health menu: trigger any injury, or heal |
 | Esc | Close the inventory or panel; otherwise pause |
 | Enter | Respawn after death |
 
@@ -274,7 +275,7 @@ cmake --build --preset native
 blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
             [--threads N] [--pool-mb N] [--gpu N] [--world DIR | --no-save]
             [--config FILE] [--validate] [--no-sound]
-            [--play] [--screen title|pause|settings|controls|inventory]
+            [--play] [--screen title|pause|settings|controls|debug-health|inventory]
             [--debug] [--time HH] [--give LIST] [--hurt LIST]
             [--frames N] [--screenshot F] [--look YAW,PITCH] [--spawn X,Z]
             [--demo] [--health-panel] [--bench] [--mem-stats]
@@ -285,9 +286,11 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
 - `--give log:8,sand:4` starts you with items (names as shown in game).
   `--time 21` starts at 21:00.
 - `--hurt` starts you injured, to try treatments or take screenshots: a
-  comma list of `bleed`, `artery`, `fracture`, `open-fracture`,
-  `infection`, `concussion`, `burn`, `dislocation`, `abrasion` and
-  `crush`.
+  comma list of names (`--help` lists them all: bleeds, fractures, burns
+  of each degree, frostbite, dislocation, crush, infection, hypothermia,
+  hyperthermia, pain, shock, sepsis and cardiac arrest). The same names,
+  as buttons, are the debug health menu (F3, then K) picks from, to
+  trigger any of them on a live body and to heal.
 - For very weak devices start with `--radius 4`. `--demo` builds a tower
   with a timber cantilever in front of you and knocks out its middle.
   `--bench` runs CPU benchmarks without opening a window.

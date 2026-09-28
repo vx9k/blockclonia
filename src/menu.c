@@ -1,5 +1,6 @@
 #include "menu.h"
 #include "anim.h"
+#include "health.h"
 #include "palette.h"
 
 #include <math.h>
@@ -363,7 +364,7 @@ static void controls_screen(ctx *c)
         {"H", "Health panel"},
         {"E / R", "Eat / drink"},
         {"F2", "Screenshot"},
-        {"F3", "Debug overlay"},
+        {"F3", "Debug overlay (K: injury menu)"},
         {"Esc", "Pause"},
     };
     const int n = (int)(sizeof KEYS / sizeof KEYS[0]);
@@ -376,6 +377,38 @@ static void controls_screen(ctx *c)
         ui_text(u, kx + 4, ky + 11, 1, ui_alpha(C_TEXT, t), KEYS[i][1]);
     }
     if (button(c, x + w - 8 - 90, y + h - 8 - ROW_H, 90, "Back")) menu_open(m, m->back_to);
+}
+
+/* Trigger any injury the body model supports, on a chosen part, plus a
+ * heal/reset: for testing bleeding, fractures, burns and the rest without
+ * having to get hurt first. Opened straight from gameplay (K, with the F3
+ * overlay up), so it has no back_to to return to: Back and Esc both just
+ * resume. Doesn't touch health.h's health struct: it only hands the
+ * caller an index into HEALTH_DEBUG_KINDS through m->debug_kind. */
+static void debug_health_screen(ctx *c)
+{
+    ui *u = c->u;
+    menu *m = c->m;
+    ui_rect(u, 0, 0, u->w, u->h, ui_rgba(0, 0, 0, (int)(150.0f * ease_out_cubic(m->age / 0.25f))));
+    float x, y;
+    const float w = 460, h = 296;
+    panel(u, m->age, w, h, &x, &y, "DEBUG: HEALTH");
+    static const char *const PARTS[BP_COUNT] = {"Head",      "Chest",    "Abdomen",  "Left arm",
+                                                "Right arm", "Left leg", "Right leg"};
+    float rx = x + 8, rw = w - 16, ry = y + 22;
+    cycle(c, rx, ry, rw, "Part (for entries that need one)", &m->debug_part, PARTS, BP_COUNT);
+    ry += 22;
+    const float bw = (rw - 6) * 0.5f;
+    for (int i = 0; i < HEALTH_DEBUG_COUNT; i++) {
+        float bx = rx + (float)(i % 2) * (bw + 6), by = ry + (float)(i / 2) * ROW_H;
+        if (button(c, bx, by, bw, HEALTH_DEBUG_KINDS[i].label)) {
+            m->debug_kind = i;
+            c->action = MENU_DEBUG_INJURE;
+        }
+    }
+    float by = ry + (float)((HEALTH_DEBUG_COUNT + 1) / 2) * ROW_H + 6;
+    if (button(c, rx, by, bw, "Heal (reset to new)")) c->action = MENU_DEBUG_RESET;
+    if (button(c, rx + bw + 6, by, bw, "Back")) c->action = MENU_RESUME;
 }
 
 menu_action menu_frame(menu *m, ui *u, const menu_input *in, settings *s)
@@ -403,6 +436,7 @@ menu_action menu_frame(menu *m, ui *u, const menu_input *in, settings *s)
     case SCREEN_PAUSE: pause_screen(&c); break;
     case SCREEN_SETTINGS: settings_screen(&c, s); break;
     case SCREEN_CONTROLS: controls_screen(&c); break;
+    case SCREEN_DEBUG_HEALTH: debug_health_screen(&c); break;
     default: break;
     }
     /* The screen functions can switch screens through c.m. */
@@ -411,7 +445,7 @@ menu_action menu_frame(menu *m, ui *u, const menu_input *in, settings *s)
     else m->items = 0; /* switched: the new screen lays out next frame */
 
     if (in->back && c.action == MENU_NONE && m->screen == screen) {
-        if (screen == SCREEN_PAUSE) c.action = MENU_RESUME;
+        if (screen == SCREEN_PAUSE || screen == SCREEN_DEBUG_HEALTH) c.action = MENU_RESUME;
         else if (screen == SCREEN_SETTINGS || screen == SCREEN_CONTROLS) menu_open(m, m->back_to);
     }
     m->hovered = m->focus != focus0 && m->screen == screen0 && m->items > 0;
