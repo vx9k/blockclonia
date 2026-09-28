@@ -227,7 +227,8 @@ endif()
 if(MC_BUILD_TESTS)
   enable_testing()
   add_executable(mc_tests tests/test_main.c tests/test_util.c tests/test_thermo.c tests/test_health2.c
-                          tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_gpucaps.c)
+                          tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_gpucaps.c
+                          tests/test_health_debug.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)
   set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT 120)

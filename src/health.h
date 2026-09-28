@@ -294,6 +294,46 @@ void health_crush(health *h, int part, double mass_kg, double dt);
  * heat unless the part already has a larger burn. */
 void health_burn(health *h, int part, double omega);
 
+/* Stops the heart in the given rhythm (RHYTHM_VF or RHYTHM_ASYSTOLE),
+ * as if it had happened on its own; exposed for the debug menu and for
+ * items (a taser, a lightning strike) that need to cause an arrest
+ * directly instead of waiting for ischemia to. */
+void health_arrest(health *h, int rhythm);
+
+/* -------------------------------------------------- debug injuries */
+
+/* One entry per condition the model can be put into directly: --hurt and
+ * the in-game debug menu (F3, K) both drive health_injure from this same
+ * table, so the two stay in sync. part_kind says what `part` in
+ * health_injure means for that entry: HDBG_ANY lets the caller choose any
+ * body part, HDBG_ARM and HDBG_HEAD restrict or force it the way the
+ * underlying injury does (a dislocated shoulder, a concussion), and
+ * HDBG_SYSTEMIC ignores it (whole-body conditions: temperature, shock,
+ * sepsis, cardiac rhythm). default_part is used when the caller doesn't
+ * choose one (--hurt never does), or when it chooses one HDBG_ARM /
+ * HDBG_HEAD can't use. */
+typedef enum { HDBG_ANY, HDBG_ARM, HDBG_HEAD, HDBG_SYSTEMIC } health_debug_part_kind;
+
+typedef struct {
+    const char *name;                    /* --hurt token, e.g. "bleed" */
+    const char *label;                   /* shown in the debug menu */
+    health_debug_part_kind part_kind;
+    uint8_t default_part;                /* body_part_id */
+} health_debug_kind;
+
+extern const health_debug_kind HEALTH_DEBUG_KINDS[];
+#define HEALTH_DEBUG_COUNT 22
+
+/* Looks a --hurt token up in HEALTH_DEBUG_KINDS; returns -1 if there is
+ * no such name. */
+int health_debug_find(const char *name);
+
+/* Applies HEALTH_DEBUG_KINDS[kind] to the body. part chooses the body
+ * part where part_kind is HDBG_ANY; it is ignored (or clamped to a valid
+ * one) otherwise. Does nothing if kind is out of range or the body is
+ * already dead. */
+void health_injure(health *h, int kind, int part);
+
 /* ------------------------------------------------------- treatments */
 
 /* Applies a treatment to a part (ignored for systemic ones), using up

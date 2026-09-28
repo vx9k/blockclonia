@@ -140,6 +140,19 @@ static int parse_float_pair(const char *s, float lim, float *a, float *b)
     return 1;
 }
 
+/* The --hurt names, comma-joined from HEALTH_DEBUG_KINDS so usage() can't
+ * fall out of sync with what --hurt (and the debug menu) actually take. */
+static const char *hurt_names(void)
+{
+    static char buf[512];
+    size_t len = 0;
+    for (int i = 0; i < HEALTH_DEBUG_COUNT && len < sizeof buf; i++) {
+        int n = snprintf(buf + len, sizeof buf - len, "%s%s", i ? ", " : "", HEALTH_DEBUG_KINDS[i].name);
+        if (n > 0) len += (size_t)n < sizeof buf - len ? (size_t)n : sizeof buf - len - 1;
+    }
+    return buf;
+}
+
 static void usage(void)
 {
     printf("usage: blockclonia [options]\n"
@@ -159,18 +172,17 @@ static void usage(void)
            "  --spawn X,Z       spawn position (default: nearest dry land)\n"
            "  --config FILE     settings file (default ./blockclonia.cfg)\n"
            "  --play            skip the title screen\n"
-           "  --screen NAME     open title, pause, settings or controls at start\n"
+           "  --screen NAME     open title, pause, settings, controls or debug-health at start\n"
            "  --debug           start with the F3 overlay on\n"
            "  --give LIST       start with items, e.g. log:8,sand:4 (names as shown in game)\n"
            "  --time HH         start at this hour of the day (0-23)\n"
            "  --demo            scripted structural-collapse demo\n"
            "  --health-panel    start with the health panel (H) open\n"
-           "  --hurt LIST       start injured: comma list of bleed, artery, fracture,\n"
-           "                    open-fracture, infection, concussion, burn, dislocation,\n"
-           "                    abrasion, crush\n"
+           "  --hurt LIST       start injured: comma list of %s\n"
            "  --bench           run CPU benchmarks and exit (no window)\n"
            "  --mem-stats       print mimalloc statistics at exit\n"
-           "  --no-sound        do not open an audio device\n");
+           "  --no-sound        do not open an audio device\n",
+           hurt_names());
 }
 
 /* Options that take no value. */
@@ -235,7 +247,7 @@ static int parse_int_option(options *o, const char *a, const char *v, int *ok)
 
 static int valid_screen(const char *v)
 {
-    static const char *const NAMES[] = {"title", "pause", "settings", "controls", "game", "inventory"};
+    static const char *const NAMES[] = {"title", "pause", "settings", "controls", "debug-health", "game", "inventory"};
     for (size_t i = 0; i < sizeof NAMES / sizeof NAMES[0]; i++)
         if (strcmp(v, NAMES[i]) == 0) return 1;
     return 0;
@@ -396,6 +408,8 @@ static void key_cb(GLFWwindow *win, int key, int sc, int action, int mods)
         if (key >= GLFW_KEY_1 && key <= GLFW_KEY_9) g_in.slot = key - GLFW_KEY_1;
     } else if (key == GLFW_KEY_H) {
         g_in.panel = !g_in.panel;
+    } else if (key == GLFW_KEY_K && g_in.debug) {
+        g_in.screen = SCREEN_DEBUG_HEALTH; /* opens through the generic menu_open below */
     } else if (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER) {
         g_in.respawn = 1;
     } else if (key == GLFW_KEY_E) {
@@ -630,26 +644,18 @@ static void thermal_env(const thermo *th, const world *w, const player *p, healt
 }
 
 /* --hurt: start with a chosen set of injuries, for screenshots and for
- * trying treatments without having to get hurt first. */
+ * trying treatments without having to get hurt first. The names and what
+ * they do come from health.h's HEALTH_DEBUG_KINDS, the same table the F3
+ * debug menu (K) uses, so the two can't drift apart. */
 static void apply_hurt(health *h, const char *list)
 {
     char buf[256];
     snprintf(buf, sizeof buf, "%s", list);
     char *save = NULL;
     for (char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
-        if (!strcmp(t, "bleed")) health_cut(h, BP_LLEG, 0.6f, 0, 0.3f);
-        else if (!strcmp(t, "artery")) health_cut(h, BP_LLEG, 0.7f, 1, 0.2f);
-        else if (!strcmp(t, "fracture")) health_break_bone(h, BP_RARM, 0);
-        else if (!strcmp(t, "open-fracture")) health_break_bone(h, BP_RLEG, 1);
-        else if (!strcmp(t, "concussion")) health_blunt(h, BP_HEAD, 12.0);
-        else if (!strcmp(t, "burn")) health_burn(h, BP_LARM, 5.0);
-        else if (!strcmp(t, "dislocation")) health_dislocate(h, BP_RARM);
-        else if (!strcmp(t, "abrasion")) health_abrasion(h, BP_LLEG, 0.3f, 0.7f);
-        else if (!strcmp(t, "crush")) health_crush(h, BP_LLEG, 400.0, 600.0);
-        else if (!strcmp(t, "infection")) {
-            health_cut(h, BP_LARM, 0.5f, 0, 0.9f);
-            h->wounds[h->wound_count - 1].infection = 0.45f;
-        } else log_warn("--hurt: unknown injury '%s'", t);
+        int kind = health_debug_find(t);
+        if (kind < 0) log_warn("--hurt: unknown injury '%s'", t);
+        else health_injure(h, kind, -1);
     }
 }
 
@@ -909,6 +915,7 @@ static void open_start_screen(game *g)
         else if (!strcmp(o->screen, "pause")) g_in.screen = SCREEN_PAUSE;
         else if (!strcmp(o->screen, "settings")) g_in.screen = SCREEN_SETTINGS;
         else if (!strcmp(o->screen, "controls")) g_in.screen = SCREEN_CONTROLS;
+        else if (!strcmp(o->screen, "debug-health")) g_in.screen = SCREEN_DEBUG_HEALTH;
         else g_in.screen = SCREEN_NONE;
         g_in.inv_open = !strcmp(o->screen, "inventory");
     }
@@ -1380,6 +1387,11 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
         renderer_set_vsync(g->rd, g->st.vsync);
         apply_volumes(g);
         g->settings_dirty = 1;
+        break;
+    case MENU_DEBUG_INJURE: health_injure(&g->hl, g->mn.debug_kind, g->mn.debug_part); break;
+    case MENU_DEBUG_RESET:
+        health_init(&g->hl, g->seed ^ (uint32_t)g->frame * 2654435761u);
+        log_info("debug menu: health reset");
         break;
     default: break;
     }

@@ -11,7 +11,14 @@
 #include "settings.h"
 #include "ui.h"
 
-typedef enum { SCREEN_NONE, SCREEN_TITLE, SCREEN_PAUSE, SCREEN_SETTINGS, SCREEN_CONTROLS } screen_id;
+typedef enum {
+    SCREEN_NONE,
+    SCREEN_TITLE,
+    SCREEN_PAUSE,
+    SCREEN_SETTINGS,
+    SCREEN_CONTROLS,
+    SCREEN_DEBUG_HEALTH
+} screen_id;
 
 typedef enum {
     MENU_NONE,
@@ -20,6 +27,8 @@ typedef enum {
     MENU_TO_TITLE,     /* pause: save and return to the title screen */
     MENU_QUIT,         /* quit the game */
     MENU_SETTINGS,     /* a setting changed (apply it; saved when leaving) */
+    MENU_DEBUG_INJURE, /* debug menu: apply debug_kind to debug_part (see below) */
+    MENU_DEBUG_RESET,  /* debug menu: heal the body back to new */
 } menu_action;
 
 typedef struct {
@@ -30,7 +39,7 @@ typedef struct {
     float dt;
 } menu_input;
 
-#define MENU_MAX_ITEMS 16
+#define MENU_MAX_ITEMS 32 /* the debug health screen lists every HEALTH_DEBUG_KINDS entry */
 
 typedef struct {
     int screen;
@@ -47,6 +56,11 @@ typedef struct {
     int tab;           /* settings: 0 video, 1 controls, 2 audio */
     int clicked;       /* a button or setting was used this frame (UI sound) */
     int hovered;       /* the focus moved to another item this frame (UI sound) */
+    /* Debug health screen: the part cycled to, and what MENU_DEBUG_INJURE
+     * asks the caller to apply. menu.c never sees a health struct; it
+     * only hands back which of HEALTH_DEBUG_KINDS was clicked. */
+    int debug_part;
+    int debug_kind;
 } menu;
 
 void menu_init(menu *m);
