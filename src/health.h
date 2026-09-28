@@ -156,6 +156,21 @@ typedef struct {
 } defib_state;
 
 /* What the rest of the game tells the body each step. */
+/* Individual constitution, drawn once per body (health_init_varied) from
+ * the seed, within a healthy adult's normal range; health_init leaves it
+ * at the population mean instead, so the reference body tests check exact
+ * numbers against never changes. `vary` also turns on the small
+ * beat-to-beat and breath-to-breath noise health_step adds when set. */
+typedef struct {
+    float hr_rest;    /* bpm, resting heart rate: 55..85, mean 64 */
+    float map_set;    /* mmHg, mean arterial pressure set-point: 85..101, mean 93 */
+    float pain_gain;  /* x perceived pain: 0.8..1.2 */
+    float clot_gain;  /* x clotting speed: 0.75..1.35 */
+    float metab_gain; /* x BMR, VO2max and critical power: 0.92..1.1 */
+    float cold_bias;  /* degrees C added to the shiver threshold: -0.4..0.4 */
+    int vary;
+} health_baseline;
+
 typedef struct {
     double speed;         /* horizontal speed, m/s */
     double submerged;     /* 0..1 of the body in water */
@@ -246,6 +261,10 @@ typedef struct health {
     double t;                         /* s since spawn */
     uint32_t rng;
 
+    health_baseline base; /* this body's constitution */
+    uint32_t vrng; /* short-term variability, its own stream so it never shifts an injury */
+    float hr_noise, map_noise, rr_noise, spo2_noise; /* wandering state for `base.vary` */
+
     /* Monitor traces, ring buffers written at HEALTH_WAVE_HZ. */
     float ecg[HEALTH_WAVE_LEN];       /* mV */
     float art[HEALTH_WAVE_LEN];       /* mmHg */
@@ -259,9 +278,17 @@ typedef struct health {
     float log_age[HEALTH_LOG];
 } health;
 
-/* A healthy, rested and fed adult. seed drives the model's own random
- * numbers, so a run with the same inputs replays exactly. */
+/* A healthy, rested and fed adult, at the population mean (HR_REST,
+ * MAP_SET, ... in health.c) with no short-term variability: the reference
+ * body the tests check exact numbers against. seed drives the model's own
+ * random numbers (injuries, arrhythmia), so a run with the same inputs
+ * replays exactly. */
 void health_init(health *h, uint32_t seed);
+
+/* As health_init, but also draws this body's constitution (health_baseline)
+ * from seed and turns on short-term variability, both reproducible from
+ * seed alone. What the game spawns and respawns players with. */
+void health_init_varied(health *h, uint32_t seed);
 
 /* Advances the body by dt seconds of real time. */
 void health_step(health *h, const health_env *e, double dt);

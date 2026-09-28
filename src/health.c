@@ -79,14 +79,39 @@ static const float BREAK_N[BP_COUNT] = {6000.0f, 3500.0f, 4000.0f, 2000.0f, 2000
 
 /* ------------------------------------------------------------ helpers */
 
-static float frand(health *h)
+static float frand_s(uint32_t *state)
 {
-    uint32_t x = h->rng;
+    uint32_t x = *state;
     x ^= x << 13;
     x ^= x >> 17;
     x ^= x << 5;
-    h->rng = x;
+    *state = x;
     return (float)(x >> 8) * (1.0f / 16777216.0f);
+}
+
+static float frand(health *h) { return frand_s(&h->rng); }
+
+/* murmur3's finaliser, used to spread a small or sequential seed (1, 2,
+ * 3, ...) across the whole 32 bits before drawing a body's constitution
+ * from it: the xorshift above needs a well-mixed seed or its first draws
+ * cluster near 0. */
+static uint32_t hash32(uint32_t x)
+{
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
+}
+
+/* A bounded wander for short-term variability: each call redraws the
+ * target within +-amp and eases `cur` toward it over `tau` seconds, so the
+ * result never leaves [-amp, amp] and stays smooth from step to step. */
+static float wander(uint32_t *rng, float cur, double dt, double tau, float amp)
+{
+    float target = (frand_s(rng) * 2.0f - 1.0f) * amp;
+    return cur + (target - cur) * (float)(1.0 - exp(-dt / tau));
 }
 
 static float fclamp(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -116,7 +141,7 @@ static float severinghaus(float po2)
 static float dehydration(const health *h) { return maxf(0.0f, 1.0f - h->water / WATER_NORMAL); }
 static float hct(const health *h) { return h->blood > 0.05f ? h->rbc / h->blood : 0.0f; }
 float health_hb(const health *h) { return hct(h) * 33.3f; }
-static float vo2max_l(void) { return VO2MAX_W / J_PER_ML_O2 * 0.06f; }
+static float vo2max_l(float metab_gain) { return VO2MAX_W * metab_gain / J_PER_ML_O2 * 0.06f; }
 
 static int is_limb(int part) { return part >= BP_LARM; }
 static int is_leg(int part) { return part == BP_LLEG || part == BP_RLEG; }
@@ -172,6 +197,9 @@ void health_init(health *h, uint32_t seed)
 {
     memset(h, 0, sizeof *h);
     h->rng = seed ? seed : 0x9E3779B9u;
+    h->base.hr_rest = HR_REST;
+    h->base.map_set = MAP_SET;
+    h->base.pain_gain = h->base.clot_gain = h->base.metab_gain = 1.0f;
     for (int i = 0; i < BP_COUNT; i++) {
         h->part[i].integrity = 1.0f;
         h->part[i].skin = is_limb(i) ? 31.0f : 33.5f; /* clothed at rest in 20 C air */
@@ -186,17 +214,17 @@ void health_init(health *h, uint32_t seed)
     h->glycogen = 1600.0f;
     h->fat = FAT_NORMAL;
 
-    h->hr = HR_REST;
+    h->hr = h->base.hr_rest;
     h->sv = 75.0f;
-    h->co = HR_REST * 75.0f / 1000.0f;
+    h->co = h->base.hr_rest * 75.0f / 1000.0f;
     h->svr = SVR0;
-    h->map = MAP_SET;
+    h->map = h->base.map_set;
     h->sbp = 120.0f;
     h->dbp = 80.0f;
     h->symp = 0.15f;
     h->rhythm = RHYTHM_SINUS;
-    h->next_r = 60.0 / (double)HR_REST;
-    h->prev_r = -60.0 / (double)HR_REST;
+    h->next_r = 60.0 / (double)h->base.hr_rest;
+    h->prev_r = -60.0 / (double)h->base.hr_rest;
     h->beat_pp = 40.0f;
     h->beat_dbp = 80.0f;
 
@@ -226,6 +254,31 @@ void health_init(health *h, uint32_t seed)
         h->pleth[i] = 0.0f;
     }
     for (int i = 0; i < HEALTH_LOG; i++) h->log_age[i] = 1e9f;
+}
+
+void health_init_varied(health *h, uint32_t seed)
+{
+    health_init(h, seed);
+    /* Drawn from a hash of seed, not h->rng itself: the constitution must
+     * not depend on how it happens to be mixed, and must not shift the
+     * sequence health_init already handed out to injuries. */
+    uint32_t s = hash32(seed);
+    h->base.hr_rest = 55.0f + 30.0f * frand_s(&s);   /* bpm */
+    h->base.map_set = 85.0f + 16.0f * frand_s(&s);   /* mmHg */
+    h->base.pain_gain = 0.8f + 0.4f * frand_s(&s);
+    h->base.clot_gain = 0.75f + 0.6f * frand_s(&s);
+    h->base.metab_gain = 0.92f + 0.18f * frand_s(&s);
+    h->base.cold_bias = -0.4f + 0.8f * frand_s(&s);
+    h->base.vary = 1;
+    h->vrng = hash32(s); /* a stream of its own for the short-term wander */
+
+    h->hr = h->base.hr_rest;
+    h->co = h->base.hr_rest * 75.0f / 1000.0f;
+    h->map = h->base.map_set;
+    h->next_r = 60.0 / (double)h->base.hr_rest;
+    h->prev_r = -60.0 / (double)h->base.hr_rest;
+    h->power = BMR_W * h->base.metab_gain;
+    h->vo2 = h->power / J_PER_ML_O2 * 0.06f;
 }
 
 /* ------------------------------------------------------------ injuries */
@@ -958,8 +1011,8 @@ static void step_bleeding(health *h, const health_env *e, double dt, float gh, f
     const float fdt = (float)dt;
     float coag = sqrtf(h->organ[ORG_LIVER]) *
                  (h->temp < 35.0f ? fclamp(1.0f - (35.0f - h->temp) * 0.15f, 0.3f, 1.0f) : 1.0f) *
-                 fclamp(hct(h) / 0.3f, 0.3f, 1.0f) * (1.0f - 0.5f * h->sepsis);
-    float pressure = fclamp(h->map / MAP_SET, 0.0f, 1.5f);
+                 fclamp(hct(h) / 0.3f, 0.3f, 1.0f) * (1.0f - 0.5f * h->sepsis) * h->base.clot_gain;
+    float pressure = fclamp(h->map / h->base.map_set, 0.0f, 1.5f);
     float ext = 0.0f;
     for (int i = 0; i < h->wound_count; i++) {
         wound *w = &h->wounds[i];
@@ -1429,7 +1482,7 @@ static void step_parts(health *h, const health_env *e, double dt, float gh, int 
         h->part[i].pain = minf(PAIN_SCALE, h->part[i].pain);
         sum2 += h->part[i].pain * h->part[i].pain;
     }
-    float pain = minf(PAIN_SCALE, sqrtf(sum2)) * (h->painkiller > 0.0f ? 0.45f : 1.0f);
+    float pain = minf(PAIN_SCALE, sqrtf(sum2) * h->base.pain_gain) * (h->painkiller > 0.0f ? 0.45f : 1.0f);
     h->pain = awake ? lag(h->pain, pain, dt, 1.0) : 0.0f;
     h->painkiller = maxf(0.0f, h->painkiller - gh);
     h->antibiotic = maxf(0.0f, h->antibiotic - gh);
@@ -1581,7 +1634,9 @@ void health_step(health *h, const health_env *e, double dt)
     const int arrest = h->rhythm != RHYTHM_SINUS;
 
     /* ---- metabolism: power demand, stamina, VO2, lactate */
-    float p = BMR_W * (1.0f + 0.1f * maxf(0.0f, h->temp - 37.0f));
+    const float bmr = BMR_W * h->base.metab_gain, crit_power = CRIT_POWER * h->base.metab_gain,
+                vo2max_w = VO2MAX_W * h->base.metab_gain;
+    float p = bmr * (1.0f + 0.1f * maxf(0.0f, h->temp - 37.0f));
     int swimming = e->submerged > 0.5;
     if (awake) {
         if (swimming) p += 60.0f + 450.0f * (float)minf((float)e->speed, 3.0f); /* sculling + strokes */
@@ -1593,11 +1648,11 @@ void health_step(health *h, const health_env *e, double dt)
     /* Shivering, driven by a cooling core, and by cold skin unless the core
      * is already warm. */
     float skin_drive = maxf(0.0f, 27.0f - health_skin_mean(h)) * fclamp((37.1f - h->temp) / 0.3f, 0.0f, 1.0f);
-    p += minf(400.0f, 250.0f * maxf(0.0f, 36.5f - h->temp) + 20.0f * skin_drive);
+    p += minf(400.0f, 250.0f * maxf(0.0f, 36.5f - h->base.cold_bias - h->temp) + 20.0f * skin_drive);
     float cap = cao2_rel * h->organ[ORG_HEART] * fclamp(h->blood / BLOOD_NORMAL, 0.0f, 1.0f) *
                 (h->glycogen > 50.0f ? 1.0f : 0.7f) * (1.0f - fclamp(dehyd * 3.0f, 0.0f, 0.4f));
     cap = fclamp(cap, 0.05f, 1.0f);
-    float cp = CRIT_POWER * cap, aer_max = VO2MAX_W * cap;
+    float cp = crit_power * cap, aer_max = vo2max_w * cap;
     if (p > cp) {
         h->wbal -= (p - cp) * fdt;
         h->lactate += (p - cp) / 5000.0f * fdt;
@@ -1608,7 +1663,7 @@ void health_step(health *h, const health_env *e, double dt)
     h->wbal = fclamp(h->wbal, 0.0f, WPRIME);
     h->power = lag(h->power, minf(p, aer_max), dt, 25.0); /* VO2 on-kinetics */
     h->vo2 = h->power / J_PER_ML_O2 * 0.06f;
-    float vo2_frac = h->vo2 / vo2max_l();
+    float vo2_frac = h->vo2 / vo2max_l(h->base.metab_gain);
     float do2_rel = (h->co / 4.8f) * cao2_rel;
     if (do2_rel < 0.5f) h->lactate += (0.5f - do2_rel) * 0.05f * fdt; /* shock: tissues starved of oxygen */
     /* Prolonged severe hypoperfusion poisons the heart and vessels
@@ -1636,9 +1691,9 @@ void health_step(health *h, const health_env *e, double dt)
     if (h->water > WATER_NORMAL + 0.5f) h->water -= (h->water - WATER_NORMAL) * 0.5f * gh * h->organ[ORG_KIDNEYS];
 
     /* ---- energy */
-    float kcal_basal = BMR_W * 3600.0f / 4184.0f * gh;
-    float kcal_ex = maxf(0.0f, p - BMR_W) * fdt / 4184.0f;
-    float carb = 0.4f * kcal_basal + (0.5f + 0.45f * fclamp(p / CRIT_POWER, 0.0f, 1.0f)) * kcal_ex;
+    float kcal_basal = bmr * 3600.0f / 4184.0f * gh;
+    float kcal_ex = maxf(0.0f, p - bmr) * fdt / 4184.0f;
+    float carb = 0.4f * kcal_basal + (0.5f + 0.45f * fclamp(p / crit_power, 0.0f, 1.0f)) * kcal_ex;
     float digest = minf(h->stomach_kcal, 250.0f * gh * h->organ[ORG_GUT]);
     h->stomach_kcal -= digest;
     h->glycogen += digest - carb;
@@ -1660,8 +1715,9 @@ void health_step(health *h, const health_env *e, double dt)
     float veff = h->blood * (1.0f - 0.6f * dehyd);
     /* Exercise drive: central command reacts at once, the metabolic part
      * follows oxygen uptake. */
-    float ex = fclamp(0.35f * minf(p / VO2MAX_W, 1.0f) + 0.65f * vo2_frac, 0.0f, 1.0f);
-    float b = fclamp((MAP_SET + 30.0f * ex - h->map) / 30.0f, -1.0f, 1.0f); /* baroreflex resets upward in exercise */
+    float ex = fclamp(0.35f * minf(p / vo2max_w, 1.0f) + 0.65f * vo2_frac, 0.0f, 1.0f);
+    float b = fclamp((h->base.map_set + 30.0f * ex - h->map) / 30.0f, -1.0f,
+                     1.0f); /* baroreflex resets upward in exercise */
     float chemo = fclamp((0.92f - h->sao2) / 0.3f, 0.0f, 1.0f) + 0.6f * fclamp((h->paco2 - 45.0f) / 25.0f, 0.0f, 1.0f);
     int diving = e->airway == AIRWAY_WATER;
     h->icp = 10.0f + 0.8f * h->ich + 0.012f * h->ich * h->ich;
@@ -1678,7 +1734,7 @@ void health_step(health *h, const health_env *e, double dt)
     float drive = 0.95f * ex + 0.85f * maxf(b, 0.0f) + (h->breathing ? 0.5f : -0.2f) * chemo + 0.025f * h->pain +
                   0.07f * maxf(0.0f, h->temp - 37.0f) + 0.25f * h->sepsis - 0.4f * maxf(-b, 0.0f) +
                   (h->lactate > 4.0f ? 0.02f * (h->lactate - 4.0f) : 0.0f);
-    float hr_rest = HR_REST * (h->temp < 35.0f ? fclamp(1.0f - (35.0f - h->temp) * 0.08f, 0.3f, 1.0f) : 1.0f);
+    float hr_rest = h->base.hr_rest * (h->temp < 35.0f ? fclamp(1.0f - (35.0f - h->temp) * 0.08f, 0.3f, 1.0f) : 1.0f);
     /* Above rest the drive spends the heart-rate reserve; below it, vagal
      * slowing scales the resting rate. */
     float hr_t = drive >= 0.0f ? hr_rest + (hr_max - hr_rest) * minf(drive, 1.0f)
@@ -1687,6 +1743,13 @@ void health_step(health *h, const health_env *e, double dt)
     if (cushing) hr_t = minf(hr_t, 50.0f);                     /* Cushing reflex */
     if (h->sao2 < 0.5f) hr_t *= 0.35f + 0.65f * h->sao2 / 0.5f; /* hypoxic bradycardia */
     if (h->organ[ORG_BRAIN] < 0.15f) hr_t = minf(hr_t, 50.0f);
+    if (h->base.vary && !arrest) {
+        /* Heart rate variability, a few bpm wandering over a few seconds,
+         * plus respiratory sinus arrhythmia: the vagus speeds the heart on
+         * inhalation and slows it on exhalation. */
+        h->hr_noise = wander(&h->vrng, h->hr_noise, dt, 3.0, 3.0f);
+        hr_t += h->hr_noise + 2.5f * sinf(6.2831853f * h->breath_phase);
+    }
     if (!arrest) h->hr = lag(h->hr, hr_t, dt, hr_t > h->hr ? 2.5 : 4.0);
 
     float contract = h->organ[ORG_HEART] * (0.85f + 0.35f * minf(1.0f, h->symp + ex)) *
@@ -1704,14 +1767,18 @@ void health_step(health *h, const health_env *e, double dt)
     h->svr = SVR0 * (0.85f + 0.9f * h->symp) / 0.985f * (1.0f - 0.6f * ex) * (1.0f - 0.5f * h->sepsis) /
              (1.0f + 0.15f * h->shock_debt * h->shock_debt);
     float map_t = co * h->svr + rap;
+    if (h->base.vary && !arrest) {
+        h->map_noise = wander(&h->vrng, h->map_noise, dt, 4.0, 2.0f); /* mmHg, beat-to-beat wander */
+        map_t += h->map_noise;
+    }
     h->map = lag(h->map, map_t, dt, 1.0);
-    float pp = arrest ? 0.0f : h->sv / 1.9f * (1.0f + 0.6f * ex + maxf(0.0f, (h->map - MAP_SET) / 150.0f));
+    float pp = arrest ? 0.0f : h->sv / 1.9f * (1.0f + 0.6f * ex + maxf(0.0f, (h->map - h->base.map_set) / 150.0f));
     h->sbp = h->map + pp * 2.0f / 3.0f;
     h->dbp = h->map - pp / 3.0f;
 
     /* Myocardial oxygen: rate-pressure product against coronary supply. */
     if (!arrest) {
-        float demand = h->hr * h->sbp / (HR_REST * 120.0f);
+        float demand = h->hr * h->sbp / (h->base.hr_rest * 120.0f);
         float diast = fclamp(1.2f - h->hr / 300.0f, 0.3f, 1.0f) / 0.987f;
         float coronary = fclamp((h->dbp - 5.0f) / 73.0f, 0.0f, 2.0f) * cao2_rel * diast;
         float supply = 6.0f * coronary * sqrtf(h->organ[ORG_HEART]);
@@ -1753,6 +1820,10 @@ void health_step(health *h, const health_env *e, double dt)
                      (h->lactate > 4.0f ? 0.9f * (h->lactate - 4.0f) : 0.0f) + 2.0f * maxf(0.0f, h->temp - 37.5f);
         if (!awake) rr_t = minf(rr_t, 24.0f);
         if (h->organ[ORG_BRAIN] < 0.3f) rr_t *= h->organ[ORG_BRAIN] / 0.3f;
+        if (h->base.vary) {
+            h->rr_noise = wander(&h->vrng, h->rr_noise, dt, 6.0, 1.0f); /* breaths/min, breath-to-breath jitter */
+            rr_t += h->rr_noise;
+        }
         h->rr = lag(h->rr, fclamp(rr_t, 4.0f, 55.0f), dt, 4.0);
         float pao2_target = maxf(0.0f, 0.21f * 713.0f - h->paco2 / 0.8f);
         float store_t = O2_VOL * pao2_target / 713.0f;
@@ -1785,6 +1856,10 @@ void health_step(health *h, const health_env *e, double dt)
     float svo2 = delivery > 1.0f ? fclamp(h->sao2 * (1.0f - h->vo2 * 1000.0f / delivery), 0.05f, 0.95f) : 0.1f;
     h->sao2 = fclamp((1.0f - shunt) * severinghaus(h->pao2) + shunt * svo2, 0.0f, 1.0f);
     h->spo2_shown = lag(h->spo2_shown, h->sao2, dt, 5.0);
+    if (h->base.vary) {
+        h->spo2_noise = wander(&h->vrng, h->spo2_noise, dt, 8.0, 0.005f); /* pulse-ox wander, +-0.5% */
+        h->spo2_shown = fclamp(h->spo2_shown + h->spo2_noise, 0.0f, 1.0f);
+    }
     h->etco2 = h->breathing ? maxf(0.0f, h->paco2 - 3.0f - 25.0f * maxf(0.0f, 1.0f - h->co / 4.0f)) : 0.0f;
 
     /* ---- brain */

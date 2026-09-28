@@ -1019,7 +1019,7 @@ static void game_init_world(game *g)
     log_info("spawn at %.1f %.1f %.1f with %d worker threads", g->pl.pos.x, g->pl.pos.y, g->pl.pos.z,
              jobs_worker_count(g->js));
 
-    health_init(&g->hl, g->seed ^ 0x9E3779B9u);
+    health_init_varied(&g->hl, g->seed ^ 0x9E3779B9u);
     if (o->hurt) apply_hurt(&g->hl, o->hurt);
 }
 
@@ -1228,7 +1228,7 @@ static void frame_interact(game *g, double dt)
             drop_everything(&g->ph, &g->inv, pl, &g->death_rng);
             world_load_blocking(&g->w, g->sx, g->sz, 1);
             player_spawn(pl, &g->w, g->sx, g->sz);
-            health_init(&g->hl, g->seed ^ (uint32_t)g->frame * 2654435761u);
+            health_init_varied(&g->hl, g->seed ^ (uint32_t)g->frame * 2654435761u);
             inv_starting_kit(&g->inv);
             g->hs.alert_count = 0;
             g_in.panel = 0;
@@ -1401,7 +1401,7 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
         break;
     case MENU_DEBUG_INJURE: health_injure(&g->hl, g->mn.debug_kind, g->mn.debug_part); break;
     case MENU_DEBUG_RESET:
-        health_init(&g->hl, g->seed ^ (uint32_t)g->frame * 2654435761u);
+        health_init_varied(&g->hl, g->seed ^ (uint32_t)g->frame * 2654435761u);
         log_info("debug menu: health reset");
         break;
     default: break;
