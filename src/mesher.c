@@ -52,8 +52,14 @@ static inline uint32_t face_key(const mesh_input *in, const uint8_t *cls, int pi
     uint8_t cb = cls[pi];
     if (cb == C_AIR) return 0;
     uint8_t cn = cls[ni];
-    if (cn == C_OPAQUE && cb != C_WATER) return 0; /* hidden: the common case, decided first */
     uint8_t b = in->blocks[pi];
+    if (cn == C_OPAQUE && cb != C_WATER) { /* hidden: the common case, decided first */
+        /* Leaves sway in block.vert and nothing else does, so where leaves
+         * touch another loaded block both faces stay: the one that moves
+         * away would otherwise open a gap into the block's empty inside. */
+        uint8_t nb = in->blocks[ni];
+        if ((b == B_LEAVES) == (nb == B_LEAVES) || nb >= B_COUNT) return 0;
+    }
     uint32_t key = K_PRESENT | block_get(b)->tex[f]; /* ids >= B_COUNT read as stone */
 
     if (cb == C_WATER) {
@@ -77,6 +83,10 @@ static inline uint32_t face_key(const mesh_input *in, const uint8_t *cls, int pi
     int ao2 = corner_ao(cls, ni, +su, +sv);
     int ao3 = corner_ao(cls, ni, -su, +sv);
     key |= (uint32_t)(ao0 | ao1 << 2 | ao2 << 4 | ao3 << 6) << 8;
+    /* The sway is a sine of the position, applied at the corners: a merged
+     * quad's edge stays a straight chord, and a neighbour's corner partway
+     * along it moves off that chord and opens a crack. */
+    if (b == B_LEAVES) key |= K_NOMERGE;
     return key;
 }
 
