@@ -1760,6 +1760,113 @@ health_limits health_get_limits(const health *h)
     return l;
 }
 
+void health_arrest(health *h, int rhythm)
+{
+    if (h->dead) return;
+    stop_heart(h, rhythm, AIRWAY_AIR);
+}
+
+/* -------------------------------------------------- debug injuries */
+
+/* The 10 original --hurt names keep their exact parameters and parts:
+ * changing them would change what a saved --hurt command line does.
+ * Everything after "infection" is new, for the debug menu and for --hurt
+ * to reach conditions that had no direct trigger before. */
+const health_debug_kind HEALTH_DEBUG_KINDS[HEALTH_DEBUG_COUNT] = {
+    {"bleed", "Bleeding (venous cut)", HDBG_ANY, BP_LLEG},
+    {"artery", "Arterial bleed", HDBG_ANY, BP_LLEG},
+    {"fracture", "Closed fracture", HDBG_ANY, BP_RARM},
+    {"open-fracture", "Open fracture", HDBG_ANY, BP_RLEG},
+    {"concussion", "Concussion", HDBG_HEAD, BP_HEAD},
+    {"burn", "Burn (2nd degree)", HDBG_ANY, BP_LARM},
+    {"dislocation", "Dislocated shoulder", HDBG_ARM, BP_RARM},
+    {"abrasion", "Abrasion (road rash)", HDBG_ANY, BP_LLEG},
+    {"crush", "Crush injury", HDBG_ANY, BP_LLEG},
+    {"infection", "Infected wound", HDBG_ANY, BP_LARM},
+    {"burn1", "Burn (1st degree)", HDBG_ANY, BP_LARM},
+    {"burn3", "Burn (3rd degree)", HDBG_ANY, BP_LARM},
+    {"frostnip", "Frostnip", HDBG_ANY, BP_LARM},
+    {"frostbite", "Frostbite (superficial)", HDBG_ANY, BP_LARM},
+    {"deep-frostbite", "Frostbite (deep, frozen through)", HDBG_ANY, BP_LARM},
+    {"hypothermia", "Hypothermia (core 33" DEG "C)", HDBG_SYSTEMIC, BP_HEAD},
+    {"hyperthermia", "Hyperthermia (core 40.5" DEG "C)", HDBG_SYSTEMIC, BP_HEAD},
+    {"pain", "Severe local pain", HDBG_ANY, BP_ABDOMEN},
+    {"shock", "Hypovolemic shock", HDBG_SYSTEMIC, BP_HEAD},
+    {"sepsis", "Sepsis", HDBG_SYSTEMIC, BP_HEAD},
+    {"vfib", "Cardiac arrest (V-fib)", HDBG_SYSTEMIC, BP_HEAD},
+    {"asystole", "Cardiac arrest (asystole)", HDBG_SYSTEMIC, BP_HEAD},
+};
+
+int health_debug_find(const char *name)
+{
+    for (int i = 0; i < HEALTH_DEBUG_COUNT; i++)
+        if (!strcmp(HEALTH_DEBUG_KINDS[i].name, name)) return i;
+    return -1;
+}
+
+/* Sets a frostbite stage directly, through the same state step_frost
+ * reads (freeze_time), so the result survives the next health_step
+ * instead of being read back down to none. */
+static void set_frostbite(health *h, int part, int stage)
+{
+    body_part *bp = &h->part[part];
+    bp->freeze_time = stage == FROST_DEEP ? 1000.0f : (stage == FROST_SUPERFICIAL ? 300.0f : 20.0f);
+    step_frost(h, part, 0.0f);
+}
+
+void health_injure(health *h, int kind, int part)
+{
+    if (h->dead || kind < 0 || kind >= HEALTH_DEBUG_COUNT) return;
+    const health_debug_kind *k = &HEALTH_DEBUG_KINDS[kind];
+    int p = k->default_part;
+    if (k->part_kind == HDBG_ANY && part >= 0 && part < BP_COUNT) p = part;
+    else if (k->part_kind == HDBG_ARM && is_arm(part)) p = part;
+    switch (kind) {
+    case 0: health_cut(h, p, 0.6f, 0, 0.3f); break;                    /* bleed */
+    case 1: health_cut(h, p, 0.7f, 1, 0.2f); break;                    /* artery */
+    case 2: health_break_bone(h, p, 0); break;                         /* fracture */
+    case 3: health_break_bone(h, p, 1); break;                         /* open-fracture */
+    case 4: health_blunt(h, BP_HEAD, 12.0); break;                     /* concussion */
+    case 5: health_burn(h, p, 5.0); break;                             /* burn (2nd degree) */
+    case 6: health_dislocate(h, p); break;                             /* dislocation */
+    case 7: health_abrasion(h, p, 0.3f, 0.7f); break;                  /* abrasion */
+    case 8: health_crush(h, p, 400.0, 600.0); break;                   /* crush */
+    case 9:                                                            /* infection */
+        if (h->wound_count < HEALTH_MAX_WOUNDS) {
+            health_cut(h, p, 0.5f, 0, 0.9f);
+            h->wounds[h->wound_count - 1].infection = 0.45f;
+        }
+        break;
+    case 10: health_burn(h, p, 0.6); break;                            /* burn1 */
+    case 11: health_burn(h, p, 2e4); break;                            /* burn3 */
+    case 12: set_frostbite(h, p, FROST_NIP); break;                    /* frostnip */
+    case 13: set_frostbite(h, p, FROST_SUPERFICIAL); break;            /* frostbite */
+    case 14: set_frostbite(h, p, FROST_DEEP); break;                   /* deep-frostbite */
+    case 15:                                                           /* hypothermia */
+        h->temp = 33.0f;
+        health_log(h, "Debug: hypothermia induced");
+        break;
+    case 16: /* hyperthermia */
+        h->temp = 40.5f;
+        health_log(h, "Debug: hyperthermia induced");
+        break;
+    case 17: h->part[p].pain_spike = 10.0f; break;                     /* pain */
+    case 18:                                                           /* shock: sudden 45% blood loss */
+        h->blood *= 0.55f;
+        h->rbc *= 0.55f;
+        h->shock_debt = maxf(h->shock_debt, 2.0f);
+        health_log(h, "Debug: hypovolemic shock induced");
+        break;
+    case 19: /* sepsis */
+        h->sepsis = maxf(h->sepsis, 0.7f);
+        health_log(h, "Debug: sepsis induced");
+        break;
+    case 20: health_arrest(h, RHYTHM_VF); break;                       /* vfib */
+    case 21: health_arrest(h, RHYTHM_ASYSTOLE); break;                 /* asystole */
+    default: break;
+    }
+}
+
 /* ------------------------------------------------------------- display */
 
 int health_spo2_reading(const health *h)
