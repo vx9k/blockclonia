@@ -1,4 +1,5 @@
 #include "hud.h"
+#include "debug.h"
 #include "palette.h"
 
 #include <math.h>
@@ -302,10 +303,13 @@ static void vitals(ui *u, const health *h, float x, float y)
     ui_text(u, x + 3, y + 3, 1, beat_color(h), UI_CH_HEART);
     uint32_t hrc = arrest || h->hr > 140.0f || h->hr < 45.0f ? (blink(h, 2) ? C_ART : C_TEXT) : C_ECG;
     ui_textf(u, x + 11, y + 3, 1, hrc, "%3.0f", arrest ? 0.0 : (double)h->hr);
-    ui_textf(u, x + 36, y + 3, 1, h->sbp < 90.0f ? C_ART : C_TEXT, "BP %3.0f/%-3.0f", (double)h->sbp, (double)h->dbp);
+    ui_textf(u, x + 34, y + 3, 1, h->sbp < 90.0f ? C_ART : C_TEXT, "BP %3.0f/%-3.0f", (double)h->sbp, (double)h->dbp);
+    /* The right-hand readouts end at the box's edge whatever their width. */
+    char b[24];
     int sp = health_spo2_reading(h);
-    if (sp < 0) ui_text(u, x + 104, y + 3, 1, C_DIM, "SpO2 --");
-    else ui_textf(u, x + 104, y + 3, 1, sp < 90 ? C_ART : C_PLETH, "SpO2 %d%%", sp);
+    if (sp < 0) snprintf(b, sizeof b, "SpO2 --");
+    else snprintf(b, sizeof b, "SpO2 %d%%", sp);
+    ui_text(u, x + w - 3 - ui_text_width(b, 1), y + 3, 1, sp < 0 ? C_DIM : (sp < 90 ? C_ART : C_PLETH), b);
     ui_rect(u, x + 3, y + 13, w - 6, 13, ui_rgba(0, 20, 8, 200));
     trace_scroll(u, h->ecg, h->wave_pos, HEALTH_WAVE_LEN / 2, x + 4, y + 14, w - 8, 11, -0.6f, 1.6f, C_ECG);
 
@@ -333,9 +337,9 @@ static void vitals(ui *u, const health *h, float x, float y)
                                        : (ta < 0.0f ? ui_rgba(150, 200, 255, 255) : (ta > 30.0f ? SEV[1] : C_TEXT));
     ui_textf(u, x + 3, y + 43, 1, tc, "Air %.0f" UI_CH_DEGREE "C", (double)ta);
     if (h->radiant > 1000.0f) ui_textf(u, x + 58, y + 43, 1, tc, "+%.1fkW", (double)(h->radiant / 1000.0f));
-    if (h->wet >= 0.05f)
-        ui_textf(u, x + 104, y + 43, 1, ui_rgba(90, 160, 255, 255), "Wet %d%%", (int)lroundf(h->wet * 100.0f));
-    else ui_text(u, x + 104, y + 43, 1, C_DIM, "Dry");
+    if (h->wet >= 0.05f) snprintf(b, sizeof b, "Wet %d%%", (int)lroundf(h->wet * 100.0f));
+    else snprintf(b, sizeof b, "Dry");
+    ui_text(u, x + w - 3 - ui_text_width(b, 1), y + 43, 1, h->wet >= 0.05f ? ui_rgba(90, 160, 255, 255) : C_DIM, b);
 }
 
 static void alert_line(ui *u, float x, float y, const char *text, int sev, float alpha, const health *h)
@@ -350,7 +354,7 @@ static void alert_line(ui *u, float x, float y, const char *text, int sev, float
 static void hud(ui *u, const health *h, const hud_state *s)
 {
     /* With the F3 overlay up, the vitals move below its left column. */
-    const float x = 4, y = s->debug ? 200 : 4;
+    const float x = 4, y = s->debug ? DEBUG_LEFT_BOTTOM : 4;
     vitals(u, h, x, y);
     float ay = y + 60;
     if (s->animated) {
@@ -508,7 +512,7 @@ static void labelled_bar(ui *u, float x, float y, const char *label, float frac,
 
 static void monitor(ui *u, const health *h, float x, float y, float w)
 {
-    const float row = 46, tw = w - 86; /* 84 px of numbers fits "200/120" */
+    const float row = 46, tw = w - 92; /* 84 px of numbers fits "200/120" at size 2 */
     ui_rect(u, x, y, w, row * 4 + 4, ui_rgba(0, 0, 0, 255));
     ui_frame(u, x, y, w, row * 4 + 4, 1, C_BORDER);
     int arrest = h->rhythm != RHYTHM_SINUS;
@@ -608,6 +612,12 @@ static void panel(ui *u, const health *h, const hud_state *s)
 {
     ui_rect(u, 0, 0, u->w, u->h, ui_rgba(0, 0, 0, 140));
     const float pw = 628, ph = 348;
+    /* Drop the GUI scale until the fixed-size panel fits whole: a high
+     * override (or a small window) otherwise leaves logical pixels short
+     * and runs the panel off the edge. Restored below, since the cursor
+     * and anything drawn after read u->scale at its usual value. */
+    const float saved_scale = u->scale, saved_w = u->w, saved_h = u->h;
+    ui_fit(u, pw + 8, ph + 8);
     const float x0 = floorf((u->w - pw) * 0.5f), y0 = floorf((u->h - ph) * 0.5f);
     ui_rect(u, x0, y0, pw, ph, C_PANEL);
     ui_frame(u, x0, y0, pw, ph, 1, C_BORDER);
@@ -727,6 +737,9 @@ static void panel(ui *u, const health *h, const hud_state *s)
             "1-7 select part   B bandage   S splint   D disinfect   C cool burn   X reduce joint");
     ui_text(u, x0 + 8, y0 + ph - 11, 1, C_DIM,
             "P painkiller   A antibiotics   E eat   R drink (in or facing water)   H close");
+    u->scale = saved_scale;
+    u->w = saved_w;
+    u->h = saved_h;
 }
 
 /* ------------------------------------------------------------ death */

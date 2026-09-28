@@ -10,6 +10,9 @@
 #include <stdint.h>
 
 #define DEBUG_HIST 240
+/* The left column ends above this (logical pixels) even with every
+ * optional line showing, so the HUD can start below it and stay put. */
+#define DEBUG_LEFT_BOTTOM 142.0f
 
 typedef struct {
     float ms[DEBUG_HIST];      /* frame times, ring buffer */

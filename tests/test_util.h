@@ -47,5 +47,6 @@ void test_bodies_all(void);
 void test_visual_all(void);
 void test_sound_all(void);
 void test_gpucaps_all(void);
+void test_hud_all(void);
 
 #endif

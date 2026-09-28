@@ -60,6 +60,10 @@ void ui_begin(ui *u, ui_vertex *mem, int max_quads, int fb_w, int fb_h);
 /* Overrides the automatic scale (the GUI scale setting). Clamped so the
  * screen stays at least 480x270 logical pixels; 0 keeps the automatic one. */
 void ui_set_scale(ui *u, int scale, int fb_w, int fb_h);
+/* Lowers the scale in whole steps, never below 1, until the screen is at
+ * least w x h logical pixels: for a view that must fit whole, drawn
+ * between saving and restoring scale, w and h. */
+void ui_fit(ui *u, float w, float h);
 
 void ui_rect(ui *u, float x, float y, float w, float h, uint32_t rgba);
 /* Corner colours clockwise from the top left: gradients for free. */
