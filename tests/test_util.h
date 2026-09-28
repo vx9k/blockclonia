@@ -48,5 +48,6 @@ void test_visual_all(void);
 void test_sound_all(void);
 void test_gpucaps_all(void);
 void test_health_debug_all(void);
+void test_defib_all(void);
 
 #endif
