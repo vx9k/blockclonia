@@ -162,6 +162,7 @@ set(MC_CORE_SOURCES
   src/paths.c
   src/physics.c
   src/save.c
+  src/save_db.c
   src/settings.c
   src/sound.c
   src/sound_synth.c
@@ -229,7 +230,8 @@ if(MC_BUILD_TESTS)
   enable_testing()
   add_executable(mc_tests tests/test_main.c tests/test_util.c tests/test_thermo.c tests/test_health2.c
                           tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_gpucaps.c
-                          tests/test_health_debug.c tests/test_defib.c tests/test_paths.c)
+                          tests/test_health_debug.c tests/test_defib.c tests/test_paths.c
+                          tests/test_save_db.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)
   set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT 120)
@@ -268,6 +270,9 @@ if(MC_BUILD_FUZZ)
   add_executable(fuzz_save tests/fuzz_save.c)
   target_link_libraries(fuzz_save PRIVATE mccore_fuzz)
   target_link_options(fuzz_save PRIVATE -fsanitize=fuzzer,address,undefined)
+  add_executable(fuzz_save_db tests/fuzz_save_db.c)
+  target_link_libraries(fuzz_save_db PRIVATE mccore_fuzz)
+  target_link_options(fuzz_save_db PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()
 
 # ---------------------------------------------------------------- install / package

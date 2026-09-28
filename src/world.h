@@ -46,7 +46,7 @@ typedef struct column {
     col_state state;
     uint8_t want_unload;   /* unload once the in-flight load job finishes */
     uint8_t modified;      /* differs from generated terrain: keep a save file */
-    uint8_t unsaved;       /* edited since it was last written to disk */
+    uint8_t unsaved;       /* edited since it was last written to disk (2: written, not yet committed) */
     uint8_t *blocks;       /* COL_VOL block ids */
     uint8_t *meta;         /* COL_VOL fluid levels, NULL when all zero */
     uint8_t dirty[SECTIONS];        /* needs re-meshing */
@@ -59,6 +59,7 @@ typedef struct column {
 } column;
 
 struct jobs;
+struct save_db;
 
 #define WORLD_URGENT 64
 
@@ -73,7 +74,7 @@ typedef struct world {
     int center_cx, center_cz;
     int have_center;
     uint32_t version_counter;
-    char save_dir[256];  /* empty: saving disabled */
+    struct save_db *db;  /* NULL: saving disabled; not owned */
     struct jobs *jobs;
     int gen_in_flight, mesh_in_flight;
     int max_gen_in_flight, max_mesh_in_flight;
@@ -102,9 +103,10 @@ typedef struct world {
 } world;
 
 /* An empty world: columns stream in from world_update. radius is clamped
- * to 2..32 columns; js runs generation and meshing; save_dir NULL means
- * nothing is loaded or saved. */
-void world_init(world *w, uint32_t seed, int radius, struct jobs *js, const char *save_dir);
+ * to 2..32 columns; js runs generation and meshing; db NULL means nothing
+ * is loaded or saved. The world reads db on the main thread only and hands
+ * the bytes to its load jobs. */
+void world_init(world *w, uint32_t seed, int radius, struct jobs *js, struct save_db *db);
 /* Waits for outstanding jobs and frees everything. Does not save: call
  * world_save_all first. */
 void world_destroy(world *w);

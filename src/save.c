@@ -289,21 +289,22 @@ int save_copy_file(const char *from, const char *to, size_t cap)
     return r;
 }
 
-/* "c.<cx>.<cz>.bin" exactly as column_path writes it, so no other name
- * (c.01.0.bin, c.+1.0.bin) can stand in for a column. */
-static int column_file_name(const char *name)
+int save_column_name(const char *name, int *cx, int *cz)
 {
     if (strncmp(name, "c.", 2) != 0) return 0;
     char *end;
     errno = 0;
-    long long cx = strtoll(name + 2, &end, 10);
+    long long x = strtoll(name + 2, &end, 10);
     if (errno || *end != '.') return 0;
-    const char *z = end + 1;
-    long long cz = strtoll(z, &end, 10);
-    if (errno || end == z || cx < INT_MIN || cx > INT_MAX || cz < INT_MIN || cz > INT_MAX) return 0;
+    const char *zs = end + 1;
+    long long z = strtoll(zs, &end, 10);
+    if (errno || end == zs || x < INT_MIN || x > INT_MAX || z < INT_MIN || z > INT_MAX) return 0;
     char canon[64];
-    int n = snprintf(canon, sizeof canon, "c.%d.%d.bin", (int)cx, (int)cz);
-    return n > 0 && (size_t)n < sizeof canon && strcmp(canon, name) == 0;
+    int n = snprintf(canon, sizeof canon, "c.%d.%d.bin", (int)x, (int)z);
+    if (n <= 0 || (size_t)n >= sizeof canon || strcmp(canon, name) != 0) return 0;
+    *cx = (int)x;
+    *cz = (int)z;
+    return 1;
 }
 
 /* Copies one file of a world folder; 1 if it was copied. */
@@ -321,10 +322,13 @@ static int copy_world_file(const char *from, const char *to, const char *name, u
 int save_copy_world(const char *from, const char *to)
 {
     uint32_t seed;
-    char dst[512];
+    char dst[512], db[512];
     struct stat st;
-    int n = snprintf(dst, sizeof dst, "%s/level.dat", to);
-    if (n < 0 || (size_t)n >= sizeof dst || exists(dst) || save_read_seed(from, &seed) != 0) return 0;
+    int cx, cz;
+    int n = snprintf(dst, sizeof dst, "%s/level.dat", to), m = snprintf(db, sizeof db, "%s/world.db", to);
+    if (n < 0 || (size_t)n >= sizeof dst || m < 0 || (size_t)m >= sizeof db || exists(dst) || exists(db) ||
+        save_read_seed(from, &seed) != 0)
+        return 0;
     if (lstat(from, &st) != 0 || !S_ISDIR(st.st_mode)) return 0; /* not through a symlinked folder */
     DIR *d = opendir(from);
     if (!d) return 0;
@@ -332,7 +336,7 @@ int save_copy_world(const char *from, const char *to)
     int copied = 0;
     const struct dirent *e;
     while ((e = readdir(d)) != NULL)
-        if (strcmp(e->d_name, "player.dat") == 0 || column_file_name(e->d_name))
+        if (strcmp(e->d_name, "player.dat") == 0 || save_column_name(e->d_name, &cx, &cz))
             copied += copy_world_file(from, to, e->d_name, buf);
     closedir(d);
     /* level.dat last: it is what marks `to` as a world, so a copy cut
