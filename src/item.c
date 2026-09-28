@@ -61,6 +61,12 @@ static const item_def ITEMS[ITEM_END - ITEM_FIRST] = {
                                      .tex = T_ITEM_WATER_BUCKET,
                                      .desc = "Right-click to pour; R to drink.",
                                      .density = 1080.0f},
+    [I_DEFIBRILLATOR - ITEM_FIRST] = {.name = "Defibrillator",
+                                      .stack = 1,
+                                      .block = B_AIR,
+                                      .tex = T_ITEM_DEFIBRILLATOR,
+                                      .desc = "Automatic. Right-click: pads on or off.",
+                                      .density = 650.0f},
 };
 
 static const item_def UNKNOWN = {

@@ -21,6 +21,7 @@ enum {
     I_APPLE,
     I_BUCKET,
     I_WATER_BUCKET,
+    I_DEFIBRILLATOR,
     ITEM_END
 };
 

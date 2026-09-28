@@ -49,6 +49,7 @@ typedef struct {
     int broke;           /* a block was broken by hand (not flying) */
     uint8_t broken_id;
     int eat;             /* right-clicked food: eat it */
+    int defib;           /* right-clicked the defibrillator: pads on or off */
     const char *msg;     /* short feedback, or NULL */
     interact_event ev[INTERACT_MAX_EVENTS];
     int ev_count;
