@@ -50,5 +50,7 @@ void test_gpucaps_all(void);
 void test_health_debug_all(void);
 void test_defib_all(void);
 void test_cardio_all(void);
+void test_paths_all(void);
+void test_save_db_all(void);
 
 #endif

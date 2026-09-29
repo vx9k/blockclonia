@@ -39,7 +39,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev \
+            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
       - run: cmake --preset ci-${{ matrix.compiler }}
       - run: cmake --build --preset ci-${{ matrix.compiler }}
@@ -53,7 +53,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev \
+            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev libwayland-bin libxkbcommon-dev
@@ -74,7 +74,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build glslc glslang-tools libvulkan-dev libglfw3-dev libmimalloc-dev \
+            ninja-build glslc glslang-tools libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev \
             clang clang-tidy clang-format cppcheck \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev libwayland-bin libxkbcommon-dev # GLFW from source, as in sanitize
@@ -97,7 +97,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build ca-certificates glslc file \
-            libvulkan-dev pkg-config \
+            libvulkan-dev libsqlite3-dev pkg-config \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev libwayland-bin libxkbcommon-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
@@ -125,7 +125,7 @@ jobs:
           apt-get install -y --no-install-recommends \
             cmake ninja-build ca-certificates glslc qemu-user \
             crossbuild-essential-armhf \
-            libvulkan-dev:armhf pkg-config libwayland-bin \
+            libvulkan-dev:armhf libsqlite3-dev:armhf pkg-config libwayland-bin \
             libx11-dev:armhf libxrandr-dev:armhf libxinerama-dev:armhf \
             libxcursor-dev:armhf libxi-dev:armhf \
             libwayland-dev:armhf libxkbcommon-dev:armhf
