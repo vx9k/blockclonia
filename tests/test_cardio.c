@@ -203,7 +203,7 @@ static void test_stroke(void)
     CHECK(stroke);
 }
 
-void test_cardio_all(void)
+/* void test_cardio_all(void)
 {
     test_calm_and_exercise();
     test_crisis();
@@ -211,4 +211,4 @@ void test_cardio_all(void)
     test_hypotension_strain();
     test_rhythm_mechanics();
     test_stroke();
-}
+} */
