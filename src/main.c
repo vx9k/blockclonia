@@ -19,6 +19,7 @@
 #include "physics.h"
 #include "renderer.h"
 #include "save.h"
+#include "save_db.h"
 #include "settings.h"
 #include "sound.h"
 #include "survival.h"
@@ -502,30 +503,26 @@ typedef struct {
     const player *pl;
     const inventory *inv;
     const thermo *th;
-    const char *dir;
+    save_db *db;
 } save_ctx;
 
 static void save_player(const save_ctx *sc)
 {
-    if (!sc->dir) return;
-    char path[512];
+    if (!sc->db) return;
     uint8_t buf[PLAYER_FILE_SIZE];
-    snprintf(path, sizeof path, "%s/player.dat", sc->dir);
     size_t n = survival_encode_player(sc->pl, sc->inv, thermo_day_time(sc->th), buf, sizeof buf);
-    if (!n || save_write_file(path, buf, n) != 0) log_warn("could not save %s", path);
+    if (!n || save_db_put_blob(sc->db, "player", buf, n) != 0) log_warn("could not save the player");
 }
 
 /* 1 if a saved player was loaded into pl and inv. */
-static int load_player(const char *dir, player *pl, inventory *inv, double *day)
+static int load_player(save_db *db, player *pl, inventory *inv, double *day)
 {
-    if (!dir) return 0;
-    char path[512];
+    if (!db) return 0;
     uint8_t buf[PLAYER_FILE_SIZE + 1];
-    snprintf(path, sizeof path, "%s/player.dat", dir);
-    long n = save_read_file(path, buf, sizeof buf);
+    long n = save_db_get_blob(db, "player", buf, sizeof buf);
     if (n < 0) return 0;
     if (survival_decode_player(pl, inv, day, buf, (size_t)n) != 0) {
-        log_warn("%s is corrupt; starting fresh", path);
+        log_warn("the saved player is corrupt; starting fresh");
         return 0;
     }
     return 1;
@@ -726,6 +723,7 @@ typedef struct {
     physics ph;
     thermo *th;
     world_hooks hooks;
+    save_db *db;              /* NULL: not saving */
     save_ctx sc;
     double sx, sz;            /* spawn point */
     player pl;
@@ -956,21 +954,37 @@ static void use_xdg_paths(const options *o)
     }
 }
 
-static uint32_t choose_seed(options *o)
+/* Opens the world's database into *db, first bringing in a world older
+ * builds kept as files in the same folder, and returns its seed (a new
+ * world takes --seed or a random one). Saving is off if that fails. */
+static uint32_t choose_seed(options *o, save_db **db)
 {
     uint32_t seed = o->have_seed ? o->seed : (uint32_t)time(NULL) * 2654435761u;
+    *db = NULL;
     if (!o->world_dir) return seed;
-    if (save_ensure_dir(o->world_dir) != 0) {
-        log_error("cannot create world directory '%s'; saving disabled", o->world_dir);
+    if (save_ensure_dir(o->world_dir) == 0) *db = save_db_open(o->world_dir);
+    if (!*db) {
+        log_error("cannot open world '%s'; saving disabled", o->world_dir);
         o->world_dir = NULL;
         return seed;
     }
+    /* Starting a new world over an old one that failed to import would
+     * hide it for good, so a failed import turns saving off instead. */
+    int n = save_db_import(*db, o->world_dir);
+    if (n < 0) {
+        log_error("could not import the world files in '%s'; saving disabled", o->world_dir);
+        save_db_close(*db);
+        *db = NULL;
+        o->world_dir = NULL;
+        return seed;
+    }
+    if (n > 0) log_info("imported %d world files into %s/world.db; they stay but are no longer read", n, o->world_dir);
     uint32_t saved;
-    if (save_read_seed(o->world_dir, &saved) == 0) {
+    if (save_db_get_seed(*db, &saved) == 0) {
         if (o->have_seed && saved != o->seed) log_warn("--seed ignored: world '%s' uses seed %u", o->world_dir, saved);
         return saved;
     }
-    if (save_write_seed(o->world_dir, seed) != 0) log_warn("could not write level.dat");
+    if (save_db_set_seed(*db, seed) != 0) log_warn("could not store the world seed");
     return seed;
 }
 
@@ -1009,14 +1023,14 @@ static void game_init_world(game *g)
                       .pipeline_cache = g_paths.pipelines};
     g->rd = renderer_create(g->win, &ro);
 
-    world_init(&g->w, g->seed, o->radius, g->js, o->world_dir);
+    world_init(&g->w, g->seed, o->radius, g->js, g->db);
     physics_init(&g->ph, &g->w);
     g->th = thermo_create(g->seed);
     g->hooks = (world_hooks){&g->ph, g->th, &g->w};
     g->w.edit_user = &g->hooks;
     g->w.on_block_changed = on_block_changed;
     g->w.on_column_unload = on_column_unload;
-    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, o->world_dir};
+    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, g->db};
     log_set_fatal_hook(save_on_fatal, &g->sc);
     renderer_bind_world(g->rd, &g->w);
 
@@ -1034,10 +1048,10 @@ static void game_init_world(game *g)
     }
     inv_starting_kit(&g->inv);
     double day = THERMO_DAY_START;
-    if (!o->have_spawn && !o->demo && load_player(o->world_dir, &g->pl, &g->inv, &day)) {
+    if (!o->have_spawn && !o->demo && load_player(g->db, &g->pl, &g->inv, &day)) {
         thermo_set_day_time(g->th, day);
         world_load_blocking(&g->w, g->pl.pos.x, g->pl.pos.z, 1);
-        log_info("player restored from %s/player.dat", o->world_dir);
+        log_info("player restored from %s/world.db", o->world_dir);
     }
     if (o->give) give_items(&g->inv, o->give);
     if (o->have_time) thermo_set_day_time(g->th, o->time_of_day);
@@ -1050,7 +1064,7 @@ static void game_init_world(game *g)
 
 static void game_init(game *g)
 {
-    g->seed = choose_seed(&g->o);
+    g->seed = choose_seed(&g->o, &g->db);
     log_info("seed %u", g->seed);
     g->win = open_window(&g->o);
     game_init_world(g);
@@ -1558,6 +1572,7 @@ static void game_shutdown(game *g)
     mem_free(g->ents);
     mem_free(g->fx);
     world_destroy(&g->w);
+    save_db_close(g->db);
     physics_destroy(&g->ph);
     thermo_destroy(g->th);
     jobs_destroy(g->js);

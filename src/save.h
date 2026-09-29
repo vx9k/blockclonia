@@ -1,6 +1,9 @@
-/* World persistence. Only columns the player changed are written, one file
- * per column, RLE-compressed. Files are untrusted input: the decoder
- * validates every field and rejects anything malformed. */
+/* World persistence: the encoding of a column (RLE-compressed; only
+ * columns the player changed are saved), checked file access, and the
+ * one-file-per-column format older builds kept worlds in, still read to
+ * import them (save_db.h stores worlds now). Saved data is untrusted
+ * input: the decoder validates every field and rejects anything
+ * malformed. */
 #ifndef MC_SAVE_H
 #define MC_SAVE_H
 
@@ -39,8 +42,13 @@ int save_write_file(const char *path, const void *data, size_t len);
  * failed. copy_world copies a world folder's level.dat, player.dat and
  * c.X.Z.bin files into the existing directory `to` and skips anything
  * else: returns the files copied, 0 if `from` has no valid level.dat or
- * `to` has one already. */
+ * `to` has a level.dat or world.db (save_db.h) already. */
 int save_copy_file(const char *from, const char *to, size_t cap);
 int save_copy_world(const char *from, const char *to);
+
+/* 1 and the coordinates if name is a column file name exactly as this
+ * module writes it ("c.-3.12.bin"), so no other spelling (c.01.0.bin,
+ * c.+1.0.bin) can stand in for a column. */
+int save_column_name(const char *name, int *cx, int *cz);
 
 #endif

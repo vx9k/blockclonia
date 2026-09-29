@@ -183,6 +183,16 @@ or burns.
 | 1 glass | 2 sand | a burning campfire nearby |
 | 1 brick | 2 dirt, 1 sand | a burning campfire nearby |
 
+## Saves
+
+Each world is one SQLite database, `world.db`, in the world's directory
+(named `world` unless `--world` says otherwise). A folder written by an
+older build (`level.dat`, `player.dat`, `c.X.Z.bin`) is imported into the
+database the first time it is opened; the old files are left in place but
+are no longer read. Only one running game can hold a world's database
+open at a time: pointing a second instance at the same directory disables
+saving for it instead of touching the world.
+
 ## Settings
 
 Settings are saved in `blockclonia.cfg` under the config directory (or
@@ -240,8 +250,9 @@ entirely.
 ## Building
 
 Dependencies: a C11 compiler, CMake ≥ 3.21, Ninja, the Vulkan headers and
-loader, `glslc` (shaderc), GLFW 3.5, mimalloc 3.5 and miniaudio 0.11. The
-build fetches GLFW 3.5.1, mimalloc 3.5.3 and miniaudio 0.11.25 when the
+loader, `glslc` (shaderc), GLFW 3.5, mimalloc 3.5, miniaudio 0.11 and
+SQLite 3.31+ (`libsqlite3-dev`). The build fetches GLFW 3.5.1, mimalloc
+3.5.3, miniaudio 0.11.25 and the SQLite 3.53.4 amalgamation when the
 system copies are missing or older. `-DMC_DEPS=SYSTEM` still accepts GLFW
 3.3+ and mimalloc 2.1+ for distro packaging, and builds a silent game if
 miniaudio isn't installed.
@@ -250,7 +261,7 @@ Debian, Ubuntu, Raspberry Pi OS:
 
 ```sh
 sudo apt install build-essential cmake ninja-build glslc libvulkan-dev \
-                 libglfw3-dev libmimalloc-dev mesa-vulkan-drivers
+                 libglfw3-dev libmimalloc-dev libsqlite3-dev mesa-vulkan-drivers
 cmake --preset native            # tuned for this machine (use this on a Pi)
 cmake --build --preset native
 ./build/native/blockclonia
@@ -262,8 +273,11 @@ cmake --build --preset native
   (`libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
   libwayland-dev libwayland-bin libxkbcommon-dev`). `-DMC_DEPS=SYSTEM` forbids downloads; `FETCH` always
   uses the pinned releases. For a reproducible build, set
-  `MC_MIMALLOC_SHA256`, `MC_GLFW_SHA256` and `MC_MINIAUDIO_SHA256` (see
-  [SECURITY.md](SECURITY.md#supply-chain)).
+  `MC_MIMALLOC_SHA256`, `MC_GLFW_SHA256`, `MC_MINIAUDIO_SHA256` and
+  `MC_SQLITE_SHA256` (see [SECURITY.md](SECURITY.md#supply-chain)).
+  `MC_SQLITE_VERSION` and `MC_SQLITE_YEAR` pick a different pinned
+  release. Offline, point `FETCHCONTENT_SOURCE_DIR_SQLITE` at an existing
+  `build/*/_deps/sqlite-src` checkout instead of downloading.
 - `-DMC_SOUND=OFF` builds without sound (no miniaudio needed).
 - `cmake --list-presets` shows the rest: `dev`, `release` (-O2 + LTO,
   portable), `profile`, `asan`, `core` (no Vulkan or GLFW needed), `fuzz`,

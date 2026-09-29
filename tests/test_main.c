@@ -1420,6 +1420,7 @@ int main(void)
     test_health_debug_all();
     test_defib_all();
     test_paths_all();
+    test_save_db_all();
     printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);
     return g_failed ? 1 : 0;
 }

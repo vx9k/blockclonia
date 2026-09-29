@@ -1,10 +1,11 @@
 #include "world.h"
 #include "jobs.h"
+#include "log.h"
+#include "mathlib.h"
 #include "mem.h"
 #include "mesher.h"
 #include "save.h"
-#include "log.h"
-#include "mathlib.h"
+#include "save_db.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -186,17 +187,19 @@ typedef struct {
     job base;
     world *w;
     column *c;
+    uint8_t *saved; /* the column's saved bytes, fetched on the main thread */
+    long saved_len; /* -1: never saved, -2: unusable row */
 } gen_job;
 
 static void gen_run(job *j)
 {
     gen_job *g = (gen_job *)j;
     int loaded = 0;
-    if (g->w->save_dir[0]) {
-        int r = save_load_column(g->w->save_dir, g->c);
-        if (r < 0)
-            log_warn("column %d,%d: save file corrupt, regenerating", g->c->cx, g->c->cz);
-        loaded = r > 0;
+    if (g->saved_len != -1) {
+        loaded = g->saved_len >= 0 && save_decode_column(g->c, g->saved, (size_t)g->saved_len) == 0;
+        if (!loaded) log_warn("column %d,%d: saved data corrupt, regenerating", g->c->cx, g->c->cz);
+        mem_free(g->saved);
+        g->saved = NULL;
     }
     if (!loaded) {
         if (g->w->generator) g->w->generator(g->w->seed, g->c);
@@ -240,15 +243,15 @@ static void request_column(world *w, int cx, int cz)
     g->base.done = gen_done;
     g->w = w;
     g->c = c;
+    g->saved_len = w->db ? save_db_get_column(w->db, cx, cz, &g->saved) : -1;
     w->gen_in_flight++;
     jobs_submit(w->jobs, &g->base);
 }
 
 static void store_column(const world *w, column *c)
 {
-    if (!c->unsaved || !w->save_dir[0]) return;
-    if (save_store_column(w->save_dir, c) != 0)
-        log_error("failed to save column %d,%d", c->cx, c->cz);
+    if (!c->unsaved || !w->db) return;
+    if (save_db_put_column(w->db, c) != 0) log_error("failed to save column %d,%d", c->cx, c->cz);
     else
         c->unsaved = 0;
 }
@@ -523,7 +526,7 @@ static int cmp_dist(const void *a, const void *b)
     return (da > db) - (da < db);
 }
 
-void world_init(world *w, uint32_t seed, int radius, jobs *js, const char *save_dir)
+void world_init(world *w, uint32_t seed, int radius, jobs *js, struct save_db *db)
 {
     memset(w, 0, sizeof *w);
     w->seed = seed;
@@ -539,11 +542,7 @@ void world_init(world *w, uint32_t seed, int radius, jobs *js, const char *save_
     w->max_gen_in_flight = workers ? 8 * workers : 1;
     w->max_mesh_in_flight = workers ? 16 * workers : 1;
     w->eye_sy = SEA_LEVEL / SECTION_H;
-    if (save_dir && save_dir[0]) {
-        size_t n = strlen(save_dir);
-        if (n >= sizeof w->save_dir) log_fatal("save directory path too long");
-        memcpy(w->save_dir, save_dir, n + 1);
-    }
+    w->db = db;
 
     int r = w->radius + 1;
     w->spiral = mem_alloc(mem_array_size((size_t)(2 * r + 1) * (size_t)(2 * r + 1), sizeof *w->spiral));
@@ -625,10 +624,20 @@ void world_load_blocking(world *w, double px, double pz, int radius)
 
 void world_save_all(world *w)
 {
-    if (!w->save_dir[0]) return;
+    if (!w->db) return;
+    /* One transaction for the batch. A column counts as saved only once
+     * the commit went through; otherwise the next save tries it again. */
+    int batch = save_db_begin(w->db) == 0;
     for (int i = 0; i < w->grid_w * w->grid_w; i++) {
         column *c = w->grid[i];
-        if (c && c->state == COL_READY) store_column(w, c);
+        if (!c || c->state != COL_READY || !c->unsaved) continue;
+        if (save_db_put_column(w->db, c) == 0) c->unsaved = 2;
+        else log_error("failed to save column %d,%d", c->cx, c->cz);
+    }
+    int ok = !batch || save_db_commit(w->db) == 0;
+    for (int i = 0; i < w->grid_w * w->grid_w; i++) {
+        column *c = w->grid[i];
+        if (c && c->unsaved == 2) c->unsaved = ok ? 0 : 1;
     }
 }
 
