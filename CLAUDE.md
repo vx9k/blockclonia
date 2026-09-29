@@ -39,7 +39,7 @@
 - Subagents live in `.claude/agents/` (see its `README.md`), in three
   tiers: `docs-writer` (Sonnet 5.5, medium effort) for prose-only work,
   `general-dev` (Opus 5.5, medium effort) for everyday development, and
-  `deep-reasoning` (Fable 5.1, max effort) as the default for complex or
+  `deep-reasoning` (Opus 5.5, high effort) as the default for complex or
   high-stakes work: design decisions, cross-module bugs, file formats,
   the Vulkan 1.0 path and anything security-sensitive. Pick the cheapest
   tier that fits, and delegate when the user asks for it.
