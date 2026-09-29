@@ -1,7 +1,7 @@
 ---
 name: deep-reasoning
 description: Maximum-depth tier for high-stakes work. Use for architecture and design decisions (new subsystems, data formats, threading or frame-loop changes), hard bugs that span several modules or resist reproduction (heisenbugs, races, nondeterminism, GPU synchronization or validation errors), changes with a wide blast radius (shared headers, the vertex format, save compatibility, the Vulkan 1.0 fallback path), and anything security-sensitive (parsing untrusted world, settings or cache files, file-system access, dependency fetching and pinning). Route here when being wrong is expensive; it is slower and costlier than general-dev, so do not use it for routine work.
-model: opus
+model: fable
 effort: max
 tools: Read, Edit, Write, Bash
 ---

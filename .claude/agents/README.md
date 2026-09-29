@@ -10,9 +10,9 @@ rules through `CLAUDE.md`.)
 
 | Agent | Model | Effort | Tools | Use it for |
 |---|---|---|---|---|
-| `docs-writer` | `haiku` | not set | Read, Edit, Write, Bash | Prose only: README and docs pages, comments, changelogs, templates, formatting |
-| `general-dev` | `opus` | `medium` | Read, Edit, Write, Bash | Everyday features, contained refactors, reproducible bugs, tests, code review |
-| `deep-reasoning` | `opus` | `max` | Read, Edit, Write, Bash | Architecture, hard cross-module bugs, wide blast radius, security-sensitive changes |
+| `docs-writer` | `sonnet` (Sonnet 5.5) | `medium` | Read, Edit, Write, Bash | Prose only: README and docs pages, comments, changelogs, templates, formatting |
+| `general-dev` | `opus` (Opus 5.5) | `medium` | Read, Edit, Write, Bash | Everyday features, contained refactors, reproducible bugs, tests, code review |
+| `deep-reasoning` | `fable` (Fable 5.1) | `max` | Read, Edit, Write, Bash | Architecture, hard cross-module bugs, wide blast radius, security-sensitive changes |
 
 ## What sends a task to each tier
 
@@ -62,9 +62,9 @@ start a new session.
 The `effort` field in the frontmatter controls how much each tier
 reasons. It accepts `low`, `medium`, `high`, `xhigh`, `max` or an integer.
 Claude Code documents `max` as "use sparingly for the hardest tasks",
-which is why only deep-reasoning has it. docs-writer leaves `effort`
-unset: it runs on Haiku, and effort levels only apply to models that
-support them.
+which is why only deep-reasoning has it. docs-writer runs Sonnet at
+`medium`: documentation needs the facts read carefully from the code, but
+not the depth of the engineering tiers.
 
 The system prompts also contain the phrases "think hard" (general-dev)
 and "ultrathink" (deep-reasoning), but in Claude Code 2.1.283 they only
@@ -81,7 +81,10 @@ wording.
 ## Notes
 
 - `model` accepts `haiku`, `sonnet`, `opus`, `fable`, `inherit` or a full
-  model ID. If your organisation restricts models, a disallowed model
+  model ID. The tiers use the aliases, which resolve to the newest release
+  of each model (Fable 5.1, Opus 5.5 and Sonnet 5.5 at the time of
+  writing), so a new release needs no edit here. Pin a full model ID
+  instead if a tier must stay on one version. If your organisation restricts models, a disallowed model
   falls back to the session's model.
 - This Claude Code build has no Grep or Glob tools, so every tier gets
   Bash for searching (`grep` here is ugrep). docs-writer's prompt limits
