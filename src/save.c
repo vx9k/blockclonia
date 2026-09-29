@@ -1,8 +1,10 @@
 #include "save.h"
 #include "mem.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -268,4 +270,78 @@ int save_write_file(const char *path, const void *data, size_t len)
     int n = snprintf(tmp, sizeof tmp, "%s.tmp", path);
     if (n < 0 || (size_t)n >= sizeof tmp) return -1;
     return write_atomic(path, tmp, data, len);
+}
+
+static int exists(const char *path)
+{
+    struct stat st;
+    return lstat(path, &st) == 0 || errno != ENOENT;
+}
+
+int save_copy_file(const char *from, const char *to, size_t cap)
+{
+    if (exists(to)) return 0;
+    uint8_t *buf = mem_alloc(cap ? cap : 1);
+    long len = read_regular(from, buf, cap);
+    int r = 0;
+    if (len >= 0 && (size_t)len <= cap) r = save_write_file(to, buf, (size_t)len) == 0 ? 1 : -1;
+    mem_free(buf);
+    return r;
+}
+
+int save_column_name(const char *name, int *cx, int *cz)
+{
+    if (strncmp(name, "c.", 2) != 0) return 0;
+    char *end;
+    errno = 0;
+    long long x = strtoll(name + 2, &end, 10);
+    if (errno || *end != '.') return 0;
+    const char *zs = end + 1;
+    long long z = strtoll(zs, &end, 10);
+    if (errno || end == zs || x < INT_MIN || x > INT_MAX || z < INT_MIN || z > INT_MAX) return 0;
+    char canon[64];
+    int n = snprintf(canon, sizeof canon, "c.%d.%d.bin", (int)x, (int)z);
+    if (n <= 0 || (size_t)n >= sizeof canon || strcmp(canon, name) != 0) return 0;
+    *cx = (int)x;
+    *cz = (int)z;
+    return 1;
+}
+
+/* Copies one file of a world folder; 1 if it was copied. */
+static int copy_world_file(const char *from, const char *to, const char *name, uint8_t *buf)
+{
+    char src[512], dst[512];
+    int a = snprintf(src, sizeof src, "%s/%s", from, name), b = snprintf(dst, sizeof dst, "%s/%s", to, name);
+    if (a < 0 || (size_t)a >= sizeof src || b < 0 || (size_t)b >= sizeof dst || exists(dst)) return 0;
+    /* Symlinks, FIFOs and oversized files are left behind, as loading
+     * would reject them. */
+    long len = read_regular(src, buf, SAVE_MAX_FILE);
+    return len >= 0 && len <= (long)SAVE_MAX_FILE && save_write_file(dst, buf, (size_t)len) == 0;
+}
+
+int save_copy_world(const char *from, const char *to)
+{
+    uint32_t seed;
+    char dst[512], db[512];
+    struct stat st;
+    int cx, cz;
+    int n = snprintf(dst, sizeof dst, "%s/level.dat", to), m = snprintf(db, sizeof db, "%s/world.db", to);
+    if (n < 0 || (size_t)n >= sizeof dst || m < 0 || (size_t)m >= sizeof db || exists(dst) || exists(db) ||
+        save_read_seed(from, &seed) != 0)
+        return 0;
+    if (lstat(from, &st) != 0 || !S_ISDIR(st.st_mode)) return 0; /* not through a symlinked folder */
+    DIR *d = opendir(from);
+    if (!d) return 0;
+    uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
+    int copied = 0;
+    const struct dirent *e;
+    while ((e = readdir(d)) != NULL)
+        if (strcmp(e->d_name, "player.dat") == 0 || save_column_name(e->d_name, &cx, &cz))
+            copied += copy_world_file(from, to, e->d_name, buf);
+    closedir(d);
+    /* level.dat last: it is what marks `to` as a world, so a copy cut
+     * short is retried on the next start instead of passing for done. */
+    copied += copy_world_file(from, to, "level.dat", buf);
+    mem_free(buf);
+    return copied;
 }

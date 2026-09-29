@@ -37,6 +37,10 @@ int settings_parse(settings *s, const char *text);
 /* Writes the whole set as text; returns the length (always < cap). */
 int settings_format(const settings *s, char *out, int cap);
 
+/* The largest settings file read: ~300 bytes, with room for comments a
+ * player adds. */
+#define SETTINGS_MAX_FILE 4095
+
 /* 0 on success; a missing or unreadable file leaves s unchanged. */
 int settings_load(settings *s, const char *path);
 int settings_save(const settings *s, const char *path);

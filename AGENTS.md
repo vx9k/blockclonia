@@ -30,8 +30,9 @@ tools/lint.sh                                      # the CI lint gate; run it be
 - No GPU (CI, containers): `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`
   selects Mesa's software rasterizer; under a headless session wrap the
   command in `xvfb-run -a`.
-- Offline: point `FETCHCONTENT_SOURCE_DIR_MIMALLOC`, `..._GLFW` and
-  `..._MINIAUDIO` at an existing `build/*/_deps/*-src` checkout.
+- Offline: point `FETCHCONTENT_SOURCE_DIR_MIMALLOC`, `..._GLFW`,
+  `..._MINIAUDIO` and `..._SQLITE` at an existing `build/*/_deps/*-src`
+  checkout.
 
 A change is done when both compilers build it with `-DMC_WERROR=ON`,
 `mc_tests` passes, `tools/lint.sh` is clean, and anything visible has been
@@ -107,6 +108,11 @@ and clang. `.clang-tidy` and `cppcheck` run in `tools/lint.sh`.
   `save_write_file`: regular files only, no symlinks followed, writes made
   atomic through a temporary file and `rename`. Don't open world files any
   other way.
+- Each world lives in one SQLite database, `world.db`, opened through
+  `save_db.c`. Treat it as untrusted input too: it is opened without
+  following symlinks, with SQLite's defensive mode, untrusted schema and
+  no extensions, and refused unless its schema matches exactly. Callers
+  still decode every row through the checked decoders in `save.c`.
 - Formats are versioned by a magic tag (`INV1`, ...). Change the tag when
   the layout changes, and keep reading the old one when that is cheap.
 - New parsers get a round-trip test, a corruption test and, when they read
