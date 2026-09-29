@@ -109,7 +109,7 @@ if(MC_BUILD_GAME)
 elseif(MC_VK_MIMALLOC)
   find_package(Vulkan QUIET) # headers only, for the allocation callbacks
 endif()
-include(Dependencies) # mc::mimalloc, and mc::glfw when MC_BUILD_GAME
+include(Dependencies) # mc::mimalloc, mc::sqlite, and mc::glfw when MC_BUILD_GAME
 
 # ---------------------------------------------------------------- LTO
 # Set after the dependencies so only our own targets are affected, and for
@@ -159,8 +159,10 @@ set(MC_CORE_SOURCES
   src/menu.c
   src/mesher.c
   src/noise.c
+  src/paths.c
   src/physics.c
   src/save.c
+  src/save_db.c
   src/settings.c
   src/sound.c
   src/sound_synth.c
@@ -176,7 +178,7 @@ set(MC_CORE_SOURCES
 function(mc_add_core name)
   add_library(${name} STATIC ${MC_CORE_SOURCES})
   target_include_directories(${name} PUBLIC src)
-  target_link_libraries(${name} PUBLIC Threads::Threads PRIVATE mc_warnings)
+  target_link_libraries(${name} PUBLIC Threads::Threads mc::sqlite PRIVATE mc_warnings)
   if(NOT MC_SANITIZE)
     target_link_libraries(${name} PUBLIC mc::mimalloc)
   endif()
@@ -228,7 +230,8 @@ if(MC_BUILD_TESTS)
   enable_testing()
   add_executable(mc_tests tests/test_main.c tests/test_util.c tests/test_thermo.c tests/test_health2.c
                           tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_gpucaps.c
-                          tests/test_health_debug.c tests/test_defib.c)
+                          tests/test_health_debug.c tests/test_defib.c tests/test_paths.c
+                          tests/test_save_db.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)
   set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT 120)
@@ -267,6 +270,9 @@ if(MC_BUILD_FUZZ)
   add_executable(fuzz_save tests/fuzz_save.c)
   target_link_libraries(fuzz_save PRIVATE mccore_fuzz)
   target_link_options(fuzz_save PRIVATE -fsanitize=fuzzer,address,undefined)
+  add_executable(fuzz_save_db tests/fuzz_save_db.c)
+  target_link_libraries(fuzz_save_db PRIVATE mccore_fuzz)
+  target_link_options(fuzz_save_db PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()
 
 # ---------------------------------------------------------------- install / package
