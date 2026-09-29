@@ -245,6 +245,13 @@ entirely.
 | Procedural textures with mipmaps and procedural sound, generated at startup | No asset files to ship or parse |
 | Vulkan 1.0 core with zero required optional features | Runs on anything with a Vulkan driver, including Raspberry Pi (V3DV) |
 
+By default the renderer negotiates the highest API version the loader,
+the Vulkan headers it was built against and the renderer itself (1.4)
+all support. `MC_VK_API=1.0|1.1|1.2|1.3|1.4` caps that, to test the 1.0
+fallbacks on a newer machine; an unrecognized value logs a warning and is
+ignored, leaving the version uncapped. The negotiated version shows up in
+the startup GPU log line and in the F3 overlay.
+
 ![the F3 debug overlay](docs/debug.jpg)
 
 ## Building
