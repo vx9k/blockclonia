@@ -1,9 +1,9 @@
 {
-  "advisorModel": "sonnet",
+  "advisorModel": "opus",
   "enabledPlugins": {
     "claude-mem@thedotmack": true
   },
-  "maxEffortLevel": "xhigh",
+  "maxEffortLevel": "high",
   "outputStyle": "Proactive",
   "showThinkingSummaries": true,
   "sandbox": {
