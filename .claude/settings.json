@@ -1,0 +1,12 @@
+{
+  "advisorModel": "sonnet",
+  "enabledPlugins": {
+    "claude-mem@thedotmack": true
+  },
+  "maxEffortLevel": "xhigh",
+  "outputStyle": "Proactive",
+  "showThinkingSummaries": true,
+  "sandbox": {
+    "enabled": true
+  }
+}
