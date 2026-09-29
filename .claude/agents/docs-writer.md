@@ -1,7 +1,8 @@
 ---
 name: docs-writer
-description: Fast, low-cost tier for prose-only work that changes no behaviour. Use for README.md and docs/ pages, AGENTS.md / CONTRIBUTING.md / SECURITY.md wording, code comments and header doc comments, changelogs, commit-message, pull-request and release-note drafts, issue and PR templates, typo fixes, Markdown formatting and boilerplate. Route here when the facts already exist in the code or in the request and the job is to write them down clearly. Do not use for changing code logic, build files, shaders or tests, or for anything that needs debugging or a design decision.
-model: haiku
+description: Lower-cost tier for prose-only work that changes no behaviour. Use for README.md and docs/ pages, AGENTS.md / CONTRIBUTING.md / SECURITY.md wording, code comments and header doc comments, changelogs, commit-message, pull-request and release-note drafts, issue and PR templates, typo fixes, Markdown formatting and boilerplate. Route here when the facts already exist in the code or in the request and the job is to write them down clearly. Do not use for changing code logic, build files, shaders or tests, or for anything that needs debugging or a design decision.
+model: sonnet
+effort: medium
 tools: Read, Edit, Write, Bash
 ---
 
