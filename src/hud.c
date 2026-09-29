@@ -16,7 +16,7 @@ static int blink(const health *h, double hz) { return fmod(h->t * hz, 1.0) < 0.5
 /* The heart glyph flashes on each beat. */
 static uint32_t beat_color(const health *h)
 {
-    int beat = h->rhythm == RHYTHM_SINUS && h->t - h->last_r < 0.12;
+    int beat = health_rhythm_perfusing(h->rhythm) && h->t - h->last_r < 0.12;
     return beat ? ui_rgba(255, 90, 90, 255) : ui_rgba(170, 40, 40, 255);
 }
 
@@ -155,7 +155,7 @@ __attribute__((format(printf, 4, 5))) static void add_alert(alert_list *l, uint3
 static int defib_prompt(const health *h, char *buf, size_t n)
 {
     const defib_state *d = &h->defib;
-    int arrest = h->rhythm != RHYTHM_SINUS;
+    int arrest = !health_rhythm_perfusing(h->rhythm);
     switch (d->phase) {
     case DEFIB_ANALYSE: snprintf(buf, n, "Defibrillator: analysing rhythm"); return arrest ? 3 : 1;
     case DEFIB_CHARGE: snprintf(buf, n, "Defibrillator: shock advised, charging %.0f J", (double)d->joules); return 3;
@@ -172,8 +172,12 @@ static int defib_prompt(const health *h, char *buf, size_t n)
 static void alerts_vital(const health *h, alert_list *l)
 {
     float bleed = h->bleed_ext + h->bleed_int;
-    if (h->rhythm == RHYTHM_VF) add_alert(l, KEY, 3, "CARDIAC ARREST (VF)");
-    else if (h->rhythm == RHYTHM_ASYSTOLE) add_alert(l, KEY, 3, "CARDIAC ARREST");
+    int arrest = !health_rhythm_perfusing(h->rhythm);
+    if (h->rhythm == RHYTHM_ASYSTOLE) add_alert(l, KEY, 3, "CARDIAC ARREST");
+    else if (arrest) add_alert(l, KEY, 3, "CARDIAC ARREST (%s)", health_rhythm_short(h->rhythm));
+    else if (h->rhythm == RHYTHM_VT) add_alert(l, KEY, 3, "Racing heartbeat (VT)");
+    else if (h->rhythm == RHYTHM_AVB3) add_alert(l, KEY, 3, "Slow heartbeat (heart block)");
+    else if (h->rhythm == RHYTHM_AF) add_alert(l, KEY, 2, "Irregular heartbeat (AF)");
     if (h->defib.phase != DEFIB_OFF) {
         char t[64];
         int sev = defib_prompt(h, t, sizeof t);
@@ -184,10 +188,17 @@ static void alerts_vital(const health *h, alert_list *l)
     for (int i = 0; i < BP_COUNT; i++) pinned += h->part[i].crush_load;
     if (pinned > 0.0f) add_alert(l, KEY, 3, "Crushed: pinned under %.0f kg", (double)pinned);
     if (bleed >= 5.0f) add_alert(l, KEY, bleed > 30.0f ? 3 : 2, "Bleeding %.0f mL/min", (double)bleed);
-    if (!h->breathing && h->conscious != CONS_UNCONSCIOUS && h->rhythm == RHYTHM_SINUS)
+    if (!h->breathing && h->conscious != CONS_UNCONSCIOUS && !arrest)
         add_alert(l, KEY, h->sao2 < 0.85f || h->lung_water > 0.02f ? 3 : 1, "%s",
                   h->lung_water > 0.02f ? "Drowning" : (pinned > 0.0f ? "Can't breathe" : "Holding breath"));
-    if (h->sao2 < 0.9f && h->rhythm == RHYTHM_SINUS) add_alert(l, KEY, h->sao2 < 0.8f ? 3 : 2, "Low oxygen");
+    if (h->sao2 < 0.9f && !arrest) add_alert(l, KEY, h->sao2 < 0.8f ? 3 : 2, "Low oxygen");
+    /* A crisis by the ACC/AHA line (180/120); dizziness when the systolic
+     * no longer keeps the head perfused; angina from an ischaemic heart. */
+    if (!arrest && (h->sbp >= 180.0f || h->dbp >= 120.0f))
+        add_alert(l, KEY, 3, "Hypertensive crisis %.0f/%.0f", (double)h->sbp, (double)h->dbp);
+    else if (!arrest && h->sbp < 90.0f && h->conscious != CONS_UNCONSCIOUS)
+        add_alert(l, KEY, h->sbp < 75.0f ? 3 : 2, "Dizzy: low blood pressure");
+    if (!arrest && h->ischemia > 1.0f && h->conscious != CONS_UNCONSCIOUS) add_alert(l, KEY, 3, "Chest pain");
 }
 
 /* Burns, broken bones, joints, frostbite and crushed muscle. */
@@ -321,7 +332,7 @@ static void vitals(ui *u, const health *h, float x, float y)
 {
     const float w = 152;
     ui_rect(u, x, y, w, 56, ui_rgba(0, 0, 0, 150));
-    int arrest = h->rhythm != RHYTHM_SINUS;
+    int arrest = !health_rhythm_perfusing(h->rhythm);
     ui_text(u, x + 3, y + 3, 1, beat_color(h), UI_CH_HEART);
     uint32_t hrc = arrest || h->hr > 140.0f || h->hr < 45.0f ? (blink(h, 2) ? C_ART : C_TEXT) : C_ECG;
     ui_textf(u, x + 11, y + 3, 1, hrc, "%3.0f", arrest ? 0.0 : (double)h->hr);
@@ -537,7 +548,7 @@ static void monitor(ui *u, const health *h, float x, float y, float w)
     const float row = 46, tw = w - 92; /* 84 px of numbers fits "200/120" at size 2 */
     ui_rect(u, x, y, w, row * 4 + 4, ui_rgba(0, 0, 0, 255));
     ui_frame(u, x, y, w, row * 4 + 4, 1, C_BORDER);
-    int arrest = h->rhythm != RHYTHM_SINUS;
+    int arrest = !health_rhythm_perfusing(h->rhythm);
     char b[48];
 
     /* ECG, lead II. */
@@ -551,7 +562,8 @@ static void monitor(ui *u, const health *h, float x, float y, float w)
     ui_text(u, x + tw + 22, ry + 1, 1, beat_color(h), UI_CH_HEART);
     snprintf(b, sizeof b, "%.0f", arrest ? 0.0 : (double)h->hr);
     ui_text(u, x + tw + 8, ry + 12, 3, c, b);
-    if (arrest) ui_text(u, x + tw + 8, ry + 38, 1, C_ART, h->rhythm == RHYTHM_VF ? "VF" : "ASYSTOLE");
+    if (h->rhythm != RHYTHM_SINUS)
+        ui_text(u, x + tw + 8, ry + 38, 1, arrest ? C_ART : C_CO2, health_rhythm_short(h->rhythm));
     else if (h->last_beat_pvc) ui_text(u, x + tw + 8, ry + 38, 1, C_CO2, "PVC");
 
     /* Invasive arterial pressure, scaled to the systolic like a monitor. */
