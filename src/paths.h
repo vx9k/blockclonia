@@ -2,6 +2,9 @@
  * Specification: settings in $XDG_CONFIG_HOME/blockclonia, worlds in
  * $XDG_DATA_HOME/blockclonia/worlds and the Vulkan pipeline cache in
  * $XDG_CACHE_HOME/blockclonia, each defaulting to its place under $HOME.
+ * On Windows the same roles go to %APPDATA%\blockclonia (settings, worlds)
+ * and %LOCALAPPDATA%\blockclonia (pipeline cache), defaulting to their
+ * places under %USERPROFILE%, and both separators are accepted.
  * It only builds paths and creates directories; save.c and settings.c
  * read and write the files. */
 #ifndef MC_PATHS_H
@@ -24,7 +27,7 @@ typedef struct {
 
 /* "<base>/blockclonia" in out: base is $<var> when it holds an absolute
  * path (the spec says to ignore empty and relative values), else
- * $HOME/<home_rel>. Returns 0, or -1 when neither is usable or the result
+ * $HOME/<home_rel> (%USERPROFILE% on Windows). Returns 0, or -1 when neither is usable or the result
  * does not fit in cap. */
 int paths_app_dir(const char *var, const char *home_rel, char *out, size_t cap);
 
@@ -32,7 +35,8 @@ int paths_app_dir(const char *var, const char *home_rel, char *out, size_t cap);
  * falls back to its old name in the working directory. */
 void paths_resolve(paths *p);
 
-/* Creates dir and any missing parents with mode 0700, as the spec asks;
+/* Creates dir and any missing parents with mode 0700, as the spec asks
+ * (Windows: the profile's own permissions);
  * directories that exist keep their permissions. Returns 0, or -1 if a
  * component is not a directory or cannot be created. */
 int paths_make_dirs(const char *dir);

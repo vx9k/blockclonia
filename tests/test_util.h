@@ -40,6 +40,20 @@ health *new_body(uint32_t seed);   /* mem_free it */
 health_env calm_env(void);         /* standing still in mild air */
 void live(health *h, const health_env *e, double seconds); /* 60 Hz steps */
 
+/* File-system helpers that POSIX and Windows spell differently. */
+/* Makes a fresh directory "<temp>/<prefix>XXXXXX" in out ($TMPDIR or /tmp;
+ * %TEMP% on Windows). Returns 1, or 0 if none could be made. */
+int tmp_dir_make(char *out, size_t cap, const char *prefix);
+/* Creates a symlink at `link` pointing to `target`: 1 if made, 0 on
+ * failure, -1 where this system does not let the tests make one (Windows
+ * without Developer Mode or administrator rights); checks that need the
+ * link are skipped then. */
+int tmp_symlink(const char *target, const char *link);
+/* Removes a file, symlink or empty directory; never follows a link. */
+void tmp_remove(const char *path);
+/* Sets an environment variable; NULL unsets it. */
+void tmp_setenv(const char *name, const char *value);
+
 /* Entry points of the other test files. */
 void test_thermo_all(void);
 void test_health2_all(void);

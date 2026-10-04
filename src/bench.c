@@ -2,19 +2,12 @@
 #include "jobs.h"
 #include "mem.h"
 #include "mesher.h"
+#include "os.h"
 #include "physics.h"
 #include "world.h"
 
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
-
-static double now_s(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
-}
 
 int bench_run(uint32_t seed)
 {
@@ -23,7 +16,7 @@ int bench_run(uint32_t seed)
 
     /* Terrain generation. */
     column **cols = mem_calloc((size_t)side * (size_t)side, sizeof *cols);
-    double t0 = now_s();
+    double t0 = os_now();
     for (int z = 0; z < side; z++)
         for (int x = 0; x < side; x++) {
             column *c = column_alloc(x, z);
@@ -31,7 +24,7 @@ int bench_run(uint32_t seed)
             column_recount(c);
             cols[z * side + x] = c;
         }
-    double gen = now_s() - t0;
+    double gen = os_now() - t0;
     printf("  worldgen: %.3f ms/column\n", gen * 1000.0 / (side * side));
 
     /* Meshing, via a real world so gather/mesh paths are exercised. */
@@ -43,7 +36,7 @@ int bench_run(uint32_t seed)
     uint32_t *out = mem_alloc(sizeof(uint32_t) * 4 * MESH_MAX_QUADS);
     uint64_t quads = 0;
     int sections = 0;
-    t0 = now_s();
+    t0 = os_now();
     for (int cz = -4; cz <= 4; cz++)
         for (int cx = -4; cx <= 4; cx++) {
             const column *c = world_column(&w, cx, cz);
@@ -62,7 +55,7 @@ int bench_run(uint32_t seed)
                 sections++;
             }
         }
-    double mesh = now_s() - t0;
+    double mesh = os_now() - t0;
     printf("  gather+mesh: %.3f ms/section, %.0f quads/section avg, %u bytes/vertex\n",
            mesh * 1000.0 / sections, (double)quads / sections, (unsigned)sizeof(uint32_t));
 
@@ -74,37 +67,37 @@ int bench_run(uint32_t seed)
     int gy = world_surface_y(&w, 8, 8);
     for (int y = gy; y < gy + 10 && y < WORLD_H; y++) world_set(&w, 8, y, 8, B_STONE, 0);
     for (int i = 1; i <= 6; i++) world_set(&w, 8 + i, gy + 9, 8, B_PLANKS, 0);
-    t0 = now_s();
+    t0 = os_now();
     int iters = 50;
     for (int i = 0; i < iters; i++) physics_check_structure(&ph, 8, gy + 5, 8);
-    double sc = now_s() - t0;
+    double sc = os_now() - t0;
     printf("  structural check (25^3 region): %.3f ms\n", sc * 1000.0 / iters);
     world_set(&w, 8, gy + 2, 8, B_AIR, 0);
     int fell = physics_check_structure(&ph, 8, gy + 2, 8);
     player pl;
     player_spawn(&pl, &w, 0.5, 0.5);
     player_input pin = {0};
-    t0 = now_s();
+    t0 = os_now();
     int steps = 0;
     while (ph.body_count && steps < 600) {
         physics_step(&ph, &pl, &pin);
         steps++;
     }
-    double ps = now_s() - t0;
+    double ps = os_now() - t0;
     printf("  collapse: %d blocks fell, settled in %d steps (%.2f s sim), %.3f ms/step\n", fell, steps,
            steps * PHYS_DT, ps * 1000.0 / (steps ? steps : 1));
 
     /* Fluids: pour a column of water on a slope. */
     int wy = world_surface_y(&w, 20, 20);
     for (int y = wy; y < wy + 4 && y < WORLD_H; y++) world_set(&w, 20, y, 20, B_WATER, 0);
-    t0 = now_s();
+    t0 = os_now();
     int ticks = 0, peak = 0;
     for (; ticks < 200; ticks++) {
         physics_fluid_tick(&ph);
         if (ph.fluid_updates > peak) peak = ph.fluid_updates;
         if (!ph.fluid_next.count) break;
     }
-    double ft = now_s() - t0;
+    double ft = os_now() - t0;
     printf("  fluid: %d ticks to settle, peak %d active cells, %.3f ms/tick\n", ticks, peak,
            ft * 1000.0 / (ticks ? ticks : 1));
 

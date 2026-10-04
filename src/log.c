@@ -1,9 +1,10 @@
 #include "log.h"
+#include "os.h"
 
 static void (*g_hook)(void *user);
 static void *g_hook_user;
-static _Thread_local int g_hook_thread;
-static _Thread_local int g_hook_running;
+static OS_THREAD_LOCAL int g_hook_thread;
+static OS_THREAD_LOCAL int g_hook_running;
 
 void log_set_fatal_hook(void (*fn)(void *user), void *user)
 {

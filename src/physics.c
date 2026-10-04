@@ -4,10 +4,10 @@
 #include "log.h"
 #include "mem.h"
 #include "noise.h"
+#include "os.h"
 
 #include <math.h>
 #include <string.h>
-#include <time.h>
 
 #define EPS 1e-7
 #define REGION_W (2 * STRUCT_RADIUS + 1)
@@ -57,13 +57,6 @@ static int span_of(uint8_t id)
     if (id == B_UNLOADED) return STRUCT_MAX_SPAN;
     int s = block_get(id)->span;
     return s > STRUCT_MAX_SPAN ? STRUCT_MAX_SPAN : s;
-}
-
-static double mono_sec(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
 static int boxes_overlap(aabb a, aabb b)
@@ -1271,9 +1264,9 @@ void physics_step(physics *ph, player *p, const player_input *in)
     items_step(ph);
 
     /* At least one structural check per step, more while time allows. */
-    double t0 = ph->struct_count > 1 ? mono_sec() : 0.0;
+    double t0 = ph->struct_count > 1 ? os_now() : 0.0;
     for (int n = 0; ph->struct_count > 0 && ph->body_count < MAX_BODIES; n++) {
-        if (n > 0 && mono_sec() - t0 > STRUCT_BUDGET_S) break;
+        if (n > 0 && os_now() - t0 > STRUCT_BUDGET_S) break;
         ipos q = ph->struct_queue[ph->struct_head];
         ph->struct_head = (ph->struct_head + 1) % (int)(sizeof ph->struct_queue / sizeof ph->struct_queue[0]);
         ph->struct_count--;

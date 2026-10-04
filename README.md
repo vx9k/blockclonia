@@ -295,6 +295,51 @@ cmake --build --preset native
   Pi OS's compiler has NEON off by default, so set it there.
 - Packages: `cd build/release && cpack` makes a `.tar.gz` and a `.deb`.
 
+### Windows
+
+Windows 10 or 11, 64-bit. Every CI run builds a zip with the game, the
+mimalloc DLLs and the Visual C++ runtime; unpack it anywhere and run
+`blockclonia.exe`. The GPU driver provides Vulkan (`vulkan-1.dll`); any
+GPU with a Vulkan 1.0 driver works, including Intel HD 500-series and
+newer integrated graphics.
+
+Building with Visual Studio 2022 (17.5 or newer, for `<stdatomic.h>`)
+and the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows), from a
+Developer PowerShell:
+
+```powershell
+cmake --preset windows-msvc
+cmake --build --preset windows-msvc
+ctest --preset windows-msvc
+.\build\windows-msvc\Release\blockclonia.exe
+cpack --config build/windows-msvc/CPackConfig.cmake -C Release   # the zip
+```
+
+The build fetches GLFW, mimalloc, miniaudio and SQLite like other
+platforms. With MSVC, mimalloc is the DLL build with
+`mimalloc-redirect.dll`, which also takes over `malloc` for GLFW, the
+Vulkan loader and the driver; both DLLs are copied next to the exe.
+
+Cross-compiling from Linux with MinGW-w64 (`apt install
+gcc-mingw-w64-x86-64 glslc libvulkan-dev`, plus `wine64` to run the tests)
+needs a MinGW import library for the Vulkan loader, made from the loader's
+export list:
+
+```sh
+mkdir -p ~/vk-mingw/include ~/vk-mingw/lib
+cp -r /usr/include/vulkan /usr/include/vk_video ~/vk-mingw/include/
+curl -fsSLO https://raw.githubusercontent.com/KhronosGroup/Vulkan-Loader/v1.3.275/loader/vulkan-1.def
+x86_64-w64-mingw32-dlltool -d vulkan-1.def -D vulkan-1.dll -l ~/vk-mingw/lib/libvulkan-1.a
+cmake --preset mingw64 -DVulkan_INCLUDE_DIR=$HOME/vk-mingw/include \
+      -DVulkan_LIBRARY=$HOME/vk-mingw/lib/libvulkan-1.a
+cmake --build --preset mingw64
+ctest --preset mingw64          # unit tests and --bench under Wine
+```
+
+The MinGW build is a single static exe with no DLLs beside it, but
+mimalloc cannot replace `malloc` there, so only the game's own
+allocations use it; prefer the MSVC zip for playing.
+
 ### Running
 
 ```
@@ -334,7 +379,8 @@ xvfb-run -a env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
 
 ## Where files live
 
-blockclonia follows the XDG Base Directory Specification:
+On Linux and other Unix systems blockclonia follows the XDG Base
+Directory Specification:
 
 - Settings: `$XDG_CONFIG_HOME/blockclonia/blockclonia.cfg`, falling back
   to `~/.config/blockclonia/blockclonia.cfg`.
@@ -348,6 +394,12 @@ An `XDG_*` variable is ignored when it is empty or not an absolute path,
 as the spec requires; the game then falls back to the `$HOME`-based path
 above. `--world` and `--config` still take any path directly.
 
+On Windows, settings and worlds go in `%APPDATA%\blockclonia`
+(`blockclonia.cfg`, `worlds\world\`), which roams with a domain profile,
+and the pipeline cache in `%LOCALAPPDATA%\blockclonia`, since it belongs to
+this machine's GPU and driver. Without those variables the game falls back
+to the same folders under `%USERPROFILE%\AppData`.
+
 The first time the game finds a settings file or world where older
 builds kept them (`./blockclonia.cfg`, `./world`), it copies them into
 the new location once and keeps using it from there on; the originals
@@ -360,7 +412,9 @@ Game code allocates through `src/mem.h`, which wraps mimalloc's `mi_*` API
 and aborts cleanly on out-of-memory. mimalloc is linked first, so on Linux
 its shared library also overrides `malloc` for GLFW, the Vulkan loader, the
 GPU driver and miniaudio (`LD_DEBUG=bindings` confirms they bind to
-`libmimalloc.so`). Explicit `VkAllocationCallbacks` backed by mimalloc are
+`libmimalloc.so`). On Windows the MSVC build gets the same through
+`mimalloc-redirect.dll`; the MinGW build has no override. Explicit
+`VkAllocationCallbacks` backed by mimalloc are
 available with `MC_VK_ALLOC=1` for platforms without the override. They
 are off by default because some drivers (Mesa lavapipe) free memory they
 did not allocate through the callbacks.

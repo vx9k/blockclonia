@@ -156,8 +156,22 @@ static const char *hurt_names(void)
     return buf;
 }
 
+/* Default locations, as paths.c resolves them on each platform. */
+#ifdef _WIN32
+#define USAGE_WORLD "  --world DIR       save directory (default %%APPDATA%%\\blockclonia\\worlds\\world)\n"
+#define USAGE_CONFIG "  --config FILE     settings file (default %%APPDATA%%\\blockclonia\\blockclonia.cfg)\n"
+#else
+#define USAGE_WORLD                                                                          \
+    "  --world DIR       save directory (default $XDG_DATA_HOME/blockclonia/worlds/world,\n" \
+    "                    or ~/.local/share/blockclonia/worlds/world)\n"
+#define USAGE_CONFIG                                                                             \
+    "  --config FILE     settings file (default $XDG_CONFIG_HOME/blockclonia/blockclonia.cfg,\n" \
+    "                    or ~/.config/blockclonia/blockclonia.cfg)\n"
+#endif
+
 static void usage(void)
 {
+    /* clang-format off */
     printf("usage: blockclonia [options]\n"
            "  --seed N          world seed (default: random, or the saved world's)\n"
            "  --radius N        render distance in chunks, 2-32 (default 8)\n"
@@ -166,16 +180,14 @@ static void usage(void)
            "  --threads N       worker threads (default: cores - 1)\n"
            "  --pool-mb N       GPU vertex pool size (default: from radius)\n"
            "  --gpu N           Vulkan device index\n"
-           "  --world DIR       save directory (default $XDG_DATA_HOME/blockclonia/worlds/world,\n"
-           "                    or ~/.local/share/blockclonia/worlds/world)\n"
+           USAGE_WORLD
            "  --no-save         do not load or save the world\n"
            "  --validate        enable Vulkan validation layers\n"
            "  --frames N        quit after N frames\n"
            "  --screenshot F    write a PPM of the last frame to F\n"
            "  --look YAW,PITCH  initial view angles in degrees\n"
            "  --spawn X,Z       spawn position (default: nearest dry land)\n"
-           "  --config FILE     settings file (default $XDG_CONFIG_HOME/blockclonia/blockclonia.cfg,\n"
-           "                    or ~/.config/blockclonia/blockclonia.cfg)\n"
+           USAGE_CONFIG
            "  --play            skip the title screen\n"
            "  --screen NAME     open title, pause, settings, controls or debug-health at start\n"
            "  --debug           start with the F3 overlay on\n"
@@ -189,6 +201,7 @@ static void usage(void)
            "  --mem-stats       print mimalloc statistics at exit\n"
            "  --no-sound        do not open an audio device\n",
            hurt_names());
+    /* clang-format on */
 }
 
 /* Options that take no value. */

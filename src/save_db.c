@@ -1,17 +1,20 @@
 #include "save_db.h"
 #include "log.h"
 #include "mem.h"
+#include "os.h"
 #include "save.h"
 
 #include <sqlite3.h>
 
-#include <dirent.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
+
+/* Longest world folder path, resolved; Linux's PATH_MAX. MSVC has no
+ * PATH_MAX and MinGW's is MAX_PATH, shorter than UTF-8 paths can be. */
+#define DB_PATH_MAX 4096
 
 /* SQLITE_OPEN_NOFOLLOW and trusted_schema, which opening shared files
  * safely depends on, arrived in 3.31. */
@@ -163,16 +166,18 @@ static int check_or_create(sqlite3 *h, const char *path)
 
 /* The database and the files SQLite keeps beside it must be regular files
  * or absent: a symlink planted as world.db-journal would otherwise have
- * SQLite write through it (older SQLite releases do not refuse one). */
+ * SQLite write through it (older SQLite releases do not refuse one, and
+ * its Windows VFS ignores SQLITE_OPEN_NOFOLLOW altogether, which leaves
+ * this check as the guard there). */
 static int side_files_ok(const char *path)
 {
     static const char *const SUFFIX[] = {"", "-journal", "-wal", "-shm"};
     for (size_t i = 0; i < sizeof SUFFIX / sizeof SUFFIX[0]; i++) {
-        char p[PATH_MAX + 32];
-        struct stat st;
+        char p[DB_PATH_MAX + 32];
         int n = snprintf(p, sizeof p, "%s%s", path, SUFFIX[i]);
         if (n < 0 || (size_t)n >= sizeof p) return 0;
-        if (lstat(p, &st) == 0 ? !S_ISREG(st.st_mode) : errno != ENOENT) {
+        int kind = os_path_kind(p);
+        if (kind != OS_FILE && kind != OS_MISSING) {
             log_error("%s is not a regular file; refusing the world", p);
             return 0;
         }
@@ -189,9 +194,10 @@ save_db *save_db_open(const char *dir)
     /* SQLITE_OPEN_NOFOLLOW refuses a symlink anywhere in the path, and
      * homes are often reached through one (/home -> /var/home). Resolving
      * the folder first leaves only world.db itself to be refused. */
-    char real[PATH_MAX], path[PATH_MAX + 16];
-    if (!realpath(dir, real)) {
-        log_error("world folder %s: %s", dir, strerror(errno));
+    char real[DB_PATH_MAX], path[DB_PATH_MAX + 16];
+    errno = 0;
+    if (os_full_path(dir, real, sizeof real) != 0) {
+        log_error("world folder %s: %s", dir, errno ? strerror(errno) : "cannot resolve it");
         return NULL;
     }
     int n = snprintf(path, sizeof path, "%s/world.db", real);
@@ -378,16 +384,16 @@ int save_db_import(save_db *db, const char *dir)
 {
     uint32_t seed, have;
     if (save_db_get_seed(db, &have) == 0 || save_read_seed(dir, &seed) != 0) return 0;
-    DIR *d = opendir(dir);
+    os_dir *d = os_dir_open(dir);
     if (!d) return 0;
     if (save_db_begin(db) != 0) {
-        closedir(d);
+        os_dir_close(d);
         return -1;
     }
     int files = 1, failed = 0; /* level.dat */
-    const struct dirent *e;
-    while (!failed && (e = readdir(d)) != NULL) files += import_file(db, dir, e->d_name, &failed);
-    closedir(d);
+    const char *name;
+    while (!failed && (name = os_dir_next(d)) != NULL) files += import_file(db, dir, name, &failed);
+    os_dir_close(d);
     if (!failed && save_db_set_seed(db, seed) == 0 && save_db_commit(db) == 0) return files;
     exec(db->h, "ROLLBACK");
     return -1;

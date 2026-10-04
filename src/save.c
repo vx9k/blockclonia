@@ -1,16 +1,12 @@
 #include "save.h"
 #include "mem.h"
+#include "os.h"
 
-#include <dirent.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 
 /* File layout (little endian):
  *   0  "MCCL"        magic
@@ -135,75 +131,19 @@ static int column_path(char *buf, size_t cap, const char *dir, int cx, int cz, c
     return n > 0 && (size_t)n < cap ? 0 : -1;
 }
 
-/* World folders can come from anyone, so file access never follows a
- * symlink and only touches regular files. Otherwise a shared world could
- * point level.dat or a column file at, say, ~/.bashrc and have the game
- * overwrite it on save, or at a FIFO and hang a loader thread. */
-
-/* Reads up to `cap` bytes of a regular file. Returns the length read,
- * cap + 1 if the file is larger, or -1 if it is missing or unusable. */
-static long read_regular(const char *path, uint8_t *buf, size_t cap)
-{
-    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
-    if (fd < 0) return -1;
-    struct stat st;
-    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
-        close(fd);
-        errno = EINVAL;
-        return -1;
-    }
-    if ((unsigned long long)st.st_size > cap) {
-        close(fd);
-        return (long)cap + 1;
-    }
-    size_t len = 0;
-    while (len < cap) {
-        ssize_t n = read(fd, buf + len, cap - len);
-        if (n < 0 && errno == EINTR) continue;
-        if (n < 0) {
-            close(fd);
-            return -1;
-        }
-        if (n == 0) break;
-        len += (size_t)n;
-    }
-    close(fd);
-    return (long)len;
-}
-
-/* Writes a whole file through a fresh temp file and a rename, so a crash
- * mid-save never leaves a truncated file, and whatever sat at either name
- * before (a symlink, a hard link to another file) is replaced, never
- * written through. */
-static int write_atomic(const char *path, const char *tmp, const void *data, size_t len)
-{
-    unlink(tmp); /* a stale or planted temp entry; unlink never follows */
-    int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
-    if (fd < 0) return -1;
-    const uint8_t *p = data;
-    size_t done = 0;
-    while (done < len) {
-        ssize_t n = write(fd, p + done, len - done);
-        if (n < 0 && errno == EINTR) continue;
-        if (n <= 0) break;
-        done += (size_t)n;
-    }
-    int ok = done == len;
-    ok &= close(fd) == 0;
-    if (ok && rename(tmp, path) == 0) return 0;
-    unlink(tmp);
-    return -1;
-}
+/* World folders can come from anyone, so every file access goes through
+ * os_read_regular and os_write_atomic, which never follow a symlink and
+ * only touch regular files (see os.h). */
 
 int save_load_column(const char *dir, column *c)
 {
     char path[512];
     if (column_path(path, sizeof path, dir, c->cx, c->cz, "") != 0) return 0;
     uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
-    long len = read_regular(path, buf, SAVE_MAX_FILE);
+    long len = os_read_regular(path, buf, SAVE_MAX_FILE);
     int r = 0; /* missing: generate */
     if (len >= 0 && len <= SAVE_MAX_FILE) r = save_decode_column(c, buf, (size_t)len) == 0 ? 1 : -1;
-    else if (len >= 0 || errno != ENOENT) r = -1; /* too big, or not a readable regular file */
+    else if (len != -2) r = -1; /* too big, or not a readable regular file */
     mem_free(buf);
     return r;
 }
@@ -215,18 +155,15 @@ int save_store_column(const char *dir, const column *c)
     if (column_path(tmp, sizeof tmp, dir, c->cx, c->cz, ".tmp") != 0) return -1;
     uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
     size_t len = save_encode_column(c, buf, SAVE_MAX_FILE);
-    int r = len ? write_atomic(path, tmp, buf, len) : -1;
+    int r = len ? os_write_atomic(path, tmp, buf, len) : -1;
     mem_free(buf);
     return r;
 }
 
 int save_ensure_dir(const char *dir)
 {
-    if (mkdir(dir, 0755) == 0 || errno == EEXIST) {
-        struct stat st;
-        if (stat(dir, &st) == 0 && S_ISDIR(st.st_mode)) return 0;
-    }
-    return -1;
+    (void)os_mkdir(dir, 0755);
+    return os_is_dir(dir) ? 0 : -1;
 }
 
 int save_read_seed(const char *dir, uint32_t *seed)
@@ -234,7 +171,7 @@ int save_read_seed(const char *dir, uint32_t *seed)
     char path[512], buf[64];
     int n = snprintf(path, sizeof path, "%s/level.dat", dir);
     if (n < 0 || (size_t)n >= sizeof path) return -1;
-    long len = read_regular(path, (uint8_t *)buf, sizeof buf - 1);
+    long len = os_read_regular(path, (uint8_t *)buf, sizeof buf - 1);
     if (len < 0 || len > (long)sizeof buf - 1) return -1;
     buf[len] = '\0';
     /* strtoul would accept spaces, '+' and '-' (negation wraps): digits only. */
@@ -255,12 +192,12 @@ int save_write_seed(const char *dir, uint32_t seed)
     n = snprintf(tmp, sizeof tmp, "%s/level.dat.tmp", dir);
     if (n < 0 || (size_t)n >= sizeof tmp) return -1;
     int len = snprintf(text, sizeof text, "seed %u\n", seed);
-    return write_atomic(path, tmp, text, (size_t)len);
+    return os_write_atomic(path, tmp, text, (size_t)len);
 }
 
 long save_read_file(const char *path, void *buf, size_t cap)
 {
-    long len = read_regular(path, buf, cap);
+    long len = os_read_regular(path, buf, cap);
     return len >= 0 && (size_t)len <= cap ? len : -1;
 }
 
@@ -269,20 +206,16 @@ int save_write_file(const char *path, const void *data, size_t len)
     char tmp[512];
     int n = snprintf(tmp, sizeof tmp, "%s.tmp", path);
     if (n < 0 || (size_t)n >= sizeof tmp) return -1;
-    return write_atomic(path, tmp, data, len);
+    return os_write_atomic(path, tmp, data, len);
 }
 
-static int exists(const char *path)
-{
-    struct stat st;
-    return lstat(path, &st) == 0 || errno != ENOENT;
-}
+static int exists(const char *path) { return os_path_kind(path) != OS_MISSING; }
 
 int save_copy_file(const char *from, const char *to, size_t cap)
 {
     if (exists(to)) return 0;
     uint8_t *buf = mem_alloc(cap ? cap : 1);
-    long len = read_regular(from, buf, cap);
+    long len = os_read_regular(from, buf, cap);
     int r = 0;
     if (len >= 0 && (size_t)len <= cap) r = save_write_file(to, buf, (size_t)len) == 0 ? 1 : -1;
     mem_free(buf);
@@ -315,7 +248,7 @@ static int copy_world_file(const char *from, const char *to, const char *name, u
     if (a < 0 || (size_t)a >= sizeof src || b < 0 || (size_t)b >= sizeof dst || exists(dst)) return 0;
     /* Symlinks, FIFOs and oversized files are left behind, as loading
      * would reject them. */
-    long len = read_regular(src, buf, SAVE_MAX_FILE);
+    long len = os_read_regular(src, buf, SAVE_MAX_FILE);
     return len >= 0 && len <= (long)SAVE_MAX_FILE && save_write_file(dst, buf, (size_t)len) == 0;
 }
 
@@ -323,22 +256,21 @@ int save_copy_world(const char *from, const char *to)
 {
     uint32_t seed;
     char dst[512], db[512];
-    struct stat st;
     int cx, cz;
     int n = snprintf(dst, sizeof dst, "%s/level.dat", to), m = snprintf(db, sizeof db, "%s/world.db", to);
     if (n < 0 || (size_t)n >= sizeof dst || m < 0 || (size_t)m >= sizeof db || exists(dst) || exists(db) ||
         save_read_seed(from, &seed) != 0)
         return 0;
-    if (lstat(from, &st) != 0 || !S_ISDIR(st.st_mode)) return 0; /* not through a symlinked folder */
-    DIR *d = opendir(from);
+    if (os_path_kind(from) != OS_DIR) return 0; /* not through a symlinked folder */
+    os_dir *d = os_dir_open(from);
     if (!d) return 0;
     uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
     int copied = 0;
-    const struct dirent *e;
-    while ((e = readdir(d)) != NULL)
-        if (strcmp(e->d_name, "player.dat") == 0 || save_column_name(e->d_name, &cx, &cz))
-            copied += copy_world_file(from, to, e->d_name, buf);
-    closedir(d);
+    const char *name;
+    while ((name = os_dir_next(d)) != NULL)
+        if (strcmp(name, "player.dat") == 0 || save_column_name(name, &cx, &cz))
+            copied += copy_world_file(from, to, name, buf);
+    os_dir_close(d);
     /* level.dat last: it is what marks `to` as a world, so a copy cut
      * short is retried on the next start instead of passing for done. */
     copied += copy_world_file(from, to, "level.dat", buf);

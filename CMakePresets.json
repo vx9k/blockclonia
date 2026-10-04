@@ -109,14 +109,14 @@
     },
     {
       "name": "mingw64",
-      "displayName": "Cross: Windows x86_64 with MinGW-w64 (experimental: needs a Windows port of jobs.c/save.c)",
+      "displayName": "Cross: Windows x86_64 with MinGW-w64 (tests run under Wine if installed; see README, Windows)",
       "inherits": ["release", "linux-only"],
       "toolchainFile": "${sourceDir}/cmake/toolchains/mingw-w64-x86_64.cmake",
-      "cacheVariables": { "MC_DEPS": "FETCH", "MC_BUILD_TESTS": "OFF" }
+      "cacheVariables": { "MC_DEPS": "FETCH" }
     },
     {
       "name": "windows-msvc",
-      "displayName": "Windows, Visual Studio 2022 (experimental: needs a Windows port)",
+      "displayName": "Windows x64, Visual Studio 2022 17.5+ and the Vulkan SDK",
       "generator": "Visual Studio 17 2022",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
@@ -171,6 +171,8 @@
     { "name": "pi4-aarch64", "inherits": "base", "configurePreset": "pi4-aarch64",
       "filter": { "include": { "label": "headless" } } },
     { "name": "pi4-armhf", "inherits": "base", "configurePreset": "pi4-armhf",
+      "filter": { "include": { "label": "headless" } } },
+    { "name": "mingw64", "inherits": "base", "configurePreset": "mingw64",
       "filter": { "include": { "label": "headless" } } },
     { "name": "windows-msvc", "inherits": "base", "configurePreset": "windows-msvc", "configuration": "Release" }
   ]

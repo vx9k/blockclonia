@@ -1,0 +1,4 @@
+/* MinGW only: windres embeds the manifest as resource 1 of type 24
+ * (CREATEPROCESS_MANIFEST_RESOURCE_ID, RT_MANIFEST). MSVC's linker embeds
+ * blockclonia.manifest itself. */
+1 24 "blockclonia.manifest"

@@ -11,6 +11,7 @@
 #include "mem.h"
 #include "menu.h"
 #include "mesher.h"
+#include "os.h"
 #include "physics.h"
 #include "save.h"
 #include "settings.h"
@@ -23,8 +24,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <sys/stat.h>
-#include <unistd.h>
+#endif
 
 /* --------------------------------------------------------------- tests */
 
@@ -101,9 +103,7 @@ static int file_is(const char *path, const char *text)
 static void test_save_files(void)
 {
     char dir[256];
-    const char *tmp = getenv("TMPDIR");
-    snprintf(dir, sizeof dir, "%s/mc_test_XXXXXX", tmp && tmp[0] && strlen(tmp) < 200 ? tmp : "/tmp");
-    int made = mkdtemp(dir) != NULL;
+    int made = tmp_dir_make(dir, sizeof dir, "mc_test_");
     CHECK(made);
     if (!made) return;
     char victim[300], p[340];
@@ -113,27 +113,33 @@ static void test_save_files(void)
     if (f) (void)fclose(f);
 
     snprintf(p, sizeof p, "%s/level.dat", dir);
-    CHECK(symlink(victim, p) == 0);
+    int linked = tmp_symlink(victim, p);
+    CHECK(linked != 0);
     uint32_t seed = 0;
-    CHECK(save_read_seed(dir, &seed) == -1); /* symlinks are not followed */
+    if (linked == 1) CHECK(save_read_seed(dir, &seed) == -1); /* symlinks are not followed */
     CHECK(save_write_seed(dir, 77) == 0);
     CHECK(file_is(victim, "precious"));
     CHECK(save_read_seed(dir, &seed) == 0 && seed == 77);
-    struct stat st;
-    CHECK(lstat(p, &st) == 0 && S_ISREG(st.st_mode)); /* the link was replaced */
+    CHECK(os_path_kind(p) == OS_FILE); /* the link was replaced */
 
     column *c = column_alloc(0, 0);
     test_flat_gen(0, c);
     snprintf(p, sizeof p, "%s/c.0.0.bin.tmp", dir);
-    CHECK(symlink(victim, p) == 0);
+    CHECK(tmp_symlink(victim, p) != 0);
     CHECK(save_store_column(dir, c) == 0);
     CHECK(file_is(victim, "precious"));
     column *d = column_alloc(0, 0);
     CHECK(save_load_column(dir, d) == 1 && memcmp(c->blocks, d->blocks, COL_VOL) == 0);
 
-    /* A FIFO in place of a column file is rejected, not waited on. */
+    /* A FIFO in place of a column file is rejected, not waited on. Windows
+     * has no FIFOs; a directory stands in for something that is not a
+     * regular file. */
     snprintf(p, sizeof p, "%s/c.1.0.bin", dir);
+#ifdef _WIN32
+    CHECK(os_mkdir(p, 0700) == 0);
+#else
     CHECK(mkfifo(p, 0600) == 0);
+#endif
     column *e = column_alloc(1, 0);
     CHECK(save_load_column(dir, e) == -1);
     column *g = column_alloc(2, 0);
@@ -146,9 +152,9 @@ static void test_save_files(void)
     const char *names[] = {"victim.txt", "level.dat", "c.0.0.bin", "c.1.0.bin"};
     for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
         snprintf(p, sizeof p, "%s/%s", dir, names[i]);
-        unlink(p);
+        tmp_remove(p);
     }
-    rmdir(dir);
+    tmp_remove(dir);
 }
 
 static void test_mesher(void)
