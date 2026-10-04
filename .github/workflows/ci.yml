@@ -170,6 +170,15 @@ jobs:
           Start-Process -Wait -FilePath .\vksdk.exe -ArgumentList "--root", $root, "--accept-licenses", "--default-answer", "--confirm-command", "install"
           "VULKAN_SDK=$root" >> $env:GITHUB_ENV
           "$root\Bin" >> $env:GITHUB_PATH
+      # The SDK does not install the loader (vulkan-1.dll), which the game
+      # links against, so without it even --bench cannot start.
+      - name: Install the Vulkan runtime
+        shell: pwsh
+        run: |
+          $v = $env:VULKAN_SDK_VERSION
+          Invoke-WebRequest "https://sdk.lunarg.com/sdk/download/$v/windows/VulkanRT-$v-Installer.exe" -OutFile vkrt.exe
+          Start-Process -Wait -FilePath .\vkrt.exe -ArgumentList "/S"
+          if (-not (Test-Path "$env:SystemRoot\System32\vulkan-1.dll")) { throw "vulkan-1.dll was not installed" }
       - run: cmake --preset windows-msvc -DMC_WERROR=ON
       - run: cmake --build --preset windows-msvc
       - run: ctest --preset windows-msvc
