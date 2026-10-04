@@ -40,6 +40,11 @@
 #include <string.h>
 #include <time.h>
 
+/* MSVC spells POSIX strtok_r as strtok_s, with the same arguments. */
+#ifdef _MSC_VER
+#define strtok_r strtok_s
+#endif
+
 #define REACH 5.0
 #define MAX_STEPS_PER_FRAME 5
 #define MESH_UPLOADS_PER_FRAME 128

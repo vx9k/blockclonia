@@ -249,6 +249,11 @@ if(MC_BUILD_TESTS)
                           tests/test_health_debug.c tests/test_defib.c tests/test_paths.c
                           tests/test_save_db.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
+  if(MSVC)
+    # C4127 (constant condition) fires on CHECKs of compile-time facts, such
+    # as a table's length, which the tests verify on purpose.
+    target_compile_options(mc_tests PRIVATE /wd4127)
+  endif()
   add_test(NAME unit COMMAND mc_tests)
   set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT 120)
 

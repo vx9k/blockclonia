@@ -428,6 +428,9 @@ os_dir *os_dir_open(const char *dir)
 
 const char *os_dir_next(os_dir *d)
 {
+    /* Each os_dir has its own DIR, so readdir is safe across threads here;
+     * readdir_r is deprecated in POSIX.1-2008. */
+    /* cppcheck-suppress readdirCalled */
     const struct dirent *e = readdir(d->d);
     return e ? e->d_name : NULL;
 }
