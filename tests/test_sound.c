@@ -13,10 +13,7 @@
 
 #define FRAMES 48000 /* one second at SOUND_RATE */
 
-static double now_ms(void)
-{
-    return os_now() * 1e3;
-}
+static double now_ms(void) { return os_now() * 1e3; }
 
 /* Renders `frames` in device-sized pieces; returns the peak and fills the
  * energy of each channel. */
