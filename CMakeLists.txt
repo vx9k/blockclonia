@@ -159,6 +159,7 @@ set(MC_CORE_SOURCES
   src/menu.c
   src/mesher.c
   src/noise.c
+  src/os.c
   src/paths.c
   src/physics.c
   src/save.c
@@ -184,6 +185,12 @@ function(mc_add_core name)
   endif()
   if(NOT MSVC)
     target_link_libraries(${name} PUBLIC m)
+  else()
+    # sound.c's lock-free ring needs <stdatomic.h>, which MSVC (17.5+) only
+    # offers behind this switch. The CRT "secure" variants (strcpy_s, ...)
+    # would split the code by platform for no gain over its own checks.
+    target_compile_options(${name} PUBLIC /experimental:c11atomics)
+    target_compile_definitions(${name} PUBLIC _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
   endif()
   if(MC_VK_MIMALLOC AND NOT MC_SANITIZE AND TARGET Vulkan::Headers)
     target_compile_definitions(${name} PRIVATE MC_VK_MIMALLOC) # only mem.c reads it
@@ -216,6 +223,15 @@ if(MC_BUILD_GAME)
     add_executable(blockclonia src/main.c src/renderer.c src/audio_null.c)
   endif()
   target_link_libraries(blockclonia PRIVATE mccore Vulkan::Vulkan mc::glfw mc_warnings)
+  # Windows: a manifest switches the narrow APIs to UTF-8 (see the file).
+  if(MSVC)
+    target_sources(blockclonia PRIVATE cmake/windows/blockclonia.manifest)
+  elseif(WIN32)
+    enable_language(RC)
+    target_sources(blockclonia PRIVATE cmake/windows/blockclonia.rc)
+    set_property(SOURCE cmake/windows/blockclonia.rc APPEND PROPERTY
+      INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/windows")
+  endif()
 
   include(Shaders)
   mc_compile_shaders(blockclonia
@@ -233,6 +249,11 @@ if(MC_BUILD_TESTS)
                           tests/test_health_debug.c tests/test_defib.c tests/test_paths.c
                           tests/test_save_db.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
+  if(MSVC)
+    # C4127 (constant condition) fires on CHECKs of compile-time facts, such
+    # as a table's length, which the tests verify on purpose.
+    target_compile_options(mc_tests PRIVATE /wd4127)
+  endif()
   add_test(NAME unit COMMAND mc_tests)
   set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT 120)
 

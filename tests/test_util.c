@@ -1,10 +1,79 @@
 #include "test_util.h"
 #include "mem.h"
+#include "os.h"
 #include "survival.h"
 
+#include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
 int g_failed, g_checks;
+
+#ifdef _WIN32
+/* Tests are run with ASCII temp paths, so the narrow API is enough here. */
+int tmp_dir_make(char *out, size_t cap, const char *prefix)
+{
+    const char *tmp = getenv("TEMP");
+    if (!tmp || !tmp[0] || strlen(tmp) >= 200) tmp = getenv("TMP");
+    if (!tmp || !tmp[0] || strlen(tmp) >= 200) return 0;
+    /* The process id and tick count make names unique enough; CreateDirectory
+     * failing on an existing name makes a clash safe, never shared. */
+    for (unsigned i = 0; i < 100; i++) {
+        int n = snprintf(out, cap, "%s\\%s%06lu", tmp, prefix,
+                         (unsigned long)((GetCurrentProcessId() * 7919u + GetTickCount() + i) % 1000000u));
+        if (n > 0 && (size_t)n < cap && CreateDirectoryA(out, NULL)) return 1;
+    }
+    return 0;
+}
+
+int tmp_symlink(const char *target, const char *link)
+{
+    DWORD flags = 0x2; /* SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE (Developer Mode) */
+    if (os_is_dir(target)) flags |= SYMBOLIC_LINK_FLAG_DIRECTORY;
+    /* Wine reports success without making a link; checking for one keeps
+     * the tests from passing on a link that is not there. */
+    if (CreateSymbolicLinkA(link, target, flags)) return os_path_kind(link) == OS_OTHER ? 1 : -1;
+    DWORD err = GetLastError();
+    return err == ERROR_PRIVILEGE_NOT_HELD || err == ERROR_INVALID_PARAMETER || err == ERROR_NOT_SUPPORTED ? -1 : 0;
+}
+
+void tmp_remove(const char *path)
+{
+    /* A directory symlink is removed as a directory, a file one as a file;
+     * neither call touches the target. */
+    if (!DeleteFileA(path)) (void)RemoveDirectoryA(path);
+}
+
+void tmp_setenv(const char *name, const char *value) { (void)_putenv_s(name, value ? value : ""); }
+#else
+int tmp_dir_make(char *out, size_t cap, const char *prefix)
+{
+    const char *tmp = getenv("TMPDIR");
+    int n = snprintf(out, cap, "%s/%sXXXXXX", tmp && tmp[0] && strlen(tmp) < 200 ? tmp : "/tmp", prefix);
+    return n > 0 && (size_t)n < cap && mkdtemp(out) != NULL;
+}
+
+int tmp_symlink(const char *target, const char *link) { return symlink(target, link) == 0; }
+
+void tmp_remove(const char *path)
+{
+    if (unlink(path) != 0) (void)rmdir(path);
+}
+
+void tmp_setenv(const char *name, const char *value)
+{
+    if (value) setenv(name, value, 1);
+    else unsetenv(name);
+}
+#endif
 
 void test_flat_gen(uint32_t seed, column *c)
 {

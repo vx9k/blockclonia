@@ -9,14 +9,22 @@
 #include <stdlib.h>
 
 /* flockfile keeps the message and its newline together when worker threads
- * log at the same time as the main thread. */
+ * log at the same time as the main thread. The Windows C runtime calls it
+ * _lock_file. */
+#ifdef _WIN32
+#define MC_LOCK_FILE _lock_file
+#define MC_UNLOCK_FILE _unlock_file
+#else
+#define MC_LOCK_FILE flockfile
+#define MC_UNLOCK_FILE funlockfile
+#endif
 /* clang-format off */
 #define MC_LOG_LINE(...)                        \
     do {                                        \
-        flockfile(stderr);                      \
+        MC_LOCK_FILE(stderr);                   \
         (void)fprintf(stderr, __VA_ARGS__);     \
         (void)fputc('\n', stderr);              \
-        funlockfile(stderr);                    \
+        MC_UNLOCK_FILE(stderr);                 \
     } while (0)
 #define log_info(...)  MC_LOG_LINE("[info] " __VA_ARGS__)
 #define log_warn(...)  MC_LOG_LINE("[warn] " __VA_ARGS__)

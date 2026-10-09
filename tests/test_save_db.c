@@ -4,6 +4,7 @@
  * world saving and loading through it with a worker thread. */
 #include "jobs.h"
 #include "mem.h"
+#include "os.h"
 #include "save.h"
 #include "save_db.h"
 #include "test_util.h"
@@ -13,8 +14,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 static char g_root[256];
 
@@ -22,7 +21,7 @@ static char g_root[256];
 static void sub_dir(char *out, size_t cap, const char *name)
 {
     snprintf(out, cap, "%s/%s", g_root, name);
-    (void)mkdir(out, 0700);
+    (void)os_mkdir(out, 0700);
 }
 
 static void path_in(char *out, size_t cap, const char *dir, const char *name)
@@ -73,7 +72,7 @@ static void test_roundtrip(void)
     CHECK(save_db_open(dir) == NULL);
     save_db_close(db);
     path_in(p, sizeof p, dir, "world.db-wal");
-    CHECK(access(p, F_OK) != 0); /* checkpointed on close: world.db alone is the world */
+    CHECK(os_path_kind(p) == OS_MISSING); /* checkpointed on close: world.db alone is the world */
 
     db = save_db_open(dir);
     CHECK(db != NULL);
@@ -163,8 +162,9 @@ static void test_refused(void)
         if (i == 0) sub_dir(dir, sizeof dir, name);
         else make_world(dir, sizeof dir, name, NULL);
         path_in(p, sizeof p, dir, names[i]);
-        CHECK(symlink(victim, p) == 0);
-        CHECK(save_db_open(dir) == NULL);
+        int linked = tmp_symlink(victim, p);
+        CHECK(linked != 0);
+        if (linked == 1) CHECK(save_db_open(dir) == NULL);
         char buf[16];
         CHECK(save_read_file(victim, buf, sizeof buf) == 8 && memcmp(buf, "precious", 8) == 0);
     }
@@ -218,7 +218,7 @@ static void test_import(void)
     path_in(victim, sizeof victim, g_root, "victim.txt");
     CHECK(save_write_file(victim, "precious", 8) == 0);
     path_in(p, sizeof p, dir, "c.3.3.bin");
-    CHECK(symlink(victim, p) == 0);
+    CHECK(tmp_symlink(victim, p) != 0);
 
     save_db *db = save_db_open(dir);
     CHECK(db != NULL);
@@ -238,7 +238,7 @@ static void test_import(void)
     CHECK(save_db_import(db, dir) == 0); /* once only */
     save_db_close(db);
     path_in(p, sizeof p, dir, "player.dat");
-    CHECK(access(p, F_OK) == 0); /* the old files stay */
+    CHECK(os_path_kind(p) != OS_MISSING); /* the old files stay */
 
     /* A folder without a valid level.dat has nothing to import. */
     sub_dir(dir, sizeof dir, "none");
@@ -289,20 +289,18 @@ static void clean_up(void)
         path_in(d, sizeof d, g_root, subs[i]);
         for (size_t k = 0; k < sizeof files / sizeof files[0]; k++) {
             path_in(p, sizeof p, d, files[k]);
-            unlink(p);
+            tmp_remove(p);
         }
-        rmdir(d);
+        tmp_remove(d);
     }
     path_in(p, sizeof p, g_root, "victim.txt");
-    unlink(p);
-    rmdir(g_root);
+    tmp_remove(p);
+    tmp_remove(g_root);
 }
 
 void test_save_db_all(void)
 {
-    const char *tmp = getenv("TMPDIR");
-    snprintf(g_root, sizeof g_root, "%s/mc_db_XXXXXX", tmp && tmp[0] && strlen(tmp) < 200 ? tmp : "/tmp");
-    int made = mkdtemp(g_root) != NULL;
+    int made = tmp_dir_make(g_root, sizeof g_root, "mc_db_");
     CHECK(made);
     if (!made) return;
     test_roundtrip();

@@ -2,6 +2,7 @@
  * rendered offline: no audio device. */
 #include "block.h"
 #include "mem.h"
+#include "os.h"
 #include "sound.h"
 #include "sound_synth.h"
 #include "test_util.h"
@@ -9,16 +10,10 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #define FRAMES 48000 /* one second at SOUND_RATE */
 
-static double now_ms(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * 1e3 + (double)ts.tv_nsec * 1e-6;
-}
+static double now_ms(void) { return os_now() * 1e3; }
 
 /* Renders `frames` in device-sized pieces; returns the peak and fills the
  * energy of each channel. */

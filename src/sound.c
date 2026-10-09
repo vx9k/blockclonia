@@ -1,11 +1,11 @@
 #include "sound.h"
 #include "mem.h"
+#include "os.h"
 #include "sound_synth.h"
 
 #include <math.h>
 #include <stdatomic.h>
 #include <string.h>
-#include <time.h>
 
 /* The mixer.
  *
@@ -531,17 +531,10 @@ static void mix_chunk(sound *s, float *out, int frames)
     s->limit = target;
 }
 
-static double now_s(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
-}
-
 void sound_render(void *user, float *out, uint32_t frames)
 {
     sound *s = user;
-    double t0 = now_s();
+    double t0 = os_now();
     drain(s);
     int ch = s->channels;
     for (uint32_t done = 0; done < frames;) {
@@ -550,7 +543,7 @@ void sound_render(void *user, float *out, uint32_t frames)
         done += (uint32_t)n;
     }
     /* The mixer's share of real time, smoothed. */
-    float load = frames ? (float)((now_s() - t0) * (double)s->rate / (double)frames) : 0.0f;
+    float load = frames ? (float)((os_now() - t0) * (double)s->rate / (double)frames) : 0.0f;
     uint32_t bits = atomic_load_explicit(&s->stat_load, memory_order_relaxed);
     float prev;
     memcpy(&prev, &bits, sizeof prev);

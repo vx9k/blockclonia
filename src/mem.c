@@ -1,6 +1,7 @@
 #include "mem.h"
 #include "log.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -41,10 +42,15 @@ void *mem_realloc(void *ptr, size_t size)
 
 size_t mem_array_size(size_t count, size_t size)
 {
+#if defined(__GNUC__)
     size_t total;
     if (__builtin_mul_overflow(count, size, &total))
         log_fatal("allocation size overflow (%zu * %zu)", count, size);
     return total;
+#else
+    if (size && count > SIZE_MAX / size) log_fatal("allocation size overflow (%zu * %zu)", count, size);
+    return count * size;
+#endif
 }
 
 void mem_init(void)

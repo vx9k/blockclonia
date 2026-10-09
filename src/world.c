@@ -4,13 +4,13 @@
 #include "mathlib.h"
 #include "mem.h"
 #include "mesher.h"
+#include "os.h"
 #include "save.h"
 #include "save_db.h"
 
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 /* ---------------------------------------------------------------- columns */
 
@@ -65,13 +65,6 @@ static int in_ring(int dx, int dz, int radius, int slack)
     if (ax < 0) ax = 0;
     if (az < 0) az = 0;
     return ax * ax + az * az <= radius * radius;
-}
-
-static double now_sec(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
 /* ------------------------------------------------------------ block access */
@@ -483,7 +476,7 @@ static void schedule_meshes(world *w, int backlog)
     w->urgent_count = 0;
     if (!w->sched_pending || backlog) return;
 
-    double t0 = now_sec();
+    double t0 = os_now();
     int started = 0, capped = 0;
     for (int i = 0; i < w->spiral_count && !capped; i++) {
         int dx = w->spiral[i][0], dz = w->spiral[i][1];
@@ -496,7 +489,10 @@ static void schedule_meshes(world *w, int backlog)
             if (sy < 0 || sy >= SECTIONS) continue;
             if (w->mesh_in_flight >= w->max_mesh_in_flight) { capped = 1; break; }
             started += schedule_section(w, c, sy, 0);
-            if ((started & 7) == 7 && now_sec() - t0 > GATHER_BUDGET_S) { capped = 1; break; }
+            if ((started & 7) == 7 && os_now() - t0 > GATHER_BUDGET_S) {
+                capped = 1;
+                break;
+            }
         }
     }
     if (!capped) w->sched_pending = 0; /* full pass found nothing left to start */

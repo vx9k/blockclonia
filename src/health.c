@@ -2363,7 +2363,13 @@ float health_hunger(const health *h)
 
 float health_stamina(const health *h) { return h->wbal / WPRIME; }
 
-__attribute__((format(printf, 4, 5))) static void cat(char *buf, size_t n, size_t *len, const char *fmt, ...)
+static void cat(char *buf, size_t n, size_t *len, const char *fmt, ...)
+#if defined(__GNUC__)
+    __attribute__((format(printf, 4, 5)))
+#endif
+    ;
+
+static void cat(char *buf, size_t n, size_t *len, const char *fmt, ...)
 {
     if (*len >= n) return;
     va_list ap;
@@ -2380,7 +2386,13 @@ typedef struct {
     int sev;
 } status_text;
 
-__attribute__((format(printf, 3, 4))) static void status_add(status_text *s, int sev, const char *fmt, ...)
+static void status_add(status_text *s, int sev, const char *fmt, ...)
+#if defined(__GNUC__)
+    __attribute__((format(printf, 3, 4)))
+#endif
+    ;
+
+static void status_add(status_text *s, int sev, const char *fmt, ...)
 {
     if (s->len) cat(s->buf, s->n, &s->len, ", ");
     char item[96];

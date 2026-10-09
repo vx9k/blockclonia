@@ -134,7 +134,13 @@ typedef struct {
     int n, max;
 } alert_list;
 
-__attribute__((format(printf, 4, 5))) static void add_alert(alert_list *l, uint32_t key, int sev, const char *fmt, ...)
+static void add_alert(alert_list *l, uint32_t key, int sev, const char *fmt, ...)
+#if defined(__GNUC__)
+    __attribute__((format(printf, 4, 5)))
+#endif
+    ;
+
+static void add_alert(alert_list *l, uint32_t key, int sev, const char *fmt, ...)
 {
     if (l->n >= l->max) return;
     alert *al = &l->a[l->n++];

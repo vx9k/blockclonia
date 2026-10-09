@@ -15,6 +15,7 @@ unusedFunction:*/tests/test_sound.c
 # on test_defib.c instead.
 unusedFunction:*/tests/test_defib.c
 unusedFunction:*/tests/test_health_debug.c
+unusedFunction:*/tests/test_save_db.c
 # Informational noise from --enable=all.
 missingIncludeSystem
 checkersReport

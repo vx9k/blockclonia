@@ -1,11 +1,11 @@
 #include "sound_synth.h"
 #include "block.h"
 #include "mem.h"
+#include "os.h"
 #include "sound.h"
 
 #include <math.h>
 #include <string.h>
-#include <time.h>
 
 /* The building blocks, all in float at SYNTH_RATE:
  *
@@ -675,16 +675,9 @@ static int render_one(float *buf, int id, synth_material m, rng_t *r)
     }
 }
 
-static double now_ms(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * 1e3 + (double)ts.tv_nsec * 1e-6;
-}
-
 int synth_build(synth_bank *b, uint32_t seed)
 {
-    double t0 = now_ms();
+    double t0 = os_now() * 1e3;
     memset(b, 0, sizeof *b);
     /* Material sounds: ~4.7 s per material over the six ids and their
      * variants, 11 materials; the rest ~20 s; three 3 s loops: ~85 s, 4 MB
@@ -710,7 +703,7 @@ int synth_build(synth_bank *b, uint32_t seed)
     fire(buf, &r);
     b->loop[LOOP_FIRE] = finish_loop(b, buf, n, xf, LOOP_GAIN[LOOP_FIRE]);
     mem_free(buf);
-    b->build_ms = now_ms() - t0;
+    b->build_ms = os_now() * 1e3 - t0;
     return b->used <= b->cap ? 0 : -1;
 }
 

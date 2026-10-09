@@ -13,6 +13,11 @@
 #             qemu-user; produces an armhf .deb.
 #   macos     experimental: core + unit tests (the renderer still needs the
 #             MoltenVK portability changes described in the build audit).
+#   windows   Windows Server 2022, MSVC (Visual Studio 2022) with the Vulkan
+#             SDK, -WX; unit tests and --bench natively; produces the zip
+#             players download (no GPU on the runner, so no frames drawn).
+#   mingw     cross build for Windows with MinGW-w64 on Ubuntu, -Werror;
+#             unit tests and --bench under Wine.
 name: CI
 
 on:
@@ -147,3 +152,64 @@ jobs:
       - run: cmake --preset core -DCMAKE_PREFIX_PATH="$(brew --prefix)" -DMC_DEPS=AUTO
       - run: cmake --build --preset core
       - run: ctest --preset core
+
+  windows:
+    runs-on: windows-2022
+    env:
+      VULKAN_SDK_VERSION: 1.3.296.0
+    steps:
+      - uses: actions/checkout@v4
+      # Headers, vulkan-1.lib and glslc. The runner has no GPU driver, so
+      # the game is built and its CPU paths tested, but no frame is drawn.
+      - name: Install the Vulkan SDK
+        shell: pwsh
+        run: |
+          $v = $env:VULKAN_SDK_VERSION
+          $root = "C:\VulkanSDK\$v"
+          Invoke-WebRequest "https://sdk.lunarg.com/sdk/download/$v/windows/VulkanSDK-$v-Installer.exe" -OutFile vksdk.exe
+          Start-Process -Wait -FilePath .\vksdk.exe -ArgumentList "--root", $root, "--accept-licenses", "--default-answer", "--confirm-command", "install"
+          "VULKAN_SDK=$root" >> $env:GITHUB_ENV
+          "$root\Bin" >> $env:GITHUB_PATH
+      # The SDK does not install the loader (vulkan-1.dll), which the game
+      # links against, so without it even --bench cannot start.
+      - name: Install the Vulkan runtime
+        shell: pwsh
+        run: |
+          $v = $env:VULKAN_SDK_VERSION
+          Invoke-WebRequest "https://sdk.lunarg.com/sdk/download/$v/windows/VulkanRT-$v-Installer.exe" -OutFile vkrt.exe
+          Start-Process -Wait -FilePath .\vkrt.exe -ArgumentList "/S"
+          if (-not (Test-Path "$env:SystemRoot\System32\vulkan-1.dll")) { throw "vulkan-1.dll was not installed" }
+      - run: cmake --preset windows-msvc -DMC_WERROR=ON
+      - run: cmake --build --preset windows-msvc
+      - run: ctest --preset windows-msvc
+      - run: cpack --config build/windows-msvc/CPackConfig.cmake -C Release -B build/windows-msvc/package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blockclonia-windows-x64
+          path: build/windows-msvc/package/*.zip
+
+  mingw:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build glslc libvulkan-dev gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 wine64
+      # The Vulkan headers are the same on every platform; the import
+      # library comes from the loader's export list for this header version.
+      - name: Vulkan headers and import library for MinGW
+        run: |
+          mkdir -p "$HOME/vk-mingw/include" "$HOME/vk-mingw/lib"
+          cp -r /usr/include/vulkan /usr/include/vk_video "$HOME/vk-mingw/include/"
+          curl -fsSL -o vulkan-1.def \
+            https://raw.githubusercontent.com/KhronosGroup/Vulkan-Loader/v1.3.275/loader/vulkan-1.def
+          x86_64-w64-mingw32-dlltool -d vulkan-1.def -D vulkan-1.dll -l "$HOME/vk-mingw/lib/libvulkan-1.a"
+      - run: >
+          cmake --preset mingw64 -DMC_WERROR=ON
+          -DVulkan_INCLUDE_DIR="$HOME/vk-mingw/include" -DVulkan_LIBRARY="$HOME/vk-mingw/lib/libvulkan-1.a"
+      - run: cmake --build --preset mingw64
+      - run: ctest --preset mingw64
+        env:
+          WINEDEBUG: -all

@@ -1,18 +1,23 @@
 /* Where files go (paths.c) under every mix of XDG variables and $HOME, and
  * the one-off copy of files older builds kept in the working directory
  * (save_copy_file, save_copy_world). */
+#include "os.h"
 #include "paths.h"
 #include "save.h"
 #include "test_util.h"
 
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <sys/stat.h>
-#include <unistd.h>
+#endif
 
+#ifdef _WIN32
+static const char *const VARS[] = {"USERPROFILE", "APPDATA", "LOCALAPPDATA"};
+#else
 static const char *const VARS[] = {"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"};
+#endif
 #define NVARS (sizeof VARS / sizeof VARS[0])
 
 /* The caller's environment, put back when the tests are done. */
@@ -30,26 +35,73 @@ static void env_save(void)
 
 static void env_restore(void)
 {
-    for (size_t i = 0; i < NVARS; i++) {
-        if (g_had[i]) setenv(VARS[i], g_saved[i], 1);
-        else unsetenv(VARS[i]);
-    }
-}
-
-/* Sets the four variables; NULL unsets one. */
-static void env_set(const char *home, const char *config, const char *data, const char *cache)
-{
-    const char *v[NVARS] = {home, config, data, cache};
-    for (size_t i = 0; i < NVARS; i++) {
-        if (v[i]) setenv(VARS[i], v[i], 1);
-        else unsetenv(VARS[i]);
-    }
+    for (size_t i = 0; i < NVARS; i++) tmp_setenv(VARS[i], g_had[i] ? g_saved[i] : NULL);
 }
 
 static int app_dir_is(const char *var, const char *rel, const char *want)
 {
     char out[PATHS_MAX];
     return paths_app_dir(var, rel, out, sizeof out) == 0 && strcmp(out, want) == 0;
+}
+
+#ifdef _WIN32
+/* Sets the three variables; NULL unsets one. */
+static void env_set(const char *profile, const char *roaming, const char *local)
+{
+    const char *v[NVARS] = {profile, roaming, local};
+    for (size_t i = 0; i < NVARS; i++) tmp_setenv(VARS[i], v[i]);
+}
+
+static void test_app_dir(void)
+{
+    env_set("C:\\Users\\u", "D:\\roam\\", NULL);
+    CHECK(app_dir_is("APPDATA", "AppData/Roaming", "D:\\roam/blockclonia"));
+    CHECK(app_dir_is("LOCALAPPDATA", "AppData/Local", "C:\\Users\\u/AppData/Local/blockclonia")); /* unset */
+    env_set("C:/Users/u/", "roam", "\\\\server\\share");
+    CHECK(app_dir_is("APPDATA", "AppData/Roaming", "C:/Users/u/AppData/Roaming/blockclonia")); /* relative */
+    CHECK(app_dir_is("LOCALAPPDATA", "AppData/Local", "\\\\server\\share/blockclonia"));       /* UNC */
+    env_set("C:\\", "\\no-drive", "C:relative");
+    CHECK(app_dir_is("APPDATA", "AppData/Roaming", "C:/AppData/Roaming/blockclonia"));
+    CHECK(app_dir_is("LOCALAPPDATA", "AppData/Local", "C:/AppData/Local/blockclonia"));
+
+    char out[PATHS_MAX];
+    env_set(NULL, NULL, NULL);
+    CHECK(paths_app_dir("APPDATA", "AppData/Roaming", out, sizeof out) == -1);
+    env_set("/home/u", NULL, NULL); /* a POSIX path is not absolute on Windows */
+    CHECK(paths_app_dir("APPDATA", "AppData/Roaming", out, sizeof out) == -1);
+}
+
+static void test_resolve(void)
+{
+    paths p;
+    env_set("C:\\Users\\u", "C:\\Users\\u\\AppData\\Roaming", NULL);
+    paths_resolve(&p);
+    CHECK(strcmp(p.config, "C:\\Users\\u\\AppData\\Roaming/blockclonia/blockclonia.cfg") == 0 && p.xdg_config);
+    CHECK(strcmp(p.world, "C:\\Users\\u\\AppData\\Roaming/blockclonia/worlds/world") == 0 && p.xdg_world);
+    CHECK(strcmp(p.pipelines, "C:\\Users\\u/AppData/Local/blockclonia/blockclonia.pipelines") == 0 && p.xdg_pipelines);
+
+    env_set(NULL, NULL, NULL);
+    paths_resolve(&p);
+    CHECK(strcmp(p.config, "blockclonia.cfg") == 0 && !p.xdg_config);
+    CHECK(strcmp(p.world, "world") == 0 && !p.xdg_world);
+}
+
+static void test_parent(void)
+{
+    char out[64];
+    CHECK(paths_parent("C:\\a\\b\\c.cfg", out, sizeof out) == 0 && strcmp(out, "C:\\a\\b") == 0);
+    CHECK(paths_parent("C:\\a/b/c.cfg", out, sizeof out) == 0 && strcmp(out, "C:\\a/b") == 0);
+    CHECK(paths_parent("b\\c", out, sizeof out) == 0 && strcmp(out, "b") == 0);
+    CHECK(paths_parent("C:\\c.cfg", out, sizeof out) == -1);
+    CHECK(paths_parent("\\\\server\\share\\c.cfg", out, sizeof out) == -1);
+    CHECK(paths_parent("c.cfg", out, sizeof out) == -1);
+}
+#else
+/* Sets the four variables; NULL unsets one. */
+static void env_set(const char *home, const char *config, const char *data, const char *cache)
+{
+    const char *v[NVARS] = {home, config, data, cache};
+    for (size_t i = 0; i < NVARS; i++) tmp_setenv(VARS[i], v[i]);
 }
 
 static void test_app_dir(void)
@@ -115,6 +167,7 @@ static void test_parent(void)
     CHECK(paths_parent("/c.cfg", out, sizeof out) == -1);
     CHECK(paths_parent("/abcdef/c", out, 4) == -1);
 }
+#endif
 
 /* Empties and removes a directory the tests made; its subdirectories go
  * first. Entries are unlinked, never followed. */
@@ -122,18 +175,18 @@ static void rm_dir(const char *root, const char *sub)
 {
     char dir[400];
     snprintf(dir, sizeof dir, "%s%s", root, sub);
-    DIR *d = opendir(dir);
+    os_dir *d = os_dir_open(dir);
     if (d) {
-        const struct dirent *e;
-        while ((e = readdir(d)) != NULL) {
-            if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        const char *name;
+        while ((name = os_dir_next(d)) != NULL) {
+            if (!strcmp(name, ".") || !strcmp(name, "..")) continue;
             char p[700];
-            snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
-            unlink(p);
+            snprintf(p, sizeof p, "%s/%s", dir, name);
+            tmp_remove(p);
         }
-        closedir(d);
+        os_dir_close(d);
     }
-    rmdir(dir);
+    tmp_remove(dir);
 }
 
 static int put_file(const char *dir, const char *name, const char *text)
@@ -157,9 +210,8 @@ static int has_file(const char *dir, const char *name, const char *text)
 static int missing(const char *dir, const char *name)
 {
     char p[512];
-    struct stat st;
     snprintf(p, sizeof p, "%s/%s", dir, name);
-    return lstat(p, &st) != 0;
+    return os_path_kind(p) == OS_MISSING;
 }
 
 static void test_make_dirs(const char *root)
@@ -167,8 +219,11 @@ static void test_make_dirs(const char *root)
     char d[400], f[400];
     snprintf(d, sizeof d, "%s/a/b/c", root);
     CHECK(paths_make_dirs(d) == 0);
+    CHECK(os_is_dir(d));
+#ifndef _WIN32
     struct stat st;
-    CHECK(stat(d, &st) == 0 && S_ISDIR(st.st_mode) && (st.st_mode & 0777) == 0700);
+    CHECK(stat(d, &st) == 0 && (st.st_mode & 0777) == 0700);
+#endif
     CHECK(paths_make_dirs(d) == 0); /* already there */
     snprintf(d, sizeof d, "%s/a/b/c/", root);
     CHECK(paths_make_dirs(d) == 0);
@@ -186,7 +241,7 @@ static void test_copy(const char *root)
     char from[400], to[400], victim[400], link[450];
     snprintf(from, sizeof from, "%s/old", root);
     snprintf(to, sizeof to, "%s/new", root);
-    CHECK(mkdir(from, 0700) == 0 && mkdir(to, 0700) == 0);
+    CHECK(os_mkdir(from, 0700) == 0 && os_mkdir(to, 0700) == 0);
 
     /* save_copy_file: copies once, then never overwrites. */
     char a[450], b[450];
@@ -204,7 +259,8 @@ static void test_copy(const char *root)
     CHECK(put_file(root, "victim.txt", "precious") == 0);
     snprintf(a, sizeof a, "%s/link.cfg", from);
     snprintf(b, sizeof b, "%s/link.cfg", to);
-    CHECK(symlink(victim, a) == 0);
+    int linked = tmp_symlink(victim, a);
+    CHECK(linked != 0);
     CHECK(save_copy_file(a, b, 64) == 0 && missing(to, "link.cfg")); /* symlinks are not followed */
 
     /* save_copy_world: only level.dat, player.dat and canonical column
@@ -217,7 +273,7 @@ static void test_copy(const char *root)
     CHECK(put_file(from, "c.0.0.bin.tmp", "temp") == 0);
     CHECK(put_file(from, "notes.txt", "junk") == 0);
     snprintf(link, sizeof link, "%s/c.5.5.bin", from);
-    CHECK(symlink(victim, link) == 0);
+    CHECK(tmp_symlink(victim, link) == linked);
     CHECK(put_file(from, "level.dat", "seed 42\n") == 0);
     CHECK(save_copy_world(from, to) == 3);
     uint32_t seed = 0;
@@ -234,8 +290,8 @@ static void test_copy(const char *root)
     char via[400], to2[400];
     snprintf(via, sizeof via, "%s/via", root);
     snprintf(to2, sizeof to2, "%s/new2", root);
-    CHECK(symlink(from, via) == 0 && mkdir(to2, 0700) == 0);
-    CHECK(save_copy_world(via, to2) == 0 && missing(to2, "level.dat"));
+    CHECK(tmp_symlink(from, via) == linked && os_mkdir(to2, 0700) == 0);
+    if (linked == 1) CHECK(save_copy_world(via, to2) == 0 && missing(to2, "level.dat"));
 }
 
 void test_paths_all(void)
@@ -247,13 +303,11 @@ void test_paths_all(void)
     test_parent();
 
     char root[256];
-    const char *tmp = getenv("TMPDIR");
-    snprintf(root, sizeof root, "%s/mc_paths_XXXXXX", tmp && tmp[0] && strlen(tmp) < 200 ? tmp : "/tmp");
-    int made = mkdtemp(root) != NULL;
+    int made = tmp_dir_make(root, sizeof root, "mc_paths_");
     CHECK(made);
     if (!made) return;
     test_make_dirs(root);
     test_copy(root);
-    const char *dirs[] = {"/a/b/c", "/a/b", "/a", "/old", "/new", "/new2", ""};
+    const char *dirs[] = {"/a/b/c", "/a/b", "/a", "/old", "/new", "/new2", "/via", ""};
     for (size_t i = 0; i < sizeof dirs / sizeof dirs[0]; i++) rm_dir(root, dirs[i]);
 }

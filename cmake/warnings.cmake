@@ -37,6 +37,13 @@ elseif(CMAKE_C_COMPILER_ID MATCHES "Clang")
     -Wshorten-64-to-32)            # catches VkDeviceSize -> size_t on 32-bit ARM
 endif()
 
+if(MINGW AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
+  # MinGW-w64's isfinite/isnan expand to a sizeof() switch over float,
+  # double and long double, which -Wfloat-conversion flags at every call.
+  # The Linux builds still check these conversions.
+  list(APPEND MC_WARNINGS -Wno-float-conversion)
+endif()
+
 if(MC_WERROR)
   list(APPEND MC_WARNINGS -Werror)
 endif()
