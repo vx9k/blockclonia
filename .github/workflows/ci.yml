@@ -18,6 +18,8 @@
 #             players download (no GPU on the runner, so no frames drawn).
 #   mingw     cross build for Windows with MinGW-w64 on Ubuntu, -Werror;
 #             unit tests and --bench under Wine.
+#   nightly   on pushes to main that pass, replaces the "nightly"
+#             prerelease with the .debs and the Windows zip.
 name: CI
 
 on:
@@ -213,3 +215,32 @@ jobs:
       - run: ctest --preset mingw64
         env:
           WINEDEBUG: -all
+
+  # Every push to main that passes the jobs below replaces the "nightly"
+  # prerelease (and its tag) with the packages built from that commit.
+  nightly:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [linux, sanitize, lint, pi-arm64, pi-armhf, windows, mingw]
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    concurrency:
+      group: nightly-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: blockclonia-*
+          path: dist
+          merge-multiple: true
+      - name: Publish the nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete nightly --cleanup-tag --yes || true
+          gh release create nightly dist/* \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Nightly ($(date -u +%Y-%m-%d), ${GITHUB_SHA::7})" \
+            --notes "Automated build of ${GITHUB_SHA} from main. Not a stable release."
