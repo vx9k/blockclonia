@@ -39,7 +39,7 @@ jobs:
       matrix:
         compiler: [gcc, clang]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install packages
         run: |
           sudo apt-get update
@@ -53,7 +53,7 @@ jobs:
   sanitize:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install packages
         run: |
           sudo apt-get update
@@ -72,7 +72,7 @@ jobs:
   lint:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # clang-format checks only lines changed since the base
       - name: Install packages
@@ -96,7 +96,7 @@ jobs:
     runs-on: ubuntu-24.04-arm # GitHub-hosted arm64; free for public repositories
     container: debian:bookworm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install packages
         run: |
           apt-get update
@@ -113,7 +113,7 @@ jobs:
       - run: cmake --build --preset release
       - run: ctest --preset release
       - run: cd build/release && cpack -G DEB
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: blockclonia-pi-arm64
           path: build/release/*.deb
@@ -122,7 +122,7 @@ jobs:
     runs-on: ubuntu-24.04
     container: debian:bookworm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install packages
         run: |
           dpkg --add-architecture armhf
@@ -138,16 +138,16 @@ jobs:
       - run: cmake --build --preset pi4-armhf
       - run: ctest --preset pi4-armhf # unit + bench under qemu-arm
       - run: cd build/pi4-armhf && cpack -G DEB
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: blockclonia-pi-armhf
           path: build/pi4-armhf/*.deb
 
   macos:
-    runs-on: macos-14
+    runs-on: macos-26
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: brew install ninja mimalloc
       - run: cmake --preset core -DCMAKE_PREFIX_PATH="$(brew --prefix)" -DMC_DEPS=AUTO
       - run: cmake --build --preset core
@@ -156,9 +156,9 @@ jobs:
   windows:
     runs-on: windows-2022
     env:
-      VULKAN_SDK_VERSION: 1.3.296.0
+      VULKAN_SDK_VERSION: 1.4.363.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Headers, vulkan-1.lib and glslc. The runner has no GPU driver, so
       # the game is built and its CPU paths tested, but no frame is drawn.
       - name: Install the Vulkan SDK
@@ -166,7 +166,7 @@ jobs:
         run: |
           $v = $env:VULKAN_SDK_VERSION
           $root = "C:\VulkanSDK\$v"
-          Invoke-WebRequest "https://sdk.lunarg.com/sdk/download/$v/windows/VulkanSDK-$v-Installer.exe" -OutFile vksdk.exe
+          Invoke-WebRequest "https://sdk.lunarg.com/sdk/download/$v/windows/vulkansdk-windows-X64-$v.exe" -OutFile vksdk.exe
           Start-Process -Wait -FilePath .\vksdk.exe -ArgumentList "--root", $root, "--accept-licenses", "--default-answer", "--confirm-command", "install"
           "VULKAN_SDK=$root" >> $env:GITHUB_ENV
           "$root\Bin" >> $env:GITHUB_PATH
@@ -176,14 +176,14 @@ jobs:
         shell: pwsh
         run: |
           $v = $env:VULKAN_SDK_VERSION
-          Invoke-WebRequest "https://sdk.lunarg.com/sdk/download/$v/windows/VulkanRT-$v-Installer.exe" -OutFile vkrt.exe
+          Invoke-WebRequest "https://sdk.lunarg.com/sdk/download/$v/windows/VulkanRT-X64-$v-Installer.exe" -OutFile vkrt.exe
           Start-Process -Wait -FilePath .\vkrt.exe -ArgumentList "/S"
           if (-not (Test-Path "$env:SystemRoot\System32\vulkan-1.dll")) { throw "vulkan-1.dll was not installed" }
       - run: cmake --preset windows-msvc -DMC_WERROR=ON
       - run: cmake --build --preset windows-msvc
       - run: ctest --preset windows-msvc
       - run: cpack --config build/windows-msvc/CPackConfig.cmake -C Release -B build/windows-msvc/package
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: blockclonia-windows-x64
           path: build/windows-msvc/package/*.zip
@@ -191,7 +191,7 @@ jobs:
   mingw:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install packages
         run: |
           sudo apt-get update
