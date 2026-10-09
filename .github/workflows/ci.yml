@@ -1,19 +1,19 @@
 # Builds and tests blockclonia on every push and pull request.
 #
-#   linux     Ubuntu 24.04, gcc and clang, Release flags, -Werror, system
+#   linux     Ubuntu 26.04, gcc and clang, Release flags, -Werror, system
 #             packages only; unit tests, --bench, and a 120-frame render on
 #             Mesa lavapipe (software Vulkan) under Xvfb with validation.
 #   sanitize  ASan + UBSan (gcc).
 #   lint      tools/lint.sh: clang-tidy, cppcheck, shader checks, and
 #             clang-format on the lines this change touches.
-#   pi-arm64  native arm64 runner inside Debian bookworm (the base of
-#             Raspberry Pi OS bookworm), tuned for the Pi 4; produces a .deb
+#   pi-arm64  native arm64 runner inside Debian trixie (the base of
+#             Raspberry Pi OS trixie), tuned for the Pi 4; produces a .deb
 #             that installs on 64-bit Pi OS.
-#   pi-armhf  cross build for 32-bit Pi OS in Debian bookworm, tests under
+#   pi-armhf  cross build for 32-bit Pi OS in Debian trixie, tests under
 #             qemu-user; produces an armhf .deb.
 #   macos     experimental: core + unit tests (the renderer still needs the
 #             MoltenVK portability changes described in the build audit).
-#   windows   Windows Server 2022, MSVC (Visual Studio 2022) with the Vulkan
+#   windows   Windows Server 2025, MSVC (Visual Studio 2026) with the Vulkan
 #             SDK, -WX; unit tests and --bench natively; produces the zip
 #             players download (no GPU on the runner, so no frames drawn).
 #   mingw     cross build for Windows with MinGW-w64 on Ubuntu, -Werror;
@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   linux:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -51,7 +51,7 @@ jobs:
       - run: ctest --preset ci-${{ matrix.compiler }}
 
   sanitize:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - name: Install packages
@@ -62,7 +62,7 @@ jobs:
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev libwayland-bin libxkbcommon-dev
-      # Ubuntu's GLFW 3.3 and mimalloc 2.1 are older than the pinned
+      # Ubuntu's GLFW 3.4 and mimalloc 3.2 are older than the pinned
       # releases, so the preset's MC_DEPS=AUTO builds both from source
       # (GLFW needs the X11 and Wayland headers and wayland-scanner).
       - run: cmake --preset asan -DMC_WERROR=ON
@@ -70,7 +70,7 @@ jobs:
       - run: ctest --preset asan
 
   lint:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -93,8 +93,8 @@ jobs:
           tools/lint.sh
 
   pi-arm64:
-    runs-on: ubuntu-24.04-arm # GitHub-hosted arm64; free for public repositories
-    container: debian:bookworm
+    runs-on: ubuntu-26.04-arm # GitHub-hosted arm64; free for public repositories
+    container: debian:trixie
     steps:
       - uses: actions/checkout@v7
       - name: Install packages
@@ -106,7 +106,7 @@ jobs:
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev libwayland-bin libxkbcommon-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
-      # bookworm ships mimalloc 2.0.x and GLFW 3.3.8, both older than the
+      # trixie ships mimalloc 3.0.x and GLFW 3.4, both older than the
       # pinned 3.5 series, so MC_DEPS=AUTO builds mimalloc 3.5.3 and GLFW
       # 3.5.1 from source here (GLFW needs the X11 and Wayland headers).
       - run: cmake --preset release -DMC_CPU=pi4 -DMC_DEPS=AUTO -DMC_WERROR=ON
@@ -119,8 +119,8 @@ jobs:
           path: build/release/*.deb
 
   pi-armhf:
-    runs-on: ubuntu-24.04
-    container: debian:bookworm
+    runs-on: ubuntu-26.04
+    container: debian:trixie
     steps:
       - uses: actions/checkout@v7
       - name: Install packages
@@ -154,7 +154,7 @@ jobs:
       - run: ctest --preset core
 
   windows:
-    runs-on: windows-2022
+    runs-on: windows-2025
     env:
       VULKAN_SDK_VERSION: 1.4.363.0
     steps:
@@ -189,7 +189,7 @@ jobs:
           path: build/windows-msvc/package/*.zip
 
   mingw:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - name: Install packages
@@ -204,7 +204,7 @@ jobs:
           mkdir -p "$HOME/vk-mingw/include" "$HOME/vk-mingw/lib"
           cp -r /usr/include/vulkan /usr/include/vk_video "$HOME/vk-mingw/include/"
           curl -fsSL -o vulkan-1.def \
-            https://raw.githubusercontent.com/KhronosGroup/Vulkan-Loader/v1.3.275/loader/vulkan-1.def
+            https://raw.githubusercontent.com/KhronosGroup/Vulkan-Loader/v1.4.341/loader/vulkan-1.def
           x86_64-w64-mingw32-dlltool -d vulkan-1.def -D vulkan-1.dll -l "$HOME/vk-mingw/lib/libvulkan-1.a"
       - run: >
           cmake --preset mingw64 -DMC_WERROR=ON
