@@ -307,6 +307,12 @@ cmake --build --preset native
   release. Offline, point `FETCHCONTENT_SOURCE_DIR_SQLITE` at an existing
   `build/*/_deps/sqlite-src` checkout instead of downloading.
 - `-DMC_SOUND=OFF` builds without sound (no miniaudio needed).
+- macOS (Apple Silicon, experimental): the renderer runs on Metal through
+  MoltenVK. `brew install cmake ninja mimalloc glfw vulkan-headers
+  vulkan-loader molten-vk shaderc`, then
+  `cmake --preset macos -DCMAKE_PREFIX_PATH="$(brew --prefix)"` and
+  `cmake --build --preset macos`. CI builds and tests it, but nobody has
+  played it on a Mac yet; reports are welcome.
 - `cmake --list-presets` shows the rest: `dev`, `release` (-O2 + LTO,
   portable), `profile`, `asan`, `core` (no Vulkan or GLFW needed), `fuzz`,
   `ci-gcc`/`ci-clang` (-Werror), and cross builds for the Pi 4/5
