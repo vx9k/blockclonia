@@ -47,6 +47,7 @@ typedef struct {
     int bodies, items, particles, fluid_updates, last_collapse, heat_cells, fires;
 
     int draw_calls, sections;
+    int indirect_draws;        /* draws inside draw_calls issued by multi-draw indirect */
     uint32_t quads, pool_used_kb, pool_total_kb;
     int ui_quads;
     size_t rss, commit;        /* bytes; 0 if unknown */

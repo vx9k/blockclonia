@@ -31,6 +31,9 @@
 #define MAX_VIS (65 * 65 * SECTIONS) /* every section at the largest radius (32) */
 #define DYN_SIZE (1u << 20)
 #define DYN_LINES_BYTES 1024u
+/* Terrain draws per frame queued for multi-draw indirect (20 bytes each):
+ * several times what radius 32 needs; beyond it draws are issued directly. */
+#define MDI_MAX_DRAWS 16384u
 #define ZNEAR 0.05f
 /* The renderer's seven pipelines make a cache of a few hundred KB; a file
  * many times larger is not one this build wrote. */
@@ -87,6 +90,8 @@ typedef struct {
     gbuf dyn;                     /* per-frame section origins, body instances, lines */
     gbuf ui;                      /* overlay quads, written in place by the game */
     int timed;                    /* its last submission wrote both timestamps */
+    gbuf ind;                     /* multi-draw indirect commands for the terrain (GPUCAP_MDI) */
+    uint32_t ind_cap;             /* commands ind holds; 0 without GPUCAP_MDI */
 } frame;
 
 /* Chunk meshes live in a few big vertex buffers ("pool blocks"). The first
@@ -1507,6 +1512,12 @@ static void create_frames(renderer *r, uint32_t pool_mb)
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
         buffer_create(r, &f->ui, (VkDeviceSize)UI_MAX_QUADS * 4 * sizeof(ui_vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
+        if (r->caps.enabled & GPUCAP_MDI) {
+            f->ind_cap = MDI_MAX_DRAWS;
+            buffer_create(r, &f->ind, (VkDeviceSize)MDI_MAX_DRAWS * sizeof(VkDrawIndexedIndirectCommand),
+                          VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
+        }
     }
 }
 
@@ -1633,6 +1644,7 @@ void renderer_destroy(renderer *r)
         buffer_destroy(r, &f->staging);
         buffer_destroy(r, &f->dyn);
         buffer_destroy(r, &f->ui);
+        buffer_destroy(r, &f->ind);
         vkDestroyFence(r->dev, f->fence, r->ac);
         vkDestroySemaphore(r->dev, f->image_ready, r->ac);
         for (int b = 0; b < MAX_POOL_BLOCKS; b++) mem_free(f->copies[b].v);
@@ -1772,7 +1784,6 @@ static void write_screenshot(renderer *r, const gbuf *b)
     else log_error("writing screenshot %s failed", r->shot_path);
 }
 
-/* Issues one section range, split where 16-bit indices run out. */
 /* Texture layers with transparent texels, judged by an entity's side face
  * (the item sprites, glass, ice, water, cracks and flames). */
 static int layer_has_alpha(uint32_t tex)
@@ -1782,25 +1793,58 @@ static int layer_has_alpha(uint32_t tex)
            l == T_ITEM_DEFIBRILLATOR || (l >= T_CRACK0 && l <= T_FIRE3);
 }
 
-static void draw_quads(VkCommandBuffer cmd, uint32_t first_vertex, uint32_t quads, uint32_t instance,
-                       render_stats *st)
+/* The terrain draws of a frame. With multi-draw indirect, consecutive draws
+ * from one pool block are queued in the frame's indirect buffer and issued
+ * as one vkCmdDrawIndexedIndirect (the section origin rides on
+ * firstInstance). Without it (Vulkan 1.0 devices lacking the feature), or
+ * once the buffer is full, each draw is a vkCmdDrawIndexed. Draw order is
+ * the same either way, which the back-to-front translucent pass needs. */
+typedef struct {
+    VkCommandBuffer cmd;
+    const renderer *r;
+    const frame *f;
+    int bound;             /* pool block bound to binding 0; -1: none */
+    uint32_t first, count; /* queued: commands [first, first + count) of f->ind */
+    render_stats *st;
+} terrain_pass;
+
+/* Issues what is queued; call before anything that changes the bound
+ * pipeline or vertex buffers. */
+static void pass_flush(terrain_pass *p)
 {
-    while (quads) {
-        uint32_t n = quads < QUADS_PER_DRAW ? quads : QUADS_PER_DRAW;
-        vkCmdDrawIndexed(cmd, n * 6, 1, 0, (int32_t)first_vertex, instance);
-        first_vertex += n * 4;
-        quads -= n;
-        st->draw_calls++;
-        st->quads += n;
-    }
+    if (!p->count) return;
+    VkDeviceSize stride = sizeof(VkDrawIndexedIndirectCommand);
+    vkCmdDrawIndexedIndirect(p->cmd, p->f->ind.buf, p->first * stride, p->count, (uint32_t)stride);
+    p->st->draw_calls++;
+    p->st->indirect_draws += (int)p->count;
+    p->first += p->count;
+    p->count = 0;
 }
 
-static void bind_pool(VkCommandBuffer cmd, const renderer *r, int block, int *bound)
+/* One section range, split where 16-bit indices run out. */
+static void pass_draw(terrain_pass *p, int block, uint32_t first_vertex, uint32_t quads, uint32_t instance)
 {
-    if (*bound == block) return;
-    VkDeviceSize zero = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &r->pool[block].buf.buf, &zero);
-    *bound = block;
+    if (p->bound != block) {
+        pass_flush(p);
+        VkDeviceSize zero = 0;
+        vkCmdBindVertexBuffers(p->cmd, 0, 1, &p->r->pool[block].buf.buf, &zero);
+        p->bound = block;
+    }
+    while (quads) {
+        uint32_t n = quads < QUADS_PER_DRAW ? quads : QUADS_PER_DRAW;
+        if (p->first + p->count < p->f->ind_cap) {
+            VkDrawIndexedIndirectCommand *c = (VkDrawIndexedIndirectCommand *)p->f->ind.map + p->first + p->count++;
+            *c = (VkDrawIndexedIndirectCommand){n * 6, 1, 0, (int32_t)first_vertex, instance};
+            if (p->count == p->r->caps.max_draw_indirect_count) pass_flush(p);
+        } else {
+            pass_flush(p);
+            vkCmdDrawIndexed(p->cmd, n * 6, 1, 0, (int32_t)first_vertex, instance);
+            p->st->draw_calls++;
+        }
+        first_vertex += n * 4;
+        quads -= n;
+        p->st->quads += n;
+    }
 }
 
 /* Bit f set: face group f (+X, -X, +Y, -Y, +Z, -Z) of a section whose min
@@ -1931,7 +1975,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
 
     render_stats st = {0};
     VkDeviceSize zero = 0;
-    int bound = -1;
+    terrain_pass tp = {.cmd = cmd, .r = r, .f = f, .bound = -1, .st = &st};
 
     /* Opaque, front to back for early-Z. Face groups that point away from
      * the camera are skipped; adjacent groups merge into one draw. */
@@ -1944,17 +1988,17 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     for (int i = 0; i < nvis; i++) {
         const section_mesh *m = r->vis[i].m;
         if (!m->opaque_quads) continue;
-        bind_pool(cmd, r, m->block, &bound);
         uint32_t faces = r->vis[i].faces;
         for (int g = 0; g < 6;) {
             if (!(faces >> g & 1)) { g++; continue; }
             int e = g;
             while (e + 1 < 6 && (faces >> (e + 1) & 1)) e++;
             uint32_t q0 = g ? m->face_end[g - 1] : 0, q1 = m->face_end[e];
-            if (q1 > q0) draw_quads(cmd, m->vtx_offset + q0 * 4, q1 - q0, (uint32_t)i, &st);
+            if (q1 > q0) pass_draw(&tp, m->block, m->vtx_offset + q0 * 4, q1 - q0, (uint32_t)i);
             g = e + 1;
         }
     }
+    pass_flush(&tp);
 
     /* Entities: falling bodies plus the game's items, particles and
      * overlays, one static cube instanced per entity. Opaque instances are
@@ -1991,7 +2035,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
             VkBuffer bufs[2] = {r->cube.buf, f->dyn.buf};
             VkDeviceSize offs[2] = {0, ent_off};
             vkCmdBindVertexBuffers(cmd, 0, 2, bufs, offs);
-            bound = -1;
+            tp.bound = -1;
             vkCmdDrawIndexed(cmd, 36, (uint32_t)n_opaque, 0, 0, 0);
             st.draw_calls++;
         }
@@ -2003,9 +2047,9 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     for (int i = nvis - 1; i >= 0; i--) {
         const section_mesh *m = r->vis[i].m;
         if (!m->trans_quads) continue;
-        bind_pool(cmd, r, m->block, &bound);
-        draw_quads(cmd, m->vtx_offset + m->opaque_quads * 4, m->trans_quads, (uint32_t)i, &st);
+        pass_draw(&tp, m->block, m->vtx_offset + m->opaque_quads * 4, m->trans_quads, (uint32_t)i);
     }
+    pass_flush(&tp);
 
     if (n_trans) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_entity_trans);

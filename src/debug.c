@@ -164,7 +164,10 @@ void debug_draw(ui *u, const debug_info *d)
         line(&rc, C_TEXT, "Memory rss %.1f MB  committed %.1f MB", (double)d->rss / 1048576.0,
              (double)d->commit / 1048576.0);
     line(&rc, C_TEXT, "Mesh pool %.1f / %.0f MB", (double)d->pool_used_kb / 1024.0, (double)d->pool_total_kb / 1024.0);
-    line(&rc, C_TEXT, "Draws %d  sections %d  quads %u", d->draw_calls, d->sections, d->quads);
+    if (d->indirect_draws)
+        line(&rc, C_TEXT, "Draws %d (%d indirect)  sections %d  quads %u", d->draw_calls, d->indirect_draws,
+             d->sections, d->quads);
+    else line(&rc, C_TEXT, "Draws %d  sections %d  quads %u", d->draw_calls, d->sections, d->quads);
     gap(&rc);
     line(&rc, C_TEXT, "Seed %u  radius %d  workers %d", d->seed, d->radius, d->threads);
     line(&rc, C_TEXT, "Bodies %d  items %d  particles %d", d->bodies, d->items, d->particles);

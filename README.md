@@ -248,6 +248,7 @@ entirely.
 | Procedural textures with mipmaps and procedural sound, generated at startup | No asset files to ship or parse |
 | Vulkan 1.0 core with zero required optional features | Runs on anything with a Vulkan driver, including Raspberry Pi (V3DV) |
 | Trilinear and up to 8× anisotropic texture filtering (`aniso`; trilinear only without it) | Distant ground stays sharp at grazing angles instead of blurring or shimmering |
+| Multi-draw indirect (`mdi`): the terrain is one `vkCmdDrawIndexedIndirect` per pool block and pass, one draw per section otherwise | Recording 1400 sections takes 0.22 ms of CPU instead of 0.37 ms on Intel UHD (ADL-N); fewer draws for drivers with a cost per draw |
 | GPU timestamps around each frame (`timestamps`; reset from the CPU with `hostreset` on 1.2) | F3 shows the GPU time of a frame next to the CPU time spent recording it |
 | Pipeline cache kept on disk between runs (`pcache`) | Pipelines build from it where the driver has no shader cache of its own (Intel with Mesa's cache off: 40 ms to 3 ms) |
 

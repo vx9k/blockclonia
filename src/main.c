@@ -1411,6 +1411,7 @@ static void draw_debug(game *g, ui *u, int fb_w, int fb_h, double alpha)
     di.fluid_updates = g->ph.fluid_updates;
     di.last_collapse = g->ph.last_collapse;
     di.draw_calls = rs.draw_calls;
+    di.indirect_draws = rs.indirect_draws;
     di.sections = rs.sections_drawn;
     di.quads = rs.quads;
     di.render_cpu_ms = rs.cpu_ms;
