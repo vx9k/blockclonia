@@ -183,23 +183,25 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
      * per stride, two dips, one per foot); sprinting pulls the arm down,
      * out and back. */
     float base[3];
-    base[0] = PIVOT[0] + 0.045f * bob * ss + 0.002f * rest * breath_x + 0.03f * sprint - 0.02f * eat;
+    base[0] = PIVOT[0] + 0.045f * bob * ss + 0.002f * rest * breath_x + 0.03f * sprint - 0.02f * eat - 0.08f * a;
     base[1] = PIVOT[1] + 0.026f * bob * s2 + 0.004f * rest * breath - 0.05f * sprint + (0.012f * chew - 0.03f) * eat -
               0.04f * a;
-    /* A hit is thrown from the shoulder: it reaches forward as it drops. */
+    /* A hit is thrown from the shoulder: it reaches forward and in toward
+     * the crosshair as it drops, so the arm keeps its line instead of
+     * swinging flat across the view. */
     base[2] = PIVOT[2] + 0.04f * sprint + 0.06f * eat - 0.06f * a;
 
     /* The arm's aim: sprinting points it down and rolls it outward (the
      * tilt), eating turns it in and up to the mouth. */
-    float yaw = REST_YAW + 0.35f * eat - 0.02f * bob * ss;
-    float pitch = REST_PITCH - 0.22f * sprint + 0.22f * eat + 0.05f * eat * chew + 0.03f * bob * s2;
+    float yaw = REST_YAW + 0.5f * eat - 0.02f * bob * ss;
+    float pitch = REST_PITCH - 0.22f * sprint + 0.35f * eat + 0.05f * eat * chew + 0.03f * bob * s2;
     float roll = -0.35f * sprint + 0.04f * bob * ss;
     quat arm = quat_mul(quat_axis(0.0f, 1.0f, 0.0f, yaw),
                         quat_mul(quat_axis(1.0f, 0.0f, 0.0f, pitch), quat_axis(0.0f, 0.0f, 1.0f, roll)));
     /* The swing: about the pivot, mostly a downward chop (pitch) with a
      * little turn in toward the crosshair, so the hand drops along an arc
      * instead of sweeping sideways. */
-    arm = quat_norm(quat_mul(quat_axis(1.0f, 0.45f, 0.0f, -0.75f * a), arm));
+    arm = quat_norm(quat_mul(quat_axis(1.0f, -0.3f, 0.0f, -0.75f * a), arm));
 
     /* Lag rotates the whole view model about the eye (yaw is positive to
      * the right, so the view-space angle is its negative). */
