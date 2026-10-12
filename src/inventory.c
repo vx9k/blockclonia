@@ -208,7 +208,10 @@ size_t inv_encode(const inventory *inv, uint8_t *out, size_t cap)
 
 int inv_decode(inventory *inv, const uint8_t *in, size_t len)
 {
-    if (len != INV_ENCODED_SIZE || memcmp(in, "INV1", 4) != 0 || in[4] >= INV_HOTBAR) return -1;
+    /* Every INV1 ever written has zero reserved bytes: anything else is a
+     * layout this build does not know. */
+    if (len != INV_ENCODED_SIZE || memcmp(in, "INV1", 4) != 0 || in[4] >= INV_HOTBAR || in[5] || in[6] || in[7])
+        return -1;
     inventory t;
     inv_init(&t);
     t.selected = in[4];

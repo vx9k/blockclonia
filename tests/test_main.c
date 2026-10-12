@@ -1109,6 +1109,13 @@ static void test_inventory(void)
     buf[8 + 2 * 12 + 1] = 200; /* 200 bandages in a stack of 16 */
     CHECK(inv_decode(&back, buf, sizeof buf) == -1);
     CHECK(inv_decode(&back, buf, sizeof buf - 1) == -1);
+    /* Reserved bytes are zero in every INV1 written, so anything else is a
+     * layout this build does not know. */
+    for (int k = 5; k <= 7; k++) {
+        inv_encode(&inv, buf, sizeof buf);
+        buf[k] = 1;
+        CHECK(inv_decode(&back, buf, sizeof buf) == -1);
+    }
 
     /* The player file. */
     player p;
@@ -1126,6 +1133,14 @@ static void test_inventory(void)
     CHECK(fabs(day - 0.75) < 1e-4);
     CHECK(q.pos.x == p.pos.x && q.pos.y == p.pos.y && q.pos.z == p.pos.z && q.yaw == p.yaw && q.flying == 1);
     CHECK(inv_equal(&qi, &inv));
+    const int reserved[] = {5, 6, 7, 41, 44 + 5};
+    for (size_t k = 0; k < sizeof reserved / sizeof reserved[0]; k++) {
+        survival_encode_player(&p, &inv, 0.75, pf, sizeof pf);
+        pf[reserved[k]] = 1;
+        q.yaw = 9.0f;
+        CHECK(survival_decode_player(&q, &qi, &day, pf, sizeof pf) == -1 && q.yaw == 9.0f);
+    }
+    survival_encode_player(&p, &inv, 0.75, pf, sizeof pf);
     double nan = (double)NAN;
     memcpy(pf + 16, &nan, 8);
     CHECK(survival_decode_player(&q, &qi, NULL, pf, sizeof pf) == -1);
