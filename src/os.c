@@ -34,7 +34,11 @@ void os_mutex_init(os_mutex *m) { pthread_mutex_init(m, NULL); }
 void os_mutex_destroy(os_mutex *m) { pthread_mutex_destroy(m); }
 void os_mutex_lock(os_mutex *m) { pthread_mutex_lock(m); }
 void os_mutex_unlock(os_mutex *m) { pthread_mutex_unlock(m); }
+/* cppcheck 2.22's posix.cfg wrongly forbids a NULL attr and takes the
+ * condition variable to pthread_cond_destroy as read-only. */
+/* cppcheck-suppress nullPointer */
 void os_cond_init(os_cond *c) { pthread_cond_init(c, NULL); }
+/* cppcheck-suppress constParameterPointer */
 void os_cond_destroy(os_cond *c) { pthread_cond_destroy(c); }
 void os_cond_wait(os_cond *c, os_mutex *m) { pthread_cond_wait(c, m); }
 void os_cond_signal(os_cond *c) { pthread_cond_signal(c); }
