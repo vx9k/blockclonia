@@ -96,51 +96,18 @@ void mem_version_string(char *buf, size_t n)
 #endif
 }
 
-#ifdef MC_VK_MIMALLOC
-#include <vulkan/vulkan.h>
-
-static VKAPI_ATTR void *VKAPI_CALL vk_alloc(void *user, size_t size, size_t align,
-                                            VkSystemAllocationScope scope)
+#ifndef MC_MEM_LIBC
+void *mem_alloc_aligned(size_t size, size_t align)
 {
-    (void)user; (void)scope;
-    if (size == 0) return NULL;
-    return mi_malloc_aligned(size, align);
+    void *p = mi_malloc_aligned(size, align);
+    if (!p && size) oom(size);
+    return p;
 }
 
-static VKAPI_ATTR void *VKAPI_CALL vk_realloc(void *user, void *orig, size_t size,
-                                              size_t align, VkSystemAllocationScope scope)
+void *mem_realloc_aligned(void *ptr, size_t size, size_t align)
 {
-    (void)user; (void)scope;
-    if (size == 0) {
-        mi_free(orig);
-        return NULL;
-    }
-    return mi_realloc_aligned(orig, size, align);
+    void *p = mi_realloc_aligned(ptr, size, align);
+    if (!p && size) oom(size);
+    return p;
 }
-
-static VKAPI_ATTR void VKAPI_CALL vk_free(void *user, void *mem)
-{
-    (void)user;
-    mi_free(mem);
-}
-
-static const VkAllocationCallbacks g_vk_callbacks = {
-    .pUserData = NULL,
-    .pfnAllocation = vk_alloc,
-    .pfnReallocation = vk_realloc,
-    .pfnFree = vk_free,
-};
-
-/* Opt-in (MC_VK_ALLOC=1). Some drivers mishandle custom allocators: Mesa's
- * lavapipe frees a stack address through pfnFree while recording a
- * pipeline barrier. Where mimalloc is linked as the shared, overriding
- * build (the Linux default), the driver's malloc already is mimalloc, so
- * the callbacks add nothing there. */
-const void *mem_vk_callbacks(void)
-{
-    const char *e = getenv("MC_VK_ALLOC");
-    return (e && e[0] == '1') ? &g_vk_callbacks : NULL;
-}
-#else
-const void *mem_vk_callbacks(void) { return NULL; }
 #endif

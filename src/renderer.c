@@ -307,6 +307,56 @@ static float srgb_to_linear(float c)
     return c <= 0.04045f ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f);
 }
 
+/* -------------------------------------------------------- host allocation */
+
+#ifdef MC_VK_MIMALLOC
+static VKAPI_ATTR void *VKAPI_CALL vk_alloc(void *user, size_t size, size_t align, VkSystemAllocationScope scope)
+{
+    (void)user;
+    (void)scope;
+    return size ? mem_alloc_aligned(size, align) : NULL;
+}
+
+static VKAPI_ATTR void *VKAPI_CALL vk_realloc(void *user, void *orig, size_t size, size_t align,
+                                              VkSystemAllocationScope scope)
+{
+    (void)user;
+    (void)scope;
+    if (size == 0) {
+        mem_free(orig);
+        return NULL;
+    }
+    return mem_realloc_aligned(orig, size, align);
+}
+
+static VKAPI_ATTR void VKAPI_CALL vk_free(void *user, void *mem)
+{
+    (void)user;
+    mem_free(mem);
+}
+
+static const VkAllocationCallbacks VK_ALLOC = {
+    .pfnAllocation = vk_alloc,
+    .pfnReallocation = vk_realloc,
+    .pfnFree = vk_free,
+};
+#endif
+
+/* The driver's host allocations through mem.h, opt-in (MC_VK_ALLOC=1). Some
+ * drivers mishandle custom allocators: Mesa's lavapipe frees a stack
+ * address through pfnFree while recording a pipeline barrier. Where
+ * mimalloc is linked as the shared, overriding build (the Linux default),
+ * the driver's malloc already is mimalloc, so the callbacks add nothing
+ * there. NULL: the driver's own allocator. */
+static const VkAllocationCallbacks *vk_callbacks(void)
+{
+#ifdef MC_VK_MIMALLOC
+    const char *e = getenv("MC_VK_ALLOC");
+    if (e && e[0] == '1') return &VK_ALLOC;
+#endif
+    return NULL;
+}
+
 /* --------------------------------------------------------------- instance */
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debug_cb(VkDebugUtilsMessageSeverityFlagBitsEXT sev,
@@ -1257,7 +1307,7 @@ renderer *renderer_create(GLFWwindow *win, const render_opts *o)
 {
     renderer *r = mem_calloc(1, sizeof *r);
     r->win = win;
-    r->ac = mem_vk_callbacks();
+    r->ac = vk_callbacks();
     r->vsync = o->vsync;
     r->radius = o->render_radius < 32 ? o->render_radius : 32;
     r->shot_usage = o->screenshots;

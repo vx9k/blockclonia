@@ -3,9 +3,9 @@
  * Game code uses these wrappers (mi_* underneath) so allocation policy
  * lives in one place. Third-party code (GLFW, the Vulkan loader and
  * driver) gets mimalloc through the shared library's malloc override,
- * which is why mimalloc is linked first. mem_vk_callbacks() can also hand
- * mimalloc to the driver explicitly via VkAllocationCallbacks, for
- * platforms without the override.
+ * which is why mimalloc is linked first. The renderer can also hand these
+ * to the driver explicitly as VkAllocationCallbacks (MC_VK_ALLOC=1), for
+ * platforms without the override; this header stays free of Vulkan.
  */
 #ifndef MC_MEM_H
 #define MC_MEM_H
@@ -44,9 +44,12 @@ void mem_process_info(size_t *rss, size_t *commit);
 /* "mimalloc 3.5.3" (the linked library's version), or "libc". */
 void mem_version_string(char *buf, size_t n);
 
-/* Returns static VkAllocationCallbacks backed by mimalloc when built with
- * MC_VK_MIMALLOC and run with MC_VK_ALLOC=1, else NULL (driver default).
- * Declared as void* so this header does not need vulkan.h. */
-const void *mem_vk_callbacks(void);
+#ifndef MC_MEM_LIBC
+/* Aligned allocations (align a power of two) for the renderer's
+ * VkAllocationCallbacks; release them with mem_free. Not in sanitizer
+ * builds: libc has no aligned realloc. */
+void *mem_alloc_aligned(size_t size, size_t align);
+void *mem_realloc_aligned(void *ptr, size_t size, size_t align);
+#endif
 
 #endif

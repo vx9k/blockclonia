@@ -98,8 +98,6 @@ endif()
 find_package(Threads REQUIRED)
 if(MC_BUILD_GAME)
   find_package(Vulkan REQUIRED)
-elseif(MC_VK_MIMALLOC)
-  find_package(Vulkan QUIET) # headers only, for the allocation callbacks
 endif()
 include(Dependencies) # mc::mimalloc, mc::sqlite, and mc::glfw when MC_BUILD_GAME
 
@@ -182,10 +180,6 @@ function(mc_add_core name)
     target_link_libraries(${name} PUBLIC mc::mimalloc)
   endif()
   target_link_libraries(${name} PUBLIC m)
-  if(MC_VK_MIMALLOC AND NOT MC_MEM_LIBC AND TARGET Vulkan::Headers)
-    target_compile_definitions(${name} PRIVATE MC_VK_MIMALLOC) # only mem.c reads it
-    target_link_libraries(${name} PRIVATE Vulkan::Headers)
-  endif()
 endfunction()
 
 mc_add_core(mccore)
@@ -207,6 +201,10 @@ if(MC_BUILD_GAME)
     add_executable(blockclonia src/main.c src/renderer.c src/audio_null.c)
   endif()
   target_link_libraries(blockclonia PRIVATE mccore Vulkan::Vulkan mc::glfw mc_warnings)
+  if(MC_VK_MIMALLOC AND NOT MC_MEM_LIBC)
+    # renderer.c's VkAllocationCallbacks; libc builds (sanitizer, fuzz) lack the aligned mem_* calls.
+    target_compile_definitions(blockclonia PRIVATE MC_VK_MIMALLOC)
+  endif()
 
   include(Shaders)
   mc_compile_shaders(blockclonia
