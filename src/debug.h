@@ -47,6 +47,7 @@ typedef struct {
     int bodies, items, particles, fluid_updates, last_collapse, heat_cells, fires;
 
     int draw_calls, sections;
+    int indirect_draws;        /* draws inside draw_calls issued by multi-draw indirect */
     uint32_t quads, pool_used_kb, pool_total_kb;
     int ui_quads;
     size_t rss, commit;        /* bytes; 0 if unknown */
@@ -56,6 +57,7 @@ typedef struct {
     const char *audio;         /* output device, or "off" */
     int snd_voices;
     float snd_load;            /* mixer time / real time */
+    float render_cpu_ms;       /* CPU time renderer_end_frame took */
     float gpu_ms;              /* GPU time of a frame, 0 if unknown */
     uint32_t vram_used_mb, vram_budget_mb;
     int width, height;

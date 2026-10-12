@@ -81,6 +81,70 @@ static void test_save_roundtrip(void)
     mem_free(buf);
 }
 
+/* Sets a column file's payload length and checksum after a test edited the
+ * payload, so the input gets past them to the checks behind. */
+static void reseal_column(uint8_t *buf, size_t len)
+{
+    uint32_t n = (uint32_t)(len - 24), h = 2166136261U;
+    for (size_t i = 24; i < len; i++) {
+        h ^= buf[i];
+        h *= 16777619U;
+    }
+    for (int k = 0; k < 4; k++) {
+        buf[16 + k] = (uint8_t)(n >> (8 * k));
+        buf[20 + k] = (uint8_t)(h >> (8 * k));
+    }
+}
+
+/* A rejected column leaves the destination exactly as it was: valid blocks
+ * ahead of a bad meta pass, or of trailing bytes, are not half-applied. */
+static void test_save_reject_untouched(void)
+{
+    column *c = column_alloc(0, 0);
+    test_flat_gen(0, c);
+    c->blocks[col_index(1, 1, 1)] = B_STONE;
+    c->meta = mem_calloc(COL_VOL, 1);
+    c->meta[col_index(1, 1, 1)] = 2; /* a level on stone: well-formed RLE, invalid column */
+    uint8_t *bad_meta = mem_alloc(SAVE_MAX_FILE);
+    size_t bad_meta_len = save_encode_column(c, bad_meta, SAVE_MAX_FILE);
+    mem_free(c->meta);
+    c->meta = NULL;
+    uint8_t *trailing = mem_alloc(SAVE_MAX_FILE);
+    size_t trailing_len = save_encode_column(c, trailing, SAVE_MAX_FILE) + 1;
+    trailing[trailing_len - 1] = 0; /* one byte after the blocks, no meta flagged */
+    reseal_column(trailing, trailing_len);
+    CHECK(bad_meta_len > 24 && trailing_len > 25);
+
+    column *d = column_alloc(0, 0);
+    memset(d->blocks, B_WATER, COL_VOL);
+    uint8_t *want = mem_alloc(COL_VOL);
+    memcpy(want, d->blocks, COL_VOL);
+    CHECK(save_decode_column(d, bad_meta, bad_meta_len) == -1);
+    CHECK(memcmp(d->blocks, want, COL_VOL) == 0 && d->meta == NULL);
+
+    d->meta = mem_calloc(COL_VOL, 1);
+    memset(d->meta, 3, COL_VOL);
+    const uint8_t *meta = d->meta;
+    CHECK(save_decode_column(d, bad_meta, bad_meta_len) == -1);
+    CHECK(memcmp(d->blocks, want, COL_VOL) == 0 && d->meta == meta);
+    CHECK(d->meta[0] == 3 && d->meta[col_index(1, 1, 1)] == 3 && d->meta[COL_VOL - 1] == 3);
+    CHECK(save_decode_column(d, trailing, trailing_len) == -1);
+    CHECK(memcmp(d->blocks, want, COL_VOL) == 0 && d->meta == meta);
+    CHECK(d->meta[0] == 3 && d->meta[COL_VOL - 1] == 3);
+
+    /* Without the extra byte the same blocks load. */
+    CHECK(save_decode_column(d, trailing, trailing_len - 1) == -1); /* the header still counts the byte */
+    reseal_column(trailing, trailing_len - 1);
+    CHECK(save_decode_column(d, trailing, trailing_len - 1) == 0 && memcmp(d->blocks, c->blocks, COL_VOL) == 0);
+    CHECK(d->meta == NULL);
+
+    column_free(c);
+    column_free(d);
+    mem_free(want);
+    mem_free(bad_meta);
+    mem_free(trailing);
+}
+
 static void fill_input(mesh_input *in, uint8_t fill)
 {
     memset(in->blocks, fill, sizeof in->blocks);
@@ -115,32 +179,32 @@ static void test_save_files(void)
     CHECK(linked != 0);
     uint32_t seed = 0;
     if (linked == 1) CHECK(save_read_seed(dir, &seed) == -1); /* symlinks are not followed */
-    CHECK(save_write_seed(dir, 77) == 0);
+    CHECK(save_write_file(p, "seed 77\n", 8) == 0);
     CHECK(file_is(victim, "precious"));
     CHECK(save_read_seed(dir, &seed) == 0 && seed == 77);
     CHECK(os_path_kind(p) == OS_FILE); /* the link was replaced */
 
     column *c = column_alloc(0, 0);
     test_flat_gen(0, c);
+    uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
+    size_t len = save_encode_column(c, buf, SAVE_MAX_FILE);
     snprintf(p, sizeof p, "%s/c.0.0.bin.tmp", dir);
     CHECK(tmp_symlink(victim, p) != 0);
-    CHECK(save_store_column(dir, c) == 0);
+    snprintf(p, sizeof p, "%s/c.0.0.bin", dir);
+    CHECK(len && save_write_file(p, buf, len) == 0);
     CHECK(file_is(victim, "precious"));
     column *d = column_alloc(0, 0);
-    CHECK(save_load_column(dir, d) == 1 && memcmp(c->blocks, d->blocks, COL_VOL) == 0);
+    long n = save_read_file(p, buf, SAVE_MAX_FILE);
+    CHECK(n == (long)len && save_decode_column(d, buf, (size_t)n) == 0 && memcmp(c->blocks, d->blocks, COL_VOL) == 0);
 
     /* A FIFO in place of a column file is rejected, not waited on. */
     snprintf(p, sizeof p, "%s/c.1.0.bin", dir);
     CHECK(mkfifo(p, 0600) == 0);
-    column *e = column_alloc(1, 0);
-    CHECK(save_load_column(dir, e) == -1);
-    column *g = column_alloc(2, 0);
-    CHECK(save_load_column(dir, g) == 0); /* missing: generate */
+    CHECK(save_read_file(p, buf, SAVE_MAX_FILE) == -1);
 
     column_free(c);
     column_free(d);
-    column_free(e);
-    column_free(g);
+    mem_free(buf);
     const char *names[] = {"victim.txt", "level.dat", "c.0.0.bin", "c.1.0.bin"};
     for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
         snprintf(p, sizeof p, "%s/%s", dir, names[i]);
@@ -477,6 +541,39 @@ static void test_structure(void)
     ph->struct_count = 0;
     world_set(&t.w, tx, GROUND, tz, B_AIR, 0);
     CHECK(physics_check_structure(ph, tx, GROUND, tz) == 4 + 8);
+    tw_free(&t);
+}
+
+/* Queued checks run under a work budget, not a time budget: how many a step
+ * gets through must not depend on how fast the machine is. */
+static void test_structure_budget(void)
+{
+    test_world t;
+    tw_init(&t);
+    physics *ph = &t.ph;
+    player p;
+    player_spawn(&p, &t.w, 0.5, 0.5);
+    player_input idle = {0};
+
+    /* Cheap checks in empty sky: several fit in a step, the same number
+     * every step. */
+    ph->struct_head = ph->struct_count = 0;
+    for (int i = 0; i < 20; i++) ph->struct_queue[i] = (ipos){i, WORLD_H - 1, 0};
+    ph->struct_count = 20;
+    for (int s = 0; s < 4; s++) {
+        int before = ph->struct_count;
+        physics_step(ph, &p, &idle);
+        CHECK(before - ph->struct_count == 5);
+    }
+
+    /* Checks through solid ground cost more: one per step. */
+    ph->struct_head = ph->struct_count = 0;
+    for (int i = 0; i < 3; i++) ph->struct_queue[i] = (ipos){i, GROUND, 8};
+    ph->struct_count = 3;
+    for (int s = 0; s < 3; s++) {
+        physics_step(ph, &p, &idle);
+        CHECK(ph->struct_count == 2 - s);
+    }
     tw_free(&t);
 }
 
@@ -1012,6 +1109,13 @@ static void test_inventory(void)
     buf[8 + 2 * 12 + 1] = 200; /* 200 bandages in a stack of 16 */
     CHECK(inv_decode(&back, buf, sizeof buf) == -1);
     CHECK(inv_decode(&back, buf, sizeof buf - 1) == -1);
+    /* Reserved bytes are zero in every INV1 written, so anything else is a
+     * layout this build does not know. */
+    for (int k = 5; k <= 7; k++) {
+        inv_encode(&inv, buf, sizeof buf);
+        buf[k] = 1;
+        CHECK(inv_decode(&back, buf, sizeof buf) == -1);
+    }
 
     /* The player file. */
     player p;
@@ -1029,6 +1133,14 @@ static void test_inventory(void)
     CHECK(fabs(day - 0.75) < 1e-4);
     CHECK(q.pos.x == p.pos.x && q.pos.y == p.pos.y && q.pos.z == p.pos.z && q.yaw == p.yaw && q.flying == 1);
     CHECK(inv_equal(&qi, &inv));
+    const int reserved[] = {5, 6, 7, 41, 44 + 5};
+    for (size_t k = 0; k < sizeof reserved / sizeof reserved[0]; k++) {
+        survival_encode_player(&p, &inv, 0.75, pf, sizeof pf);
+        pf[reserved[k]] = 1;
+        q.yaw = 9.0f;
+        CHECK(survival_decode_player(&q, &qi, &day, pf, sizeof pf) == -1 && q.yaw == 9.0f);
+    }
+    survival_encode_player(&p, &inv, 0.75, pf, sizeof pf);
     double nan = (double)NAN;
     memcpy(pf + 16, &nan, 8);
     CHECK(survival_decode_player(&q, &qi, NULL, pf, sizeof pf) == -1);
@@ -1270,6 +1382,50 @@ static void test_settings(void)
     CHECK(settings_format(&s, tiny, (int)sizeof tiny) == 7 && tiny[7] == '\0');
 }
 
+/* A settings file is used or left alone, never taken for a missing one
+ * and saved over with the defaults: a valid file well past the old 4 KB
+ * cap loads, and a symlink, a directory, a file too big or one with no
+ * setting in it is reported unusable. */
+static void test_settings_file(void)
+{
+    char dir[256], p[300], q[300];
+    int made = tmp_dir_make(dir, sizeof dir, "mc_cfg_");
+    CHECK(made);
+    if (!made) return;
+    size_t cap = SETTINGS_MAX_FILE + 2, len = 0;
+    char *text = mem_alloc(cap);
+    while (len < 8000) len += (size_t)snprintf(text + len, cap - len, "# a note the player keeps\n");
+    len += (size_t)snprintf(text + len, cap - len, "fov 90\n");
+    snprintf(p, sizeof p, "%s/big.cfg", dir);
+    CHECK(save_write_file(p, text, len) == 0);
+    settings s;
+    settings_default(&s);
+    CHECK(settings_load(&s, p) == 1 && s.fov == 90);
+
+    snprintf(q, sizeof q, "%s/missing.cfg", dir);
+    CHECK(settings_load(&s, q) == SETTINGS_MISSING);
+    snprintf(q, sizeof q, "%s/empty.cfg", dir);
+    CHECK(save_write_file(q, "", 0) == 0 && settings_load(&s, q) == 0);
+    tmp_remove(q);
+    snprintf(q, sizeof q, "%s/notes.cfg", dir);
+    CHECK(save_write_file(q, "eggs, milk\n", 11) == 0 && settings_load(&s, q) == SETTINGS_UNUSABLE);
+    tmp_remove(q);
+    memset(text, '#', cap);
+    CHECK(save_write_file(q, text, SETTINGS_MAX_FILE + 1) == 0 && settings_load(&s, q) == SETTINGS_UNUSABLE);
+    tmp_remove(q);
+    snprintf(q, sizeof q, "%s/link.cfg", dir);
+    int linked = tmp_symlink(p, q); /* a dotfiles repository's link, say */
+    CHECK(linked != 0);
+    if (linked == 1) CHECK(settings_load(&s, q) == SETTINGS_UNUSABLE);
+    tmp_remove(q);
+    CHECK(os_mkdir(q, 0700) == 0 && settings_load(&s, q) == SETTINGS_UNUSABLE);
+    tmp_remove(q);
+    CHECK(s.fov == 90); /* none of them changed anything */
+    tmp_remove(p);
+    tmp_remove(dir);
+    mem_free(text);
+}
+
 /* Drives a menu with scripted input: n frames of dt, optional click at (x, y). */
 static menu_action menu_run(menu *m, ui *u, ui_vertex *mem, settings *s, const menu_input *in0, int frames)
 {
@@ -1382,6 +1538,7 @@ int main(void)
     mesher_init();
     test_gpupool();
     test_save_roundtrip();
+    test_save_reject_untouched();
     test_save_files();
     test_mesher();
     test_world_basics();
@@ -1390,6 +1547,7 @@ int main(void)
     test_sprint_sneak();
     test_camera();
     test_structure();
+    test_structure_budget();
     test_buoyancy();
     test_settle();
     test_fluid();
@@ -1404,6 +1562,7 @@ int main(void)
     test_survival();
     test_ui();
     test_settings();
+    test_settings_file();
     test_menu();
     test_inventory();
     test_items_physics();

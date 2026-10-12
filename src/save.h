@@ -1,9 +1,10 @@
 /* World persistence: the encoding of a column (RLE-compressed; only
- * columns the player changed are saved), checked file access, and the
- * one-file-per-column format older builds kept worlds in, still read to
- * import them (save_db.h stores worlds now). Saved data is untrusted
- * input: the decoder validates every field and rejects anything
- * malformed. */
+ * columns the player changed are saved), checked file access, and what
+ * importing the one-file-per-column folders older builds wrote still
+ * needs: reading their level.dat and recognising their file names
+ * (save_db.c imports them; save_db.h stores worlds now). Saved data is
+ * untrusted input: the decoder validates every field and rejects
+ * anything malformed. */
 #ifndef MC_SAVE_H
 #define MC_SAVE_H
 
@@ -15,19 +16,16 @@
 
 /* Encodes into `out` (capacity SAVE_MAX_FILE). Returns bytes written. */
 size_t save_encode_column(const column *c, uint8_t *out, size_t cap);
-/* Decodes into c (blocks array must exist; meta is (re)allocated as
- * needed). Returns 0 on success, -1 if the data is malformed. */
+/* Decodes into c (blocks array must exist; meta is replaced, or freed if
+ * the column has none). Returns 0 on success, or -1 if the data is
+ * malformed, and then c is left untouched. */
 int save_decode_column(column *c, const uint8_t *data, size_t len);
-
-/* 1 = loaded, 0 = no save file, -1 = corrupt or not a regular file. */
-int save_load_column(const char *dir, column *c);
-int save_store_column(const char *dir, const column *c);
 
 /* Creates dir if it does not exist; 0 on success. */
 int save_ensure_dir(const char *dir);
-/* Reads/writes the world seed in <dir>/level.dat. read returns 0 if found. */
+/* Reads the world seed from <dir>/level.dat, as older builds wrote it;
+ * 0 if found. */
 int save_read_seed(const char *dir, uint32_t *seed);
-int save_write_seed(const char *dir, uint32_t seed);
 
 /* Whole small files (settings, the player): read_file returns the length,
  * or -1 if the file is missing, not a regular file or larger than cap.

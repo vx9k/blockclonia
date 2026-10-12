@@ -62,7 +62,9 @@ long os_read_regular(const char *path, uint8_t *buf, size_t cap);
 /* Writes a whole file through a fresh temp file and a rename, so a crash
  * mid-save never leaves a truncated file, and whatever sat at either name
  * before (a symlink, a hard link to another file) is replaced, never
- * written through. Returns 0 or -1. */
+ * written through. The data is synced before the rename and the folder
+ * after it, so a power cut leaves the old file or the new one. Returns 0
+ * or -1 (and then the old file is still there). */
 int os_write_atomic(const char *path, const char *tmp, const void *data, size_t len);
 
 /* Creates one directory with the given mode. Returns 0, or -1 if it was

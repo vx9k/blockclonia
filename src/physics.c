@@ -4,7 +4,6 @@
 #include "log.h"
 #include "mem.h"
 #include "noise.h"
-#include "os.h"
 
 #include <math.h>
 #include <string.h>
@@ -17,7 +16,12 @@
 #define FLUID_BUDGET 4096
 #define ITEM_BODY_SWEEP_MAX 64 /* falling blocks items still collide with */
 #define GROUNDED (STRUCT_MAX_SPAN + 1)
-#define STRUCT_BUDGET_S 0.0004 /* per step, after the first check */
+/* Structural work per step, after the first check, in units of one block
+ * reached by the bucket queue (~28 ns on an i3-N305, measured). Reading a
+ * region cell costs a tenth of that, a falling block about one more. The
+ * Pi 4 is taken as 4x slower, so 3600 units is about 0.4 ms there. Counted
+ * in work rather than time so collapses replay the same on any machine. */
+#define STRUCT_BUDGET 3600
 
 enum { SWEEP_BODIES = 1, SWEEP_PLAYER = 2 };
 
@@ -1011,6 +1015,7 @@ int physics_check_structure(physics *ph, int x, int y, int z)
     uint8_t *ids = ph->st_id;
     int32_t **bucket = ph->st_bucket;
     int *blen = ph->st_bucket_len;
+    int solid = 0;
     for (int i = 0; i <= GROUNDED; i++) blen[i] = 0;
 
 #define RIDX(i, j, k) (((j) * REGION_W + (k)) * REGION_W + (i))
@@ -1031,6 +1036,7 @@ int physics_check_structure(physics *ph, int x, int y, int z)
                 int idx = RIDX(i, j, k);
                 uint8_t id = ids[idx];
                 if (!is_structural(id)) { s[idx] = -2; continue; }
+                solid++;
                 int wy = y0 + j;
                 /* Cells on the region boundary are assumed supported: we
                  * cannot see their load path, and a false collapse is far
@@ -1102,6 +1108,7 @@ done:
      * collapse is not left hanging. */
     if (ph->body_count >= MAX_BODIES) queue_structure(ph, x, y, z);
     if (fell) ph->last_collapse = fell;
+    ph->struct_work = ny * REGION_W * REGION_W / 10 + solid + fell;
     return fell;
 }
 
@@ -1263,14 +1270,13 @@ void physics_step(physics *ph, player *p, const player_input *in)
     bodies_step(ph, p);
     items_step(ph);
 
-    /* At least one structural check per step, more while time allows. */
-    double t0 = ph->struct_count > 1 ? os_now() : 0.0;
-    for (int n = 0; ph->struct_count > 0 && ph->body_count < MAX_BODIES; n++) {
-        if (n > 0 && os_now() - t0 > STRUCT_BUDGET_S) break;
+    /* At least one structural check per step, more while the budget allows. */
+    for (int work = 0; ph->struct_count > 0 && ph->body_count < MAX_BODIES && work < STRUCT_BUDGET;) {
         ipos q = ph->struct_queue[ph->struct_head];
         ph->struct_head = (ph->struct_head + 1) % (int)(sizeof ph->struct_queue / sizeof ph->struct_queue[0]);
         ph->struct_count--;
         physics_check_structure(ph, q.x, q.y, q.z);
+        work += ph->struct_work;
     }
 
     /* Fluids tick at 10 Hz, but each tick's cells are spread over the

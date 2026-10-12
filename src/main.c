@@ -514,21 +514,28 @@ typedef struct {
     save_db *db;
 } save_ctx;
 
-static void save_player(const save_ctx *sc)
+/* The world's on_save hook: the player goes into the transaction that
+ * saves the columns, so the two on disk always match. The hook's type
+ * fixes the non-const parameter. */
+/* cppcheck-suppress constParameterCallback */
+static int save_player(void *user)
 {
-    if (!sc->db) return;
+    const save_ctx *sc = user;
     uint8_t buf[PLAYER_FILE_SIZE];
     size_t n = survival_encode_player(sc->pl, sc->inv, thermo_day_time(sc->th), buf, sizeof buf);
-    if (!n || save_db_put_blob(sc->db, "player", buf, n) != 0) log_warn("could not save the player");
+    if (n && save_db_put_blob(sc->db, "player", buf, n) == 0) return 0;
+    log_warn("could not save the player");
+    return -1;
 }
 
-/* 1 if a saved player was loaded into pl and inv. */
+/* 1 if a saved player was loaded into pl and inv, -1 if it could not be
+ * read (a database error). */
 static int load_player(save_db *db, player *pl, inventory *inv, double *day)
 {
     if (!db) return 0;
     uint8_t buf[PLAYER_FILE_SIZE + 1];
     long n = save_db_get_blob(db, "player", buf, sizeof buf);
-    if (n < 0) return 0;
+    if (n < 0) return n == -2 ? -1 : 0;
     if (survival_decode_player(pl, inv, day, buf, (size_t)n) != 0) {
         log_warn("the saved player is corrupt; starting fresh");
         return 0;
@@ -542,8 +549,7 @@ static void save_on_fatal(void *user)
 {
     save_ctx *sc = user;
     physics_settle_bodies(sc->ph, NULL);
-    world_save_all(sc->w);
-    save_player(sc);
+    world_save_all(sc->w); /* and the player, through on_save */
 }
 
 /* --give: "name:count" pairs; names match case-insensitively, spaces as
@@ -663,7 +669,7 @@ static void apply_hurt(health *h, const char *list)
     char buf[256];
     snprintf(buf, sizeof buf, "%s", list);
     char *save = NULL;
-    for (char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
+    for (const char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
         /* "pads" puts a defibrillator's pads on rather than causing an
          * injury, so it isn't in HEALTH_DEBUG_KINDS with the rest. */
         if (!strcmp(t, "pads")) {
@@ -723,6 +729,7 @@ typedef struct {
     settings st;
     int settings_dirty;
     int cfg_vsync;            /* vsync as the settings file has it (--no-vsync is not saved) */
+    int cfg_keep;             /* the settings file could not be used: never written over */
     uint32_t seed;
     GLFWwindow *win;
     jobs *js;
@@ -782,6 +789,7 @@ static game g_game;
  * unless the player changed VSync in the menu (which clears it). */
 static int save_settings(const game *g)
 {
+    if (g->cfg_keep) return 0; /* warned at start */
     settings s = g->st;
     if (g->o.no_vsync) s.vsync = g->cfg_vsync;
     return settings_save(&s, g->o.config);
@@ -988,9 +996,18 @@ static uint32_t choose_seed(options *o, save_db **db)
     }
     if (n > 0) log_info("imported %d world files into %s/world.db; they stay but are no longer read", n, o->world_dir);
     uint32_t saved;
-    if (save_db_get_seed(*db, &saved) == 0) {
+    int got = save_db_get_seed(*db, &saved);
+    if (got == 0) {
         if (o->have_seed && saved != o->seed) log_warn("--seed ignored: world '%s' uses seed %u", o->world_dir, saved);
         return saved;
+    }
+    if (got != -1) {
+        /* Storing a new seed would change every column not saved yet. */
+        log_error("cannot read world '%s'; saving disabled", o->world_dir);
+        save_db_close(*db);
+        *db = NULL;
+        o->world_dir = NULL;
+        return seed;
     }
     if (save_db_set_seed(*db, seed) != 0) log_warn("could not store the world seed");
     return seed;
@@ -1028,6 +1045,7 @@ static void game_init_world(game *g)
                       .gpu_index = o->gpu,
                       .pool_mb = o->pool_mb,
                       .screenshots = o->screenshot != NULL,
+                      .filtering = g->st.filtering,
                       .pipeline_cache = g_paths.pipelines};
     g->rd = renderer_create(g->win, &ro);
 
@@ -1056,11 +1074,22 @@ static void game_init_world(game *g)
     }
     inv_starting_kit(&g->inv);
     double day = THERMO_DAY_START;
-    if (!o->have_spawn && !o->demo && load_player(g->db, &g->pl, &g->inv, &day)) {
+    int loaded = !o->have_spawn && !o->demo ? load_player(g->db, &g->pl, &g->inv, &day) : 0;
+    if (loaded < 0) {
+        /* Playing on is fine; saving would write a fresh player over it. */
+        log_error("cannot read the saved player in '%s'; saving disabled", o->world_dir);
+        g->w.db = NULL;
+        g->sc.db = NULL;
+    }
+    if (loaded > 0) {
         thermo_set_day_time(g->th, day);
         world_load_blocking(&g->w, g->pl.pos.x, g->pl.pos.z, 1);
         log_info("player restored from %s/world.db", o->world_dir);
     }
+    /* Only now: a save before this point would write the fresh player
+     * over the saved one. */
+    g->w.save_user = &g->sc;
+    g->w.on_save = save_player;
     if (o->give) give_items(&g->inv, o->give);
     if (o->have_time) thermo_set_day_time(g->th, o->time_of_day);
     log_info("spawn at %.1f %.1f %.1f with %d worker threads", g->pl.pos.x, g->pl.pos.y, g->pl.pos.z,
@@ -1100,8 +1129,8 @@ static void game_init(game *g)
     mem_version_string(mi, sizeof mi);
     int gmaj, gmin, grev;
     glfwGetVersion(&gmaj, &gmin, &grev);
-    snprintf(g->versions, sizeof g->versions, "%s  GLFW %d.%d.%d  %s", mi, gmaj, gmin, grev,
-             renderer_api_string(g->rd));
+    /* The Vulkan version and features get their own lines in F3. */
+    snprintf(g->versions, sizeof g->versions, "%s  GLFW %d.%d.%d", mi, gmaj, gmin, grev);
     snprintf(g->mn.footer, sizeof g->mn.footer, "seed %u   %s   GLFW %d.%d.%d", g->seed, mi, gmaj, gmin, grev);
 }
 
@@ -1280,6 +1309,10 @@ static void frame_interact(game *g, double dt)
             g->hs.alert_count = 0;
             g_in.panel = 0;
             log_info("respawned");
+            /* Loading the spawn may have unloaded the death site, saving the
+             * player there with an emptied inventory; a crash before the next
+             * autosave would bring them back alive at that spot. */
+            world_save_all(&g->w);
         }
         g_in.respawn = 0;
     }
@@ -1391,8 +1424,13 @@ static void draw_debug(game *g, ui *u, int fb_w, int fb_h, double alpha)
     di.fluid_updates = g->ph.fluid_updates;
     di.last_collapse = g->ph.last_collapse;
     di.draw_calls = rs.draw_calls;
+    di.indirect_draws = rs.indirect_draws;
     di.sections = rs.sections_drawn;
     di.quads = rs.quads;
+    di.render_cpu_ms = rs.cpu_ms;
+    di.gpu_ms = rs.gpu_ms;
+    di.vram_used_mb = rs.vram_used_mb;
+    di.vram_budget_mb = rs.vram_budget_mb;
     di.pool_used_kb = rs.pool_used_kb;
     di.pool_total_kb = rs.pool_total_kb;
     di.ui_quads = u->quads;
@@ -1433,7 +1471,6 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     case MENU_TO_TITLE:
         physics_settle_bodies(&g->ph, NULL);
         world_save_all(&g->w);
-        save_player(&g->sc);
         g_in.inv_open = 0;
         g_in.panel = 0;
         menu_open(&g->mn, SCREEN_TITLE); /* the menu's own screen too, or the copy below undoes it */
@@ -1443,6 +1480,7 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     case MENU_SETTINGS:
         if (g->o.no_vsync && g->st.vsync) g->o.no_vsync = 0; /* turned back on in the menu: a real choice */
         renderer_set_vsync(g->rd, g->st.vsync);
+        renderer_set_filtering(g->rd, g->st.filtering);
         apply_volumes(g);
         g->settings_dirty = 1;
         break;
@@ -1560,8 +1598,7 @@ static void frame_bookkeeping(game *g, double now)
     }
     if (now - g->save_t >= AUTOSAVE_SECONDS) {
         g->save_t = now;
-        world_save_all(&g->w); /* only columns edited since the last save */
-        save_player(&g->sc);
+        world_save_all(&g->w); /* the player and the columns edited since the last save */
     }
 }
 
@@ -1572,8 +1609,8 @@ static void game_shutdown(game *g)
     log_info("saving and shutting down");
     log_set_fatal_hook(NULL, NULL);
     physics_settle_bodies(&g->ph, NULL);
+    if (g->hl.dead) g->w.on_save = NULL; /* quitting dead keeps the last saved player */
     world_save_all(&g->w);
-    if (!g->hl.dead) save_player(&g->sc);
     jobs_wait_idle(g->js);
     audio_device_close(g->audio); /* stops the callback before the mixer goes */
     sound_destroy(g->snd);
@@ -1598,7 +1635,10 @@ int main(int argc, char **argv)
     use_xdg_paths(&g->o);
 
     settings_default(&g->st);
-    if (settings_load(&g->st, g->o.config) == 0) log_info("settings from %s", g->o.config);
+    int got = settings_load(&g->st, g->o.config);
+    if (got >= 0) log_info("settings from %s", g->o.config);
+    g->cfg_keep = got == SETTINGS_UNUSABLE;
+    if (g->cfg_keep) log_warn("cannot use %s; playing with default settings and not saving over it", g->o.config);
     if (!g->o.have_radius) g->o.radius = g->st.render_distance;
     g->cfg_vsync = g->st.vsync; /* the file's value, kept while --no-vsync overrides it */
     if (!g->o.no_vsync) g->o.vsync = g->st.vsync;

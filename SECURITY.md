@@ -46,8 +46,9 @@ The game treats these as **untrusted input**:
 
 | Input | Where | Why it is untrusted |
 |---|---|---|
-| World folders | `world/` or `--world DIR`: `level.dat`, `player.dat`, `c.X.Z.bin` column files | People share worlds. A world folder must never be able to crash the game in a memory-unsafe way, make it read or write files outside that folder, or hang it. |
-| Settings file | `blockclonia.cfg` or `--config FILE` | Hand-edited, and possibly copied from someone else. |
+| World folders | `world/` or `--world DIR`: `world.db` (SQLite), and the older `level.dat`, `player.dat`, `c.X.Z.bin` files, which are imported when present | People share worlds. A world folder must never be able to crash the game in a memory-unsafe way, make it read or write files outside that folder, or hang it. `world.db` is opened without following links, in SQLite's defensive mode, with no extensions, and refused unless its schema is exactly the one this build writes (`save_db.c`). |
+| Settings file | `blockclonia.cfg` or `--config FILE` | Hand-edited, and possibly copied from someone else. A file the game cannot read (too big, a symlink, unreadable) is never overwritten. |
+| Pipeline cache | `$XDG_CACHE_HOME/blockclonia/blockclonia.pipelines` | Copied between machines or left by another driver, and its contents go to the GPU driver, which may not survive garbage. It is read through `save_read_file` (regular file, no symlink, at most 16 MB) and only handed over when its header names this vendor, device and driver UUID (`gpucaps_pipeline_cache_load`); anything else starts an empty cache. |
 | Command line | `--give`, `--hurt`, `--spawn`, sizes and so on | Launchers and scripts pass these through. |
 
 In scope:
@@ -74,20 +75,28 @@ Out of scope:
 
 ## How the code defends itself
 
-- **Validated decoders.** The binary formats (columns, `level.dat`,
-  `player.dat` and the inventory inside it) are parsed by code that checks
-  every field and rejects the whole file on anything malformed, leaving the
-  game's state untouched (`save.c`, `survival.c`, `inventory.c`). The
-  settings parser skips unknown keys and out-of-range values line by line
-  (`settings.c`). The column decoder, the most complex one, has a
-  libFuzzer target (`tests/fuzz_save.c`, built with `cmake --preset fuzz`).
-- **Safe file access.** World and settings files are opened with
-  `O_NOFOLLOW`, must be regular files (so no FIFOs or devices), and are
-  read up to a size cap. Writes go to a temporary file first and are
-  renamed into place, so a crash never leaves a half-written save.
+- **Validated decoders.** The binary formats (column rows and the player
+  record in `world.db`, the inventory inside it, and the older `level.dat`,
+  `player.dat` and column files that are imported) are parsed by code that
+  checks every field, rejects non-zero reserved bytes and rejects the whole
+  record on anything malformed, leaving the game's state untouched
+  (`save.c`, `survival.c`, `inventory.c`). The pipeline cache is checked
+  by its header before the driver sees it (`gpucaps_pipeline_cache_ok`).
+  The settings parser skips unknown keys and out-of-range values line by
+  line (`settings.c`). Each has a libFuzzer target, built with
+  `cmake --preset fuzz`: the column decoder (`tests/fuzz_save.c`), the
+  world database (`tests/fuzz_save_db.c`), and the player, inventory and
+  settings decoders (`tests/fuzz_files.c`).
+- **Safe file access.** Settings, pipeline cache and imported world files
+  are opened with `O_NOFOLLOW`, must be regular files (so no FIFOs or devices), and are
+  read up to a size cap. The world database is refused if `world.db` or
+  its `-journal`, `-wal` or `-shm` file is not a regular file, since SQLite
+  would write through a planted link. Writes go to a temporary file first,
+  are synced, and are renamed into place, with the folder synced after, so
+  a crash never leaves a half-written save.
 - **Bounded work.** Every file is read whole into a buffer with a fixed
-  maximum size, and decoding can never produce more data than a column
-  holds.
+  maximum size, and a `world.db` column row larger than that size is refused
+  (`save_db.c`). Decoding can never produce more data than a column holds.
 - **Checked arithmetic.** Array allocations go through
   `mem_array_size()`, which aborts on overflow. Allocation failure aborts
   cleanly instead of returning NULL.

@@ -27,9 +27,11 @@ if grep -E 'warning:|error:' "$tidy_log"; then fail=1; else echo "clean"; fi
 step "cppcheck"
 mkdir -p "$out/cppcheck"
 # The project file also lists GLFW and mimalloc when MC_DEPS=AUTO builds
-# them from source; only the project's own files are checked.
+# them from source; only the project's own files are checked. The file
+# filter only selects sources, so findings in fetched headers (mimalloc.h's
+# inline functions) are suppressed separately.
 cppcheck --project="$out/gcc/compile_commands.json" --enable=all --inconclusive --std=c11 \
-  --file-filter="$src/src/*" --file-filter="$src/tests/*" \
+  --file-filter="$src/src/*" --file-filter="$src/tests/*" --suppress='*:*/_deps/*' \
   --library=posix --inline-suppr --cppcheck-build-dir="$out/cppcheck" -j "$jobs" -q \
   --suppressions-list="$src/tools/cppcheck-suppressions.txt" --error-exitcode=1 \
   --template='{file}:{line}: {severity}: {message} [{id}]' || fail=1

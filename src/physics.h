@@ -133,6 +133,7 @@ typedef struct physics {
     int fluid_per_step;          /* a tick's work is spread over FLUID_TICK_EVERY steps */
     ipos struct_queue[256];
     int struct_head, struct_count;
+    int struct_work;             /* cost of the last check, in STRUCT_BUDGET units */
     int suppress_struct;
     uint64_t step_count;
     /* Scratch for structural checks. */
@@ -173,10 +174,11 @@ void physics_destroy(physics *ph);
 void physics_on_block_changed(void *user, int x, int y, int z, uint8_t old_id, uint8_t new_id);
 
 /* One fixed step of PHYS_DT: the player, falling bodies, dropped items,
- * queued structural checks (at least one, more while STRUCT_BUDGET_S
- * allows) and this step's share of the 10 Hz fluid tick. The per-step
- * event lists (hits, shatters, splashes, thuds) are cleared, then refilled
- * for the caller to turn into injuries, effects and sounds. */
+ * queued structural checks (at least one, more while a fixed work budget
+ * allows, so the same checks run on every machine; one check through solid
+ * ground alone exceeds it) and this step's share of the 10 Hz fluid tick.
+ * The per-step event lists (hits, shatters, splashes, thuds) are cleared,
+ * then refilled for the caller to turn into injuries, effects and sounds. */
 void physics_step(physics *ph, player *p, const player_input *in);
 
 /* Resets the player and stands them on the surface at (x, z), centred in

@@ -123,7 +123,7 @@ static int set_block(world *w, int x, int y, int z, uint8_t id, uint8_t meta, in
     c->solid_count[sy] = (uint16_t)(c->solid_count[sy] + (id != B_AIR) - (old != B_AIR));
     c->opaque_count[sy] = (uint16_t)(c->opaque_count[sy] + block_opaque(id) - block_opaque(old));
     c->modified = 1;
-    c->unsaved = 1;
+    c->unsaved = !c->keep_stored;
 
     /* Sections the block's neighbourhood reaches: at most two per axis. */
     int cx = chunk_of(x), cz = chunk_of(z);
@@ -178,7 +178,9 @@ int world_surface_y(const world *w, int x, int z)
 
 typedef struct {
     job base;
-    world *w;
+    world *w;                                    /* for gen_done, on the main thread */
+    void (*generator)(uint32_t seed, column *c); /* copied from w: gen_run never reads the world */
+    uint32_t seed;
     column *c;
     uint8_t *saved; /* the column's saved bytes, fetched on the main thread */
     long saved_len; /* -1: never saved, -2: unusable row */
@@ -195,8 +197,7 @@ static void gen_run(job *j)
         g->saved = NULL;
     }
     if (!loaded) {
-        if (g->w->generator) g->w->generator(g->w->seed, g->c);
-        else worldgen_column(g->w->seed, g->c);
+        g->generator(g->seed, g->c);
         mem_free(g->c->meta);
         g->c->meta = NULL;
     }
@@ -235,33 +236,56 @@ static void request_column(world *w, int cx, int cz)
     g->base.run = gen_run;
     g->base.done = gen_done;
     g->w = w;
+    g->generator = w->generator ? w->generator : worldgen_column;
+    g->seed = w->seed;
     g->c = c;
     g->saved_len = w->db ? save_db_get_column(w->db, cx, cz, &g->saved) : -1;
+    if (g->saved_len == -3) {
+        /* Generated terrain stands in, but saving it would overwrite the
+         * player's real column for good; the next load reads it again. */
+        log_warn("column %d,%d: cannot read its saved data; showing generated terrain, and changes to it are not saved",
+                 cx, cz);
+        c->keep_stored = 1;
+        g->saved_len = -1;
+    }
     w->gen_in_flight++;
     jobs_submit(w->jobs, &g->base);
 }
 
-static void store_column(const world *w, column *c)
+/* An unloading column is saved together with every other edited column
+ * and the player (world_save_all). Saved alone, a crash before the next
+ * autosave would find it newer than the player's inventory, duplicating
+ * or losing what was placed or mined since. */
+static void store_column(world *w, const column *c)
 {
-    if (!c->unsaved || !w->db) return;
-    if (save_db_put_column(w->db, c) != 0) log_error("failed to save column %d,%d", c->cx, c->cz);
-    else
-        c->unsaved = 0;
+    if (c->unsaved && w->db) world_save_all(w);
 }
 
-static void unload_column(world *w, column *c)
+/* Saves and frees a column that left the ring. Returns 0 if it was kept:
+ * when its save fails (a full disk, an I/O error) the column stays loaded
+ * and unsaved, holding its ring slot, rather than taking the player's
+ * edits with it. The slot bounds how many can pile up. Until a save goes
+ * through again, unloads skip the attempt, so a dead disk is not retried
+ * on every move; the autosave keeps trying. */
+static int unload_column(world *w, column *c)
 {
     if (c->state == COL_LOADING) {
         c->want_unload = 1;
-        return;
+        return 1;
     }
     if (w->on_column_unload) w->on_column_unload(w->edit_user, c);
-    store_column(w, c);
+    if (!w->save_failed) store_column(w, c);
+    if (c->unsaved && w->db) {
+        if (!w->save_failed) log_error("keeping unsaved columns loaded until saving works again");
+        w->save_failed = 1;
+        return 0;
+    }
     if (w->on_mesh_free)
         for (int s = 0; s < SECTIONS; s++)
             if (c->mesh[s].vtx_capacity) w->on_mesh_free(w->render_user, &c->mesh[s]);
     w->grid[slot_of(w, c->cx, c->cz)] = NULL;
     column_free(c);
+    return 1;
 }
 
 /* -------------------------------------------------------------- mesh jobs */
@@ -603,7 +627,7 @@ void world_load_blocking(world *w, double px, double pz, int radius)
             if (!in_limits(cx, cz)) continue;
             column *c = w->grid[slot_of(w, cx, cz)];
             while (c && (c->cx != cx || c->cz != cz)) {
-                unload_column(w, c); /* frees now, or flags a loading column */
+                if (!unload_column(w, c)) break; /* kept unsaved: the slot stays its own */
                 if (w->grid[slot_of(w, cx, cz)] == c) {
                     jobs_wait_idle(w->jobs);
                     jobs_poll(w->jobs, -1);
@@ -621,19 +645,35 @@ void world_load_blocking(world *w, double px, double pz, int radius)
 void world_save_all(world *w)
 {
     if (!w->db) return;
-    /* One transaction for the batch. A column counts as saved only once
+    /* One transaction for the columns and the player (on_save), which
+     * lands whole or not at all: any failed write abandons it, as SQLite
+     * may already have rolled it back. A column counts as saved only once
      * the commit went through; otherwise the next save tries it again. */
-    int batch = save_db_begin(w->db) == 0;
-    for (int i = 0; i < w->grid_w * w->grid_w; i++) {
+    if (save_db_begin(w->db) != 0) {
+        log_error("could not start saving the world");
+        return;
+    }
+    int ok = 1;
+    for (int i = 0; ok && i < w->grid_w * w->grid_w; i++) {
         column *c = w->grid[i];
         if (!c || c->state != COL_READY || !c->unsaved) continue;
         if (save_db_put_column(w->db, c) == 0) c->unsaved = 2;
-        else log_error("failed to save column %d,%d", c->cx, c->cz);
+        else {
+            log_error("failed to save column %d,%d", c->cx, c->cz);
+            ok = 0;
+        }
     }
-    int ok = !batch || save_db_commit(w->db) == 0;
+    if (ok && w->on_save) ok = w->on_save(w->save_user) == 0;
+    if (ok) ok = save_db_commit(w->db) == 0;
+    else save_db_rollback(w->db);
     for (int i = 0; i < w->grid_w * w->grid_w; i++) {
         column *c = w->grid[i];
         if (c && c->unsaved == 2) c->unsaved = ok ? 0 : 1;
+    }
+    if (ok && w->save_failed) {
+        log_info("saving works again");
+        w->save_failed = 0;
+        w->have_center = 0; /* the next world_update unloads the columns kept meanwhile */
     }
 }
 
@@ -646,14 +686,17 @@ void world_destroy(world *w)
         w->retry = m->retry_next;
         mesh_free(m);
     }
+    int lost = 0;
     for (int i = 0; i < w->grid_w * w->grid_w; i++) {
         column *c = w->grid[i];
         if (!c) continue;
+        lost += c->unsaved && w->db;
         if (w->on_mesh_free)
             for (int s = 0; s < SECTIONS; s++)
                 if (c->mesh[s].vtx_capacity) w->on_mesh_free(w->render_user, &c->mesh[s]);
         column_free(c);
     }
+    if (lost) log_error("%d edited columns could not be saved; their latest changes are lost", lost);
     mem_free(w->grid);
     mem_free(w->spiral);
     memset(w, 0, sizeof *w);

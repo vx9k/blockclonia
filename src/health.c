@@ -201,12 +201,18 @@ static const char *const RHYTHM_NAMES[RHYTHM_COUNT] = {"Sinus rhythm",
 static const char *const RHYTHM_SHORT[RHYTHM_COUNT] = {"SINUS", "VF",           "ASYSTOLE", "AF",
                                                        "VT",    "PULSELESS VT", "PEA",      "AV BLOCK III"};
 
-const char *health_rhythm_name(int r) { return r >= 0 && r < RHYTHM_COUNT ? RHYTHM_NAMES[r] : "?"; }
-const char *health_rhythm_short(int r) { return r >= 0 && r < RHYTHM_COUNT ? RHYTHM_SHORT[r] : "?"; }
+const char *health_rhythm_name(int rhythm) { return rhythm >= 0 && rhythm < RHYTHM_COUNT ? RHYTHM_NAMES[rhythm] : "?"; }
+const char *health_rhythm_short(int rhythm)
+{
+    return rhythm >= 0 && rhythm < RHYTHM_COUNT ? RHYTHM_SHORT[rhythm] : "?";
+}
 
-int health_rhythm_perfusing(int r) { return r == RHYTHM_SINUS || r == RHYTHM_AF || r == RHYTHM_VT || r == RHYTHM_AVB3; }
+int health_rhythm_perfusing(int rhythm)
+{
+    return rhythm == RHYTHM_SINUS || rhythm == RHYTHM_AF || rhythm == RHYTHM_VT || rhythm == RHYTHM_AVB3;
+}
 
-int health_rhythm_shockable(int r) { return r == RHYTHM_VF || r == RHYTHM_PVT; }
+int health_rhythm_shockable(int rhythm) { return rhythm == RHYTHM_VF || rhythm == RHYTHM_PVT; }
 
 const char *health_part_name(int part) { return part >= 0 && part < BP_COUNT ? PART_NAMES[part] : "?"; }
 const char *health_bone_name(int part) { return part >= 0 && part < BP_COUNT ? BONE_NAMES[part] : "?"; }
@@ -1988,10 +1994,11 @@ void health_step(health *h, const health_env *e, double dt)
     contract *= (1.0f + 0.35f * beta) / (1.0f + 0.02f * h->strain) * rhythm_pump(h->rhythm);
     float vu = 4.05f - 1.3f * h->symp + 0.5f * h->sepsis - 0.3f * alpha; /* unstressed volume, venoconstriction */
     float pms = maxf(0.0f, (veff - vu) / CSYS) * (1.0f + 1.3f * ex); /* muscle pump */
-    float rvr = RVR0 * (1.0f - 0.4f * ex);
     float rap, co = 0.0f;
-    if (!arrest) co = solve_output(h->hr, contract, pms, rvr, 12.0f * h->pneumothorax * h->pneumothorax, &rap);
-    else rap = pms / (1.0f + 0.0f);
+    if (!arrest) {
+        float rvr = RVR0 * (1.0f - 0.4f * ex);
+        co = solve_output(h->hr, contract, pms, rvr, 12.0f * h->pneumothorax * h->pneumothorax, &rap);
+    } else rap = pms / (1.0f + 0.0f);
     h->co = co;
     h->sv = h->hr > 1.0f ? co * 1000.0f / h->hr : 0.0f;
     h->svr = SVR0 * (0.85f + 0.9f * h->symp) / 0.985f * (1.0f - 0.6f * ex) * (1.0f - 0.5f * h->sepsis) /

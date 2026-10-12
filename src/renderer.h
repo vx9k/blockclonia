@@ -65,7 +65,7 @@ typedef struct {
     int indirect_draws;   /* draws inside those calls issued by multi-draw indirect */
     uint32_t quads;
     uint32_t pool_used_kb, pool_total_kb;
-    float cpu_ms;         /* CPU time renderer_end_frame took (recording, submit, present) */
+    float cpu_ms;         /* CPU time renderer_end_frame took to record and submit (not the present) */
     float gpu_ms;         /* GPU time of a recent frame, from timestamps; 0 when unsupported */
     /* Device-local memory in use by this process and the budget the driver
      * grants it (VK_EXT_memory_budget), in MiB; both 0 when unknown. */
@@ -104,10 +104,10 @@ void renderer_on_resize(renderer *r);
 /* Switches between FIFO (FIFO_RELAXED where offered) and the fastest mode;
  * rebuilds the swapchain. */
 void renderer_set_vsync(renderer *r, int on);
-/* Terrain texture minification: 0 nearest (sharp, shimmers at a distance),
- * 1 trilinear with up to 8x anisotropy where supported. Magnification stays
- * nearest either way (pixel art up close). Waits for the GPU to go idle, so
- * call it from a settings change, not every frame. */
+/* Terrain texture minification: 0 nearest texel of the nearest mip (sharp,
+ * shimmers at a distance), 1 trilinear with up to 8x anisotropy where
+ * supported. Magnification stays nearest either way (pixel art up close).
+ * Takes effect with the next frame recorded; frames in flight keep theirs. */
 void renderer_set_filtering(renderer *r, int enabled);
 const char *renderer_device_name(const renderer *r);
 /* "Vulkan 1.3: multi-draw indirect, dynamic rendering, ...": the API

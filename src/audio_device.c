@@ -23,6 +23,8 @@ struct audio_device {
     char name[300]; /* backend name + a device name of up to 255 chars */
 };
 
+/* ma_device_data_proc fixes the signature, so dev can't be const. */
+/* cppcheck-suppress constParameterCallback */
 static void data_cb(ma_device *dev, void *out, const void *in, ma_uint32 frames)
 {
     (void)in;

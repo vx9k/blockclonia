@@ -233,7 +233,10 @@ size_t survival_encode_player(const player *p, const inventory *inv, double day,
 
 int survival_decode_player(player *p, inventory *inv, double *day, const uint8_t *in, size_t len)
 {
-    if (len != PLAYER_FILE_SIZE || memcmp(in, "MCPL", 4) != 0 || in[4] != 1 || in[40] > 1) return -1;
+    /* Reserved bytes are zero in every version 1 file written. */
+    if (len != PLAYER_FILE_SIZE || memcmp(in, "MCPL", 4) != 0 || in[4] != 1 || in[5] || in[6] || in[7] || in[40] > 1 ||
+        in[41])
+        return -1;
     double x = get64(in + 8), y = get64(in + 16), z = get64(in + 24);
     float yaw = get32f(in + 32), pitch = get32f(in + 36);
     /* NaN fails every comparison, so these also reject it. */

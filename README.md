@@ -198,7 +198,10 @@ saving for it instead of touching the world.
 Settings are saved in `blockclonia.cfg` under the config directory (or
 the file given with `--config`) as one `key value` pair per line. See
 "Where files live" below for the exact path. Unknown keys and
-out-of-range values are ignored.
+out-of-range values are ignored. A file the game can't use (a symlink or
+anything else that isn't a regular file, one it can't read, one over
+64 KiB, or one without a single setting in it) is left alone: the game
+starts with the defaults and doesn't save changes over it.
 
 | Tab | Setting | Range |
 |---|---|---|
@@ -206,7 +209,7 @@ out-of-range values are ignored.
 | Video | GUI scale | automatic, or 1–4 |
 | Video | VSync | on/off |
 | Video | Render distance | 2–32 columns; applies on the next start |
-| Video | Texture filtering (distance) | on/off |
+| Video | Texture filtering (distance) | on (default): trilinear between mipmaps, with up to 8× anisotropic filtering where the GPU supports it; off: the nearest texel of the nearest mipmap, sharper but shimmering in the distance. Up close textures stay pixel-sharp either way |
 | Video | View bobbing, FOV effects | on/off |
 | Controls | Mouse sensitivity | 10–300% |
 | Controls | Invert Y, sprint toggle, key hints | on/off |
@@ -244,6 +247,16 @@ entirely.
 | Meshing and generation on worker threads from private snapshots | Main thread never waits, edits never race |
 | Procedural textures with mipmaps and procedural sound, generated at startup | No asset files to ship or parse |
 | Vulkan 1.0 core with zero required optional features | Runs on anything with a Vulkan driver, including Raspberry Pi (V3DV) |
+| Trilinear and up to 8× anisotropic texture filtering (`aniso`; trilinear only without it) | Distant ground stays sharp at grazing angles instead of blurring or shimmering |
+| Multi-draw indirect (`mdi`): the terrain is one `vkCmdDrawIndexedIndirect` per pool block and pass, one draw per section otherwise | Recording 1400 sections takes 0.22 ms of CPU instead of 0.37 ms on Intel UHD (ADL-N); fewer draws for drivers with a cost per draw |
+| Memory budget (`budget`, `VK_EXT_memory_budget` on 1.1+) | The vertex pool stops growing at the driver's budget instead of evicting other memory (or, with shared memory, squeezing the system); F3 shows use against the budget |
+| Relaxed FIFO with vsync on (`relaxed`, where the surface offers it) | A frame that misses a vblank tears briefly instead of waiting a whole refresh |
+| One timeline semaphore paces the frames (`timeline`, 1.2) | One counter tells which frames have finished, instead of a fence per frame to wait on and reset |
+| Synchronization2 barriers and submits (`sync2`; 1.3, or the KHR extension on 1.2) | The same synchronization through the newer API; dynamic rendering needs it |
+| Dynamic rendering (`dynrend`; 1.3, or the KHR extension on 1.2; needs `sync2`) | No render pass or per-image framebuffers to create and rebuild on a resize |
+| Host image copy for the block textures and the font (`hostcopy`, 1.4; only where the driver says device access stays optimal) | Textures go straight from the CPU into the image, with no staging buffer or upload command buffer |
+| GPU timestamps around each frame (`timestamps`; reset from the CPU with `hostreset` on 1.2) | F3 shows the GPU time of a frame next to the CPU time spent recording it |
+| Pipeline cache kept on disk between runs (`pcache`) | Pipelines build from it where the driver has no shader cache of its own (Intel with Mesa's cache off: 40 ms to 3 ms) |
 
 By default the renderer negotiates the highest API version the loader,
 the Vulkan headers it was built against and the renderer itself (1.4)
@@ -251,6 +264,14 @@ all support. `MC_VK_API=1.0|1.1|1.2|1.3|1.4` caps that, to test the 1.0
 fallbacks on a newer machine; an unrecognized value logs a warning and is
 ignored, leaving the version uncapped. The negotiated version shows up in
 the startup GPU log line and in the F3 overlay.
+
+Optional features the device offers at that version are enabled when the
+device is created, and listed next to the version. `MC_VK_DISABLE` turns
+them off for testing, as a comma list of `mdi`, `dynrend`, `sync2`,
+`timeline`, `aniso`, `hostcopy`, `budget`, `timestamps`, `pcache`,
+`hostreset` and `relaxed`, or `all`; unknown names are logged and
+ignored. `MC_VK_API=1.0 MC_VK_DISABLE=all` is the path a Raspberry Pi 4
+on older Mesa takes.
 
 ![the F3 debug overlay](docs/debug.jpg)
 
@@ -431,12 +452,13 @@ src/hud.c         HUD, H panel, monitor            src/invui.c   hotbar and inve
 src/debug.c       F3 overlay           src/ui.c        2D overlay batch and font
 src/camera.c      camera motion        src/viewmodel.c the first-person arm
 src/fx.c          debris, splashes and the entity list      src/anim.h   easing helpers
-src/settings.c    the settings file    src/save.c      world files
+src/settings.c    the settings file    src/save.c      column codec, file access
+src/save_db.c     world.db (SQLite)
 src/jobs.c        thread pool          src/gpupool.c   vertex pool allocator
 src/mem.c         mimalloc wrappers    src/log.c       logging, save-on-fatal hook
 src/bench.c       --bench
 shaders/          GLSL, compiled to SPIR-V and embedded at build time
-tests/            unit tests and the save-file fuzzer
+tests/            unit tests and the save-file fuzzers
 cmake/            dependencies, shaders, warnings, packaging, Pi toolchains
 tools/lint.sh     the lint gate CI runs
 ```

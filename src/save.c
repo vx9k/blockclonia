@@ -109,56 +109,34 @@ int save_decode_column(column *c, const uint8_t *data, size_t len)
     const uint8_t *p = data + HEADER_SIZE;
     if (fnv1a(p, payload) != get_u32(data + 20)) return -1;
 
-    size_t used = rle_decode(p, payload, c->blocks, COL_VOL, B_COUNT - 1);
-    if (!used) return -1;
-    if (flags & 1) {
-        if (!c->meta) c->meta = mem_alloc(COL_VOL);
-        size_t m = rle_decode(p + used, payload - used, c->meta, COL_VOL, WATER_FULL - 1);
-        if (!m) return -1;
+    /* Decoded aside and applied only once all of it checks out, so a
+     * rejected column leaves c as it was. */
+    uint8_t *blocks = mem_alloc(COL_VOL), *meta = (flags & 1) ? mem_alloc(COL_VOL) : NULL;
+    size_t used = rle_decode(p, payload, blocks, COL_VOL, B_COUNT - 1);
+    int ok = used != 0;
+    if (ok && meta) {
+        size_t m = rle_decode(p + used, payload - used, meta, COL_VOL, WATER_FULL - 1);
+        ok = m != 0;
         used += m;
-        for (size_t i = 0; i < COL_VOL; i++)
-            if (c->meta[i] && !block_has_meta(c->blocks[i])) return -1;
-    } else {
-        mem_free(c->meta);
-        c->meta = NULL;
+        for (size_t i = 0; ok && i < COL_VOL; i++)
+            if (meta[i] && !block_has_meta(blocks[i])) ok = 0;
     }
-    return used == payload ? 0 : -1;
-}
-
-static int column_path(char *buf, size_t cap, const char *dir, int cx, int cz, const char *suffix)
-{
-    int n = snprintf(buf, cap, "%s/c.%d.%d.bin%s", dir, cx, cz, suffix);
-    return n > 0 && (size_t)n < cap ? 0 : -1;
+    if (ok && used == payload) {
+        memcpy(c->blocks, blocks, COL_VOL);
+        mem_free(c->meta);
+        c->meta = meta;
+        meta = NULL;
+    } else {
+        ok = 0;
+    }
+    mem_free(blocks);
+    mem_free(meta);
+    return ok ? 0 : -1;
 }
 
 /* World folders can come from anyone, so every file access goes through
  * os_read_regular and os_write_atomic, which never follow a symlink and
  * only touch regular files (see os.h). */
-
-int save_load_column(const char *dir, column *c)
-{
-    char path[512];
-    if (column_path(path, sizeof path, dir, c->cx, c->cz, "") != 0) return 0;
-    uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
-    long len = os_read_regular(path, buf, SAVE_MAX_FILE);
-    int r = 0; /* missing: generate */
-    if (len >= 0 && len <= SAVE_MAX_FILE) r = save_decode_column(c, buf, (size_t)len) == 0 ? 1 : -1;
-    else if (len != -2) r = -1; /* too big, or not a readable regular file */
-    mem_free(buf);
-    return r;
-}
-
-int save_store_column(const char *dir, const column *c)
-{
-    char path[512], tmp[512];
-    if (column_path(path, sizeof path, dir, c->cx, c->cz, "") != 0) return -1;
-    if (column_path(tmp, sizeof tmp, dir, c->cx, c->cz, ".tmp") != 0) return -1;
-    uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
-    size_t len = save_encode_column(c, buf, SAVE_MAX_FILE);
-    int r = len ? os_write_atomic(path, tmp, buf, len) : -1;
-    mem_free(buf);
-    return r;
-}
 
 int save_ensure_dir(const char *dir)
 {
@@ -182,17 +160,6 @@ int save_read_seed(const char *dir, uint32_t *seed)
     if (errno || end == buf + 5 || (*end != '\n' && *end != '\0') || v > UINT32_MAX) return -1;
     *seed = (uint32_t)v;
     return 0;
-}
-
-int save_write_seed(const char *dir, uint32_t seed)
-{
-    char path[512], tmp[512], text[32];
-    int n = snprintf(path, sizeof path, "%s/level.dat", dir);
-    if (n < 0 || (size_t)n >= sizeof path) return -1;
-    n = snprintf(tmp, sizeof tmp, "%s/level.dat.tmp", dir);
-    if (n < 0 || (size_t)n >= sizeof tmp) return -1;
-    int len = snprintf(text, sizeof text, "seed %u\n", seed);
-    return os_write_atomic(path, tmp, text, (size_t)len);
 }
 
 long save_read_file(const char *path, void *buf, size_t cap)

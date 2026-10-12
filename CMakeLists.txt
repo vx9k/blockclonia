@@ -98,8 +98,6 @@ endif()
 find_package(Threads REQUIRED)
 if(MC_BUILD_GAME)
   find_package(Vulkan REQUIRED)
-elseif(MC_VK_MIMALLOC)
-  find_package(Vulkan QUIET) # headers only, for the allocation callbacks
 endif()
 include(Dependencies) # mc::mimalloc, mc::sqlite, and mc::glfw when MC_BUILD_GAME
 
@@ -164,18 +162,24 @@ set(MC_CORE_SOURCES
   src/worldgen.c
 )
 
+# ASan cannot see mi_* allocations, and the static mimalloc's malloc
+# override crashes ASan's own start-up, so sanitizer and fuzz builds
+# allocate through libc.
+set(MC_MEM_LIBC OFF)
+if(MC_SANITIZE OR MC_BUILD_FUZZ)
+  set(MC_MEM_LIBC ON)
+endif()
+
 function(mc_add_core name)
   add_library(${name} STATIC ${MC_CORE_SOURCES})
   target_include_directories(${name} PUBLIC src)
   target_link_libraries(${name} PUBLIC Threads::Threads mc::sqlite PRIVATE mc_warnings)
-  if(NOT MC_SANITIZE)
+  if(MC_MEM_LIBC)
+    target_compile_definitions(${name} PUBLIC MC_MEM_LIBC)
+  else()
     target_link_libraries(${name} PUBLIC mc::mimalloc)
   endif()
   target_link_libraries(${name} PUBLIC m)
-  if(MC_VK_MIMALLOC AND NOT MC_SANITIZE AND TARGET Vulkan::Headers)
-    target_compile_definitions(${name} PRIVATE MC_VK_MIMALLOC) # only mem.c reads it
-    target_link_libraries(${name} PRIVATE Vulkan::Headers)
-  endif()
 endfunction()
 
 mc_add_core(mccore)
@@ -186,8 +190,6 @@ if(MC_SANITIZE)
   set(_san -fsanitize=address,undefined -fno-sanitize-recover=undefined)
   target_compile_options(mccore PUBLIC ${_san} -fno-omit-frame-pointer)
   target_link_options(mccore PUBLIC ${_san})
-  # ASan cannot see mi_* allocations, so sanitizer builds use libc malloc.
-  target_compile_definitions(mccore PUBLIC MC_MEM_LIBC)
 endif()
 
 # ---------------------------------------------------------------- game
@@ -199,6 +201,10 @@ if(MC_BUILD_GAME)
     add_executable(blockclonia src/main.c src/renderer.c src/audio_null.c)
   endif()
   target_link_libraries(blockclonia PRIVATE mccore Vulkan::Vulkan mc::glfw mc_warnings)
+  if(MC_VK_MIMALLOC AND NOT MC_MEM_LIBC)
+    # renderer.c's VkAllocationCallbacks; libc builds (sanitizer, fuzz) lack the aligned mem_* calls.
+    target_compile_definitions(blockclonia PRIVATE MC_VK_MIMALLOC)
+  endif()
 
   include(Shaders)
   mc_compile_shaders(blockclonia
@@ -254,6 +260,9 @@ if(MC_BUILD_FUZZ)
   add_executable(fuzz_save_db tests/fuzz_save_db.c)
   target_link_libraries(fuzz_save_db PRIVATE mccore_fuzz)
   target_link_options(fuzz_save_db PRIVATE -fsanitize=fuzzer,address,undefined)
+  add_executable(fuzz_files tests/fuzz_files.c)
+  target_link_libraries(fuzz_files PRIVATE mccore_fuzz)
+  target_link_options(fuzz_files PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()
 
 # ---------------------------------------------------------------- install / package

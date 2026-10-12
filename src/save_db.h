@@ -28,22 +28,26 @@ void save_db_close(save_db *db);
 
 /* A batch of saves in one transaction, so it costs one commit and lands
  * whole or not at all. Not nested. commit returns -1 if it failed, and
- * then nothing written since begin is kept. */
+ * then nothing written since begin is kept; rollback drops it on purpose. */
 int save_db_begin(save_db *db);
 int save_db_commit(save_db *db);
+void save_db_rollback(save_db *db);
 
-/* get_seed: 0 and *seed set if the world has one, else -1. */
+/* get_seed: 0 and *seed set if the world has one, -1 if it has none (or
+ * not a valid one), -2 if it could not be read (a database error). */
 int save_db_get_seed(save_db *db, uint32_t *seed);
 int save_db_set_seed(save_db *db, uint32_t seed);
 
 /* A column's encoded bytes. Returns the length, with *out a mem_alloc'd
  * copy to mem_free; -1 if the column was never saved; -2 if its row is
- * unusable (not a blob, too big, or a database error). */
+ * unusable (not a blob, or too big); -3 if it could not be read (a
+ * database error), so the row may well be there. */
 long save_db_get_column(save_db *db, int cx, int cz, uint8_t **out);
 int save_db_put_column(save_db *db, const column *c);
 
-/* Named blobs ("player"): get returns the length, or -1 if missing, not a
- * blob or larger than cap. */
+/* Named blobs ("player"): get returns the length, -1 if missing, not a
+ * blob or larger than cap, or -2 if it could not be read (a database
+ * error). */
 long save_db_get_blob(save_db *db, const char *name, void *buf, size_t cap);
 int save_db_put_blob(save_db *db, const char *name, const void *data, size_t len);
 
@@ -52,7 +56,7 @@ int save_db_put_blob(save_db *db, const char *name, const void *data, size_t len
  * in one transaction. The files are read with save_read_file's checks and
  * left in place. Returns the files imported, 0 if there was nothing to
  * import (no valid level.dat, or the database already has a world), -1 on
- * a database error (nothing imported). */
+ * a database error (nothing imported), including one reading the seed. */
 int save_db_import(save_db *db, const char *dir);
 
 #endif

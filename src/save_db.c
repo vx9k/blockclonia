@@ -209,10 +209,13 @@ save_db *save_db_open(const char *dir)
         return NULL;
     }
     /* Write-ahead logging: a save appends to world.db-wal and syncs only at
-     * checkpoints, which keeps autosaves cheap on an SD card; a crash still
-     * leaves every committed save. With the exclusive lock the WAL needs
-     * no shared-memory file. A filesystem without WAL keeps the default
-     * rollback journal. The first write also takes the exclusive lock.
+     * checkpoints, which keeps autosaves cheap on an SD card. A crash of
+     * the game keeps every committed save, but a power cut or an OS crash
+     * can lose those since the last checkpoint (the file is not damaged:
+     * the world opens as of an earlier commit). With the exclusive lock
+     * the WAL needs no shared-memory file. A filesystem without WAL keeps
+     * the default rollback journal. The first write also takes the
+     * exclusive lock.
      * Persistent WAL stays off even where a build turns it on by default
      * (the system library on macOS appears to): closing then checkpoints
      * and deletes world.db-wal, so world.db alone is the world when it is
@@ -258,6 +261,9 @@ int save_db_commit(save_db *db)
     return -1;
 }
 
+/* Also fine when SQLite rolled back on its own after a failed write. */
+void save_db_rollback(save_db *db) { exec(db->h, "ROLLBACK"); }
+
 /* Runs a prepared write to completion and resets it. */
 static int step_write(save_db *db, sqlite3_stmt *s)
 {
@@ -269,14 +275,19 @@ static int step_write(save_db *db, sqlite3_stmt *s)
     return -1;
 }
 
-/* A blob result that fits in cap bytes, or -1. */
+/* A blob result that fits in cap bytes, -1 if there is none, or -2 if it
+ * could not be read. */
 static long read_blob(sqlite3_stmt *s, void *buf, size_t cap)
 {
     long r = -1;
-    if (sqlite3_step(s) == SQLITE_ROW && sqlite3_column_type(s, 0) == SQLITE_BLOB) {
+    int rc = sqlite3_step(s);
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+        r = -2;
+    } else if (rc == SQLITE_ROW && sqlite3_column_type(s, 0) == SQLITE_BLOB) {
         const void *p = sqlite3_column_blob(s, 0);
         int n = sqlite3_column_bytes(s, 0);
-        if (n >= 0 && (size_t)n <= cap) {
+        if (n > 0 && !p) r = -2; /* out of memory */
+        else if (n >= 0 && (size_t)n <= cap) {
             if (n) memcpy(buf, p, (size_t)n);
             r = n;
         }
@@ -291,7 +302,11 @@ int save_db_get_seed(save_db *db, uint32_t *seed)
     sqlite3_stmt *s = db->st[S_GET_META];
     int r = -1;
     sqlite3_bind_text(s, 1, "seed", -1, SQLITE_STATIC);
-    if (sqlite3_step(s) == SQLITE_ROW && sqlite3_column_type(s, 0) == SQLITE_INTEGER) {
+    int rc = sqlite3_step(s);
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+        log_error("cannot read the world seed: %s", sqlite3_errmsg(db->h));
+        r = -2;
+    } else if (rc == SQLITE_ROW && sqlite3_column_type(s, 0) == SQLITE_INTEGER) {
         sqlite3_int64 v = sqlite3_column_int64(s, 0);
         if (v >= 0 && v <= (sqlite3_int64)UINT32_MAX) {
             *seed = (uint32_t)v;
@@ -320,10 +335,13 @@ long save_db_get_column(save_db *db, int cx, int cz, uint8_t **out)
     int rc = sqlite3_step(s);
     if (rc == SQLITE_DONE) {
         r = -1;
-    } else if (rc == SQLITE_ROW && sqlite3_column_type(s, 0) == SQLITE_BLOB) {
+    } else if (rc != SQLITE_ROW) {
+        r = -3;
+    } else if (sqlite3_column_type(s, 0) == SQLITE_BLOB) {
         const void *p = sqlite3_column_blob(s, 0);
         int n = sqlite3_column_bytes(s, 0);
-        if (n >= 0 && n <= SAVE_MAX_FILE) {
+        if (n > 0 && !p) r = -3; /* out of memory */
+        else if (n >= 0 && n <= SAVE_MAX_FILE) {
             *out = mem_alloc(n ? (size_t)n : 1);
             if (n) memcpy(*out, p, (size_t)n);
             r = n;
@@ -387,7 +405,11 @@ static int import_file(save_db *db, const char *dir, const char *name, int *fail
 int save_db_import(save_db *db, const char *dir)
 {
     uint32_t seed, have;
-    if (save_db_get_seed(db, &have) == 0 || save_read_seed(dir, &seed) != 0) return 0;
+    /* A seed that is there but could not be read must not let the old
+     * files, which stay in the folder, be imported over the newer world. */
+    int got = save_db_get_seed(db, &have);
+    if (got == -2) return -1;
+    if (got == 0 || save_read_seed(dir, &seed) != 0) return 0;
     os_dir *d = os_dir_open(dir);
     if (!d) return 0;
     if (save_db_begin(db) != 0) {

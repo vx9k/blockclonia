@@ -41,6 +41,87 @@ static int raw_sql(const char *dir, const char *sql)
     return ok;
 }
 
+/* A VFS in front of the default one that fails reads or writes while a
+ * flag is set, as a failing SD card or a full disk would. save_db opens
+ * through the default VFS, so installing this as the default puts it under
+ * the game's database with no hook in the game. */
+static int g_fail_reads, g_fail_writes;
+static sqlite3_vfs *g_real_vfs;
+static sqlite3_vfs g_fault_vfs;
+
+typedef struct {
+    sqlite3_file base;
+    sqlite3_file *real; /* the default VFS's file, in the bytes after this */
+} fault_file;
+
+static sqlite3_file *real_of(sqlite3_file *f) { return ((fault_file *)f)->real; }
+static int ff_close(sqlite3_file *f) { return real_of(f)->pMethods->xClose(real_of(f)); }
+static int ff_read(sqlite3_file *f, void *buf, int n, sqlite3_int64 off)
+{
+    return g_fail_reads ? SQLITE_IOERR_READ : real_of(f)->pMethods->xRead(real_of(f), buf, n, off);
+}
+static int ff_write(sqlite3_file *f, const void *buf, int n, sqlite3_int64 off)
+{
+    return g_fail_writes ? SQLITE_FULL : real_of(f)->pMethods->xWrite(real_of(f), buf, n, off);
+}
+static int ff_truncate(sqlite3_file *f, sqlite3_int64 n) { return real_of(f)->pMethods->xTruncate(real_of(f), n); }
+static int ff_sync(sqlite3_file *f, int flags) { return real_of(f)->pMethods->xSync(real_of(f), flags); }
+static int ff_size(sqlite3_file *f, sqlite3_int64 *n) { return real_of(f)->pMethods->xFileSize(real_of(f), n); }
+static int ff_lock(sqlite3_file *f, int l) { return real_of(f)->pMethods->xLock(real_of(f), l); }
+static int ff_unlock(sqlite3_file *f, int l) { return real_of(f)->pMethods->xUnlock(real_of(f), l); }
+static int ff_reserved(sqlite3_file *f, int *out) { return real_of(f)->pMethods->xCheckReservedLock(real_of(f), out); }
+static int ff_control(sqlite3_file *f, int op, void *arg)
+{
+    return real_of(f)->pMethods->xFileControl(real_of(f), op, arg);
+}
+static int ff_sector(sqlite3_file *f) { return real_of(f)->pMethods->xSectorSize(real_of(f)); }
+static int ff_device(sqlite3_file *f) { return real_of(f)->pMethods->xDeviceCharacteristics(real_of(f)); }
+
+/* Version 1: no shared memory or memory map, which the game's exclusive
+ * lock and mmap_size = 0 do not use anyway. */
+static const sqlite3_io_methods FAULT_IO = {
+    .iVersion = 1,
+    .xClose = ff_close,
+    .xRead = ff_read,
+    .xWrite = ff_write,
+    .xTruncate = ff_truncate,
+    .xSync = ff_sync,
+    .xFileSize = ff_size,
+    .xLock = ff_lock,
+    .xUnlock = ff_unlock,
+    .xCheckReservedLock = ff_reserved,
+    .xFileControl = ff_control,
+    .xSectorSize = ff_sector,
+    .xDeviceCharacteristics = ff_device,
+};
+
+static int fv_open(sqlite3_vfs *vfs, const char *name, sqlite3_file *f, int flags, int *out_flags)
+{
+    (void)vfs;
+    fault_file *ff = (fault_file *)f;
+    ff->real = (sqlite3_file *)(ff + 1);
+    int rc = g_real_vfs->xOpen(g_real_vfs, name, ff->real, flags, out_flags);
+    ff->base.pMethods = ff->real->pMethods ? &FAULT_IO : NULL; /* SQLite closes what has methods */
+    return rc;
+}
+
+static void fault_vfs_install(void)
+{
+    g_real_vfs = sqlite3_vfs_find(NULL);
+    g_fault_vfs = *g_real_vfs;
+    g_fault_vfs.szOsFile = (int)sizeof(fault_file) + g_real_vfs->szOsFile;
+    g_fault_vfs.zName = "mc_fault";
+    g_fault_vfs.xOpen = fv_open;
+    sqlite3_vfs_register(&g_fault_vfs, 1);
+}
+
+static void fault_vfs_remove(void)
+{
+    g_fail_reads = g_fail_writes = 0;
+    sqlite3_vfs_register(g_real_vfs, 1);
+    sqlite3_vfs_unregister(&g_fault_vfs);
+}
+
 static column *edited_column(int cx, int cz)
 {
     column *c = column_alloc(cx, cz);
@@ -204,13 +285,69 @@ static void test_bad_rows(void)
     save_db_close(db);
 }
 
+/* Rows that are there but cannot be read (an I/O error) are not taken for
+ * missing ones: the column shows generated terrain but is never saved over
+ * its row, which the next load reads again, and the seed and the player
+ * report the error. */
+static void test_read_fails(void)
+{
+    char dir[400];
+    sub_dir(dir, sizeof dir, "unreadable");
+    fault_vfs_install();
+    save_db *db = save_db_open(dir);
+    column *c = edited_column(0, 0); /* planks at 3,GROUND,4 */
+    CHECK(db && save_db_set_seed(db, 1) == 0 && save_db_put_column(db, c) == 0);
+    CHECK(db && save_db_put_blob(db, "player", "P", 1) == 0);
+    save_db_close(db);
+    column_free(c);
+    db = save_db_open(dir); /* nothing of it cached yet */
+    CHECK(db != NULL);
+    if (!db) {
+        fault_vfs_remove();
+        return;
+    }
+    g_fail_reads = 1;
+    uint32_t seed;
+    char buf[4];
+    uint8_t *b = NULL;
+    CHECK(save_db_get_seed(db, &seed) == -2);
+    CHECK(save_db_get_blob(db, "player", buf, sizeof buf) == -2);
+    CHECK(save_db_get_column(db, 0, 0, &b) == -3 && b == NULL);
+    CHECK(save_db_import(db, dir) == -1);
+    jobs *js = jobs_create(1);
+    world w;
+    world_init(&w, 1, 2, js, db);
+    w.generator = test_flat_gen;
+    world_load_blocking(&w, 0.5, 0.5, 1);
+    g_fail_reads = 0;
+    CHECK(world_get(&w, 3, GROUND, 4) == B_AIR); /* the generated stand-in */
+    CHECK(world_set(&w, 8, GROUND, 8, B_GLASS, 0));
+    world_save_all(&w);
+    world_destroy(&w);
+
+    CHECK(save_db_get_seed(db, &seed) == 0 && seed == 1);
+    world_init(&w, 1, 2, js, db);
+    w.generator = test_flat_gen;
+    world_load_blocking(&w, 0.5, 0.5, 1);
+    CHECK(world_get(&w, 3, GROUND, 4) == B_PLANKS && world_get(&w, 8, GROUND, 8) == B_AIR);
+    world_destroy(&w);
+    jobs_destroy(js);
+    save_db_close(db);
+    fault_vfs_remove();
+}
+
 static void test_import(void)
 {
     char dir[400], p[512], victim[400];
     sub_dir(dir, sizeof dir, "old");
-    CHECK(save_write_seed(dir, 99) == 0);
+    path_in(p, sizeof p, dir, "level.dat");
+    CHECK(save_write_file(p, "seed 99\n", 8) == 0);
     column *c = edited_column(0, -1);
-    CHECK(save_store_column(dir, c) == 0);
+    uint8_t *enc = mem_alloc(SAVE_MAX_FILE);
+    size_t len = save_encode_column(c, enc, SAVE_MAX_FILE);
+    path_in(p, sizeof p, dir, "c.0.-1.bin");
+    CHECK(len && save_write_file(p, enc, len) == 0);
+    mem_free(enc);
     path_in(p, sizeof p, dir, "player.dat");
     CHECK(save_write_file(p, "PLAYER", 6) == 0);
     path_in(p, sizeof p, dir, "c.01.0.bin");
@@ -249,6 +386,57 @@ static void test_import(void)
     column_free(d);
 }
 
+/* Stands in for the game's player: written by the world's on_save hook. */
+static int g_player_fails;
+static int save_test_player(void *user) { return g_player_fails ? -1 : save_db_put_blob(user, "player", "new", 3); }
+
+static int player_is(save_db *db, const char *want)
+{
+    char buf[8];
+    long n = save_db_get_blob(db, "player", buf, sizeof buf);
+    return n == (long)strlen(want) && memcmp(buf, want, (size_t)n) == 0;
+}
+
+/* The columns and the player are saved in one transaction, also when a
+ * column is saved because it unloads: the file never holds a column newer
+ * than the player's inventory, or the other way round. */
+static void test_save_with_player(void)
+{
+    char dir[400];
+    sub_dir(dir, sizeof dir, "together");
+    save_db *db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (!db) return;
+    CHECK(save_db_put_blob(db, "player", "old", 3) == 0);
+    jobs *js = jobs_create(1);
+    world w;
+    world_init(&w, 1, 2, js, db);
+    w.generator = test_flat_gen;
+    w.save_user = db;
+    w.on_save = save_test_player;
+    world_load_blocking(&w, 0.5, 0.5, 1);
+    CHECK(world_set(&w, 3, GROUND, 4, B_GLASS, 0)); /* column 0,0 */
+
+    /* The player cannot be written: the column is not saved either. */
+    g_player_fails = 1;
+    world_save_all(&w);
+    uint8_t *b = NULL;
+    CHECK(save_db_get_column(db, 0, 0, &b) == -1 && player_is(db, "old"));
+    const column *c = world_column(&w, 0, 0);
+    CHECK(c && c->unsaved);
+
+    /* Walking away saves the column, and the player with it. */
+    g_player_fails = 0;
+    world_load_blocking(&w, 16 * CHUNK_W + 0.5, 0.5, 1);
+    CHECK(world_column(&w, 0, 0) == NULL);
+    long n = save_db_get_column(db, 0, 0, &b);
+    CHECK(n > 0 && player_is(db, "new"));
+    mem_free(b);
+    world_destroy(&w);
+    jobs_destroy(js);
+    save_db_close(db);
+}
+
 /* The world fetches rows on the main thread and decodes them in a job. */
 static void test_world_db(void)
 {
@@ -277,11 +465,62 @@ static void test_world_db(void)
     save_db_close(db);
 }
 
+/* A column whose save fails as it unloads (a full disk) keeps its edits:
+ * it stays loaded in its ring slot until a save goes through, and loading
+ * over that slot leaves it alone instead of waiting for it. */
+static void test_unload_save_fails(void)
+{
+    char dir[400];
+    sub_dir(dir, sizeof dir, "full");
+    fault_vfs_install();
+    save_db *db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (!db) {
+        fault_vfs_remove();
+        return;
+    }
+    jobs *js = jobs_create(1);
+    world w;
+    world_init(&w, 1, 2, js, db);
+    w.generator = test_flat_gen;
+    world_load_blocking(&w, 0.5, 0.5, 1);
+    CHECK(world_set(&w, 3, GROUND, 4, B_GLASS, 0)); /* column 0,0 */
+
+    /* Radius 2 makes the ring 16 columns a side, so column 16,0 needs the
+     * slot column 0,0 is in. */
+    CHECK(w.grid_w == 16);
+    g_fail_writes = 1;
+    world_load_blocking(&w, 16 * CHUNK_W + 0.5, 0.5, 1);
+    const column *kept = w.grid[0];
+    CHECK(kept && kept->cx == 0 && kept->cz == 0 && kept->unsaved);
+    CHECK(world_column(&w, 16, 0) == NULL && world_column(&w, 17, 0) != NULL);
+    world_save_all(&w); /* the autosave, while the disk is still full */
+    CHECK(kept && kept->unsaved);
+    g_fail_writes = 0;
+    world_save_all(&w);
+    CHECK(kept && kept->unsaved == 0 && w.grid[0] == kept);
+    world_update(&w, 16 * CHUNK_W + 0.5, GROUND, 0.5); /* now it can go */
+    jobs_wait_idle(js);
+    jobs_poll(js, -1);
+    CHECK(world_column(&w, 16, 0) != NULL);
+    world_destroy(&w);
+
+    world_init(&w, 1, 2, js, db);
+    w.generator = test_flat_gen;
+    world_load_blocking(&w, 0.5, 0.5, 1);
+    CHECK(world_get(&w, 3, GROUND, 4) == B_GLASS);
+    world_destroy(&w);
+    jobs_destroy(js);
+    save_db_close(db);
+    fault_vfs_remove();
+}
+
 /* Deletes what the tests made (one level of subfolders). */
 static void clean_up(void)
 {
-    const char *subs[] = {"rt",  "garbage", "foreign", "trigger", "index", "view", "altered", "newer",
-                          "app", "link0",   "link1",   "link2",   "rows",  "old",  "none",    "world"};
+    const char *subs[] = {"rt",    "garbage", "foreign", "trigger",    "index",   "view", "altered",
+                          "newer", "app",     "link0",   "link1",      "link2",   "rows", "old",
+                          "none",  "world",   "full",    "unreadable", "together"};
     const char *files[] = {"world.db",   "world.db-wal", "world.db-shm", "world.db-journal", "level.dat",
                            "player.dat", "c.0.-1.bin",   "c.01.0.bin",   "c.3.3.bin"};
     char d[400], p[512];
@@ -306,7 +545,10 @@ void test_save_db_all(void)
     test_roundtrip();
     test_refused();
     test_bad_rows();
+    test_read_fails();
     test_import();
+    test_save_with_player();
     test_world_db();
+    test_unload_save_fails();
     clean_up();
 }

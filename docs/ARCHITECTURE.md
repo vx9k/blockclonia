@@ -66,7 +66,7 @@ accumulator stays at zero, so the world stands still.
 | Thread | Runs | Touches |
 |---|---|---|
 | Main | everything in the frame above | all game state |
-| Workers (`jobs.c`, cores − 1, at most 8) | terrain generation, loading columns from disk, meshing | only the job's own data: a column being generated, or a snapshot of a section and its neighbours |
+| Workers (`jobs.c`, cores − 1, at most 8) | terrain generation (decoding a saved column first), meshing | only the job's own data: a column being generated, or a snapshot of a section and its neighbours |
 | Audio (miniaudio's device thread) | `sound_render`: mixing voices | the mixer's own voices, fed by a lock-free single-producer ring |
 | Driver threads | whatever the Vulkan driver does | nothing of ours |
 
@@ -75,6 +75,10 @@ each job's completion callback, so game state never needs a lock. A player
 edit re-meshes the affected sections at the front of the queue
 (`jobs_submit_front`), so the change shows on the next frames.
 
+A generation job gets its own copy of the generator and the seed when it is
+queued, and the bytes of a saved column, read on the main thread. It never
+reads `world`, so the main thread can change the world while it runs.
+
 ## World data
 
 - The world is a ring grid of **columns** (16 × 128 × 16 blocks, one byte
@@ -82,12 +86,15 @@ edit re-meshes the affected sections at the front of the queue
   campfire fuel). Each column is split into eight 16³ **sections** for
   meshing and culling.
 - Columns load in a spiral around the player out to the render radius, and
-  unload (after saving any edits) beyond it. A column is only visible to
-  the game once its state is `COL_READY`.
+  unload (after saving any edits) beyond it. A column whose save fails stays
+  loaded and is saved again on the next attempt, so its edits wait until a
+  save succeeds. A column is only visible to the game once its state is
+  `COL_READY`.
 - **Edits** go through `world_set`, which marks the section meshes dirty
   and fires `on_block_changed`. Physics uses that hook to queue a
   structural check and wake water, and thermo uses it to track heat
-  sources.
+  sources. Structural checks run under a fixed work budget per step, not a
+  clock, so the same checks run on every machine.
 - **Meshes** are built on workers into 4-byte vertices (see `mesher.h`).
   The renderer's `on_mesh_ready` hook copies them into a big GPU vertex
   pool, managed by `gpupool.c`: directly on integrated GPUs, through a
@@ -130,7 +137,10 @@ Each frame, `renderer_end_frame`:
 Positions are sent relative to the camera, so precision holds far from
 spawn. Depth is reversed-Z. Constants go in push constants, so there is
 one descriptor set for the whole frame. `gpucaps.h` lists the optional
-Vulkan features and their fallbacks.
+Vulkan features and their fallbacks; each one is used only where the
+device offers it at the API version in use. The Vulkan allocation
+callbacks, used only with `MC_VK_ALLOC=1`, are defined in `renderer.c`,
+and `mem.c` supplies the aligned allocations they call.
 
 ## Sound
 
@@ -150,6 +160,10 @@ limiter.
   encodes and decodes the payloads. A folder written by an older build
   (`level.dat`, `player.dat`, `c.X.Z.bin`) is imported into the database
   the first time it is opened, leaving the old files in place.
+- Each save writes the edited columns and the player in one transaction,
+  so the two on disk always match. A saved column that cannot be read is
+  shown as generated terrain and never written over, so its real data stays
+  on disk.
 - SQLite's exclusive locking mode keeps a world open in only one game at
   a time; a second instance pointed at the same folder disables saving
   instead of sharing the database.
@@ -157,6 +171,7 @@ limiter.
   to the title screen, on quit, and from the fatal-error hook
   (`log_set_fatal_hook`), so a lost GPU device doesn't lose the world.
 - Settings live in `blockclonia.cfg`, a text file with one `key value`
-  per line.
+  per line. A settings file the game cannot read is left alone, never
+  overwritten with the defaults.
 - `SECURITY.md` explains why every one of these files is treated as
   untrusted input.

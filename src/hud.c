@@ -39,22 +39,23 @@ static void trace_sweep(ui *u, const float *buf, int pos, float x, float y, floa
     int have_prev = 0;
     for (int c = 0; c < cols; c++) {
         int k0 = (int)((long)c * n / cols), k1 = (int)((long)(c + 1) * n / cols);
+        if (k1 <= k0) k1 = k0 + 1; /* wider than the history: repeat a sample */
         int ahead = (k0 - cursor + n) % n;
         if (ahead > 0 && ahead <= gap) {
             have_prev = 0;
             continue;
         }
-        float mn = 1e9f, mx = -1e9f;
+        float mn = 1e9f, mx = -1e9f, last = 0.0f;
         for (int k = k0; k < k1; k++) {
-            float v = buf[k];
-            if (v < mn) mn = v;
-            if (v > mx) mx = v;
+            last = buf[k];
+            if (last < mn) mn = last;
+            if (last > mx) mx = last;
         }
         if (have_prev) {
             if (prev < mn) mn = prev;
             if (prev > mx) mx = prev;
         }
-        prev = buf[k1 > k0 ? k1 - 1 : k0];
+        prev = last;
         have_prev = 1;
         float t0 = clamp01((mx - lo) / (hi - lo)), t1 = clamp01((mn - lo) / (hi - lo));
         float y0 = y + h - t0 * h, y1 = y + h - t1 * h;
