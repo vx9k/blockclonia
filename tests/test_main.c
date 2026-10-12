@@ -480,6 +480,39 @@ static void test_structure(void)
     tw_free(&t);
 }
 
+/* Queued checks run under a work budget, not a time budget: how many a step
+ * gets through must not depend on how fast the machine is. */
+static void test_structure_budget(void)
+{
+    test_world t;
+    tw_init(&t);
+    physics *ph = &t.ph;
+    player p;
+    player_spawn(&p, &t.w, 0.5, 0.5);
+    player_input idle = {0};
+
+    /* Cheap checks in empty sky: several fit in a step, the same number
+     * every step. */
+    ph->struct_head = ph->struct_count = 0;
+    for (int i = 0; i < 20; i++) ph->struct_queue[i] = (ipos){i, WORLD_H - 1, 0};
+    ph->struct_count = 20;
+    for (int s = 0; s < 4; s++) {
+        int before = ph->struct_count;
+        physics_step(ph, &p, &idle);
+        CHECK(before - ph->struct_count == 5);
+    }
+
+    /* Checks through solid ground cost more: one per step. */
+    ph->struct_head = ph->struct_count = 0;
+    for (int i = 0; i < 3; i++) ph->struct_queue[i] = (ipos){i, GROUND, 8};
+    ph->struct_count = 3;
+    for (int s = 0; s < 3; s++) {
+        physics_step(ph, &p, &idle);
+        CHECK(ph->struct_count == 2 - s);
+    }
+    tw_free(&t);
+}
+
 static void test_buoyancy(void)
 {
     test_world t;
@@ -1390,6 +1423,7 @@ int main(void)
     test_sprint_sneak();
     test_camera();
     test_structure();
+    test_structure_budget();
     test_buoyancy();
     test_settle();
     test_fluid();
