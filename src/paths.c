@@ -5,35 +5,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
-#define HOME_VAR "USERPROFILE"
-static int is_sep(char c) { return c == '/' || c == '\\'; }
-#else
 #define HOME_VAR "HOME"
 static int is_sep(char c) { return c == '/'; }
-#endif
 
 /* Length of the part of an absolute path that names no directory to
- * create: "/" on POSIX; "C:\" or "\\server\share\" on Windows. 0 if path is
- * relative. */
-static size_t root_len(const char *p)
-{
-#ifdef _WIN32
-    if (((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z')) && p[1] == ':' && is_sep(p[2])) return 3;
-    if (is_sep(p[0]) && is_sep(p[1])) {
-        size_t i = 2;
-        while (p[i] && !is_sep(p[i])) i++; /* server */
-        if (i == 2 || !p[i]) return 0;
-        size_t share = ++i;
-        while (p[i] && !is_sep(p[i])) i++;
-        if (i == share) return 0;
-        return p[i] ? i + 1 : i;
-    }
-    return 0;
-#else
-    return p[0] == '/';
-#endif
-}
+ * create: 1 for the leading "/", 0 if path is relative. */
+static size_t root_len(const char *p) { return p[0] == '/'; }
 
 /* An absolute directory from the environment, with its trailing slashes
  * dropped (so "/" has length 0); NULL when unset, empty or relative. */
@@ -73,19 +50,10 @@ static void resolve(char *out, const char *var, const char *home_rel, const char
 
 void paths_resolve(paths *p)
 {
-#ifdef _WIN32
-    /* Settings and worlds roam with a domain profile; the pipeline cache is
-     * specific to this machine's GPU and driver, so it stays local. */
-    resolve(p->config, "APPDATA", "AppData/Roaming", "blockclonia.cfg", "blockclonia.cfg", &p->xdg_config);
-    resolve(p->world, "APPDATA", "AppData/Roaming", "worlds/world", "world", &p->xdg_world);
-    resolve(p->pipelines, "LOCALAPPDATA", "AppData/Local", "blockclonia.pipelines", "blockclonia.pipelines",
-            &p->xdg_pipelines);
-#else
     resolve(p->config, "XDG_CONFIG_HOME", ".config", "blockclonia.cfg", "blockclonia.cfg", &p->xdg_config);
     resolve(p->world, "XDG_DATA_HOME", ".local/share", "worlds/world", "world", &p->xdg_world);
     resolve(p->pipelines, "XDG_CACHE_HOME", ".cache", "blockclonia.pipelines", "blockclonia.pipelines",
             &p->xdg_pipelines);
-#endif
 }
 
 int paths_make_dirs(const char *dir)

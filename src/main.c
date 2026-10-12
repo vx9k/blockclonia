@@ -40,11 +40,6 @@
 #include <string.h>
 #include <time.h>
 
-/* MSVC spells POSIX strtok_r as strtok_s, with the same arguments. */
-#ifdef _MSC_VER
-#define strtok_r strtok_s
-#endif
-
 #define REACH 5.0
 #define MAX_STEPS_PER_FRAME 5
 #define MESH_UPLOADS_PER_FRAME 128
@@ -161,18 +156,13 @@ static const char *hurt_names(void)
     return buf;
 }
 
-/* Default locations, as paths.c resolves them on each platform. */
-#ifdef _WIN32
-#define USAGE_WORLD "  --world DIR       save directory (default %%APPDATA%%\\blockclonia\\worlds\\world)\n"
-#define USAGE_CONFIG "  --config FILE     settings file (default %%APPDATA%%\\blockclonia\\blockclonia.cfg)\n"
-#else
+/* Default locations, as paths.c resolves them. */
 #define USAGE_WORLD                                                                          \
     "  --world DIR       save directory (default $XDG_DATA_HOME/blockclonia/worlds/world,\n" \
     "                    or ~/.local/share/blockclonia/worlds/world)\n"
 #define USAGE_CONFIG                                                                             \
     "  --config FILE     settings file (default $XDG_CONFIG_HOME/blockclonia/blockclonia.cfg,\n" \
     "                    or ~/.config/blockclonia/blockclonia.cfg)\n"
-#endif
 
 static void usage(void)
 {

@@ -9,15 +9,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
 #include <sys/stat.h>
-#endif
 
-#ifdef _WIN32
-static const char *const VARS[] = {"USERPROFILE", "APPDATA", "LOCALAPPDATA"};
-#else
 static const char *const VARS[] = {"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"};
-#endif
 #define NVARS (sizeof VARS / sizeof VARS[0])
 
 /* The caller's environment, put back when the tests are done. */
@@ -44,59 +38,6 @@ static int app_dir_is(const char *var, const char *rel, const char *want)
     return paths_app_dir(var, rel, out, sizeof out) == 0 && strcmp(out, want) == 0;
 }
 
-#ifdef _WIN32
-/* Sets the three variables; NULL unsets one. */
-static void env_set(const char *profile, const char *roaming, const char *local)
-{
-    const char *v[NVARS] = {profile, roaming, local};
-    for (size_t i = 0; i < NVARS; i++) tmp_setenv(VARS[i], v[i]);
-}
-
-static void test_app_dir(void)
-{
-    env_set("C:\\Users\\u", "D:\\roam\\", NULL);
-    CHECK(app_dir_is("APPDATA", "AppData/Roaming", "D:\\roam/blockclonia"));
-    CHECK(app_dir_is("LOCALAPPDATA", "AppData/Local", "C:\\Users\\u/AppData/Local/blockclonia")); /* unset */
-    env_set("C:/Users/u/", "roam", "\\\\server\\share");
-    CHECK(app_dir_is("APPDATA", "AppData/Roaming", "C:/Users/u/AppData/Roaming/blockclonia")); /* relative */
-    CHECK(app_dir_is("LOCALAPPDATA", "AppData/Local", "\\\\server\\share/blockclonia"));       /* UNC */
-    env_set("C:\\", "\\no-drive", "C:relative");
-    CHECK(app_dir_is("APPDATA", "AppData/Roaming", "C:/AppData/Roaming/blockclonia"));
-    CHECK(app_dir_is("LOCALAPPDATA", "AppData/Local", "C:/AppData/Local/blockclonia"));
-
-    char out[PATHS_MAX];
-    env_set(NULL, NULL, NULL);
-    CHECK(paths_app_dir("APPDATA", "AppData/Roaming", out, sizeof out) == -1);
-    env_set("/home/u", NULL, NULL); /* a POSIX path is not absolute on Windows */
-    CHECK(paths_app_dir("APPDATA", "AppData/Roaming", out, sizeof out) == -1);
-}
-
-static void test_resolve(void)
-{
-    paths p;
-    env_set("C:\\Users\\u", "C:\\Users\\u\\AppData\\Roaming", NULL);
-    paths_resolve(&p);
-    CHECK(strcmp(p.config, "C:\\Users\\u\\AppData\\Roaming/blockclonia/blockclonia.cfg") == 0 && p.xdg_config);
-    CHECK(strcmp(p.world, "C:\\Users\\u\\AppData\\Roaming/blockclonia/worlds/world") == 0 && p.xdg_world);
-    CHECK(strcmp(p.pipelines, "C:\\Users\\u/AppData/Local/blockclonia/blockclonia.pipelines") == 0 && p.xdg_pipelines);
-
-    env_set(NULL, NULL, NULL);
-    paths_resolve(&p);
-    CHECK(strcmp(p.config, "blockclonia.cfg") == 0 && !p.xdg_config);
-    CHECK(strcmp(p.world, "world") == 0 && !p.xdg_world);
-}
-
-static void test_parent(void)
-{
-    char out[64];
-    CHECK(paths_parent("C:\\a\\b\\c.cfg", out, sizeof out) == 0 && strcmp(out, "C:\\a\\b") == 0);
-    CHECK(paths_parent("C:\\a/b/c.cfg", out, sizeof out) == 0 && strcmp(out, "C:\\a/b") == 0);
-    CHECK(paths_parent("b\\c", out, sizeof out) == 0 && strcmp(out, "b") == 0);
-    CHECK(paths_parent("C:\\c.cfg", out, sizeof out) == -1);
-    CHECK(paths_parent("\\\\server\\share\\c.cfg", out, sizeof out) == -1);
-    CHECK(paths_parent("c.cfg", out, sizeof out) == -1);
-}
-#else
 /* Sets the four variables; NULL unsets one. */
 static void env_set(const char *home, const char *config, const char *data, const char *cache)
 {
@@ -167,7 +108,6 @@ static void test_parent(void)
     CHECK(paths_parent("/c.cfg", out, sizeof out) == -1);
     CHECK(paths_parent("/abcdef/c", out, 4) == -1);
 }
-#endif
 
 /* Empties and removes a directory the tests made; its subdirectories go
  * first. Entries are unlinked, never followed. */
@@ -220,10 +160,8 @@ static void test_make_dirs(const char *root)
     snprintf(d, sizeof d, "%s/a/b/c", root);
     CHECK(paths_make_dirs(d) == 0);
     CHECK(os_is_dir(d));
-#ifndef _WIN32
     struct stat st;
     CHECK(stat(d, &st) == 0 && (st.st_mode & 0777) == 0700);
-#endif
     CHECK(paths_make_dirs(d) == 0); /* already there */
     snprintf(d, sizeof d, "%s/a/b/c/", root);
     CHECK(paths_make_dirs(d) == 0);

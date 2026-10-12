@@ -2,7 +2,7 @@
  *
  * Only playback, in float, in the mixer's own format: miniaudio converts
  * to whatever the platform's device wants (and picks the backend at run
- * time: PipeWire/PulseAudio/ALSA, WASAPI, CoreAudio, AAudio/OpenSL). The
+ * time: PipeWire/PulseAudio/ALSA, CoreAudio, AAudio/OpenSL). The
  * period is ~10 ms, a latency the ear does not notice for effects while
  * leaving the mixer long buffers. The game's mixer already limits its
  * output to [-1, 1], so miniaudio's own clipping is switched off. */

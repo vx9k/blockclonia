@@ -1,9 +1,6 @@
-/* The few operating-system services the game needs that POSIX and Windows
- * spell differently: a monotonic clock, the CPU count, threads, and the
- * checked file access that save.c and save_db.c build on. Each function
- * has one POSIX and one Win32 body; the Win32 one serves MinGW and MSVC
- * alike, so neither needs winpthreads or a POSIX emulation layer. Paths
- * are UTF-8 on every platform. It does not decide where files go
+/* The few operating-system services the game needs: a monotonic clock,
+ * the CPU count, threads, and the checked file access that save.c and
+ * save_db.c build on, all on POSIX. It does not decide where files go
  * (paths.c) or what is in them (save.c). */
 #ifndef MC_OS_H
 #define MC_OS_H
@@ -11,16 +8,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifndef _WIN32
 #include <pthread.h>
-#endif
 
-/* MSVC only accepts its own spelling of thread-local storage in C. */
-#if defined(_MSC_VER) && !defined(__clang__)
-#define OS_THREAD_LOCAL __declspec(thread)
-#else
 #define OS_THREAD_LOCAL _Thread_local
-#endif
 
 /* Seconds on a monotonic clock with an arbitrary start. Lock-free and
  * allocation-free, so the audio callback may call it. */
@@ -31,23 +21,9 @@ int os_cpu_count(void);
 
 /* ------------------------------------------------------------ threads */
 
-#ifdef _WIN32
-/* SRWLOCK, CONDITION_VARIABLE and HANDLE are each one pointer; holding them
- * as void * keeps <windows.h> out of every file that includes this one. */
-typedef struct {
-    void *p;
-} os_mutex;
-typedef struct {
-    void *p;
-} os_cond;
-typedef struct {
-    void *p;
-} os_thread;
-#else
 typedef pthread_mutex_t os_mutex;
 typedef pthread_cond_t os_cond;
 typedef pthread_t os_thread;
-#endif
 
 void os_mutex_init(os_mutex *m);
 void os_mutex_destroy(os_mutex *m);
@@ -67,11 +43,10 @@ void os_thread_lower_priority(void);
 
 /* ------------------------------------------------------------ files */
 
-/* World folders come from anyone, so these never follow a symlink (or, on
- * Windows, any reparse point such as a junction) and only touch regular
- * files. Otherwise a shared world could point a save file at, say,
- * ~/.bashrc and have the game overwrite it, or at a FIFO or device and
- * hang a loader thread. */
+/* World folders come from anyone, so these never follow a symlink and
+ * only touch regular files. Otherwise a shared world could point a save
+ * file at, say, ~/.bashrc and have the game overwrite it, or at a FIFO or
+ * device and hang a loader thread. */
 
 /* What sits at a path, without following a final symlink. */
 enum { OS_MISSING, OS_FILE, OS_DIR, OS_OTHER, OS_ERROR };
@@ -90,14 +65,12 @@ long os_read_regular(const char *path, uint8_t *buf, size_t cap);
  * written through. Returns 0 or -1. */
 int os_write_atomic(const char *path, const char *tmp, const void *data, size_t len);
 
-/* Creates one directory (mode is ignored on Windows, where the user's
- * profile already restricts access). Returns 0, or -1 if it was not
- * created, including because something already exists there. */
+/* Creates one directory with the given mode. Returns 0, or -1 if it was
+ * not created, including because something already exists there. */
 int os_mkdir(const char *dir, unsigned mode);
 
-/* An absolute form of dir in out. POSIX resolves every symlink; Windows
- * only makes the path absolute. Returns 0, or -1 if dir does not exist or
- * the result does not fit. */
+/* An absolute form of dir in out, with every symlink resolved. Returns 0,
+ * or -1 if dir does not exist or the result does not fit. */
 int os_full_path(const char *dir, char *out, size_t cap);
 
 /* Lists the names in a directory, "." and ".." included, in no order. */

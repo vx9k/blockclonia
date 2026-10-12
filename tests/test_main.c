@@ -24,9 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
 #include <sys/stat.h>
-#endif
 
 /* --------------------------------------------------------------- tests */
 
@@ -131,15 +129,9 @@ static void test_save_files(void)
     column *d = column_alloc(0, 0);
     CHECK(save_load_column(dir, d) == 1 && memcmp(c->blocks, d->blocks, COL_VOL) == 0);
 
-    /* A FIFO in place of a column file is rejected, not waited on. Windows
-     * has no FIFOs; a directory stands in for something that is not a
-     * regular file. */
+    /* A FIFO in place of a column file is rejected, not waited on. */
     snprintf(p, sizeof p, "%s/c.1.0.bin", dir);
-#ifdef _WIN32
-    CHECK(os_mkdir(p, 0700) == 0);
-#else
     CHECK(mkfifo(p, 0600) == 0);
-#endif
     column *e = column_alloc(1, 0);
     CHECK(save_load_column(dir, e) == -1);
     column *g = column_alloc(2, 0);
