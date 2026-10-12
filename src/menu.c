@@ -60,12 +60,12 @@ static int item(ctx *c, float x, float y, float w, float h, int *hot)
     int i = c->n++;
     *hot = over(c, x, y, w, h);
     if (*hot && c->mouse_moved) c->m->focus = i;
-    if (i < MENU_MAX_ITEMS)
+    if (i >= 0 && i < MENU_MAX_ITEMS)
         c->m->hover[i] = anim_approach(c->m->hover[i], c->m->focus == i ? 1.0f : 0.0f, 18.0f, c->in->dt);
     return i;
 }
 
-static float hover_of(const ctx *c, int i) { return i < MENU_MAX_ITEMS ? c->m->hover[i] : 0.0f; }
+static float hover_of(const ctx *c, int i) { return i >= 0 && i < MENU_MAX_ITEMS ? c->m->hover[i] : 0.0f; }
 
 /* The item frame shared by buttons and setting rows: a dark cell whose
  * border warms to the monitor green, with an accent bar sliding in. */
