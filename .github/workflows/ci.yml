@@ -202,7 +202,7 @@ jobs:
           mkdir -p shots
           # Each run holds something, so the screenshots show the view model:
           # a solid block and an item card (it has transparent texels).
-          for run in default:log default:apple hostcopy:apple all:apple; do
+          for run in default:log default:stick hostcopy:stick all:stick; do
             off=${run%%:*} held=${run#*:}
             [ "$off" = default ] && off=
             echo "== MC_VK_DISABLE=$off holding $held"
