@@ -793,7 +793,12 @@ static int format_is_rgba8(VkFormat f)
 
 static VkPresentModeKHR choose_present_mode(renderer *r)
 {
-    if (r->vsync) return VK_PRESENT_MODE_FIFO_KHR; /* always available */
+    /* Relaxed FIFO waits for vblank like FIFO, but a frame that misses one
+     * is shown at once (a tear) instead of a whole refresh later (a
+     * stutter): the better trade on a GPU that sometimes falls short. FIFO
+     * itself is always available. */
+    if (r->vsync)
+        return (r->caps.enabled & GPUCAP_RELAXED) ? VK_PRESENT_MODE_FIFO_RELAXED_KHR : VK_PRESENT_MODE_FIFO_KHR;
     uint32_t n = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(r->pd, r->surf, &n, NULL);
     VkPresentModeKHR *m = mem_alloc(mem_array_size(n ? n : 1, sizeof *m));

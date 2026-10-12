@@ -250,6 +250,7 @@ entirely.
 | Trilinear and up to 8× anisotropic texture filtering (`aniso`; trilinear only without it) | Distant ground stays sharp at grazing angles instead of blurring or shimmering |
 | Multi-draw indirect (`mdi`): the terrain is one `vkCmdDrawIndexedIndirect` per pool block and pass, one draw per section otherwise | Recording 1400 sections takes 0.22 ms of CPU instead of 0.37 ms on Intel UHD (ADL-N); fewer draws for drivers with a cost per draw |
 | Memory budget (`budget`, `VK_EXT_memory_budget` on 1.1+) | The vertex pool stops growing at the driver's budget instead of evicting other memory (or, with shared memory, squeezing the system); F3 shows use against the budget |
+| Relaxed FIFO with vsync on (`relaxed`, where the surface offers it) | A frame that misses a vblank tears briefly instead of waiting a whole refresh |
 | GPU timestamps around each frame (`timestamps`; reset from the CPU with `hostreset` on 1.2) | F3 shows the GPU time of a frame next to the CPU time spent recording it |
 | Pipeline cache kept on disk between runs (`pcache`) | Pipelines build from it where the driver has no shader cache of its own (Intel with Mesa's cache off: 40 ms to 3 ms) |
 
