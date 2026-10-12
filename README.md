@@ -198,7 +198,10 @@ saving for it instead of touching the world.
 Settings are saved in `blockclonia.cfg` under the config directory (or
 the file given with `--config`) as one `key value` pair per line. See
 "Where files live" below for the exact path. Unknown keys and
-out-of-range values are ignored.
+out-of-range values are ignored. A file the game can't use (a symlink or
+anything else that isn't a regular file, one it can't read, one over
+64 KB, or one without a single setting in it) is left alone: the game
+starts with the defaults and doesn't save changes over it.
 
 | Tab | Setting | Range |
 |---|---|---|

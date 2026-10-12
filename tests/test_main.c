@@ -1382,6 +1382,50 @@ static void test_settings(void)
     CHECK(settings_format(&s, tiny, (int)sizeof tiny) == 7 && tiny[7] == '\0');
 }
 
+/* A settings file is used or left alone, never taken for a missing one
+ * and saved over with the defaults: a valid file well past the old 4 KB
+ * cap loads, and a symlink, a directory, a file too big or one with no
+ * setting in it is reported unusable. */
+static void test_settings_file(void)
+{
+    char dir[256], p[300], q[300];
+    int made = tmp_dir_make(dir, sizeof dir, "mc_cfg_");
+    CHECK(made);
+    if (!made) return;
+    size_t cap = SETTINGS_MAX_FILE + 2, len = 0;
+    char *text = mem_alloc(cap);
+    while (len < 8000) len += (size_t)snprintf(text + len, cap - len, "# a note the player keeps\n");
+    len += (size_t)snprintf(text + len, cap - len, "fov 90\n");
+    snprintf(p, sizeof p, "%s/big.cfg", dir);
+    CHECK(save_write_file(p, text, len) == 0);
+    settings s;
+    settings_default(&s);
+    CHECK(settings_load(&s, p) == 1 && s.fov == 90);
+
+    snprintf(q, sizeof q, "%s/missing.cfg", dir);
+    CHECK(settings_load(&s, q) == SETTINGS_MISSING);
+    snprintf(q, sizeof q, "%s/empty.cfg", dir);
+    CHECK(save_write_file(q, "", 0) == 0 && settings_load(&s, q) == 0);
+    tmp_remove(q);
+    snprintf(q, sizeof q, "%s/notes.cfg", dir);
+    CHECK(save_write_file(q, "eggs, milk\n", 11) == 0 && settings_load(&s, q) == SETTINGS_UNUSABLE);
+    tmp_remove(q);
+    memset(text, '#', cap);
+    CHECK(save_write_file(q, text, SETTINGS_MAX_FILE + 1) == 0 && settings_load(&s, q) == SETTINGS_UNUSABLE);
+    tmp_remove(q);
+    snprintf(q, sizeof q, "%s/link.cfg", dir);
+    int linked = tmp_symlink(p, q); /* a dotfiles repository's link, say */
+    CHECK(linked != 0);
+    if (linked == 1) CHECK(settings_load(&s, q) == SETTINGS_UNUSABLE);
+    tmp_remove(q);
+    CHECK(os_mkdir(q, 0700) == 0 && settings_load(&s, q) == SETTINGS_UNUSABLE);
+    tmp_remove(q);
+    CHECK(s.fov == 90); /* none of them changed anything */
+    tmp_remove(p);
+    tmp_remove(dir);
+    mem_free(text);
+}
+
 /* Drives a menu with scripted input: n frames of dt, optional click at (x, y). */
 static menu_action menu_run(menu *m, ui *u, ui_vertex *mem, settings *s, const menu_input *in0, int frames)
 {
@@ -1518,6 +1562,7 @@ int main(void)
     test_survival();
     test_ui();
     test_settings();
+    test_settings_file();
     test_menu();
     test_inventory();
     test_items_physics();

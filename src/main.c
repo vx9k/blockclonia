@@ -724,6 +724,7 @@ typedef struct {
     settings st;
     int settings_dirty;
     int cfg_vsync;            /* vsync as the settings file has it (--no-vsync is not saved) */
+    int cfg_keep;             /* the settings file could not be used: never written over */
     uint32_t seed;
     GLFWwindow *win;
     jobs *js;
@@ -783,6 +784,7 @@ static game g_game;
  * unless the player changed VSync in the menu (which clears it). */
 static int save_settings(const game *g)
 {
+    if (g->cfg_keep) return 0; /* warned at start */
     settings s = g->st;
     if (g->o.no_vsync) s.vsync = g->cfg_vsync;
     return settings_save(&s, g->o.config);
@@ -1615,7 +1617,10 @@ int main(int argc, char **argv)
     use_xdg_paths(&g->o);
 
     settings_default(&g->st);
-    if (settings_load(&g->st, g->o.config) == 0) log_info("settings from %s", g->o.config);
+    int got = settings_load(&g->st, g->o.config);
+    if (got >= 0) log_info("settings from %s", g->o.config);
+    g->cfg_keep = got == SETTINGS_UNUSABLE;
+    if (g->cfg_keep) log_warn("cannot use %s; playing with default settings and not saving over it", g->o.config);
     if (!g->o.have_radius) g->o.radius = g->st.render_distance;
     g->cfg_vsync = g->st.vsync; /* the file's value, kept while --no-vsync overrides it */
     if (!g->o.no_vsync) g->o.vsync = g->st.vsync;

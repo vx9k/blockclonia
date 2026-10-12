@@ -37,11 +37,19 @@ int settings_parse(settings *s, const char *text);
 /* Writes the whole set as text; returns the length (always < cap). */
 int settings_format(const settings *s, char *out, int cap);
 
-/* The largest settings file read: ~300 bytes, with room for comments a
- * player adds. */
-#define SETTINGS_MAX_FILE 4095
+/* The largest settings file read: the game writes ~300 bytes, and the
+ * rest is room for comments a player adds. */
+#define SETTINGS_MAX_FILE 65535
 
-/* 0 on success; a missing or unreadable file leaves s unchanged. */
+/* Reads path into s and returns the number of keys applied. Otherwise s
+ * is unchanged and the result is SETTINGS_MISSING when there is no file
+ * (saving creates one), or SETTINGS_UNUSABLE when there is one this build
+ * cannot use: not a regular file (a symlink, say), unreadable, larger
+ * than SETTINGS_MAX_FILE, or not empty yet without a single setting.
+ * Saving must leave such a file alone: it is somebody's, and writing the
+ * defaults over it would lose it. */
+#define SETTINGS_MISSING (-1)
+#define SETTINGS_UNUSABLE (-2)
 int settings_load(settings *s, const char *path);
 int settings_save(const settings *s, const char *path);
 

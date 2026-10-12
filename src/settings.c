@@ -1,4 +1,6 @@
 #include "settings.h"
+#include "mem.h"
+#include "os.h"
 #include "save.h"
 
 #include <errno.h>
@@ -127,12 +129,18 @@ int settings_format(const settings *s, char *out, int cap)
 
 int settings_load(settings *s, const char *path)
 {
-    char buf[SETTINGS_MAX_FILE + 1];
-    long n = save_read_file(path, buf, sizeof buf - 1);
-    if (n < 0) return -1;
-    buf[n] = '\0';
-    settings_parse(s, buf);
-    return 0;
+    char *buf = mem_alloc(SETTINGS_MAX_FILE + 1);
+    long n = save_read_file(path, buf, SETTINGS_MAX_FILE);
+    int r;
+    if (n < 0) {
+        r = os_path_kind(path) == OS_MISSING ? SETTINGS_MISSING : SETTINGS_UNUSABLE;
+    } else {
+        buf[n] = '\0';
+        r = settings_parse(s, buf);
+        if (r == 0 && n > 0) r = SETTINGS_UNUSABLE;
+    }
+    mem_free(buf);
+    return r;
 }
 
 int settings_save(const settings *s, const char *path)
