@@ -770,17 +770,18 @@ typedef struct {
     uint32_t seed;
     sys_info sys;
     sys_budget plan;          /* budgets for this machine (sysinfo.h) */
-    int backdrop;             /* the menus' fixed, unsaved world is loaded, not a player's */
-    char world_path[WORLDS_PATH_MAX]; /* the world being played (o.world_dir points here) */
-    char worlds_root[WORLDS_PATH_MAX];
+    GLFWwindow *win;
     world_entry *world_list;  /* WORLDS_MAX, refreshed when the list opens */
     menu_world *world_rows;
-    int world_count;
-    GLFWwindow *win;
-    int fullscreen;           /* what the window is now */
-    int win_x, win_y, win_w, win_h; /* the windowed frame, restored on leaving fullscreen */
     jobs *js;
     renderer *rd;
+    int backdrop;             /* the menus' fixed, unsaved world is loaded, not a player's */
+    int world_count;
+    int fullscreen;           /* what the window is now */
+    int win_x, win_y, win_w, win_h; /* the windowed frame, restored on leaving fullscreen */
+    int snd_inv_open;
+    char world_path[WORLDS_PATH_MAX]; /* the world being played (o.world_dir points here) */
+    char worlds_root[WORLDS_PATH_MAX];
     world w;
     physics ph;
     thermo *th;
@@ -819,7 +820,6 @@ typedef struct {
     float landing;            /* hardest landing this frame, m/s */
     float swim_t, prev_hurt, prev_breath;
     double last_beat;         /* health.last_r of the last heartbeat heard */
-    int snd_inv_open;
 
     /* This frame. */
     int in_menu, frozen;

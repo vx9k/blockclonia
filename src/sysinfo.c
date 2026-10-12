@@ -1,5 +1,6 @@
 #include "sysinfo.h"
 #include "log.h"
+#include "os.h"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -56,8 +57,7 @@ static uint32_t parse_size(const char *s)
 void sys_detect(sys_info *si)
 {
     memset(si, 0, sizeof *si);
-    long n = sysconf(_SC_NPROCESSORS_ONLN);
-    si->cores = n > 0 ? (n > 1024 ? 1024 : (int)n) : 1;
+    si->cores = os_cpu_count();
 #ifdef __APPLE__
     si->ram = sysctl_u64("hw.memsize");
     si->l1d = (uint32_t)sysctl_u64("hw.l1dcachesize");

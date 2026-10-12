@@ -19,8 +19,8 @@ static void write_text(const char *path, const char *text)
 {
     FILE *f = fopen(path, "wb");
     if (!f) return;
-    fputs(text, f);
-    fclose(f);
+    CHECK(fputs(text, f) >= 0);
+    CHECK(fclose(f) == 0);
 }
 
 static int exists(const char *path) { return os_path_kind(path) != OS_MISSING; }
