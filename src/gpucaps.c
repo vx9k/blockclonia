@@ -122,7 +122,10 @@ static uint32_t offered(const gpu_offer *o, uint32_t api, int *dynrend_khr, int 
     }
     if (o->timeline_semaphore && api >= GPU_API(1, 2)) m |= GPUCAP_TIMELINE;
     if (o->sampler_anisotropy && o->max_sampler_anisotropy >= 2.0f) m |= GPUCAP_ANISO;
-    if (o->host_image_copy && api >= GPU_API(1, 4)) m |= GPUCAP_HOSTCOPY;
+    /* MoltenVK emulates host image copy over Metal, and binding memory to
+     * such an image crashed in vkBindImageMemory on Apple's paravirtual
+     * GPU (CI's macOS runners). Staging costs a few ms once at start-up. */
+    if (o->host_image_copy && api >= GPU_API(1, 4) && !o->portability_subset) m |= GPUCAP_HOSTCOPY;
     /* vkGetPhysicalDeviceMemoryProperties2 is 1.1 core. */
     if (o->ext_memory_budget && api >= GPU_API(1, 1)) m |= GPUCAP_BUDGET;
     if (o->timestamp_compute_and_graphics && o->timestamp_valid_bits && o->timestamp_period > 0.0f)

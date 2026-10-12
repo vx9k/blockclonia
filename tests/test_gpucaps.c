@@ -264,6 +264,18 @@ static void test_dependencies(void)
     CHECK(!(c.enabled & (GPUCAP_PCACHE | GPUCAP_BUDGET)));
 }
 
+/* MoltenVK: everything but host image copy, which crashed there. */
+static void test_portability(void)
+{
+    gpu_offer o = full_offer();
+    o.portability_subset = 1;
+    gpu_choice c;
+    gpucaps_choose(&o, 0, &c);
+    CHECK(c.enabled == (GPUCAP_ALL & ~GPUCAP_HOSTCOPY));
+    gpucaps_choose(&o, GPUCAP_HOSTCOPY, &c); /* MC_VK_DISABLE=hostcopy: it was never on offer */
+    CHECK(!(c.disabled & GPUCAP_HOSTCOPY));
+}
+
 static void test_overrides(void)
 {
     gpu_offer o = full_offer();
@@ -401,6 +413,7 @@ void test_gpucaps_all(void)
     test_choose_versions();
     test_choose_minimal();
     test_dependencies();
+    test_portability();
     test_overrides();
     test_summary();
     test_pipeline_cache_header();

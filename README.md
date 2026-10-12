@@ -277,44 +277,16 @@ on older Mesa takes.
 
 ## Building
 
-Dependencies: a C11 compiler, CMake ≥ 3.21, Ninja, the Vulkan headers and
-loader, `glslc` (shaderc), GLFW 3.5, mimalloc 3.5, miniaudio 0.11 and
-SQLite 3.31+ (`libsqlite3-dev`). The build fetches GLFW 3.5.1, mimalloc
-3.5.3, miniaudio 0.11.25 and the SQLite 3.53.4 amalgamation when the
-system copies are missing or older. `-DMC_DEPS=SYSTEM` still accepts GLFW
-3.3+ and mimalloc 2.1+ for distro packaging, and builds a silent game if
-miniaudio isn't installed.
-
-Debian, Ubuntu, Raspberry Pi OS:
+[BUILDING.md](BUILDING.md) has the requirements, the steps for Debian,
+Ubuntu, Arch, the Raspberry Pi and macOS, the build presets, and
+troubleshooting. In short, on Debian or Ubuntu:
 
 ```sh
 sudo apt install build-essential cmake ninja-build glslc libvulkan-dev \
                  libglfw3-dev libmimalloc-dev libsqlite3-dev mesa-vulkan-drivers
-cmake --preset native            # tuned for this machine (use this on a Pi)
-cmake --build --preset native
+cmake --preset native && cmake --build --preset native
 ./build/native/blockclonia
 ```
-
-- If the distro's mimalloc or GLFW is older than 3.5 (most distros today),
-  the default `MC_DEPS=AUTO` downloads and compiles the pinned releases.
-  Building GLFW needs the X11 and Wayland headers and `wayland-scanner`
-  (`libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
-  libwayland-dev libwayland-bin libxkbcommon-dev`). `-DMC_DEPS=SYSTEM` forbids downloads; `FETCH` always
-  uses the pinned releases. For a reproducible build, set
-  `MC_MIMALLOC_SHA256`, `MC_GLFW_SHA256`, `MC_MINIAUDIO_SHA256` and
-  `MC_SQLITE_SHA256` (see [SECURITY.md](SECURITY.md#supply-chain)).
-  `MC_SQLITE_VERSION` and `MC_SQLITE_YEAR` pick a different pinned
-  release. Offline, point `FETCHCONTENT_SOURCE_DIR_SQLITE` at an existing
-  `build/*/_deps/sqlite-src` checkout instead of downloading.
-- `-DMC_SOUND=OFF` builds without sound (no miniaudio needed).
-- `cmake --list-presets` shows the rest: `dev`, `release` (-O2 + LTO,
-  portable), `profile`, `asan`, `core` (no Vulkan or GLFW needed), `fuzz`,
-  `ci-gcc`/`ci-clang` (-Werror), and cross builds for the Pi 4/5
-  (`pi4-aarch64`, `pi5-aarch64`, `pi4-armhf`; see the header of
-  `cmake/toolchains/rpi-aarch64.cmake`).
-- `-DMC_CPU=pi4|pi5|native|x86-64-v2` picks the CPU to tune for. 32-bit
-  Pi OS's compiler has NEON off by default, so set it there.
-- Packages: `cd build/release && cpack` makes a `.tar.gz` and a `.deb`.
 
 ### Running
 
@@ -421,6 +393,8 @@ The unit tests (about 2400 checks, no window or GPU needed) cover:
 
 ## Documentation
 
+- [BUILDING.md](BUILDING.md): requirements, building on each platform,
+  and troubleshooting.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the frame loop, the
   threads, and how the modules fit together.
 - [AGENTS.md](AGENTS.md): the rules for changing the code (for people and
@@ -428,6 +402,8 @@ The unit tests (about 2400 checks, no window or GPU needed) cover:
   pull requests.
 - [SECURITY.md](SECURITY.md): what counts as a vulnerability and how to
   report one.
+- [TODO.md](TODO.md): larger work deliberately deferred, and what would
+  make it worth doing.
 - Each header in `src/` starts with a description of its module.
 
 ## Layout

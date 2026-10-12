@@ -16,8 +16,8 @@
 #             that installs on 64-bit Pi OS.
 #   pi-armhf  cross build for 32-bit Pi OS in Debian trixie, tests under
 #             qemu-user; produces an armhf .deb.
-#   macos     experimental: core + unit tests (the renderer still needs the
-#             MoltenVK portability changes described in the build audit).
+#   macos     experimental: the game through MoltenVK (Homebrew) and the
+#             unit tests on Apple Silicon, plus a best-effort render.
 #   nightly   on pushes to main that pass, replaces the "nightly"
 #             prerelease with the .debs.
 name: CI
@@ -184,10 +184,27 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
-      - run: brew install ninja mimalloc
-      - run: cmake --preset core -DCMAKE_PREFIX_PATH="$(brew --prefix)" -DMC_DEPS=AUTO
-      - run: cmake --build --preset core
-      - run: ctest --preset core
+      - run: brew install ninja mimalloc glfw vulkan-headers vulkan-loader molten-vk shaderc vulkan-validationlayers
+      - run: cmake --preset macos -DCMAKE_PREFIX_PATH="$(brew --prefix)"
+      - run: cmake --build --preset macos
+      - run: ctest --test-dir build/macos --output-on-failure
+      # Nobody on the project has a Mac, so this log is how a renderer bug
+      # on MoltenVK shows up: validation messages, MoltenVK's own warnings
+      # and, on a crash, lldb's backtrace, with all optional features, with
+      # host image copy off and with none. Hosted runners are VMs (Apple's
+      # paravirtual GPU), so a failure here does not fail the job.
+      - name: Render 60 frames through MoltenVK
+        continue-on-error: true
+        env:
+          MVK_CONFIG_LOG_LEVEL: 2
+        run: |
+          rc=0
+          for off in "" hostcopy all; do
+            echo "== MC_VK_DISABLE=$off"
+            MC_VK_DISABLE=$off lldb --batch -o run -k 'bt 30' -k 'quit 1' -- \
+              ./build/macos/blockclonia --validate --no-sound --no-save --seed 1337 --play --frames 60 || rc=1
+          done
+          exit $rc
 
   # Every push to main that passes the jobs below replaces the "nightly"
   # prerelease (and its tag) with the packages built from that commit.

@@ -469,6 +469,18 @@ static int has_layer(const char *name)
     return found;
 }
 
+static int has_instance_ext(const char *name)
+{
+    uint32_t n = 0;
+    vkEnumerateInstanceExtensionProperties(NULL, &n, NULL);
+    VkExtensionProperties *e = mem_alloc(mem_array_size(n ? n : 1, sizeof *e));
+    vkEnumerateInstanceExtensionProperties(NULL, &n, e);
+    int found = 0;
+    for (uint32_t i = 0; i < n && !found; i++) found = strcmp(e[i].extensionName, name) == 0;
+    mem_free(e);
+    return found;
+}
+
 /* The loader's version, or 0 (read as 1.0) without vkEnumerateInstanceVersion:
  * that is a 1.0 loader, which fails vkCreateInstance for any apiVersion above
  * 1.0. */
@@ -498,7 +510,18 @@ static void create_instance(renderer *r, int validate)
 
     const char *exts[16];
     uint32_t n = 0;
-    for (uint32_t i = 0; i < glfw_count && n < 15; i++) exts[n++] = glfw_ext[i];
+    for (uint32_t i = 0; i < glfw_count && n < 13; i++) exts[n++] = glfw_ext[i];
+    /* macOS: the loader lists MoltenVK, a layer over Metal that is not a
+     * fully conformant driver, only to an instance that asks for such
+     * "portability" drivers. Its device needs VK_KHR_portability_subset,
+     * which depends on properties2 when the API is capped at 1.0. */
+    VkInstanceCreateFlags flags = 0;
+    if (has_instance_ext("VK_KHR_portability_enumeration")) {
+        exts[n++] = "VK_KHR_portability_enumeration";
+        flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+        if (has_instance_ext("VK_KHR_get_physical_device_properties2"))
+            exts[n++] = "VK_KHR_get_physical_device_properties2";
+    }
     const char *layers[1];
     uint32_t nl = 0;
     if (validate) {
@@ -519,9 +542,13 @@ static void create_instance(renderer *r, int validate)
                              .pEngineName = "blockclonia",
                              .engineVersion = 1,
                              .apiVersion = r->instance_api};
-    VkInstanceCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &app,
-                               .enabledExtensionCount = n, .ppEnabledExtensionNames = exts,
-                               .enabledLayerCount = nl, .ppEnabledLayerNames = layers};
+    VkInstanceCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+                               .flags = flags,
+                               .pApplicationInfo = &app,
+                               .enabledExtensionCount = n,
+                               .ppEnabledExtensionNames = exts,
+                               .enabledLayerCount = nl,
+                               .ppEnabledLayerNames = layers};
     VK_CHECK(vkCreateInstance(&ci, r->ac, &r->inst));
 
     if (validate) {
@@ -624,6 +651,7 @@ static void query_offer(const renderer *r, const render_opts *o, gpu_offer *off)
     off->khr_dynamic_rendering = has_device_ext(r->pd, "VK_KHR_dynamic_rendering");
     off->khr_synchronization2 = has_device_ext(r->pd, "VK_KHR_synchronization2");
     off->ext_memory_budget = has_device_ext(r->pd, "VK_EXT_memory_budget");
+    off->portability_subset = has_device_ext(r->pd, "VK_KHR_portability_subset");
     off->present_relaxed = has_present_mode(r, VK_PRESENT_MODE_FIFO_RELAXED_KHR);
     off->pipeline_cache = !o->pipeline_cache || o->pipeline_cache[0];
 
@@ -726,9 +754,11 @@ static void create_device(renderer *r)
     float prio = 1.0f;
     VkDeviceQueueCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = r->qfam,
                                   .queueCount = 1, .pQueuePriorities = &prio};
-    const char *exts[4];
+    const char *exts[5];
     uint32_t n = 0;
     exts[n++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+    /* MoltenVK: the spec requires it enabled wherever it is offered. */
+    if (has_device_ext(r->pd, "VK_KHR_portability_subset")) exts[n++] = "VK_KHR_portability_subset";
     /* Exactly what gpucaps chose: the 1.0 features through pEnabledFeatures,
      * newer ones through one structure per version (per KHR extension on
      * 1.2), each chained only when something in it is enabled. */
