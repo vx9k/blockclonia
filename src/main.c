@@ -522,13 +522,14 @@ static void save_player(const save_ctx *sc)
     if (!n || save_db_put_blob(sc->db, "player", buf, n) != 0) log_warn("could not save the player");
 }
 
-/* 1 if a saved player was loaded into pl and inv. */
+/* 1 if a saved player was loaded into pl and inv, -1 if it could not be
+ * read (a database error). */
 static int load_player(save_db *db, player *pl, inventory *inv, double *day)
 {
     if (!db) return 0;
     uint8_t buf[PLAYER_FILE_SIZE + 1];
     long n = save_db_get_blob(db, "player", buf, sizeof buf);
-    if (n < 0) return 0;
+    if (n < 0) return n == -2 ? -1 : 0;
     if (survival_decode_player(pl, inv, day, buf, (size_t)n) != 0) {
         log_warn("the saved player is corrupt; starting fresh");
         return 0;
@@ -988,9 +989,18 @@ static uint32_t choose_seed(options *o, save_db **db)
     }
     if (n > 0) log_info("imported %d world files into %s/world.db; they stay but are no longer read", n, o->world_dir);
     uint32_t saved;
-    if (save_db_get_seed(*db, &saved) == 0) {
+    int got = save_db_get_seed(*db, &saved);
+    if (got == 0) {
         if (o->have_seed && saved != o->seed) log_warn("--seed ignored: world '%s' uses seed %u", o->world_dir, saved);
         return saved;
+    }
+    if (got != -1) {
+        /* Storing a new seed would change every column not saved yet. */
+        log_error("cannot read world '%s'; saving disabled", o->world_dir);
+        save_db_close(*db);
+        *db = NULL;
+        o->world_dir = NULL;
+        return seed;
     }
     if (save_db_set_seed(*db, seed) != 0) log_warn("could not store the world seed");
     return seed;
@@ -1056,7 +1066,14 @@ static void game_init_world(game *g)
     }
     inv_starting_kit(&g->inv);
     double day = THERMO_DAY_START;
-    if (!o->have_spawn && !o->demo && load_player(g->db, &g->pl, &g->inv, &day)) {
+    int loaded = !o->have_spawn && !o->demo ? load_player(g->db, &g->pl, &g->inv, &day) : 0;
+    if (loaded < 0) {
+        /* Playing on is fine; saving would write a fresh player over it. */
+        log_error("cannot read the saved player in '%s'; saving disabled", o->world_dir);
+        g->w.db = NULL;
+        g->sc.db = NULL;
+    }
+    if (loaded > 0) {
         thermo_set_day_time(g->th, day);
         world_load_blocking(&g->w, g->pl.pos.x, g->pl.pos.z, 1);
         log_info("player restored from %s/world.db", o->world_dir);

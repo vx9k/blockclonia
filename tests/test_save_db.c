@@ -279,6 +279,57 @@ static void test_bad_rows(void)
     save_db_close(db);
 }
 
+/* Rows that are there but cannot be read (an I/O error) are not taken for
+ * missing ones: the column shows generated terrain but is never saved over
+ * its row, which the next load reads again, and the seed and the player
+ * report the error. */
+static void test_read_fails(void)
+{
+    char dir[400];
+    sub_dir(dir, sizeof dir, "unreadable");
+    fault_vfs_install();
+    save_db *db = save_db_open(dir);
+    column *c = edited_column(0, 0); /* planks at 3,GROUND,4 */
+    CHECK(db && save_db_set_seed(db, 1) == 0 && save_db_put_column(db, c) == 0);
+    CHECK(db && save_db_put_blob(db, "player", "P", 1) == 0);
+    save_db_close(db);
+    column_free(c);
+    db = save_db_open(dir); /* nothing of it cached yet */
+    CHECK(db != NULL);
+    if (!db) {
+        fault_vfs_remove();
+        return;
+    }
+    g_fail_reads = 1;
+    uint32_t seed;
+    char buf[4];
+    uint8_t *b = NULL;
+    CHECK(save_db_get_seed(db, &seed) == -2);
+    CHECK(save_db_get_blob(db, "player", buf, sizeof buf) == -2);
+    CHECK(save_db_get_column(db, 0, 0, &b) == -3 && b == NULL);
+    CHECK(save_db_import(db, dir) == -1);
+    jobs *js = jobs_create(1);
+    world w;
+    world_init(&w, 1, 2, js, db);
+    w.generator = test_flat_gen;
+    world_load_blocking(&w, 0.5, 0.5, 1);
+    g_fail_reads = 0;
+    CHECK(world_get(&w, 3, GROUND, 4) == B_AIR); /* the generated stand-in */
+    CHECK(world_set(&w, 8, GROUND, 8, B_GLASS, 0));
+    world_save_all(&w);
+    world_destroy(&w);
+
+    CHECK(save_db_get_seed(db, &seed) == 0 && seed == 1);
+    world_init(&w, 1, 2, js, db);
+    w.generator = test_flat_gen;
+    world_load_blocking(&w, 0.5, 0.5, 1);
+    CHECK(world_get(&w, 3, GROUND, 4) == B_PLANKS && world_get(&w, 8, GROUND, 8) == B_AIR);
+    world_destroy(&w);
+    jobs_destroy(js);
+    save_db_close(db);
+    fault_vfs_remove();
+}
+
 static void test_import(void)
 {
     char dir[400], p[512], victim[400];
@@ -411,7 +462,7 @@ static void test_unload_save_fails(void)
 static void clean_up(void)
 {
     const char *subs[] = {"rt",    "garbage", "foreign", "trigger", "index", "view", "altered", "newer", "app",
-                          "link0", "link1",   "link2",   "rows",    "old",   "none", "world",   "full"};
+                          "link0", "link1",   "link2",   "rows",    "old",   "none", "world",   "full",  "unreadable"};
     const char *files[] = {"world.db",   "world.db-wal", "world.db-shm", "world.db-journal", "level.dat",
                            "player.dat", "c.0.-1.bin",   "c.01.0.bin",   "c.3.3.bin"};
     char d[400], p[512];
@@ -436,6 +487,7 @@ void test_save_db_all(void)
     test_roundtrip();
     test_refused();
     test_bad_rows();
+    test_read_fails();
     test_import();
     test_world_db();
     test_unload_save_fails();

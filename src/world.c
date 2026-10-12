@@ -123,7 +123,7 @@ static int set_block(world *w, int x, int y, int z, uint8_t id, uint8_t meta, in
     c->solid_count[sy] = (uint16_t)(c->solid_count[sy] + (id != B_AIR) - (old != B_AIR));
     c->opaque_count[sy] = (uint16_t)(c->opaque_count[sy] + block_opaque(id) - block_opaque(old));
     c->modified = 1;
-    c->unsaved = 1;
+    c->unsaved = !c->keep_stored;
 
     /* Sections the block's neighbourhood reaches: at most two per axis. */
     int cx = chunk_of(x), cz = chunk_of(z);
@@ -240,6 +240,14 @@ static void request_column(world *w, int cx, int cz)
     g->seed = w->seed;
     g->c = c;
     g->saved_len = w->db ? save_db_get_column(w->db, cx, cz, &g->saved) : -1;
+    if (g->saved_len == -3) {
+        /* Generated terrain stands in, but saving it would overwrite the
+         * player's real column for good; the next load reads it again. */
+        log_warn("column %d,%d: cannot read its saved data; showing generated terrain, and changes to it are not saved",
+                 cx, cz);
+        c->keep_stored = 1;
+        g->saved_len = -1;
+    }
     w->gen_in_flight++;
     jobs_submit(w->jobs, &g->base);
 }

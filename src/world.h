@@ -47,6 +47,7 @@ typedef struct column {
     uint8_t want_unload;   /* unload once the in-flight load job finishes */
     uint8_t modified;      /* differs from generated terrain: keep a save file */
     uint8_t unsaved;       /* edited since it was last written to disk (2: written, not yet committed) */
+    uint8_t keep_stored;   /* its saved row could not be read: generated instead, never saved over the row */
     uint8_t *blocks;       /* COL_VOL block ids */
     uint8_t *meta;         /* COL_VOL fluid levels, NULL when all zero */
     uint8_t dirty[SECTIONS];        /* needs re-meshing */
