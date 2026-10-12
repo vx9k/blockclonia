@@ -212,7 +212,13 @@ save_db *save_db_open(const char *dir)
      * checkpoints, which keeps autosaves cheap on an SD card; a crash still
      * leaves every committed save. With the exclusive lock the WAL needs
      * no shared-memory file. A filesystem without WAL keeps the default
-     * rollback journal. The first write also takes the exclusive lock. */
+     * rollback journal. The first write also takes the exclusive lock.
+     * Persistent WAL stays off even where a build turns it on by default
+     * (the system library on macOS appears to): closing then checkpoints
+     * and deletes world.db-wal, so world.db alone is the world when it is
+     * copied or shared. */
+    int persist_wal = 0;
+    sqlite3_file_control(h, "main", SQLITE_FCNTL_PERSIST_WAL, &persist_wal);
     exec(h, "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL");
     if (exec(h, "BEGIN IMMEDIATE; COMMIT") != 0) {
         log_error("%s: %s", path,
