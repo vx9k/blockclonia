@@ -206,6 +206,12 @@ struct renderer {
     pool_free *frees;             /* oldest first */
     int free_count, free_cap;
     uint64_t submitted, completed;
+    /* GPUCAP_TIMELINE: one timeline semaphore counts finished frames (each
+     * submit signals its serial), in place of the per-slot fences; the 1.2
+     * entry points are loaded. VK_NULL_HANDLE: the fences. */
+    VkSemaphore timeline;
+    PFN_vkWaitSemaphores wait_semaphores;
+    PFN_vkGetSemaphoreCounterValue semaphore_value;
 
     frame frames[FRAMES];
     uint32_t frame_index, image_index;
@@ -1477,9 +1483,26 @@ static void defer_free(renderer *r, int block, uint32_t start, uint32_t len)
     r->frees[r->free_count++] = (pool_free){start, len, (uint8_t)block, r->submitted};
 }
 
+/* Blocks until the frame last submitted from slot f has finished. */
+static void wait_frame(renderer *r, const frame *f)
+{
+    if (!r->timeline) {
+        VK_CHECK(vkWaitForFences(r->dev, 1, &f->fence, VK_TRUE, UINT64_MAX));
+        return;
+    }
+    VkSemaphoreWaitInfo wi = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+                              .semaphoreCount = 1,
+                              .pSemaphores = &r->timeline,
+                              .pValues = &f->serial};
+    VK_CHECK(r->wait_semaphores(r->dev, &wi, UINT64_MAX));
+}
+
 static void release_frees(renderer *r)
 {
-    for (int i = 0; i < FRAMES; i++) {
+    uint64_t done = 0;
+    if (r->timeline && r->semaphore_value(r->dev, r->timeline, &done) == VK_SUCCESS && done > r->completed)
+        r->completed = done;
+    for (int i = 0; i < FRAMES && !r->timeline; i++) {
         frame *f = &r->frames[i];
         if (f->serial > r->completed && vkGetFenceStatus(r->dev, f->fence) == VK_SUCCESS) r->completed = f->serial;
     }
@@ -1526,6 +1549,14 @@ static void create_frames(renderer *r, uint32_t pool_mb)
                                   .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
                                   .queueFamilyIndex = r->qfam};
     VK_CHECK(vkCreateCommandPool(r->dev, &ci, r->ac, &r->cmdpool));
+    if (r->caps.enabled & GPUCAP_TIMELINE) {
+        r->wait_semaphores = (PFN_vkWaitSemaphores)vkGetDeviceProcAddr(r->dev, "vkWaitSemaphores");
+        r->semaphore_value = (PFN_vkGetSemaphoreCounterValue)vkGetDeviceProcAddr(r->dev, "vkGetSemaphoreCounterValue");
+        VkSemaphoreTypeCreateInfo ti = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+                                        .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE};
+        VkSemaphoreCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &ti};
+        if (r->wait_semaphores && r->semaphore_value) VK_CHECK(vkCreateSemaphore(r->dev, &si, r->ac, &r->timeline));
+    }
 
     r->pool_host_visible = r->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ||
                            r->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
@@ -1718,6 +1749,7 @@ void renderer_destroy(renderer *r)
     vkDestroyDescriptorSetLayout(r->dev, r->dsl, r->ac);
     vkDestroyCommandPool(r->dev, r->cmdpool, r->ac);
     vkDestroyQueryPool(r->dev, r->queries, r->ac);
+    vkDestroySemaphore(r->dev, r->timeline, r->ac);
     destroy_swap_resources(r);
     vkDestroySwapchainKHR(r->dev, r->swap, r->ac);
     vkDestroyRenderPass(r->dev, r->pass, r->ac);
@@ -1777,7 +1809,7 @@ int renderer_begin_frame(renderer *r)
     if (r->resized && !recreate_swapchain(r)) return 0;
 
     frame *f = &r->frames[r->frame_index];
-    VK_CHECK(vkWaitForFences(r->dev, 1, &f->fence, VK_TRUE, UINT64_MAX));
+    wait_frame(r, f);
     if (r->queries) read_gpu_time(r, f);
     release_frees(r);
     f->staging_used = 0;
@@ -1791,7 +1823,7 @@ int renderer_begin_frame(renderer *r)
         return 0;
     }
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) log_fatal("vkAcquireNextImageKHR failed (%d)", (int)res);
-    VK_CHECK(vkResetFences(r->dev, 1, &f->fence));
+    if (!r->timeline) VK_CHECK(vkResetFences(r->dev, 1, &f->fence));
     r->frame_active = 1;
     return 1;
 }
@@ -2260,7 +2292,21 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
                        .pWaitSemaphores = &f->image_ready, .pWaitDstStageMask = &wait_stage,
                        .commandBufferCount = 1, .pCommandBuffers = &cmd, .signalSemaphoreCount = 1,
                        .pSignalSemaphores = &r->render_done[r->image_index]};
-    VK_CHECK(vkQueueSubmit(r->queue, 1, &si, f->fence));
+    /* Timeline: also signal the frame's serial (binary semaphores ignore
+     * their value), and no fence. */
+    VkSemaphore signals[2] = {r->render_done[r->image_index], r->timeline};
+    uint64_t values[2] = {0, f->serial};
+    VkTimelineSemaphoreSubmitInfo ti = {.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+                                        .waitSemaphoreValueCount = 1,
+                                        .pWaitSemaphoreValues = values,
+                                        .signalSemaphoreValueCount = 2,
+                                        .pSignalSemaphoreValues = values};
+    if (r->timeline) {
+        si.pNext = &ti;
+        si.signalSemaphoreCount = 2;
+        si.pSignalSemaphores = signals;
+    }
+    VK_CHECK(vkQueueSubmit(r->queue, 1, &si, r->timeline ? VK_NULL_HANDLE : f->fence));
     st.cpu_ms = (float)((glfwGetTime() - t_start) * 1000.0); /* present can wait for vsync: not counted */
 
     VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .waitSemaphoreCount = 1,
@@ -2271,7 +2317,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     else if (res != VK_SUCCESS) log_fatal("vkQueuePresentKHR failed (%d)", (int)res);
 
     if (shot) {
-        VK_CHECK(vkWaitForFences(r->dev, 1, &f->fence, VK_TRUE, UINT64_MAX));
+        wait_frame(r, f);
         write_screenshot(r, &shot_buf);
         buffer_destroy(r, &shot_buf);
         r->shot_pending = 0;
