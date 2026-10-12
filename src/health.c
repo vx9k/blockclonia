@@ -203,10 +203,14 @@ static const char *const RHYTHM_SHORT[RHYTHM_COUNT] = {"SINUS", "VF",           
 
 const char *health_rhythm_name(int rhythm) { return rhythm >= 0 && rhythm < RHYTHM_COUNT ? RHYTHM_NAMES[rhythm] : "?"; }
 const char *health_rhythm_short(int rhythm)
-{ return rhythm >= 0 && rhythm < RHYTHM_COUNT ? RHYTHM_SHORT[rhythm] : "?"; }
+{
+    return rhythm >= 0 && rhythm < RHYTHM_COUNT ? RHYTHM_SHORT[rhythm] : "?";
+}
 
 int health_rhythm_perfusing(int rhythm)
-{ return rhythm == RHYTHM_SINUS || rhythm == RHYTHM_AF || rhythm == RHYTHM_VT || rhythm == RHYTHM_AVB3; }
+{
+    return rhythm == RHYTHM_SINUS || rhythm == RHYTHM_AF || rhythm == RHYTHM_VT || rhythm == RHYTHM_AVB3;
+}
 
 int health_rhythm_shockable(int rhythm) { return rhythm == RHYTHM_VF || rhythm == RHYTHM_PVT; }
 

@@ -57,9 +57,13 @@ typedef struct {
 static sqlite3_file *real_of(sqlite3_file *f) { return ((fault_file *)f)->real; }
 static int ff_close(sqlite3_file *f) { return real_of(f)->pMethods->xClose(real_of(f)); }
 static int ff_read(sqlite3_file *f, void *buf, int n, sqlite3_int64 off)
-{ return g_fail_reads ? SQLITE_IOERR_READ : real_of(f)->pMethods->xRead(real_of(f), buf, n, off); }
+{
+    return g_fail_reads ? SQLITE_IOERR_READ : real_of(f)->pMethods->xRead(real_of(f), buf, n, off);
+}
 static int ff_write(sqlite3_file *f, const void *buf, int n, sqlite3_int64 off)
-{ return g_fail_writes ? SQLITE_FULL : real_of(f)->pMethods->xWrite(real_of(f), buf, n, off); }
+{
+    return g_fail_writes ? SQLITE_FULL : real_of(f)->pMethods->xWrite(real_of(f), buf, n, off);
+}
 static int ff_truncate(sqlite3_file *f, sqlite3_int64 n) { return real_of(f)->pMethods->xTruncate(real_of(f), n); }
 static int ff_sync(sqlite3_file *f, int flags) { return real_of(f)->pMethods->xSync(real_of(f), flags); }
 static int ff_size(sqlite3_file *f, sqlite3_int64 *n) { return real_of(f)->pMethods->xFileSize(real_of(f), n); }
@@ -67,7 +71,9 @@ static int ff_lock(sqlite3_file *f, int l) { return real_of(f)->pMethods->xLock(
 static int ff_unlock(sqlite3_file *f, int l) { return real_of(f)->pMethods->xUnlock(real_of(f), l); }
 static int ff_reserved(sqlite3_file *f, int *out) { return real_of(f)->pMethods->xCheckReservedLock(real_of(f), out); }
 static int ff_control(sqlite3_file *f, int op, void *arg)
-{ return real_of(f)->pMethods->xFileControl(real_of(f), op, arg); }
+{
+    return real_of(f)->pMethods->xFileControl(real_of(f), op, arg);
+}
 static int ff_sector(sqlite3_file *f) { return real_of(f)->pMethods->xSectorSize(real_of(f)); }
 static int ff_device(sqlite3_file *f) { return real_of(f)->pMethods->xDeviceCharacteristics(real_of(f)); }
 
