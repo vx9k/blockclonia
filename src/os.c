@@ -69,7 +69,12 @@ int os_thread_start(os_thread *t, void (*fn)(void *arg), void *arg)
     thread_start *s = mem_alloc(sizeof *s);
     s->fn = fn;
     s->arg = arg;
-    if (pthread_create(t, NULL, thread_main, s) != 0) {
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, OS_THREAD_STACK);
+    int rc = pthread_create(t, &attr, thread_main, s);
+    pthread_attr_destroy(&attr);
+    if (rc != 0) {
         mem_free(s);
         return -1;
     }

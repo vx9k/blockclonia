@@ -364,6 +364,16 @@ available with `MC_VK_ALLOC=1` for platforms without the override. They
 are off by default because some drivers (Mesa lavapipe) free memory they
 did not allocate through the callbacks.
 
+The game sizes itself to the machine at start-up (`src/sysinfo.c`) and
+logs what it found: cores, RAM and the memory available, and the CPU's
+cache sizes (from `/proc` and `/sys` on Linux, `sysctl` on macOS). From
+those it picks the number of worker threads (every core but the main
+thread's, as long as there is memory for them), the SQLite page cache
+(1/512 of the available memory, 2–64 MB), mimalloc's reservation step,
+and, on a first run without a settings file, the render distance (6–16
+columns; the setting goes up to 32). `--threads N` and the settings file
+override them.
+
 ## Tests
 
 ```sh

@@ -24,6 +24,9 @@ typedef struct save_db save_db;
  * format, damaged, or open in another game. A refused file is left as it
  * was. */
 save_db *save_db_open(const char *dir);
+/* The page cache each database opened afterwards gets, in KB (sys_plan);
+ * SQLite's own default (2 MB) until set. */
+void save_db_set_cache_kb(int kb);
 void save_db_close(save_db *db);
 
 /* A batch of saves in one transaction, so it costs one commit and lands

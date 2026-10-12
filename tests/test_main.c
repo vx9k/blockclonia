@@ -16,6 +16,7 @@
 #include "save.h"
 #include "settings.h"
 #include "survival.h"
+#include "sysinfo.h"
 #include "test_util.h"
 #include "ui.h"
 #include "world.h"
@@ -1359,6 +1360,40 @@ static void test_review_fixes(void)
     tw_free(&t);
 }
 
+static void test_sysinfo(void)
+{
+    /* Detection reads something on any machine the tests run on. */
+    sys_info si;
+    sys_detect(&si);
+    CHECK(si.cores >= 1 && si.ram > 0);
+
+    sys_budget b;
+    /* A Raspberry Pi 4 (4 GB, 4 cores, 3 GB free): three workers, the old
+     * defaults. */
+    sys_info pi = {.ram = 4ull * 1024ull * 1024ull * 1024ull,
+                   .ram_avail = 3ull * 1024ull * 1024ull * 1024ull,
+                   .cores = 4};
+    sys_plan(&pi, &b);
+    CHECK(b.workers == 3 && b.render_distance == 8 && b.arena_mb == 64);
+    /* A desktop (32 GB, 16 cores, 24 GB free): every core but the main
+     * thread's, a longer view, a bigger page cache and reservation step. */
+    sys_info desk = {.ram = 32ull * 1024ull * 1024ull * 1024ull,
+                     .ram_avail = 24ull * 1024ull * 1024ull * 1024ull,
+                     .cores = 16};
+    sys_plan(&desk, &b);
+    CHECK(b.workers == 15 && b.render_distance == 16 && b.arena_mb == 256);
+    CHECK(b.sqlite_cache_kb == 49152);
+    /* Little free memory caps the workers even with many cores. */
+    sys_info tight = {.ram = 2ull * 1024ull * 1024ull * 1024ull, .ram_avail = 256ull * 1024ull * 1024ull, .cores = 32};
+    sys_plan(&tight, &b);
+    CHECK(b.workers == 2 && b.render_distance == 6 && b.sqlite_cache_kb == 2048);
+    /* Nothing known: a safe small plan, never zero workers. */
+    sys_info none;
+    memset(&none, 0, sizeof none);
+    sys_plan(&none, &b);
+    CHECK(b.workers >= 1 && b.render_distance >= 6 && b.sqlite_cache_kb >= 2048 && b.arena_mb == 64);
+}
+
 static void test_settings(void)
 {
     settings s, t;
@@ -1540,7 +1575,7 @@ static void test_menu(void)
 
 int main(void)
 {
-    mem_init();
+    mem_init(64);
     mesher_init();
     test_gpupool();
     test_save_roundtrip();
@@ -1568,6 +1603,7 @@ int main(void)
     test_survival();
     test_ui();
     test_settings();
+    test_sysinfo();
     test_settings_file();
     test_menu();
     test_inventory();

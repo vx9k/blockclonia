@@ -154,6 +154,7 @@ set(MC_CORE_SOURCES
   src/sound.c
   src/sound_synth.c
   src/survival.c
+  src/sysinfo.c
   src/texgen.c
   src/thermo.c
   src/ui.c

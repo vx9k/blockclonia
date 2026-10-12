@@ -24,6 +24,7 @@
 #include "settings.h"
 #include "sound.h"
 #include "survival.h"
+#include "sysinfo.h"
 #include "thermo.h"
 #include "ui.h"
 #include "viewmodel.h"
@@ -176,7 +177,7 @@ static void usage(void)
            "  --radius N        render distance in chunks, 2-32 (default 8)\n"
            "  --size WxH        window size (default 1280x720)\n"
            "  --no-vsync        uncapped frame rate\n"
-           "  --threads N       worker threads (default: cores - 1)\n"
+           "  --threads N       worker threads (default: cores - 1, fewer on low memory)\n"
            "  --pool-mb N       GPU vertex pool size (default: from radius)\n"
            "  --gpu N           Vulkan device index\n"
            USAGE_WORLD
@@ -738,6 +739,8 @@ typedef struct {
     int cfg_vsync;            /* vsync as the settings file has it (--no-vsync is not saved) */
     int cfg_keep;             /* the settings file could not be used: never written over */
     uint32_t seed;
+    sys_info sys;
+    sys_budget plan;          /* budgets for this machine (sysinfo.h) */
     GLFWwindow *win;
     int fullscreen;           /* what the window is now */
     int win_x, win_y, win_w, win_h; /* the windowed frame, restored on leaving fullscreen */
@@ -1075,9 +1078,7 @@ static void set_fullscreen(game *g, int on)
 static void game_init_world(game *g)
 {
     const options *o = &g->o;
-    int workers = o->threads >= 0 ? o->threads : cpu_count() - 1;
-    if (workers < 1 && o->threads < 0) workers = 1;
-    if (workers > 8 && o->threads < 0) workers = 8;
+    int workers = o->threads >= 0 ? o->threads : g->plan.workers;
     g->js = jobs_create(workers);
 
     render_opts ro = {.vsync = o->vsync,
@@ -1674,13 +1675,19 @@ int main(int argc, char **argv)
 {
     game *g = &g_game;
     if (!parse_args(argc, argv, &g->o)) return 2;
-    mem_init();
+    sys_detect(&g->sys); /* before the allocator, which it sizes */
+    sys_plan(&g->sys, &g->plan);
+    mem_init(g->plan.arena_mb);
+    sys_log(&g->sys, &g->plan);
+    save_db_set_cache_kb(g->plan.sqlite_cache_kb);
     mesher_init();
     use_xdg_paths(&g->o);
 
     settings_default(&g->st);
     int got = settings_load(&g->st, g->o.config);
     if (got >= 0) log_info("settings from %s", g->o.config);
+    /* A first run: pick the view distance for this machine. */
+    if (got == SETTINGS_MISSING) g->st.render_distance = g->plan.render_distance;
     g->cfg_keep = got == SETTINGS_UNUSABLE;
     if (g->cfg_keep) log_warn("cannot use %s; playing with default settings and not saving over it", g->o.config);
     if (!g->o.have_radius) g->o.radius = g->st.render_distance;

@@ -6,7 +6,10 @@ keep the rules here and tool-specific notes there.
 
 blockclonia is a voxel sandbox in C11 and Vulkan: streamed terrain, SI-unit
 physics with structural collapse and thermodynamics, a simulated human
-body, procedural textures and sound, all tuned to run on a Raspberry Pi 4.
+body, procedural textures and sound. It sizes itself to the machine
+(`sysinfo.c`: cores, RAM, CPU caches), from a Raspberry Pi up to a
+workstation, rather than holding every machine to the smallest one's
+budgets.
 `README.md` covers what the game does, and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) explains the frame loop,
 threads and data flow.
@@ -45,8 +48,10 @@ The compiler enforces most of these: `cmake/warnings.cmake` turns on
 -Wframe-larger-than=16384` and more, and CI builds with `-Werror` on gcc
 and clang. `.clang-tidy` and `cppcheck` run in `tools/lint.sh`.
 
-- **C11, no extensions.** No VLAs. Stack frames stay under 16 KB, so big
-  buffers go on the heap. Casts are explicit wherever a conversion narrows
+- **C11, no extensions.** No VLAs. Stack frames stay under 64 KB
+  (threads get `OS_THREAD_STACK`, 4 MB, on every OS), so big buffers go
+  on the heap. Budgets that depend on the machine (threads, caches,
+  default view distance) come from `sys_plan`, not fixed numbers. Casts are explicit wherever a conversion narrows
   or changes sign.
 - **Allocate through `src/mem.h` only** (`mem_alloc`, `mem_calloc`,
   `mem_realloc`, `mem_free`, `mem_array_size` for `n * size`). Never call

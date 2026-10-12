@@ -183,6 +183,10 @@ static int side_files_ok(const char *path)
     return 1;
 }
 
+static int g_cache_kb;
+
+void save_db_set_cache_kb(int kb) { g_cache_kb = kb > 0 ? kb : 0; }
+
 save_db *save_db_open(const char *dir)
 {
     if (sqlite3_libversion_number() < 3031000) {
@@ -223,6 +227,11 @@ save_db *save_db_open(const char *dir)
     int persist_wal = 0;
     sqlite3_file_control(h, "main", SQLITE_FCNTL_PERSIST_WAL, &persist_wal);
     exec(h, "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL");
+    if (g_cache_kb) {
+        char pragma[64];
+        snprintf(pragma, sizeof pragma, "PRAGMA cache_size = -%d", g_cache_kb); /* negative: KiB */
+        exec(h, pragma);
+    }
     if (exec(h, "BEGIN IMMEDIATE; COMMIT") != 0) {
         log_error("%s: %s", path,
                   sqlite3_errcode(h) == SQLITE_BUSY ? "the world is open in another game" : sqlite3_errmsg(h));
