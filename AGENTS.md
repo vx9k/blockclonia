@@ -157,8 +157,9 @@ from a job.
 - **Settings**: `settings.c` (field table, defaults), the settings screen
   in `menu.c`, and the README.
 - **Renderer features**: `gpucaps.h` and the README's renderer table.
-- **Dependencies**: `cmake/Dependencies.cmake` (version pins), the README
-  build section, and `.github/workflows/ci.yml`.
+- **Dependencies**: `cmake/Dependencies.cmake` (version pins),
+  `BUILDING.md` (and the README's short build section), and
+  `.github/workflows/ci.yml`.
 
 ## Git
 
