@@ -215,6 +215,10 @@ struct renderer {
     /* GPUCAP_SYNC2: the 1.3 (or KHR) barrier and submit, loaded; NULL: 1.0. */
     PFN_vkCmdPipelineBarrier2 cmd_barrier2;
     PFN_vkQueueSubmit2 queue_submit2;
+    /* GPUCAP_DYNREND: the 1.3 (or KHR) dynamic rendering calls, loaded; NULL:
+     * a VkRenderPass and a framebuffer per swapchain image. */
+    PFN_vkCmdBeginRendering begin_rendering;
+    PFN_vkCmdEndRendering end_rendering;
 
     frame frames[FRAMES];
     uint32_t frame_index, image_index;
@@ -786,6 +790,19 @@ static void create_device(renderer *r)
             r->queue_submit2 = NULL;
         }
     }
+    /* gpucaps only enables dynamic rendering with synchronization2, which
+     * its layout transitions are recorded with. */
+    if ((m & GPUCAP_DYNREND) && r->cmd_barrier2) {
+        int khr = r->caps.dynrend_khr;
+        r->begin_rendering = (PFN_vkCmdBeginRendering)vkGetDeviceProcAddr(r->dev, khr ? "vkCmdBeginRenderingKHR"
+                                                                                      : "vkCmdBeginRendering");
+        r->end_rendering = (PFN_vkCmdEndRendering)vkGetDeviceProcAddr(r->dev, khr ? "vkCmdEndRenderingKHR"
+                                                                                  : "vkCmdEndRendering");
+        if (!r->begin_rendering || !r->end_rendering) {
+            r->begin_rendering = NULL;
+            r->end_rendering = NULL;
+        }
+    }
 }
 
 /* -------------------------------------------------------------- swapchain */
@@ -956,12 +973,13 @@ static int create_swapchain(renderer *r)
                                     .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
         VK_CHECK(vkCreateImageView(r->dev, &vi, r->ac, &r->views[i]));
         VkImageView att[2] = {r->views[i], r->depth_view};
+        VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        VK_CHECK(vkCreateSemaphore(r->dev, &sci, r->ac, &r->render_done[i]));
+        if (!r->pass) continue; /* dynamic rendering: no framebuffers */
         VkFramebufferCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, .renderPass = r->pass,
                                       .attachmentCount = 2, .pAttachments = att, .width = ext.width,
                                       .height = ext.height, .layers = 1};
         VK_CHECK(vkCreateFramebuffer(r->dev, &fi, r->ac, &r->fbs[i]));
-        VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-        VK_CHECK(vkCreateSemaphore(r->dev, &sci, r->ac, &r->render_done[i]));
     }
     return 1;
 }
@@ -1119,7 +1137,14 @@ static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
     VkDynamicState dyn[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dy = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
                                            .dynamicStateCount = 2, .pDynamicStates = dyn};
+    /* Dynamic rendering: the attachment formats instead of a render pass
+     * (no stencil attachment; the depth format may carry one, unused). */
+    VkPipelineRenderingCreateInfo rend = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+                                          .colorAttachmentCount = 1,
+                                          .pColorAttachmentFormats = &r->swap_fmt,
+                                          .depthAttachmentFormat = r->depth_fmt};
     VkGraphicsPipelineCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+                                       .pNext = r->begin_rendering ? &rend : NULL,
                                        .stageCount = 2,
                                        .pStages = stages,
                                        .pVertexInputState = &vin,
@@ -1730,7 +1755,7 @@ renderer *renderer_create(GLFWwindow *win, const render_opts *o)
     create_device(r);
     choose_surface_format(r);
     r->depth_fmt = pick_depth_format(r);
-    create_render_pass(r);
+    if (!r->begin_rendering) create_render_pass(r);
     if (!create_swapchain(r)) log_fatal("window has zero size at startup");
     size_t cache_size;
     void *cache = create_pipeline_cache(r, o, &cache_size);
@@ -2027,6 +2052,70 @@ static int collect_visible(renderer *r, const world *w, const render_view *v, co
     return nvis;
 }
 
+/* Starts drawing into the acquired image: the render pass, or with dynamic
+ * rendering the same clears and stores, with the transitions the render
+ * pass made implicitly. Colour waits at the stage the acquire semaphore is
+ * waited at; depth, shared by the frames in flight, waits for the previous
+ * frame's depth writes, as the render pass's external dependency did. */
+static void begin_pass(const renderer *r, VkCommandBuffer cmd, const VkClearValue clears[2])
+{
+    if (!r->begin_rendering) {
+        VkRenderPassBeginInfo rp = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+                                    .renderPass = r->pass,
+                                    .framebuffer = r->fbs[r->image_index],
+                                    .renderArea = {{0, 0}, r->extent},
+                                    .clearValueCount = 2,
+                                    .pClearValues = clears};
+        vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
+        return;
+    }
+    VkPipelineStageFlags tests = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    VkImageAspectFlags depth_aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+    if (r->depth_fmt == VK_FORMAT_D32_SFLOAT_S8_UINT || r->depth_fmt == VK_FORMAT_D24_UNORM_S8_UINT)
+        depth_aspect |= VK_IMAGE_ASPECT_STENCIL_BIT; /* layouts cover both aspects */
+    image_barrier(r, cmd, r->images[r->image_index], VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+    image_barrier(r, cmd, r->depth, depth_aspect, 1, 1, VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                  VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, tests,
+                  tests);
+    VkRenderingAttachmentInfo color = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                                       .imageView = r->views[r->image_index],
+                                       .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                       .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                       .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                                       .clearValue = clears[0]};
+    /* Depth is never stored: saves a full-screen write-back on tilers. */
+    VkRenderingAttachmentInfo depth = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                                       .imageView = r->depth_view,
+                                       .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                                       .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                       .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                                       .clearValue = clears[1]};
+    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                          .renderArea = {{0, 0}, r->extent},
+                          .layerCount = 1,
+                          .colorAttachmentCount = 1,
+                          .pColorAttachments = &color,
+                          .pDepthAttachment = &depth};
+    r->begin_rendering(cmd, &ri);
+}
+
+/* Ends drawing; the image is left in PRESENT_SRC either way. */
+static void end_pass(const renderer *r, VkCommandBuffer cmd)
+{
+    if (!r->end_rendering) {
+        vkCmdEndRenderPass(cmd);
+        return;
+    }
+    r->end_rendering(cmd);
+    image_barrier(r, cmd, r->images[r->image_index], VK_IMAGE_ASPECT_COLOR_BIT, 1, 1,
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                  VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+}
+
 /* Submits the frame's command buffer: it waits for the acquired image and
  * signals render_done for the present, plus, with a timeline, the frame's
  * serial instead of the slot's fence. */
@@ -2154,10 +2243,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     VkClearValue clears[2];
     clears[0].color = (VkClearColorValue){{pf.color[0], pf.color[1], pf.color[2], 1.0f}};
     clears[1].depthStencil = (VkClearDepthStencilValue){0.0f, 0}; /* reversed Z */
-    VkRenderPassBeginInfo rp = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, .renderPass = r->pass,
-                                .framebuffer = r->fbs[r->image_index], .renderArea = {{0, 0}, r->extent},
-                                .clearValueCount = 2, .pClearValues = clears};
-    vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
+    begin_pass(r, cmd, clears);
     VkViewport viewport = {0, 0, (float)r->extent.width, (float)r->extent.height, 0.0f, 1.0f};
     VkRect2D scissor = {{0, 0}, r->extent};
     vkCmdSetViewport(cmd, 0, 1, &viewport);
@@ -2360,7 +2446,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         st.draw_calls++;
     }
 
-    vkCmdEndRenderPass(cmd);
+    end_pass(r, cmd);
 
     int shot = r->shot_pending && r->swap_has_src;
     gbuf shot_buf = {0};
