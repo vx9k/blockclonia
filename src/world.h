@@ -75,6 +75,7 @@ typedef struct world {
     int have_center;
     uint32_t version_counter;
     struct save_db *db;  /* NULL: saving disabled; not owned */
+    int save_failed;     /* a column could not be saved: unloads keep edited columns until a save succeeds */
     struct jobs *jobs;
     int gen_in_flight, mesh_in_flight;
     int max_gen_in_flight, max_mesh_in_flight;
@@ -108,7 +109,7 @@ typedef struct world {
  * the bytes to its load jobs. */
 void world_init(world *w, uint32_t seed, int radius, struct jobs *js, struct save_db *db);
 /* Waits for outstanding jobs and frees everything. Does not save: call
- * world_save_all first. */
+ * world_save_all first. Logs how many edited columns are dropped unsaved. */
 void world_destroy(world *w);
 
 /* Inline: every physics query goes through these. */
@@ -155,7 +156,8 @@ void world_load_blocking(world *w, double px, double pz, int radius);
 int world_surface_y(const world *w, int x, int z);
 
 /* Writes every column edited since its last save. Cheap when nothing
- * changed, so it doubles as the autosave. */
+ * changed, so it doubles as the autosave, and it retries columns kept
+ * loaded because their save on unloading failed. */
 void world_save_all(world *w);
 
 /* Worker-side entry point for generating one column (also used by bench). */

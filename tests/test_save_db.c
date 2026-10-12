@@ -41,6 +41,81 @@ static int raw_sql(const char *dir, const char *sql)
     return ok;
 }
 
+/* A VFS in front of the default one that fails reads or writes while a
+ * flag is set, as a failing SD card or a full disk would. save_db opens
+ * through the default VFS, so installing this as the default puts it under
+ * the game's database with no hook in the game. */
+static int g_fail_reads, g_fail_writes;
+static sqlite3_vfs *g_real_vfs;
+static sqlite3_vfs g_fault_vfs;
+
+typedef struct {
+    sqlite3_file base;
+    sqlite3_file *real; /* the default VFS's file, in the bytes after this */
+} fault_file;
+
+static sqlite3_file *real_of(sqlite3_file *f) { return ((fault_file *)f)->real; }
+static int ff_close(sqlite3_file *f) { return real_of(f)->pMethods->xClose(real_of(f)); }
+static int ff_read(sqlite3_file *f, void *buf, int n, sqlite3_int64 off)
+{ return g_fail_reads ? SQLITE_IOERR_READ : real_of(f)->pMethods->xRead(real_of(f), buf, n, off); }
+static int ff_write(sqlite3_file *f, const void *buf, int n, sqlite3_int64 off)
+{ return g_fail_writes ? SQLITE_FULL : real_of(f)->pMethods->xWrite(real_of(f), buf, n, off); }
+static int ff_truncate(sqlite3_file *f, sqlite3_int64 n) { return real_of(f)->pMethods->xTruncate(real_of(f), n); }
+static int ff_sync(sqlite3_file *f, int flags) { return real_of(f)->pMethods->xSync(real_of(f), flags); }
+static int ff_size(sqlite3_file *f, sqlite3_int64 *n) { return real_of(f)->pMethods->xFileSize(real_of(f), n); }
+static int ff_lock(sqlite3_file *f, int l) { return real_of(f)->pMethods->xLock(real_of(f), l); }
+static int ff_unlock(sqlite3_file *f, int l) { return real_of(f)->pMethods->xUnlock(real_of(f), l); }
+static int ff_reserved(sqlite3_file *f, int *out) { return real_of(f)->pMethods->xCheckReservedLock(real_of(f), out); }
+static int ff_control(sqlite3_file *f, int op, void *arg)
+{ return real_of(f)->pMethods->xFileControl(real_of(f), op, arg); }
+static int ff_sector(sqlite3_file *f) { return real_of(f)->pMethods->xSectorSize(real_of(f)); }
+static int ff_device(sqlite3_file *f) { return real_of(f)->pMethods->xDeviceCharacteristics(real_of(f)); }
+
+/* Version 1: no shared memory or memory map, which the game's exclusive
+ * lock and mmap_size = 0 do not use anyway. */
+static const sqlite3_io_methods FAULT_IO = {
+    .iVersion = 1,
+    .xClose = ff_close,
+    .xRead = ff_read,
+    .xWrite = ff_write,
+    .xTruncate = ff_truncate,
+    .xSync = ff_sync,
+    .xFileSize = ff_size,
+    .xLock = ff_lock,
+    .xUnlock = ff_unlock,
+    .xCheckReservedLock = ff_reserved,
+    .xFileControl = ff_control,
+    .xSectorSize = ff_sector,
+    .xDeviceCharacteristics = ff_device,
+};
+
+static int fv_open(sqlite3_vfs *vfs, const char *name, sqlite3_file *f, int flags, int *out_flags)
+{
+    (void)vfs;
+    fault_file *ff = (fault_file *)f;
+    ff->real = (sqlite3_file *)(ff + 1);
+    int rc = g_real_vfs->xOpen(g_real_vfs, name, ff->real, flags, out_flags);
+    ff->base.pMethods = ff->real->pMethods ? &FAULT_IO : NULL; /* SQLite closes what has methods */
+    return rc;
+}
+
+static void fault_vfs_install(void)
+{
+    g_real_vfs = sqlite3_vfs_find(NULL);
+    g_fault_vfs = *g_real_vfs;
+    g_fault_vfs.szOsFile = (int)sizeof(fault_file) + g_real_vfs->szOsFile;
+    g_fault_vfs.zName = "mc_fault";
+    g_fault_vfs.xOpen = fv_open;
+    sqlite3_vfs_register(&g_fault_vfs, 1);
+}
+
+static void fault_vfs_remove(void)
+{
+    g_fail_reads = g_fail_writes = 0;
+    sqlite3_vfs_register(g_real_vfs, 1);
+    sqlite3_vfs_unregister(&g_fault_vfs);
+}
+
 static column *edited_column(int cx, int cz)
 {
     column *c = column_alloc(cx, cz);
@@ -282,11 +357,61 @@ static void test_world_db(void)
     save_db_close(db);
 }
 
+/* A column whose save fails as it unloads (a full disk) keeps its edits:
+ * it stays loaded in its ring slot until a save goes through, and loading
+ * over that slot leaves it alone instead of waiting for it. */
+static void test_unload_save_fails(void)
+{
+    char dir[400];
+    sub_dir(dir, sizeof dir, "full");
+    fault_vfs_install();
+    save_db *db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (!db) {
+        fault_vfs_remove();
+        return;
+    }
+    jobs *js = jobs_create(1);
+    world w;
+    world_init(&w, 1, 2, js, db);
+    w.generator = test_flat_gen;
+    world_load_blocking(&w, 0.5, 0.5, 1);
+    CHECK(world_set(&w, 3, GROUND, 4, B_GLASS, 0)); /* column 0,0 */
+
+    /* Radius 2 makes the ring 16 columns a side, so column 16,0 needs the
+     * slot column 0,0 is in. */
+    CHECK(w.grid_w == 16);
+    g_fail_writes = 1;
+    world_load_blocking(&w, 16 * CHUNK_W + 0.5, 0.5, 1);
+    const column *kept = w.grid[0];
+    CHECK(kept && kept->cx == 0 && kept->cz == 0 && kept->unsaved);
+    CHECK(world_column(&w, 16, 0) == NULL && world_column(&w, 17, 0) != NULL);
+    world_save_all(&w); /* the autosave, while the disk is still full */
+    CHECK(kept && kept->unsaved);
+    g_fail_writes = 0;
+    world_save_all(&w);
+    CHECK(kept && kept->unsaved == 0 && w.grid[0] == kept);
+    world_update(&w, 16 * CHUNK_W + 0.5, GROUND, 0.5); /* now it can go */
+    jobs_wait_idle(js);
+    jobs_poll(js, -1);
+    CHECK(world_column(&w, 16, 0) != NULL);
+    world_destroy(&w);
+
+    world_init(&w, 1, 2, js, db);
+    w.generator = test_flat_gen;
+    world_load_blocking(&w, 0.5, 0.5, 1);
+    CHECK(world_get(&w, 3, GROUND, 4) == B_GLASS);
+    world_destroy(&w);
+    jobs_destroy(js);
+    save_db_close(db);
+    fault_vfs_remove();
+}
+
 /* Deletes what the tests made (one level of subfolders). */
 static void clean_up(void)
 {
-    const char *subs[] = {"rt",  "garbage", "foreign", "trigger", "index", "view", "altered", "newer",
-                          "app", "link0",   "link1",   "link2",   "rows",  "old",  "none",    "world"};
+    const char *subs[] = {"rt",    "garbage", "foreign", "trigger", "index", "view", "altered", "newer", "app",
+                          "link0", "link1",   "link2",   "rows",    "old",   "none", "world",   "full"};
     const char *files[] = {"world.db",   "world.db-wal", "world.db-shm", "world.db-journal", "level.dat",
                            "player.dat", "c.0.-1.bin",   "c.01.0.bin",   "c.3.3.bin"};
     char d[400], p[512];
@@ -313,5 +438,6 @@ void test_save_db_all(void)
     test_bad_rows();
     test_import();
     test_world_db();
+    test_unload_save_fails();
     clean_up();
 }
