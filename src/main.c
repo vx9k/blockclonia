@@ -1309,6 +1309,10 @@ static void frame_interact(game *g, double dt)
             g->hs.alert_count = 0;
             g_in.panel = 0;
             log_info("respawned");
+            /* Loading the spawn may have unloaded the death site, saving the
+             * player there with an emptied inventory; a crash before the next
+             * autosave would bring them back alive at that spot. */
+            world_save_all(&g->w);
         }
         g_in.respawn = 0;
     }
