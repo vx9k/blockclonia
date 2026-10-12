@@ -254,6 +254,7 @@ entirely.
 | One timeline semaphore paces the frames (`timeline`, 1.2) | One counter tells which frames have finished, instead of a fence per frame to wait on and reset |
 | Synchronization2 barriers and submits (`sync2`; 1.3, or the KHR extension on 1.2) | The same synchronization through the newer API; dynamic rendering needs it |
 | Dynamic rendering (`dynrend`; 1.3, or the KHR extension on 1.2; needs `sync2`) | No render pass or per-image framebuffers to create and rebuild on a resize |
+| Host image copy for the block textures and the font (`hostcopy`, 1.4; only where the driver says device access stays optimal) | Textures go straight from the CPU into the image, with no staging buffer or upload command buffer |
 | GPU timestamps around each frame (`timestamps`; reset from the CPU with `hostreset` on 1.2) | F3 shows the GPU time of a frame next to the CPU time spent recording it |
 | Pipeline cache kept on disk between runs (`pcache`) | Pipelines build from it where the driver has no shader cache of its own (Intel with Mesa's cache off: 40 ms to 3 ms) |
 

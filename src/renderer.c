@@ -219,6 +219,12 @@ struct renderer {
      * a VkRenderPass and a framebuffer per swapchain image. */
     PFN_vkCmdBeginRendering begin_rendering;
     PFN_vkCmdEndRendering end_rendering;
+#ifdef VK_API_VERSION_1_4
+    /* GPUCAP_HOSTCOPY: the 1.4 host image copy calls, loaded; NULL: textures
+     * go through a staging buffer. */
+    PFN_vkCopyMemoryToImage copy_to_image;
+    PFN_vkTransitionImageLayout transition_layout;
+#endif
 
     frame frames[FRAMES];
     uint32_t frame_index, image_index;
@@ -803,6 +809,13 @@ static void create_device(renderer *r)
             r->end_rendering = NULL;
         }
     }
+#ifdef VK_API_VERSION_1_4
+    if (m & GPUCAP_HOSTCOPY) {
+        r->copy_to_image = (PFN_vkCopyMemoryToImage)vkGetDeviceProcAddr(r->dev, "vkCopyMemoryToImage");
+        r->transition_layout = (PFN_vkTransitionImageLayout)vkGetDeviceProcAddr(r->dev, "vkTransitionImageLayout");
+        if (!r->copy_to_image || !r->transition_layout) r->copy_to_image = NULL;
+    }
+#endif
 }
 
 /* -------------------------------------------------------------- swapchain */
@@ -1281,9 +1294,100 @@ static void create_ui_pipeline(renderer *r)
 
 /* ------------------------------------------------------------- resources */
 
+/* GPUCAP_HOSTCOPY: whether a sampled image of this format can be filled from
+ * the CPU (1.4 host image copy) without slowing the GPU's reads of it; some
+ * drivers give up compression for such images, and then staging is better. */
+static int host_copy_ok(const renderer *r, VkFormat fmt, uint32_t layers)
+{
+#ifdef VK_API_VERSION_1_4
+    if (!r->copy_to_image) return 0;
+    PFN_vkGetPhysicalDeviceFormatProperties2 format_props = (PFN_vkGetPhysicalDeviceFormatProperties2)
+        vkGetInstanceProcAddr(r->inst, "vkGetPhysicalDeviceFormatProperties2");
+    PFN_vkGetPhysicalDeviceImageFormatProperties2 image_props = (PFN_vkGetPhysicalDeviceImageFormatProperties2)
+        vkGetInstanceProcAddr(r->inst, "vkGetPhysicalDeviceImageFormatProperties2");
+    if (!format_props || !image_props) return 0;
+    VkFormatProperties3 f3 = {.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3};
+    VkFormatProperties2 f2 = {.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2, .pNext = &f3};
+    format_props(r->pd, fmt, &f2);
+    if (!(f3.optimalTilingFeatures & VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT)) return 0;
+    VkPhysicalDeviceImageFormatInfo2 info = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+                                             .format = fmt,
+                                             .type = VK_IMAGE_TYPE_2D,
+                                             .tiling = VK_IMAGE_TILING_OPTIMAL,
+                                             .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_HOST_TRANSFER_BIT};
+    VkHostImageCopyDevicePerformanceQuery perf = {.sType = VK_STRUCTURE_TYPE_HOST_IMAGE_COPY_DEVICE_PERFORMANCE_QUERY};
+    VkImageFormatProperties2 ip = {.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2, .pNext = &perf};
+    if (image_props(r->pd, &info, &ip) != VK_SUCCESS || ip.imageFormatProperties.maxArrayLayers < layers) return 0;
+    return perf.optimalDeviceAccess == VK_TRUE;
+#else
+    (void)r;
+    (void)fmt;
+    (void)layers;
+    return 0;
+#endif
+}
+
+static VkImageUsageFlags upload_usage(int host)
+{
+#ifdef VK_API_VERSION_1_4
+    if (host) return VK_IMAGE_USAGE_HOST_TRANSFER_BIT;
+#endif
+    (void)host;
+    return VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+}
+
+/* Fills a new image (UNDEFINED, every mip and layer covered by regions,
+ * whose bufferOffset index data) and leaves it SHADER_READ_ONLY_OPTIMAL:
+ * with host image copy straight from data, else through a staging buffer
+ * and a one-off command buffer. */
+static void upload_image(renderer *r, VkImage img, int host, uint32_t mips, uint32_t layers, const uint8_t *data,
+                         size_t bytes, const VkBufferImageCopy *regions, uint32_t n)
+{
+#ifdef VK_API_VERSION_1_4
+    if (host) {
+        VkHostImageLayoutTransitionInfo t = {.sType = VK_STRUCTURE_TYPE_HOST_IMAGE_LAYOUT_TRANSITION_INFO,
+                                             .image = img,
+                                             .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                                             .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                             .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, mips, 0, layers}};
+        VK_CHECK(r->transition_layout(r->dev, 1, &t));
+        VkMemoryToImageCopy c[TEX_MIPS];
+        if (n > TEX_MIPS) log_fatal("upload_image: %u regions", n);
+        for (uint32_t i = 0; i < n; i++)
+            c[i] = (VkMemoryToImageCopy){.sType = VK_STRUCTURE_TYPE_MEMORY_TO_IMAGE_COPY,
+                                         .pHostPointer = data + regions[i].bufferOffset,
+                                         .imageSubresource = regions[i].imageSubresource,
+                                         .imageExtent = regions[i].imageExtent};
+        VkCopyMemoryToImageInfo ci = {.sType = VK_STRUCTURE_TYPE_COPY_MEMORY_TO_IMAGE_INFO,
+                                      .dstImage = img,
+                                      .dstImageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                      .regionCount = n,
+                                      .pRegions = c};
+        VK_CHECK(r->copy_to_image(r->dev, &ci));
+        return;
+    }
+#endif
+    (void)host;
+    gbuf st;
+    buffer_create(r, &st, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
+    memcpy(st.map, data, bytes);
+    VkCommandBuffer cmd = one_shot_begin(r);
+    image_barrier(r, cmd, img, VK_IMAGE_ASPECT_COLOR_BIT, mips, layers, VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    vkCmdCopyBufferToImage(cmd, st.buf, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, n, regions);
+    image_barrier(r, cmd, img, VK_IMAGE_ASPECT_COLOR_BIT, mips, layers, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    one_shot_end(r, cmd);
+    buffer_destroy(r, &st);
+}
+
 /* The overlay font: a small R8 atlas built on the CPU at start-up. */
 static void create_font(renderer *r)
 {
+    int host = host_copy_ok(r, VK_FORMAT_R8_UNORM, 1);
     VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
                             .imageType = VK_IMAGE_TYPE_2D,
                             .format = VK_FORMAT_R8_UNORM,
@@ -1292,7 +1396,7 @@ static void create_font(renderer *r)
                             .arrayLayers = 1,
                             .samples = VK_SAMPLE_COUNT_1_BIT,
                             .tiling = VK_IMAGE_TILING_OPTIMAL,
-                            .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                            .usage = upload_usage(host) | VK_IMAGE_USAGE_SAMPLED_BIT,
                             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
     VK_CHECK(vkCreateImage(r->dev, &ii, r->ac, &r->font));
     VkMemoryRequirements req;
@@ -1304,22 +1408,12 @@ static void create_font(renderer *r)
     VK_CHECK(vkAllocateMemory(r->dev, &ai, r->ac, &r->font_mem));
     VK_CHECK(vkBindImageMemory(r->dev, r->font, r->font_mem, 0));
 
-    gbuf st;
-    buffer_create(r, &st, UI_ATLAS_W * UI_ATLAS_H, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
-    ui_font_build(st.map);
-    VkCommandBuffer cmd = one_shot_begin(r);
-    image_barrier(r, cmd, r->font, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_UNDEFINED,
-                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
-                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    uint8_t *texels = mem_alloc(UI_ATLAS_W * UI_ATLAS_H);
+    ui_font_build(texels);
     VkBufferImageCopy region = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                                 .imageExtent = {UI_ATLAS_W, UI_ATLAS_H, 1}};
-    vkCmdCopyBufferToImage(cmd, st.buf, r->font, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-    image_barrier(r, cmd, r->font, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-    one_shot_end(r, cmd);
-    buffer_destroy(r, &st);
+    upload_image(r, r->font, host, 1, 1, texels, UI_ATLAS_W * UI_ATLAS_H, &region, 1);
+    mem_free(texels);
 
     VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                                 .image = r->font,
@@ -1353,11 +1447,16 @@ static void create_font(renderer *r)
 static void create_texture(renderer *r)
 {
     VkFormat fmt = r->swap_srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-    VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
-                            .format = fmt, .extent = {TEX_SIZE, TEX_SIZE, 1}, .mipLevels = TEX_MIPS,
-                            .arrayLayers = T_COUNT, .samples = VK_SAMPLE_COUNT_1_BIT,
+    int host = host_copy_ok(r, fmt, T_COUNT);
+    VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                            .imageType = VK_IMAGE_TYPE_2D,
+                            .format = fmt,
+                            .extent = {TEX_SIZE, TEX_SIZE, 1},
+                            .mipLevels = TEX_MIPS,
+                            .arrayLayers = T_COUNT,
+                            .samples = VK_SAMPLE_COUNT_1_BIT,
                             .tiling = VK_IMAGE_TILING_OPTIMAL,
-                            .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                            .usage = upload_usage(host) | VK_IMAGE_USAGE_SAMPLED_BIT,
                             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
     VK_CHECK(vkCreateImage(r->dev, &ii, r->ac, &r->tex));
     VkMemoryRequirements req;
@@ -1368,16 +1467,9 @@ static void create_texture(renderer *r)
     VK_CHECK(vkAllocateMemory(r->dev, &ai, r->ac, &r->tex_mem));
     VK_CHECK(vkBindImageMemory(r->dev, r->tex, r->tex_mem, 0));
 
-    gbuf st;
     uint32_t bytes = texgen_total_bytes();
-    buffer_create(r, &st, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
-    texgen_build(st.map);
-
-    VkCommandBuffer cmd = one_shot_begin(r);
-    image_barrier(r, cmd, r->tex, VK_IMAGE_ASPECT_COLOR_BIT, TEX_MIPS, T_COUNT, VK_IMAGE_LAYOUT_UNDEFINED,
-                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
-                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    uint8_t *texels = mem_alloc(bytes);
+    texgen_build(texels);
     VkBufferImageCopy regions[TEX_MIPS];
     for (int m = 0; m < TEX_MIPS; m++) {
         uint32_t s = TEX_SIZE >> m;
@@ -1385,12 +1477,8 @@ static void create_texture(renderer *r)
                                          .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, (uint32_t)m, 0, T_COUNT},
                                          .imageExtent = {s, s, 1}};
     }
-    vkCmdCopyBufferToImage(cmd, st.buf, r->tex, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, TEX_MIPS, regions);
-    image_barrier(r, cmd, r->tex, VK_IMAGE_ASPECT_COLOR_BIT, TEX_MIPS, T_COUNT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-    one_shot_end(r, cmd);
-    buffer_destroy(r, &st);
+    upload_image(r, r->tex, host, TEX_MIPS, T_COUNT, texels, bytes, regions, TEX_MIPS);
+    mem_free(texels);
 
     VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = r->tex,
                                 .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY, .format = fmt,
