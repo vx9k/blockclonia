@@ -5,6 +5,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define ROW_H 18.0f
@@ -38,7 +39,7 @@ void menu_open(menu *m, int screen)
     }
     m->screen = screen;
     m->age = 0.0f;
-    m->focus = screen == SCREEN_SETTINGS ? 3 : 0; /* past the three tabs, on the first setting */
+    m->focus = screen == SCREEN_SETTINGS ? SETTINGS_TABS : 0; /* past the tabs, on the first setting */
     m->drag = -1;
     for (int i = 0; i < MENU_MAX_ITEMS; i++) m->hover[i] = 0.0f;
 }
@@ -278,23 +279,45 @@ static int tab_button(ctx *c, float x, float y, float w, const char *label, int 
     ui_rect(u, x, y, w, ROW_H, ui_alpha(active ? ui_rgba(30, 44, 40, 240) : ui_rgba(14, 16, 20, 200), a));
     ui_frame(u, x, y, w, ROW_H, 1, ui_alpha(pal_mix(C_BORDER, C_ECG, active ? 1.0f : hv * 0.7f), a));
     ui_text(u, x + (w - ui_text_width(label, 1)) * 0.5f, y + 6, 1, ui_alpha(active ? C_HEAD : C_TEXT, a), label);
-    if (c->m->focus == i && c->adjust) c->m->tab = (c->m->tab + c->adjust + 3) % 3;
+    if (c->m->focus == i && c->adjust) c->m->tab = (c->m->tab + c->adjust + SETTINGS_TABS) % SETTINGS_TABS;
     return (hot && c->in->click) || c->activate == i;
 }
 
 static int settings_video(ctx *c, settings *s, float rx, float ry, float rw)
 {
     static const char *const ONOFF[] = {"Off", "On"};
-    static const char *const GUI[] = {"Auto", "1x", "2x", "3x", "4x"};
     int changed = 0;
     changed |= slider(c, rx, ry, rw, "Field of view", &s->fov, SETTINGS_FOV_MIN, SETTINGS_FOV_MAX, 1, UI_CH_DEGREE);
     changed |= cycle(c, rx, ry + 20, rw, "View bobbing", &s->view_bob, ONOFF, 2);
     changed |= cycle(c, rx, ry + 40, rw, "Sprint FOV effect", &s->fov_effects, ONOFF, 2);
     changed |= slider(c, rx, ry + 60, rw, "Render distance (restart)", &s->render_distance, SETTINGS_RD_MIN,
                       SETTINGS_RD_MAX, 1, "");
-    changed |= cycle(c, rx, ry + 80, rw, "VSync", &s->vsync, ONOFF, 2);
-    changed |= cycle(c, rx, ry + 100, rw, "Texture filtering (distance)", &s->filtering, ONOFF, 2);
-    changed |= cycle(c, rx, ry + 120, rw, "GUI scale", &s->gui_scale, GUI, SETTINGS_GUI_MAX + 1);
+    changed |= cycle(c, rx, ry + 80, rw, "Texture filtering (distance)", &s->filtering, ONOFF, 2);
+    changed |= slider(c, rx, ry + 100, rw, "Brightness (nights)", &s->brightness, 0, 100, 5, "%");
+    return changed;
+}
+
+/* The frame-rate limits offered; any value in range loads, and the cycle
+ * starts from the nearest one. */
+static const int FPS_STEPS[] = {0, 30, 60, 90, 120, 144, 165, 240};
+#define FPS_COUNT ((int)(sizeof FPS_STEPS / sizeof FPS_STEPS[0]))
+
+static int settings_display(ctx *c, settings *s, float rx, float ry, float rw)
+{
+    static const char *const ONOFF[] = {"Off", "On"};
+    static const char *const GUI[] = {"Auto", "1x", "2x", "3x", "4x"};
+    static const char *const FPS[FPS_COUNT] = {"Unlimited", "30", "60", "90", "120", "144", "165", "240"};
+    int changed = 0;
+    changed |= cycle(c, rx, ry, rw, "Fullscreen", &s->fullscreen, ONOFF, 2);
+    changed |= cycle(c, rx, ry + 20, rw, "VSync", &s->vsync, ONOFF, 2);
+    int k = 0;
+    for (int i = 1; i < FPS_COUNT; i++)
+        if (abs(FPS_STEPS[i] - s->max_fps) < abs(FPS_STEPS[k] - s->max_fps)) k = i;
+    if (cycle(c, rx, ry + 40, rw, s->vsync ? "Frame limit (VSync off)" : "Frame limit", &k, FPS, FPS_COUNT)) {
+        s->max_fps = FPS_STEPS[k];
+        changed = 1;
+    }
+    changed |= cycle(c, rx, ry + 60, rw, "GUI scale", &s->gui_scale, GUI, SETTINGS_GUI_MAX + 1);
     return changed;
 }
 
@@ -313,10 +336,14 @@ static int settings_controls(ctx *c, settings *s, float rx, float ry, float rw)
 
 static int settings_audio(ctx *c, settings *s, float rx, float ry, float rw)
 {
+    static const char *const ONOFF[] = {"Off", "On"};
     int changed = 0;
     changed |= slider(c, rx, ry, rw, "Master volume", &s->volume_master, 0, 100, 5, "%");
     changed |= slider(c, rx, ry + 20, rw, "Effects", &s->volume_effects, 0, 100, 5, "%");
     changed |= slider(c, rx, ry + 40, rw, "Ambience (wind, water, fire)", &s->volume_ambient, 0, 100, 5, "%");
+    changed |= slider(c, rx, ry + 60, rw, "Interface", &s->volume_ui, 0, 100, 5, "%");
+    changed |= slider(c, rx, ry + 80, rw, "Body (heartbeat, breathing)", &s->volume_body, 0, 100, 5, "%");
+    changed |= cycle(c, rx, ry + 100, rw, "Mute in background", &s->mute_unfocused, ONOFF, 2);
     return changed;
 }
 
@@ -328,14 +355,15 @@ static void settings_screen(ctx *c, settings *s)
     float x, y;
     const float w = 300, h = 222;
     panel(u, m->age, w, h, &x, &y, "SETTINGS");
-    static const char *const TABS[3] = {"Video", "Controls", "Audio"};
-    float tw = (w - 16 - 8) / 3.0f;
-    for (int t = 0; t < 3; t++)
+    static const char *const TABS[SETTINGS_TABS] = {"Video", "Display", "Controls", "Audio"};
+    float tw = (w - 16 - 4.0f * (SETTINGS_TABS - 1)) / (float)SETTINGS_TABS;
+    for (int t = 0; t < SETTINGS_TABS; t++)
         if (tab_button(c, x + 8 + (float)t * (tw + 4), y + 22, tw, TABS[t], m->tab == t)) m->tab = t;
     float rx = x + 8, rw = w - 16, ry = y + 48;
     int changed;
     if (m->tab == 0) changed = settings_video(c, s, rx, ry, rw);
-    else if (m->tab == 1) changed = settings_controls(c, s, rx, ry, rw);
+    else if (m->tab == 1) changed = settings_display(c, s, rx, ry, rw);
+    else if (m->tab == 2) changed = settings_controls(c, s, rx, ry, rw);
     else changed = settings_audio(c, s, rx, ry, rw);
     if (button(c, x + w - 8 - 90, y + h - 8 - ROW_H, 90, "Done")) menu_open(m, m->back_to);
     if (changed) c->action = MENU_SETTINGS;
@@ -363,7 +391,7 @@ static void controls_screen(ctx *c)
         {"Tab / I", "Inventory and crafting"},
         {"H", "Health panel"},
         {"E / R", "Eat / drink"},
-        {"F2", "Screenshot"},
+        {"F2 / F11", "Screenshot / fullscreen"},
         {"F3", "Debug overlay (K: injury menu)"},
         {"Esc", "Pause"},
     };

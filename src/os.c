@@ -24,6 +24,13 @@ double os_now(void)
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
+void os_sleep(double seconds)
+{
+    if (!(seconds > 0.0)) return;
+    struct timespec ts = {(time_t)seconds, (long)((seconds - (double)(time_t)seconds) * 1e9)};
+    while (nanosleep(&ts, &ts) != 0 && errno == EINTR) {}
+}
+
 int os_cpu_count(void)
 {
     long n = sysconf(_SC_NPROCESSORS_ONLN);

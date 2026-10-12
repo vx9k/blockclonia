@@ -81,6 +81,7 @@ struct sound {
     dvec3 fires[SOUND_MAX_FIRES];
     int fire_count;
     float vol[3];           /* master, effects, ambient */
+    float vol_ui, vol_body; /* applied to intensity in sound_play */
     int vol_dirty;
 
     /* Audio thread only. */
@@ -133,6 +134,7 @@ sound *sound_create(uint32_t seed, uint32_t rate, int channels)
     s->rng = seed ? seed : 0x5A17u;
     synth_build(&s->bank, seed);
     s->vol[0] = s->vol[1] = s->vol[2] = 1.0f;
+    s->vol_ui = s->vol_body = 1.0f;
     s->avol[0] = s->avol[1] = s->avol[2] = 1.0f;
     s->limit = 1.0f;
     s->lp_coef = 1.0f - expf(-6.2831853f * 700.0f / (float)s->rate); /* muffled below ~700 Hz */
@@ -154,11 +156,13 @@ void sound_destroy(sound *s)
     mem_free(s);
 }
 
-void sound_set_volumes(sound *s, float master, float effects, float ambient)
+void sound_set_volumes(sound *s, float master, float effects, float ambient, float ui, float body)
 {
     s->vol[0] = master;
     s->vol[1] = effects;
     s->vol[2] = ambient;
+    s->vol_ui = ui;
+    s->vol_body = body;
     s->vol_dirty = 1;
 }
 
@@ -174,6 +178,9 @@ void sound_listener(sound *s, dvec3 pos, float yaw, float pitch, int underwater)
 
 void sound_play(sound *s, int id, const dvec3 *pos, uint8_t material, float intensity)
 {
+    /* Scaled here, on the game thread, so the mixer needs no new bus. */
+    if (id >= SND_UI_CLICK && id <= SND_UI_CLOSE) intensity *= s->vol_ui;
+    else if (id == SND_HEARTBEAT || id == SND_BREATH) intensity *= s->vol_body;
     if (id < 0 || id >= SND_COUNT || !(intensity > 0.0f)) return;
     uint32_t r = next_rand(s);
     cmd c;

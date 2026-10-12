@@ -16,6 +16,10 @@
  * allocation-free, so the audio callback may call it. */
 double os_now(void);
 
+/* Sleeps for about `seconds` (nothing if it is not positive), resuming
+ * after signals. */
+void os_sleep(double seconds);
+
 /* Online CPU cores, at least 1. */
 int os_cpu_count(void);
 

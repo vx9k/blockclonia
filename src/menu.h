@@ -39,7 +39,8 @@ typedef struct {
     float dt;
 } menu_input;
 
-#define MENU_MAX_ITEMS 32 /* the debug health screen lists every HEALTH_DEBUG_KINDS entry */
+#define MENU_MAX_ITEMS 32
+#define SETTINGS_TABS 4 /* the debug health screen lists every HEALTH_DEBUG_KINDS entry */
 
 typedef struct {
     int screen;
@@ -53,7 +54,7 @@ typedef struct {
     float last_mx, last_my;
     char footer[160];  /* title screen, bottom left: versions and seed */
     char status[160];  /* pause screen: a line about the survivor */
-    int tab;           /* settings: 0 video, 1 controls, 2 audio */
+    int tab;           /* settings: 0 video, 1 display, 2 controls, 3 audio */
     int clicked;       /* a button or setting was used this frame (UI sound) */
     int hovered;       /* the focus moved to another item this frame (UI sound) */
     /* Debug health screen: the part cycled to, and what MENU_DEBUG_INJURE

@@ -19,6 +19,12 @@ typedef struct {
     int volume_master;    /* percent */
     int volume_effects;   /* percent */
     int volume_ambient;   /* percent */
+    int fullscreen;       /* borderless on the monitor the window is on */
+    int max_fps;          /* frame-rate limit with VSync off; 0: none */
+    int brightness;       /* percent: 0 keeps nights dark, 100 lifts them toward dusk */
+    int volume_ui;        /* percent: menu clicks and the inventory */
+    int volume_body;      /* percent: heartbeat and laboured breathing */
+    int mute_unfocused;   /* silence while the window is in the background */
 } settings;
 
 #define SETTINGS_FOV_MIN 50
@@ -28,6 +34,9 @@ typedef struct {
 #define SETTINGS_GUI_MAX 4
 #define SETTINGS_RD_MIN 2
 #define SETTINGS_RD_MAX 32
+/* Values below SETTINGS_FPS_MIN (except 0, no limit) are raised to it. */
+#define SETTINGS_FPS_MIN 20
+#define SETTINGS_FPS_MAX 360
 
 /* The values a fresh install starts with. */
 void settings_default(settings *s);

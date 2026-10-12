@@ -15,6 +15,7 @@
 #include "mem.h"
 #include "menu.h"
 #include "mesher.h"
+#include "os.h"
 #include "paths.h"
 #include "physics.h"
 #include "renderer.h"
@@ -89,6 +90,9 @@ typedef struct {
     int screen;         /* menu screen, SCREEN_NONE while playing */
     int debug;          /* F3 overlay */
     int lost_focus;     /* the window lost focus: pause */
+    int focused;        /* the window has the keyboard (for mute in background) */
+    int focus_changed;
+    int toggle_fullscreen; /* F11 */
     int sprint_latch;   /* toggle-sprint mode: Ctrl flips this */
     int sprint_tap;     /* W double-tapped: sprint until W is released */
     double last_w;      /* time of the last W press */
@@ -398,6 +402,7 @@ static void key_cb(GLFWwindow *win, int key, int sc, int action, int mods)
     if (action == GLFW_PRESS) g_in.keys[key] = 1;
     else if (action == GLFW_RELEASE) g_in.keys[key] = 0;
     if (action == GLFW_PRESS && key == GLFW_KEY_F2) g_in.want_shot = 1;
+    if (action == GLFW_PRESS && key == GLFW_KEY_F11) g_in.toggle_fullscreen = 1;
     if (action == GLFW_PRESS && key == GLFW_KEY_F3 && g_in.screen != SCREEN_TITLE) g_in.debug = !g_in.debug;
     if (g_in.screen != SCREEN_NONE) {
         menu_key(key, action);
@@ -501,6 +506,8 @@ static void focus_cb(GLFWwindow *win, int focused)
 {
     (void)win;
     if (!focused) g_in.lost_focus = 1;
+    g_in.focused = focused != 0;
+    g_in.focus_changed = 1;
 }
 
 /* --------------------------------------------------------------- game */
@@ -732,6 +739,8 @@ typedef struct {
     int cfg_keep;             /* the settings file could not be used: never written over */
     uint32_t seed;
     GLFWwindow *win;
+    int fullscreen;           /* what the window is now */
+    int win_x, win_y, win_w, win_h; /* the windowed frame, restored on leaving fullscreen */
     jobs *js;
     renderer *rd;
     world w;
@@ -831,8 +840,10 @@ static float water_level(const world *w, const player *p, dvec3 eye)
 
 static void apply_volumes(game *g)
 {
-    sound_set_volumes(g->snd, (float)g->st.volume_master / 100.0f, (float)g->st.volume_effects / 100.0f,
-                      (float)g->st.volume_ambient / 100.0f);
+    /* Muted while the window is in the background, if the player asked. */
+    float master = g->st.mute_unfocused && !g_in.focused ? 0.0f : (float)g->st.volume_master / 100.0f;
+    sound_set_volumes(g->snd, master, (float)g->st.volume_effects / 100.0f, (float)g->st.volume_ambient / 100.0f,
+                      (float)g->st.volume_ui / 100.0f, (float)g->st.volume_body / 100.0f);
 }
 
 /* Per-step physics events worth hearing (they are cleared by the next step). */
@@ -1030,6 +1041,36 @@ static GLFWwindow *open_window(const options *o)
     return win;
 }
 
+/* Borderless fullscreen on the monitor the window is on (the primary one
+ * if GLFW cannot tell), at that monitor's current mode, so no mode switch
+ * flickers the screen; leaving restores the windowed frame. */
+static void set_fullscreen(game *g, int on)
+{
+    if (on == g->fullscreen) return;
+    if (on) {
+        glfwGetWindowPos(g->win, &g->win_x, &g->win_y);
+        glfwGetWindowSize(g->win, &g->win_w, &g->win_h);
+        GLFWmonitor *mon = glfwGetPrimaryMonitor();
+        int count = 0;
+        GLFWmonitor **mons = glfwGetMonitors(&count);
+        for (int i = 0; i < count; i++) {
+            int mx, my;
+            const GLFWvidmode *vm = glfwGetVideoMode(mons[i]);
+            glfwGetMonitorPos(mons[i], &mx, &my);
+            int cx = g->win_x + g->win_w / 2, cy = g->win_y + g->win_h / 2;
+            if (vm && cx >= mx && cx < mx + vm->width && cy >= my && cy < my + vm->height) mon = mons[i];
+        }
+        const GLFWvidmode *mode = mon ? glfwGetVideoMode(mon) : NULL;
+        if (!mode) return;
+        glfwSetWindowMonitor(g->win, mon, 0, 0, mode->width, mode->height, mode->refreshRate);
+    } else {
+        glfwSetWindowMonitor(g->win, NULL, g->win_x, g->win_y, g->win_w > 0 ? g->win_w : g->o.width,
+                             g->win_h > 0 ? g->win_h : g->o.height, 0);
+    }
+    g->fullscreen = on;
+    g_in.resized = 1;
+}
+
 /* The world, physics, heat, the player and their things. */
 static void game_init_world(game *g)
 {
@@ -1104,6 +1145,7 @@ static void game_init(game *g)
     g->seed = choose_seed(&g->o, &g->db);
     log_info("seed %u", g->seed);
     g->win = open_window(&g->o);
+    g_in.focused = glfwGetWindowAttrib(g->win, GLFW_FOCUSED) != 0;
     game_init_world(g);
 
     g->fx = mem_alloc(sizeof *g->fx);
@@ -1350,7 +1392,8 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     }
     v.underwater = world_get(&g->w, (int)floor(v.eye.x), (int)floor(v.eye.y), (int)floor(v.eye.z)) == B_WATER;
     v.time = (float)fmod(now, 3600.0);
-    v.daylight = thermo_daylight(g->th);
+    /* Brightness lifts the darkest light toward dusk; days are unchanged. */
+    v.daylight = fmaxf(thermo_daylight(g->th), 0.006f * (float)g->st.brightness);
     thermo_sky(g->th, v.sky);
 
     g->eat_anim = fmaxf(0.0f, g->eat_anim - (float)dt / 1.6f);
@@ -1481,6 +1524,7 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
         if (g->o.no_vsync && g->st.vsync) g->o.no_vsync = 0; /* turned back on in the menu: a real choice */
         renderer_set_vsync(g->rd, g->st.vsync);
         renderer_set_filtering(g->rd, g->st.filtering);
+        set_fullscreen(g, g->st.fullscreen);
         apply_volumes(g);
         g->settings_dirty = 1;
         break;
@@ -1651,6 +1695,7 @@ int main(int argc, char **argv)
     }
 
     game_init(g);
+    set_fullscreen(g, g->st.fullscreen);
     double prev = glfwGetTime();
     g->title_t = g->save_t = prev;
     while (!glfwWindowShouldClose(g->win)) {
@@ -1660,6 +1705,16 @@ int main(int argc, char **argv)
         prev = now;
         debug_frames_push(&g->dframes, (float)(dt * 1000.0));
         if (dt > 0.25) dt = 0.25;
+        if (g_in.toggle_fullscreen) {
+            g->st.fullscreen = !g->fullscreen;
+            set_fullscreen(g, g->st.fullscreen);
+            g->settings_dirty = 1;
+            g_in.toggle_fullscreen = 0;
+        }
+        if (g_in.focus_changed) {
+            apply_volumes(g);
+            g_in.focus_changed = 0;
+        }
         if (g_in.resized) {
             renderer_on_resize(g->rd);
             g_in.resized = 0;
@@ -1675,6 +1730,12 @@ int main(int argc, char **argv)
             g_in.ui_back = 0;
         frame_bookkeeping(g, now);
         if (g->o.frames && g->frame >= g->o.frames) break;
+        /* Frame limit with VSync off: sleep out the rest of the frame. The
+         * physics accumulator reads the clock, so it is unaffected. */
+        if (!g->st.vsync && g->st.max_fps > 0) {
+            int fps = g->st.max_fps < SETTINGS_FPS_MIN ? SETTINGS_FPS_MIN : g->st.max_fps;
+            os_sleep(now + 1.0 / fps - glfwGetTime());
+        }
     }
     game_shutdown(g);
     if (g->o.mem_stats) mem_print_stats();

@@ -1368,10 +1368,16 @@ static void test_settings(void)
     s.fov = 95;
     s.sprint_toggle = 1;
     s.gui_scale = 3;
+    s.fullscreen = 1;
+    s.max_fps = 144;
+    s.brightness = 35;
+    s.volume_ui = 20;
+    s.volume_body = 0;
+    s.mute_unfocused = 0;
     int n = settings_format(&s, buf, (int)sizeof buf);
     CHECK(n > 0 && n < (int)sizeof buf);
     settings_default(&t);
-    CHECK(settings_parse(&t, buf) == 14);
+    CHECK(settings_parse(&t, buf) == (int)(sizeof(settings) / sizeof(int))); /* every field, round-tripped */
     CHECK(memcmp(&s, &t, sizeof s) == 0);
     /* Out of range, junk and unknown keys are ignored; the rest applies. */
     settings_default(&t);

@@ -29,8 +29,15 @@ static const field FIELDS[] = {
     {"volume_master", 0, 100},
     {"volume_effects", 0, 100},
     {"volume_ambient", 0, 100},
+    {"fullscreen", 0, 1},
+    {"max_fps", 0, SETTINGS_FPS_MAX},
+    {"brightness", 0, 100},
+    {"volume_ui", 0, 100},
+    {"volume_body", 0, 100},
+    {"mute_unfocused", 0, 1},
 };
 #define NFIELDS ((int)(sizeof FIELDS / sizeof FIELDS[0]))
+_Static_assert(sizeof FIELDS / sizeof FIELDS[0] * sizeof(int) == sizeof(settings), "every setting needs a FIELDS row");
 
 void settings_default(settings *s)
 {
@@ -48,6 +55,12 @@ void settings_default(settings *s)
     s->volume_master = 80;
     s->volume_effects = 100;
     s->volume_ambient = 70;
+    s->fullscreen = 0;
+    s->max_fps = 0;
+    s->brightness = 0;
+    s->volume_ui = 80;
+    s->volume_body = 100;
+    s->mute_unfocused = 1;
 }
 
 static int *field_ptr(settings *s, int i)
@@ -66,7 +79,13 @@ static int *field_ptr(settings *s, int i)
     case 10: return &s->filtering;
     case 11: return &s->volume_master;
     case 12: return &s->volume_effects;
-    default: return &s->volume_ambient;
+    case 13: return &s->volume_ambient;
+    case 14: return &s->fullscreen;
+    case 15: return &s->max_fps;
+    case 16: return &s->brightness;
+    case 17: return &s->volume_ui;
+    case 18: return &s->volume_body;
+    default: return &s->mute_unfocused;
     }
 }
 

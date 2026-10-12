@@ -61,6 +61,7 @@ Every texture and sound is generated at start-up, and all memory comes from
 | H | Health panel |
 | E / R | Eat an apple / drink (standing in or facing water, or holding a water bucket) |
 | F2 | Screenshot (`screenshot.ppm`) |
+| F11 | Fullscreen on or off |
 | F3 | Debug overlay |
 | K (with F3 on) | Debug health menu: trigger any injury, or heal |
 | Esc | Close the inventory or panel; otherwise pause |
@@ -206,14 +207,19 @@ starts with the defaults and doesn't save changes over it.
 | Tab | Setting | Range |
 |---|---|---|
 | Video | Field of view | 50–110° (default 70) |
-| Video | GUI scale | automatic, or 1–4 |
-| Video | VSync | on/off |
 | Video | Render distance | 2–32 columns; applies on the next start |
 | Video | Texture filtering (distance) | on (default): trilinear between mipmaps, with up to 8× anisotropic filtering where the GPU supports it; off: the nearest texel of the nearest mipmap, sharper but shimmering in the distance. Up close textures stay pixel-sharp either way |
 | Video | View bobbing, FOV effects | on/off |
+| Video | Brightness (nights) | 0–100% (default 0): lifts the darkest light toward dusk; daylight is unchanged |
+| Display | Fullscreen | on/off (also F11): borderless at the monitor's own resolution |
+| Display | VSync | on/off |
+| Display | Frame limit | unlimited (default), 30, 60, 90, 120, 144, 165 or 240 fps; used while VSync is off |
+| Display | GUI scale | automatic, or 1–4 |
 | Controls | Mouse sensitivity | 10–300% |
 | Controls | Invert Y, sprint toggle, key hints | on/off |
 | Audio | Master, effects, ambience volume | 0–100% |
+| Audio | Interface, body (heartbeat, breathing) volume | 0–100%, on top of effects |
+| Audio | Mute in background | on (default)/off: silent while the window is not focused |
 
 ## Sound
 
