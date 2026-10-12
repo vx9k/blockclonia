@@ -262,6 +262,9 @@ if(MC_BUILD_FUZZ)
   add_executable(fuzz_save_db tests/fuzz_save_db.c)
   target_link_libraries(fuzz_save_db PRIVATE mccore_fuzz)
   target_link_options(fuzz_save_db PRIVATE -fsanitize=fuzzer,address,undefined)
+  add_executable(fuzz_files tests/fuzz_files.c)
+  target_link_libraries(fuzz_files PRIVATE mccore_fuzz)
+  target_link_options(fuzz_files PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()
 
 # ---------------------------------------------------------------- install / package

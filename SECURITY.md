@@ -79,8 +79,10 @@ Out of scope:
   every field and rejects the whole file on anything malformed, leaving the
   game's state untouched (`save.c`, `survival.c`, `inventory.c`). The
   settings parser skips unknown keys and out-of-range values line by line
-  (`settings.c`). The column decoder, the most complex one, has a
-  libFuzzer target (`tests/fuzz_save.c`, built with `cmake --preset fuzz`).
+  (`settings.c`). Each has a libFuzzer target, built with
+  `cmake --preset fuzz`: the column decoder (`tests/fuzz_save.c`), the
+  world database (`tests/fuzz_save_db.c`), and the player, inventory and
+  settings decoders (`tests/fuzz_files.c`).
 - **Safe file access.** World and settings files are opened with
   `O_NOFOLLOW`, must be regular files (so no FIFOs or devices), and are
   read up to a size cap. Writes go to a temporary file first and are

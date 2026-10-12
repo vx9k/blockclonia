@@ -436,7 +436,7 @@ src/jobs.c        thread pool          src/gpupool.c   vertex pool allocator
 src/mem.c         mimalloc wrappers    src/log.c       logging, save-on-fatal hook
 src/bench.c       --bench
 shaders/          GLSL, compiled to SPIR-V and embedded at build time
-tests/            unit tests and the save-file fuzzer
+tests/            unit tests and the save-file fuzzers
 cmake/            dependencies, shaders, warnings, packaging, Pi toolchains
 tools/lint.sh     the lint gate CI runs
 ```
