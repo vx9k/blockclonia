@@ -161,6 +161,7 @@ set(MC_CORE_SOURCES
   src/viewmodel.c
   src/world.c
   src/worldgen.c
+  src/worlds.c
 )
 
 # ASan cannot see mi_* allocations, and the static mimalloc's malloc
@@ -219,7 +220,7 @@ if(MC_BUILD_TESTS)
   add_executable(mc_tests tests/test_main.c tests/test_util.c tests/test_thermo.c tests/test_health2.c
                           tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_gpucaps.c
                           tests/test_health_debug.c tests/test_defib.c tests/test_paths.c
-                          tests/test_save_db.c)
+                          tests/test_save_db.c tests/test_worlds.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)
   set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT 120)

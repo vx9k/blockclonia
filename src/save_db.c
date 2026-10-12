@@ -306,33 +306,121 @@ static long read_blob(sqlite3_stmt *s, void *buf, size_t cap)
     return r;
 }
 
-int save_db_get_seed(save_db *db, uint32_t *seed)
+int save_db_get_meta(save_db *db, const char *key, int64_t *v)
 {
     sqlite3_stmt *s = db->st[S_GET_META];
     int r = -1;
-    sqlite3_bind_text(s, 1, "seed", -1, SQLITE_STATIC);
+    sqlite3_bind_text(s, 1, key, -1, SQLITE_STATIC);
     int rc = sqlite3_step(s);
     if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
-        log_error("cannot read the world seed: %s", sqlite3_errmsg(db->h));
+        log_error("cannot read the world's %s: %s", key, sqlite3_errmsg(db->h));
         r = -2;
     } else if (rc == SQLITE_ROW && sqlite3_column_type(s, 0) == SQLITE_INTEGER) {
-        sqlite3_int64 v = sqlite3_column_int64(s, 0);
-        if (v >= 0 && v <= (sqlite3_int64)UINT32_MAX) {
-            *seed = (uint32_t)v;
-            r = 0;
-        }
+        *v = (int64_t)sqlite3_column_int64(s, 0);
+        r = 0;
     }
     sqlite3_reset(s);
     sqlite3_clear_bindings(s);
     return r;
 }
 
-int save_db_set_seed(save_db *db, uint32_t seed)
+int save_db_set_meta(save_db *db, const char *key, int64_t v)
 {
     sqlite3_stmt *s = db->st[S_PUT_META];
-    sqlite3_bind_text(s, 1, "seed", -1, SQLITE_STATIC);
-    sqlite3_bind_int64(s, 2, (sqlite3_int64)seed);
+    sqlite3_bind_text(s, 1, key, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(s, 2, (sqlite3_int64)v);
     return step_write(db, s);
+}
+
+int save_db_get_seed(save_db *db, uint32_t *seed)
+{
+    int64_t v;
+    int r = save_db_get_meta(db, "seed", &v);
+    if (r != 0) return r;
+    if (v < 0 || v > (int64_t)UINT32_MAX) return -1;
+    *seed = (uint32_t)v;
+    return 0;
+}
+
+int save_db_set_seed(save_db *db, uint32_t seed) { return save_db_set_meta(db, "seed", (int64_t)seed); }
+
+/* One integer from meta on a bare connection (the peek has no prepared
+ * statements); -1 missing or not an integer, -2 on an error. */
+static int peek_meta(sqlite3 *h, const char *key, int64_t *v)
+{
+    sqlite3_stmt *s = NULL;
+    if (sqlite3_prepare_v2(h, STMT_SQL[S_GET_META], -1, &s, NULL) != SQLITE_OK) return -2;
+    sqlite3_bind_text(s, 1, key, -1, SQLITE_STATIC);
+    int rc = sqlite3_step(s), r = -1;
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE) r = -2;
+    else if (rc == SQLITE_ROW && sqlite3_column_type(s, 0) == SQLITE_INTEGER) {
+        *v = (int64_t)sqlite3_column_int64(s, 0);
+        r = 0;
+    }
+    sqlite3_finalize(s);
+    return r;
+}
+
+void save_db_peek(const char *dir, save_peek *p)
+{
+    memset(p, 0, sizeof *p);
+    p->generator = 1;
+    p->status = SAVE_PEEK_BAD;
+    char real[DB_PATH_MAX], path[DB_PATH_MAX + 16];
+    if (os_full_path(dir, real, sizeof real) != 0) return;
+    int n = snprintf(path, sizeof path, "%s/world.db", real);
+    if (n < 0 || (size_t)n >= sizeof path) return;
+    int kind = os_path_kind(path);
+    if (kind == OS_MISSING) {
+        char old[DB_PATH_MAX + 16];
+        n = snprintf(old, sizeof old, "%s/level.dat", real);
+        p->status = n > 0 && (size_t)n < sizeof old && os_path_kind(old) == OS_FILE ? SAVE_PEEK_LEGACY : SAVE_PEEK_NONE;
+        return;
+    }
+    if (kind != OS_FILE || !side_files_ok(path)) return;
+
+    /* Read-only: the list never writes, creates or recovers anything. The
+     * lock goes back to normal after harden: a read-only connection in
+     * exclusive mode cannot read a WAL database (SQLite answers with an
+     * I/O error). A world a game holds still answers busy, from that
+     * game's own exclusive lock, instead of being read mid-write. */
+    sqlite3 *h = NULL;
+    int rc = sqlite3_open_v2(path, &h, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOFOLLOW, NULL);
+    sqlite3_int64 app = 0, version = 0;
+    int empty = 0, ours = -1;
+    if (rc == SQLITE_OK && harden(h) == 0 && exec(h, "PRAGMA locking_mode = NORMAL") == 0 &&
+        pragma_int(h, "PRAGMA application_id", &app) == 0 && pragma_int(h, "PRAGMA user_version", &version) == 0)
+        ours = schema_is_ours(h, &empty);
+    if (ours < 0) {
+        int busy = h && (sqlite3_errcode(h) == SQLITE_BUSY || sqlite3_errcode(h) == SQLITE_LOCKED);
+        p->status = busy ? SAVE_PEEK_IN_USE : SAVE_PEEK_BAD;
+        sqlite3_close(h);
+        return;
+    }
+    if (app != APP_ID || version != FORMAT || !ours) {
+        sqlite3_close(h);
+        return;
+    }
+    int64_t v;
+    if (peek_meta(h, "seed", &v) == 0 && v >= 0 && v <= (int64_t)UINT32_MAX) {
+        p->seed = (uint32_t)v;
+        p->has_seed = 1;
+    }
+    if (peek_meta(h, "generator", &v) == 0 && v >= 1 && v <= 1000000) p->generator = (int)v;
+    if (peek_meta(h, "last_played", &v) == 0 && v > 0) p->last_played = v;
+    sqlite3_stmt *s = NULL;
+    if (sqlite3_prepare_v2(h, STMT_SQL[S_GET_BLOB], -1, &s, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(s, 1, "name", -1, SQLITE_STATIC);
+        char name[SAVE_NAME_MAX + 1];
+        long len = read_blob(s, name, SAVE_NAME_MAX);
+        if (len > 0 && save_name_valid(name, (size_t)len)) {
+            memcpy(p->name, name, (size_t)len);
+            p->name[len] = '\0';
+        }
+        sqlite3_finalize(s);
+    }
+    sqlite3_close(h);
+    p->status = SAVE_PEEK_OK;
 }
 
 long save_db_get_column(save_db *db, int cx, int cz, uint8_t **out)

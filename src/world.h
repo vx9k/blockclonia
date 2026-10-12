@@ -169,6 +169,10 @@ void world_save_all(world *w);
 
 /* Worker-side entry point for generating one column (also used by bench). */
 void worldgen_column(uint32_t seed, column *c);
+/* Bump when worldgen_column makes different terrain for the same seed:
+ * worlds record the version they were made with, and a build refuses a
+ * world from a newer generator instead of joining new terrain onto it. */
+#define WORLDGEN_VERSION 1
 /* Terrain surface height before trees/water; cheap, needs nothing loaded. */
 int worldgen_height(uint32_t seed, int x, int z);
 

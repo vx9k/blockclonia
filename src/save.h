@@ -14,6 +14,12 @@
 
 #define SAVE_MAX_FILE (4 * COL_VOL + 64)
 
+/* A world's display name: 1 to SAVE_NAME_MAX bytes of printable ASCII
+ * (what the UI font draws), not starting or ending with a space. Names
+ * come from typing and from shared world files, so both are checked. */
+#define SAVE_NAME_MAX 32
+int save_name_valid(const char *s, size_t len);
+
 /* Encodes into `out` (capacity SAVE_MAX_FILE). Returns bytes written. */
 size_t save_encode_column(const column *c, uint8_t *out, size_t cap);
 /* Decodes into c (blocks array must exist; meta is replaced, or freed if

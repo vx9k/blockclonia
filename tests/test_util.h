@@ -64,5 +64,6 @@ void test_defib_all(void);
 // void test_cardio_all(void);
 void test_paths_all(void);
 void test_save_db_all(void);
+void test_worlds_all(void);
 
 #endif

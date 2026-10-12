@@ -1621,6 +1621,7 @@ int main(void)
     // test_cardio_all(); TODO: broken
     test_paths_all();
     test_save_db_all();
+    test_worlds_all();
     printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);
     return g_failed ? 1 : 0;
 }

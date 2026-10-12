@@ -138,6 +138,14 @@ int save_decode_column(column *c, const uint8_t *data, size_t len)
  * os_read_regular and os_write_atomic, which never follow a symlink and
  * only touch regular files (see os.h). */
 
+int save_name_valid(const char *s, size_t len)
+{
+    if (len == 0 || len > SAVE_NAME_MAX || s[0] == ' ' || s[len - 1] == ' ') return 0;
+    for (size_t i = 0; i < len; i++)
+        if (s[i] < 0x20 || s[i] > 0x7e) return 0;
+    return 1;
+}
+
 int save_ensure_dir(const char *dir)
 {
     (void)os_mkdir(dir, 0755);

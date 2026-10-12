@@ -13,6 +13,7 @@
 #ifndef MC_SAVE_DB_H
 #define MC_SAVE_DB_H
 
+#include "save.h"
 #include "world.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -40,6 +41,32 @@ void save_db_rollback(save_db *db);
  * not a valid one), -2 if it could not be read (a database error). */
 int save_db_get_seed(save_db *db, uint32_t *seed);
 int save_db_set_seed(save_db *db, uint32_t seed);
+/* Integer facts about the world ("generator", "created", "last_played"):
+ * get returns 0 with *v set, -1 if missing or not an integer, -2 on a
+ * database error. */
+int save_db_get_meta(save_db *db, const char *key, int64_t *v);
+int save_db_set_meta(save_db *db, const char *key, int64_t v);
+
+/* What the world list shows, read without changing anything: the file is
+ * opened read-only with the same checks as save_db_open, nothing is
+ * created or imported, and a world another game holds is reported, not
+ * waited for. */
+enum {
+    SAVE_PEEK_OK,     /* a world of this format; the fields are set */
+    SAVE_PEEK_NONE,   /* no world here */
+    SAVE_PEEK_LEGACY, /* files an older build wrote; imported when played */
+    SAVE_PEEK_IN_USE, /* open in a game (this one included) */
+    SAVE_PEEK_BAD     /* refused: not ours, damaged, a newer format or a symlink */
+};
+typedef struct {
+    int status;
+    char name[SAVE_NAME_MAX + 1]; /* "" when the world has none (older worlds) */
+    uint32_t seed;
+    int has_seed;
+    int generator;           /* terrain generator version; 1 when not recorded */
+    int64_t last_played;     /* Unix seconds; 0 unknown */
+} save_peek;
+void save_db_peek(const char *dir, save_peek *p);
 
 /* A column's encoded bytes. Returns the length, with *out a mem_alloc'd
  * copy to mem_free; -1 if the column was never saved; -2 if its row is
