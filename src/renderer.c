@@ -2508,6 +2508,12 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         VkClearAttachment ca = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .clearValue.depthStencil = {0.0f, 0}};
         VkClearRect cr = {.rect = {{0, 0}, r->extent}, .baseArrayLayer = 0, .layerCount = 1};
         vkCmdClearAttachments(cmd, 1, &ca, 1, &cr);
+        /* MoltenVK clears inside a render pass by drawing with a pipeline of
+         * its own, and the texture bound before it no longer reaches the
+         * fragment shader: the arm came out black and item cards invisible.
+         * Vulkan keeps bound state across the clear; binding again is free. */
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->layout, 0, 1, &r->dsets[r->filtering], 0,
+                                NULL);
         push_vert mp = pv;
         mat4 proj = m4_perspective_revz(70.0f * (float)(MC_PI / 180.0), aspect, 0.02f);
         memcpy(mp.view_proj, proj.m, sizeof mp.view_proj);
