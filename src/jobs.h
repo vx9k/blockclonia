@@ -32,7 +32,4 @@ void jobs_wait_idle(jobs *js);
  * thread (worker or main) and freed when the pool is destroyed. */
 void *jobs_scratch(size_t size);
 
-/* Online CPU cores, at least 1. */
-int cpu_count(void);
-
 #endif
