@@ -73,6 +73,7 @@ typedef struct {
     int host_image_copy;
     /* extensions and surface */
     int ext_memory_budget;
+    int portability_subset; /* VK_KHR_portability_subset is listed: MoltenVK */
     int present_relaxed; /* the surface offers VK_PRESENT_MODE_FIFO_RELAXED_KHR */
     int pipeline_cache;  /* a cache file path is configured */
 } gpu_offer;

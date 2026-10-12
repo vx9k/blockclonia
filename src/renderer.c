@@ -651,6 +651,7 @@ static void query_offer(const renderer *r, const render_opts *o, gpu_offer *off)
     off->khr_dynamic_rendering = has_device_ext(r->pd, "VK_KHR_dynamic_rendering");
     off->khr_synchronization2 = has_device_ext(r->pd, "VK_KHR_synchronization2");
     off->ext_memory_budget = has_device_ext(r->pd, "VK_EXT_memory_budget");
+    off->portability_subset = has_device_ext(r->pd, "VK_KHR_portability_subset");
     off->present_relaxed = has_present_mode(r, VK_PRESENT_MODE_FIFO_RELAXED_KHR);
     off->pipeline_cache = !o->pipeline_cache || o->pipeline_cache[0];
 
