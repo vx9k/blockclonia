@@ -8,27 +8,8 @@
 # of our packages.
 include(GNUInstallDirs)
 
-# Windows zips are flat: unpack and run blockclonia.exe, with the DLLs it
-# needs beside it. vulkan-1.dll is not among them; the GPU driver installs it.
-if(WIN32)
-  set(_bindir .)
-  set(_docdir .)
-else()
-  set(_bindir ${CMAKE_INSTALL_BINDIR})
-  set(_docdir ${CMAKE_INSTALL_DOCDIR})
-endif()
-
-install(TARGETS blockclonia RUNTIME DESTINATION ${_bindir} COMPONENT game)
-install(FILES README.md DESTINATION ${_docdir} COMPONENT game)
-if(MC_MIMALLOC_DLL)
-  install(FILES ${MC_MIMALLOC_DLL} DESTINATION ${_bindir} COMPONENT game)
-endif()
-if(MSVC)
-  # The Visual C++ runtime DLLs, so the zip runs without the redistributable.
-  set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION ${_bindir})
-  set(CMAKE_INSTALL_SYSTEM_RUNTIME_COMPONENT game)
-  include(InstallRequiredSystemLibraries)
-endif()
+install(TARGETS blockclonia RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT game)
+install(FILES README.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT game)
 
 set(CPACK_PACKAGE_NAME blockclonia)
 set(CPACK_PACKAGE_VENDOR "blockclonia")
@@ -53,9 +34,7 @@ else()
 endif()
 set(CPACK_SYSTEM_NAME "${CMAKE_SYSTEM_NAME}-${_arch}")
 
-if(WIN32)
-  set(CPACK_GENERATOR ZIP)
-elseif(APPLE)
+if(APPLE)
   set(CPACK_GENERATOR TGZ)
 else()
   set(CPACK_GENERATOR TGZ DEB)
