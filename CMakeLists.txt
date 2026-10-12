@@ -164,15 +164,25 @@ set(MC_CORE_SOURCES
   src/worldgen.c
 )
 
+# ASan cannot see mi_* allocations, and the static mimalloc's malloc
+# override crashes ASan's own start-up, so sanitizer and fuzz builds
+# allocate through libc.
+set(MC_MEM_LIBC OFF)
+if(MC_SANITIZE OR MC_BUILD_FUZZ)
+  set(MC_MEM_LIBC ON)
+endif()
+
 function(mc_add_core name)
   add_library(${name} STATIC ${MC_CORE_SOURCES})
   target_include_directories(${name} PUBLIC src)
   target_link_libraries(${name} PUBLIC Threads::Threads mc::sqlite PRIVATE mc_warnings)
-  if(NOT MC_SANITIZE)
+  if(MC_MEM_LIBC)
+    target_compile_definitions(${name} PUBLIC MC_MEM_LIBC)
+  else()
     target_link_libraries(${name} PUBLIC mc::mimalloc)
   endif()
   target_link_libraries(${name} PUBLIC m)
-  if(MC_VK_MIMALLOC AND NOT MC_SANITIZE AND TARGET Vulkan::Headers)
+  if(MC_VK_MIMALLOC AND NOT MC_MEM_LIBC AND TARGET Vulkan::Headers)
     target_compile_definitions(${name} PRIVATE MC_VK_MIMALLOC) # only mem.c reads it
     target_link_libraries(${name} PRIVATE Vulkan::Headers)
   endif()
@@ -186,8 +196,6 @@ if(MC_SANITIZE)
   set(_san -fsanitize=address,undefined -fno-sanitize-recover=undefined)
   target_compile_options(mccore PUBLIC ${_san} -fno-omit-frame-pointer)
   target_link_options(mccore PUBLIC ${_san})
-  # ASan cannot see mi_* allocations, so sanitizer builds use libc malloc.
-  target_compile_definitions(mccore PUBLIC MC_MEM_LIBC)
 endif()
 
 # ---------------------------------------------------------------- game
