@@ -208,9 +208,14 @@ static void test_import(void)
 {
     char dir[400], p[512], victim[400];
     sub_dir(dir, sizeof dir, "old");
-    CHECK(save_write_seed(dir, 99) == 0);
+    path_in(p, sizeof p, dir, "level.dat");
+    CHECK(save_write_file(p, "seed 99\n", 8) == 0);
     column *c = edited_column(0, -1);
-    CHECK(save_store_column(dir, c) == 0);
+    uint8_t *enc = mem_alloc(SAVE_MAX_FILE);
+    size_t len = save_encode_column(c, enc, SAVE_MAX_FILE);
+    path_in(p, sizeof p, dir, "c.0.-1.bin");
+    CHECK(len && save_write_file(p, enc, len) == 0);
+    mem_free(enc);
     path_in(p, sizeof p, dir, "player.dat");
     CHECK(save_write_file(p, "PLAYER", 6) == 0);
     path_in(p, sizeof p, dir, "c.01.0.bin");

@@ -179,32 +179,32 @@ static void test_save_files(void)
     CHECK(linked != 0);
     uint32_t seed = 0;
     if (linked == 1) CHECK(save_read_seed(dir, &seed) == -1); /* symlinks are not followed */
-    CHECK(save_write_seed(dir, 77) == 0);
+    CHECK(save_write_file(p, "seed 77\n", 8) == 0);
     CHECK(file_is(victim, "precious"));
     CHECK(save_read_seed(dir, &seed) == 0 && seed == 77);
     CHECK(os_path_kind(p) == OS_FILE); /* the link was replaced */
 
     column *c = column_alloc(0, 0);
     test_flat_gen(0, c);
+    uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
+    size_t len = save_encode_column(c, buf, SAVE_MAX_FILE);
     snprintf(p, sizeof p, "%s/c.0.0.bin.tmp", dir);
     CHECK(tmp_symlink(victim, p) != 0);
-    CHECK(save_store_column(dir, c) == 0);
+    snprintf(p, sizeof p, "%s/c.0.0.bin", dir);
+    CHECK(len && save_write_file(p, buf, len) == 0);
     CHECK(file_is(victim, "precious"));
     column *d = column_alloc(0, 0);
-    CHECK(save_load_column(dir, d) == 1 && memcmp(c->blocks, d->blocks, COL_VOL) == 0);
+    long n = save_read_file(p, buf, SAVE_MAX_FILE);
+    CHECK(n == (long)len && save_decode_column(d, buf, (size_t)n) == 0 && memcmp(c->blocks, d->blocks, COL_VOL) == 0);
 
     /* A FIFO in place of a column file is rejected, not waited on. */
     snprintf(p, sizeof p, "%s/c.1.0.bin", dir);
     CHECK(mkfifo(p, 0600) == 0);
-    column *e = column_alloc(1, 0);
-    CHECK(save_load_column(dir, e) == -1);
-    column *g = column_alloc(2, 0);
-    CHECK(save_load_column(dir, g) == 0); /* missing: generate */
+    CHECK(save_read_file(p, buf, SAVE_MAX_FILE) == -1);
 
     column_free(c);
     column_free(d);
-    column_free(e);
-    column_free(g);
+    mem_free(buf);
     const char *names[] = {"victim.txt", "level.dat", "c.0.0.bin", "c.1.0.bin"};
     for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
         snprintf(p, sizeof p, "%s/%s", dir, names[i]);
