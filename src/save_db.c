@@ -261,6 +261,9 @@ int save_db_commit(save_db *db)
     return -1;
 }
 
+/* Also fine when SQLite rolled back on its own after a failed write. */
+void save_db_rollback(save_db *db) { exec(db->h, "ROLLBACK"); }
+
 /* Runs a prepared write to completion and resets it. */
 static int step_write(save_db *db, sqlite3_stmt *s)
 {

@@ -380,6 +380,57 @@ static void test_import(void)
     column_free(d);
 }
 
+/* Stands in for the game's player: written by the world's on_save hook. */
+static int g_player_fails;
+static int save_test_player(void *user) { return g_player_fails ? -1 : save_db_put_blob(user, "player", "new", 3); }
+
+static int player_is(save_db *db, const char *want)
+{
+    char buf[8];
+    long n = save_db_get_blob(db, "player", buf, sizeof buf);
+    return n == (long)strlen(want) && memcmp(buf, want, (size_t)n) == 0;
+}
+
+/* The columns and the player are saved in one transaction, also when a
+ * column is saved because it unloads: the file never holds a column newer
+ * than the player's inventory, or the other way round. */
+static void test_save_with_player(void)
+{
+    char dir[400];
+    sub_dir(dir, sizeof dir, "together");
+    save_db *db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (!db) return;
+    CHECK(save_db_put_blob(db, "player", "old", 3) == 0);
+    jobs *js = jobs_create(1);
+    world w;
+    world_init(&w, 1, 2, js, db);
+    w.generator = test_flat_gen;
+    w.save_user = db;
+    w.on_save = save_test_player;
+    world_load_blocking(&w, 0.5, 0.5, 1);
+    CHECK(world_set(&w, 3, GROUND, 4, B_GLASS, 0)); /* column 0,0 */
+
+    /* The player cannot be written: the column is not saved either. */
+    g_player_fails = 1;
+    world_save_all(&w);
+    uint8_t *b = NULL;
+    CHECK(save_db_get_column(db, 0, 0, &b) == -1 && player_is(db, "old"));
+    const column *c = world_column(&w, 0, 0);
+    CHECK(c && c->unsaved);
+
+    /* Walking away saves the column, and the player with it. */
+    g_player_fails = 0;
+    world_load_blocking(&w, 16 * CHUNK_W + 0.5, 0.5, 1);
+    CHECK(world_column(&w, 0, 0) == NULL);
+    long n = save_db_get_column(db, 0, 0, &b);
+    CHECK(n > 0 && player_is(db, "new"));
+    mem_free(b);
+    world_destroy(&w);
+    jobs_destroy(js);
+    save_db_close(db);
+}
+
 /* The world fetches rows on the main thread and decodes them in a job. */
 static void test_world_db(void)
 {
@@ -461,8 +512,9 @@ static void test_unload_save_fails(void)
 /* Deletes what the tests made (one level of subfolders). */
 static void clean_up(void)
 {
-    const char *subs[] = {"rt",    "garbage", "foreign", "trigger", "index", "view", "altered", "newer", "app",
-                          "link0", "link1",   "link2",   "rows",    "old",   "none", "world",   "full",  "unreadable"};
+    const char *subs[] = {"rt",    "garbage", "foreign", "trigger",    "index",   "view", "altered",
+                          "newer", "app",     "link0",   "link1",      "link2",   "rows", "old",
+                          "none",  "world",   "full",    "unreadable", "together"};
     const char *files[] = {"world.db",   "world.db-wal", "world.db-shm", "world.db-journal", "level.dat",
                            "player.dat", "c.0.-1.bin",   "c.01.0.bin",   "c.3.3.bin"};
     char d[400], p[512];
@@ -489,6 +541,7 @@ void test_save_db_all(void)
     test_bad_rows();
     test_read_fails();
     test_import();
+    test_save_with_player();
     test_world_db();
     test_unload_save_fails();
     clean_up();

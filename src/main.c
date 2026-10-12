@@ -514,12 +514,18 @@ typedef struct {
     save_db *db;
 } save_ctx;
 
-static void save_player(const save_ctx *sc)
+/* The world's on_save hook: the player goes into the transaction that
+ * saves the columns, so the two on disk always match. The hook's type
+ * fixes the non-const parameter. */
+/* cppcheck-suppress constParameterCallback */
+static int save_player(void *user)
 {
-    if (!sc->db) return;
+    const save_ctx *sc = user;
     uint8_t buf[PLAYER_FILE_SIZE];
     size_t n = survival_encode_player(sc->pl, sc->inv, thermo_day_time(sc->th), buf, sizeof buf);
-    if (!n || save_db_put_blob(sc->db, "player", buf, n) != 0) log_warn("could not save the player");
+    if (n && save_db_put_blob(sc->db, "player", buf, n) == 0) return 0;
+    log_warn("could not save the player");
+    return -1;
 }
 
 /* 1 if a saved player was loaded into pl and inv, -1 if it could not be
@@ -543,8 +549,7 @@ static void save_on_fatal(void *user)
 {
     save_ctx *sc = user;
     physics_settle_bodies(sc->ph, NULL);
-    world_save_all(sc->w);
-    save_player(sc);
+    world_save_all(sc->w); /* and the player, through on_save */
 }
 
 /* --give: "name:count" pairs; names match case-insensitively, spaces as
@@ -1081,6 +1086,10 @@ static void game_init_world(game *g)
         world_load_blocking(&g->w, g->pl.pos.x, g->pl.pos.z, 1);
         log_info("player restored from %s/world.db", o->world_dir);
     }
+    /* Only now: a save before this point would write the fresh player
+     * over the saved one. */
+    g->w.save_user = &g->sc;
+    g->w.on_save = save_player;
     if (o->give) give_items(&g->inv, o->give);
     if (o->have_time) thermo_set_day_time(g->th, o->time_of_day);
     log_info("spawn at %.1f %.1f %.1f with %d worker threads", g->pl.pos.x, g->pl.pos.y, g->pl.pos.z,
@@ -1458,7 +1467,6 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     case MENU_TO_TITLE:
         physics_settle_bodies(&g->ph, NULL);
         world_save_all(&g->w);
-        save_player(&g->sc);
         g_in.inv_open = 0;
         g_in.panel = 0;
         menu_open(&g->mn, SCREEN_TITLE); /* the menu's own screen too, or the copy below undoes it */
@@ -1586,8 +1594,7 @@ static void frame_bookkeeping(game *g, double now)
     }
     if (now - g->save_t >= AUTOSAVE_SECONDS) {
         g->save_t = now;
-        world_save_all(&g->w); /* only columns edited since the last save */
-        save_player(&g->sc);
+        world_save_all(&g->w); /* the player and the columns edited since the last save */
     }
 }
 
@@ -1598,8 +1605,8 @@ static void game_shutdown(game *g)
     log_info("saving and shutting down");
     log_set_fatal_hook(NULL, NULL);
     physics_settle_bodies(&g->ph, NULL);
+    if (g->hl.dead) g->w.on_save = NULL; /* quitting dead keeps the last saved player */
     world_save_all(&g->w);
-    if (!g->hl.dead) save_player(&g->sc);
     jobs_wait_idle(g->js);
     audio_device_close(g->audio); /* stops the callback before the mixer goes */
     sound_destroy(g->snd);

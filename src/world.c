@@ -252,12 +252,13 @@ static void request_column(world *w, int cx, int cz)
     jobs_submit(w->jobs, &g->base);
 }
 
-static void store_column(const world *w, column *c)
+/* An unloading column is saved together with every other edited column
+ * and the player (world_save_all). Saved alone, a crash before the next
+ * autosave would find it newer than the player's inventory, duplicating
+ * or losing what was placed or mined since. */
+static void store_column(world *w, const column *c)
 {
-    if (!c->unsaved || !w->db) return;
-    if (save_db_put_column(w->db, c) != 0) log_error("failed to save column %d,%d", c->cx, c->cz);
-    else
-        c->unsaved = 0;
+    if (c->unsaved && w->db) world_save_all(w);
 }
 
 /* Saves and frees a column that left the ring. Returns 0 if it was kept:
@@ -644,24 +645,32 @@ void world_load_blocking(world *w, double px, double pz, int radius)
 void world_save_all(world *w)
 {
     if (!w->db) return;
-    /* One transaction for the batch. A column counts as saved only once
+    /* One transaction for the columns and the player (on_save), which
+     * lands whole or not at all: any failed write abandons it, as SQLite
+     * may already have rolled it back. A column counts as saved only once
      * the commit went through; otherwise the next save tries it again. */
-    int batch = save_db_begin(w->db) == 0, all = 1;
-    for (int i = 0; i < w->grid_w * w->grid_w; i++) {
+    if (save_db_begin(w->db) != 0) {
+        log_error("could not start saving the world");
+        return;
+    }
+    int ok = 1;
+    for (int i = 0; ok && i < w->grid_w * w->grid_w; i++) {
         column *c = w->grid[i];
         if (!c || c->state != COL_READY || !c->unsaved) continue;
         if (save_db_put_column(w->db, c) == 0) c->unsaved = 2;
         else {
             log_error("failed to save column %d,%d", c->cx, c->cz);
-            all = 0;
+            ok = 0;
         }
     }
-    int ok = !batch || save_db_commit(w->db) == 0;
+    if (ok && w->on_save) ok = w->on_save(w->save_user) == 0;
+    if (ok) ok = save_db_commit(w->db) == 0;
+    else save_db_rollback(w->db);
     for (int i = 0; i < w->grid_w * w->grid_w; i++) {
         column *c = w->grid[i];
         if (c && c->unsaved == 2) c->unsaved = ok ? 0 : 1;
     }
-    if (ok && all && w->save_failed) {
+    if (ok && w->save_failed) {
         log_info("saving works again");
         w->save_failed = 0;
         w->have_center = 0; /* the next world_update unloads the columns kept meanwhile */

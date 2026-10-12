@@ -28,9 +28,10 @@ void save_db_close(save_db *db);
 
 /* A batch of saves in one transaction, so it costs one commit and lands
  * whole or not at all. Not nested. commit returns -1 if it failed, and
- * then nothing written since begin is kept. */
+ * then nothing written since begin is kept; rollback drops it on purpose. */
 int save_db_begin(save_db *db);
 int save_db_commit(save_db *db);
+void save_db_rollback(save_db *db);
 
 /* get_seed: 0 and *seed set if the world has one, -1 if it has none (or
  * not a valid one), -2 if it could not be read (a database error). */

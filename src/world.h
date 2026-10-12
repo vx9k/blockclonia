@@ -100,6 +100,12 @@ typedef struct world {
     /* Called with edit_user just before a loaded column is saved and freed,
      * so state living outside it (falling bodies) can be written back. */
     void (*on_column_unload)(void *user, const column *c);
+    /* Called with save_user inside every transaction that saves columns,
+     * to write the rest of the game (the player) into it, so the world and
+     * the player on disk always come from the same moment. Returns 0, or
+     * -1 to abandon the whole save. */
+    void *save_user;
+    int (*on_save)(void *user);
     /* Test hook: replaces terrain generation when set. */
     void (*generator)(uint32_t seed, column *c);
 } world;
