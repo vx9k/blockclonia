@@ -10,7 +10,7 @@ rules through `CLAUDE.md`.)
 
 | Agent | Model | Effort | Tools | Use it for |
 |---|---|---|---|---|
-| `docs-writer` | `sonnet` (Sonnet 5.5) | `medium` | Read, Edit, Write, Bash | Prose only: README and docs pages, comments, changelogs, templates, formatting |
+| `docs-writer` | `claude-haiku-5-5` (Haiku 5.5, pinned) | `medium` | Read, Edit, Write, Bash | Prose only: README and docs pages, comments, changelogs, templates, formatting |
 | `general-dev` | `opus` (Opus 5.5) | `medium` | Read, Edit, Write, Bash | Everyday features, contained refactors, reproducible bugs, tests, code review |
 | `deep-reasoning` | `opus` (Opus 5.5) | `high` | Read, Edit, Write, Bash | Architecture, hard cross-module bugs, wide blast radius, security-sensitive changes |
 
@@ -64,8 +64,11 @@ reasons. It accepts `low`, `medium`, `high`, `xhigh`, `max` or an integer.
 deep-reasoning runs Opus at `high` rather than `max`, which Claude Code
 documents as "use sparingly for the hardest tasks", and general-dev runs
 the same model at `medium`, so the two differ only in effort. docs-writer
-runs Sonnet at `medium`: documentation needs the facts read carefully
-from the code, but not the depth of the engineering tiers.
+runs Haiku 5.5 at `medium`: documentation needs the facts read carefully
+from the code, but not the depth of the engineering tiers. It is pinned
+to the full model ID so it stays on Haiku 5.5 when newer models ship.
+Don't pass a `model` when spawning it: the call's `model` overrides the
+frontmatter.
 
 The system prompts also contain the phrases "think hard" (general-dev)
 and "ultrathink" (deep-reasoning), but in Claude Code 2.1.283 they only
@@ -82,9 +85,9 @@ wording.
 ## Notes
 
 - `model` accepts `haiku`, `sonnet`, `opus`, `fable`, `inherit` or a full
-  model ID. The tiers use the aliases, which resolve to the newest release
-  of each model (Opus 5.5 and Sonnet 5.5 at the time of writing), so a
-  new release needs no edit here. Pin a full model ID instead if a tier must stay on one version. If your organisation restricts models, a disallowed model
+  model ID. The engineering tiers use the `opus` alias, which resolves to the
+  newest Opus (Opus 5.5 at the time of writing), so a new release needs
+  no edit here; docs-writer pins `claude-haiku-5-5`. Pin a full model ID instead if a tier must stay on one version. If your organisation restricts models, a disallowed model
   falls back to the session's model.
 - This Claude Code build has no Grep or Glob tools, so every tier gets
   Bash for searching (`grep` here is ugrep). docs-writer's prompt limits
