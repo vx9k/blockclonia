@@ -81,6 +81,70 @@ static void test_save_roundtrip(void)
     mem_free(buf);
 }
 
+/* Sets a column file's payload length and checksum after a test edited the
+ * payload, so the input gets past them to the checks behind. */
+static void reseal_column(uint8_t *buf, size_t len)
+{
+    uint32_t n = (uint32_t)(len - 24), h = 2166136261U;
+    for (size_t i = 24; i < len; i++) {
+        h ^= buf[i];
+        h *= 16777619U;
+    }
+    for (int k = 0; k < 4; k++) {
+        buf[16 + k] = (uint8_t)(n >> (8 * k));
+        buf[20 + k] = (uint8_t)(h >> (8 * k));
+    }
+}
+
+/* A rejected column leaves the destination exactly as it was: valid blocks
+ * ahead of a bad meta pass, or of trailing bytes, are not half-applied. */
+static void test_save_reject_untouched(void)
+{
+    column *c = column_alloc(0, 0);
+    test_flat_gen(0, c);
+    c->blocks[col_index(1, 1, 1)] = B_STONE;
+    c->meta = mem_calloc(COL_VOL, 1);
+    c->meta[col_index(1, 1, 1)] = 2; /* a level on stone: well-formed RLE, invalid column */
+    uint8_t *bad_meta = mem_alloc(SAVE_MAX_FILE);
+    size_t bad_meta_len = save_encode_column(c, bad_meta, SAVE_MAX_FILE);
+    mem_free(c->meta);
+    c->meta = NULL;
+    uint8_t *trailing = mem_alloc(SAVE_MAX_FILE);
+    size_t trailing_len = save_encode_column(c, trailing, SAVE_MAX_FILE) + 1;
+    trailing[trailing_len - 1] = 0; /* one byte after the blocks, no meta flagged */
+    reseal_column(trailing, trailing_len);
+    CHECK(bad_meta_len > 24 && trailing_len > 25);
+
+    column *d = column_alloc(0, 0);
+    memset(d->blocks, B_WATER, COL_VOL);
+    uint8_t *want = mem_alloc(COL_VOL);
+    memcpy(want, d->blocks, COL_VOL);
+    CHECK(save_decode_column(d, bad_meta, bad_meta_len) == -1);
+    CHECK(memcmp(d->blocks, want, COL_VOL) == 0 && d->meta == NULL);
+
+    d->meta = mem_calloc(COL_VOL, 1);
+    memset(d->meta, 3, COL_VOL);
+    const uint8_t *meta = d->meta;
+    CHECK(save_decode_column(d, bad_meta, bad_meta_len) == -1);
+    CHECK(memcmp(d->blocks, want, COL_VOL) == 0 && d->meta == meta);
+    CHECK(d->meta[0] == 3 && d->meta[col_index(1, 1, 1)] == 3 && d->meta[COL_VOL - 1] == 3);
+    CHECK(save_decode_column(d, trailing, trailing_len) == -1);
+    CHECK(memcmp(d->blocks, want, COL_VOL) == 0 && d->meta == meta);
+    CHECK(d->meta[0] == 3 && d->meta[COL_VOL - 1] == 3);
+
+    /* Without the extra byte the same blocks load. */
+    CHECK(save_decode_column(d, trailing, trailing_len - 1) == -1); /* the header still counts the byte */
+    reseal_column(trailing, trailing_len - 1);
+    CHECK(save_decode_column(d, trailing, trailing_len - 1) == 0 && memcmp(d->blocks, c->blocks, COL_VOL) == 0);
+    CHECK(d->meta == NULL);
+
+    column_free(c);
+    column_free(d);
+    mem_free(want);
+    mem_free(bad_meta);
+    mem_free(trailing);
+}
+
 static void fill_input(mesh_input *in, uint8_t fill)
 {
     memset(in->blocks, fill, sizeof in->blocks);
@@ -1415,6 +1479,7 @@ int main(void)
     mesher_init();
     test_gpupool();
     test_save_roundtrip();
+    test_save_reject_untouched();
     test_save_files();
     test_mesher();
     test_world_basics();

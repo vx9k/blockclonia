@@ -109,20 +109,29 @@ int save_decode_column(column *c, const uint8_t *data, size_t len)
     const uint8_t *p = data + HEADER_SIZE;
     if (fnv1a(p, payload) != get_u32(data + 20)) return -1;
 
-    size_t used = rle_decode(p, payload, c->blocks, COL_VOL, B_COUNT - 1);
-    if (!used) return -1;
-    if (flags & 1) {
-        if (!c->meta) c->meta = mem_alloc(COL_VOL);
-        size_t m = rle_decode(p + used, payload - used, c->meta, COL_VOL, WATER_FULL - 1);
-        if (!m) return -1;
+    /* Decoded aside and applied only once all of it checks out, so a
+     * rejected column leaves c as it was. */
+    uint8_t *blocks = mem_alloc(COL_VOL), *meta = (flags & 1) ? mem_alloc(COL_VOL) : NULL;
+    size_t used = rle_decode(p, payload, blocks, COL_VOL, B_COUNT - 1);
+    int ok = used != 0;
+    if (ok && meta) {
+        size_t m = rle_decode(p + used, payload - used, meta, COL_VOL, WATER_FULL - 1);
+        ok = m != 0;
         used += m;
-        for (size_t i = 0; i < COL_VOL; i++)
-            if (c->meta[i] && !block_has_meta(c->blocks[i])) return -1;
-    } else {
-        mem_free(c->meta);
-        c->meta = NULL;
+        for (size_t i = 0; ok && i < COL_VOL; i++)
+            if (meta[i] && !block_has_meta(blocks[i])) ok = 0;
     }
-    return used == payload ? 0 : -1;
+    if (ok && used == payload) {
+        memcpy(c->blocks, blocks, COL_VOL);
+        mem_free(c->meta);
+        c->meta = meta;
+        meta = NULL;
+    } else {
+        ok = 0;
+    }
+    mem_free(blocks);
+    mem_free(meta);
+    return ok ? 0 : -1;
 }
 
 static int column_path(char *buf, size_t cap, const char *dir, int cx, int cz, const char *suffix)

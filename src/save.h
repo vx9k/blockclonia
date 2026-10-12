@@ -15,8 +15,9 @@
 
 /* Encodes into `out` (capacity SAVE_MAX_FILE). Returns bytes written. */
 size_t save_encode_column(const column *c, uint8_t *out, size_t cap);
-/* Decodes into c (blocks array must exist; meta is (re)allocated as
- * needed). Returns 0 on success, -1 if the data is malformed. */
+/* Decodes into c (blocks array must exist; meta is replaced, or freed if
+ * the column has none). Returns 0 on success, or -1 if the data is
+ * malformed, and then c is left untouched. */
 int save_decode_column(column *c, const uint8_t *data, size_t len);
 
 /* 1 = loaded, 0 = no save file, -1 = corrupt or not a regular file. */
