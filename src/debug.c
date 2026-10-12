@@ -54,6 +54,24 @@ static void line(column_ctx *c, uint32_t col, const char *fmt, ...)
     c->y += 10;
 }
 
+/* A long list (the renderer's Vulkan features) over several lines, broken
+ * after ", " or ": " so it stays inside its column on a small window. */
+static void wrapped(column_ctx *c, uint32_t col, const char *s, size_t max)
+{
+    while (*s) {
+        size_t n = strlen(s);
+        if (n > max) {
+            size_t cut = 0;
+            for (size_t i = 1; i < max; i++)
+                if (s[i] == ' ' && (s[i - 1] == ',' || s[i - 1] == ':')) cut = i;
+            n = cut ? cut : max;
+        }
+        line(c, col, "%.*s", (int)n, s);
+        s += n;
+        while (*s == ' ') s++;
+    }
+}
+
 static void gap(column_ctx *c) { c->y += 4; }
 
 static void frame_graph(ui *u, const debug_frames *f, float x, float y, float w, float h)
@@ -134,7 +152,7 @@ void debug_draw(ui *u, const debug_info *d)
     column_ctx rc = {u, 4, 1};
     line(&rc, C_TEXT, "%s", d->versions ? d->versions : "");
     line(&rc, C_TEXT, "GPU %s", d->gpu ? d->gpu : "?");
-    if (d->api) line(&rc, C_DIM, "%s", d->api);
+    if (d->api) wrapped(&rc, C_DIM, d->api, 48);
     if (d->gpu_ms > 0.0f) line(&rc, C_TEXT, "GPU frame %.2f ms", (double)d->gpu_ms);
     if (d->vram_budget_mb)
         line(&rc, C_TEXT, "VRAM %u / %u MB (budget)", d->vram_used_mb, d->vram_budget_mb);

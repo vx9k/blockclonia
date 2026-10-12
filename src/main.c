@@ -1119,8 +1119,8 @@ static void game_init(game *g)
     mem_version_string(mi, sizeof mi);
     int gmaj, gmin, grev;
     glfwGetVersion(&gmaj, &gmin, &grev);
-    snprintf(g->versions, sizeof g->versions, "%s  GLFW %d.%d.%d  %s", mi, gmaj, gmin, grev,
-             renderer_api_string(g->rd));
+    /* The Vulkan version and features get their own lines in F3. */
+    snprintf(g->versions, sizeof g->versions, "%s  GLFW %d.%d.%d", mi, gmaj, gmin, grev);
     snprintf(g->mn.footer, sizeof g->mn.footer, "seed %u   %s   GLFW %d.%d.%d", g->seed, mi, gmaj, gmin, grev);
 }
 

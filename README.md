@@ -255,6 +255,14 @@ fallbacks on a newer machine; an unrecognized value logs a warning and is
 ignored, leaving the version uncapped. The negotiated version shows up in
 the startup GPU log line and in the F3 overlay.
 
+Optional features the device offers at that version are enabled when the
+device is created, and listed next to the version. `MC_VK_DISABLE` turns
+them off for testing, as a comma list of `mdi`, `dynrend`, `sync2`,
+`timeline`, `aniso`, `hostcopy`, `budget`, `timestamps`, `pcache`,
+`hostreset` and `relaxed`, or `all`; unknown names are logged and
+ignored. `MC_VK_API=1.0 MC_VK_DISABLE=all` is the path a Raspberry Pi 4
+on older Mesa takes.
+
 ![the F3 debug overlay](docs/debug.jpg)
 
 ## Building

@@ -138,10 +138,8 @@ struct renderer {
     VkPhysicalDeviceProperties props;
     VkPhysicalDeviceMemoryProperties memprops;
     uint32_t instance_api;        /* the apiVersion the instance was created with */
-    /* The version in use (caps.device_api). The offer holds only the two
-     * versions: no optional feature is implemented yet, so none is enabled. */
-    gpu_choice caps;
-    char api[160];                /* gpucaps_summary(caps), for F3 */
+    gpu_choice caps;              /* the version in use and the optional features enabled */
+    char api[256];                /* gpucaps_summary(caps), for F3 */
     VkDevice dev;
     VkQueue queue;
     uint32_t qfam;
@@ -481,19 +479,115 @@ static int find_queue(renderer *r, VkPhysicalDevice pd, uint32_t *fam)
     return found;
 }
 
-static int has_swapchain_ext(VkPhysicalDevice pd)
+static int has_device_ext(VkPhysicalDevice pd, const char *name)
 {
     uint32_t n = 0;
     vkEnumerateDeviceExtensionProperties(pd, NULL, &n, NULL);
     VkExtensionProperties *e = mem_alloc(mem_array_size(n ? n : 1, sizeof *e));
     vkEnumerateDeviceExtensionProperties(pd, NULL, &n, e);
     int found = 0;
-    for (uint32_t i = 0; i < n && !found; i++) found = strcmp(e[i].extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0;
+    for (uint32_t i = 0; i < n && !found; i++) found = strcmp(e[i].extensionName, name) == 0;
     mem_free(e);
     return found;
 }
 
-static void pick_device(renderer *r, int want_index)
+static int has_present_mode(const renderer *r, VkPresentModeKHR mode)
+{
+    uint32_t n = 0;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(r->pd, r->surf, &n, NULL);
+    VkPresentModeKHR *m = mem_alloc(mem_array_size(n ? n : 1, sizeof *m));
+    vkGetPhysicalDeviceSurfacePresentModesKHR(r->pd, r->surf, &n, m);
+    int found = 0;
+    for (uint32_t i = 0; i < n && !found; i++) found = m[i] == mode;
+    mem_free(m);
+    return found;
+}
+
+/* Fills the offer from what the instance and the chosen device report.
+ * Newer feature structures are only queried at the negotiated version (the
+ * lower of device and instance), so MC_VK_API=1.0 never calls a 1.1 entry
+ * point; vkGetPhysicalDeviceFeatures2 is 1.1 core and loaded, not linked. */
+static void query_offer(const renderer *r, const render_opts *o, gpu_offer *off)
+{
+    memset(off, 0, sizeof *off);
+    off->instance_api = r->instance_api;
+    off->device_api = r->props.apiVersion;
+    uint32_t api = gpucaps_device_api(r->props.apiVersion, r->instance_api);
+
+    VkPhysicalDeviceFeatures f;
+    vkGetPhysicalDeviceFeatures(r->pd, &f);
+    const VkPhysicalDeviceLimits *lim = &r->props.limits;
+    off->multi_draw_indirect = f.multiDrawIndirect == VK_TRUE;
+    off->draw_indirect_first_instance = f.drawIndirectFirstInstance == VK_TRUE;
+    off->max_draw_indirect_count = lim->maxDrawIndirectCount;
+    off->sampler_anisotropy = f.samplerAnisotropy == VK_TRUE;
+    off->max_sampler_anisotropy = lim->maxSamplerAnisotropy;
+    off->timestamp_compute_and_graphics = lim->timestampComputeAndGraphics == VK_TRUE;
+    off->timestamp_period = lim->timestampPeriod;
+    uint32_t nq = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(r->pd, &nq, NULL);
+    VkQueueFamilyProperties *q = mem_alloc(mem_array_size(nq ? nq : 1, sizeof *q));
+    vkGetPhysicalDeviceQueueFamilyProperties(r->pd, &nq, q);
+    if (r->qfam < nq) off->timestamp_valid_bits = q[r->qfam].timestampValidBits;
+    mem_free(q);
+
+    off->khr_dynamic_rendering = has_device_ext(r->pd, "VK_KHR_dynamic_rendering");
+    off->khr_synchronization2 = has_device_ext(r->pd, "VK_KHR_synchronization2");
+    off->ext_memory_budget = has_device_ext(r->pd, "VK_EXT_memory_budget");
+    off->present_relaxed = has_present_mode(r, VK_PRESENT_MODE_FIFO_RELAXED_KHR);
+    off->pipeline_cache = !o->pipeline_cache || o->pipeline_cache[0];
+
+    if (api < GPU_API(1, 2)) return; /* everything below is 1.2 or newer */
+    PFN_vkGetPhysicalDeviceFeatures2 features2 = (PFN_vkGetPhysicalDeviceFeatures2)
+        vkGetInstanceProcAddr(r->inst, "vkGetPhysicalDeviceFeatures2");
+    if (!features2) return;
+    VkPhysicalDeviceFeatures2 f2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    VkPhysicalDeviceVulkan12Features v12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+    VkPhysicalDeviceVulkan13Features v13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+    VkPhysicalDeviceDynamicRenderingFeaturesKHR dr = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR};
+    VkPhysicalDeviceSynchronization2FeaturesKHR s2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR};
+    void *chain = &v12;
+    if (api >= GPU_API(1, 3)) {
+        v13.pNext = chain;
+        chain = &v13;
+    } else {
+        /* 1.2: the same features through the KHR extensions, queried only
+         * where the device lists them. */
+        if (off->khr_dynamic_rendering) {
+            dr.pNext = chain;
+            chain = &dr;
+        }
+        if (off->khr_synchronization2) {
+            s2.pNext = chain;
+            chain = &s2;
+        }
+    }
+#ifdef VK_API_VERSION_1_4
+    VkPhysicalDeviceVulkan14Features v14 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES};
+    if (api >= GPU_API(1, 4)) {
+        v14.pNext = chain;
+        chain = &v14;
+    }
+#endif
+    f2.pNext = chain;
+    features2(r->pd, &f2);
+    off->timeline_semaphore = v12.timelineSemaphore == VK_TRUE;
+    off->host_query_reset = v12.hostQueryReset == VK_TRUE;
+    if (api >= GPU_API(1, 3)) {
+        off->dynamic_rendering = v13.dynamicRendering == VK_TRUE;
+        off->synchronization2 = v13.synchronization2 == VK_TRUE;
+    } else {
+        off->dynamic_rendering = dr.dynamicRendering == VK_TRUE;
+        off->synchronization2 = s2.synchronization2 == VK_TRUE;
+    }
+#ifdef VK_API_VERSION_1_4
+    off->host_image_copy = v14.hostImageCopy == VK_TRUE;
+#endif
+}
+
+static void pick_device(renderer *r, const render_opts *o)
 {
     uint32_t n = 0;
     VK_CHECK(vkEnumeratePhysicalDevices(r->inst, &n, NULL));
@@ -505,9 +599,9 @@ static void pick_device(renderer *r, int want_index)
         VkPhysicalDeviceProperties p;
         vkGetPhysicalDeviceProperties(pds[i], &p);
         uint32_t fam;
-        if (!find_queue(r, pds[i], &fam) || !has_swapchain_ext(pds[i])) continue;
+        if (!find_queue(r, pds[i], &fam) || !has_device_ext(pds[i], VK_KHR_SWAPCHAIN_EXTENSION_NAME)) continue;
         int score = device_score(p.deviceType);
-        if (want_index >= 0) score = (int)i == want_index ? 100 : -1;
+        if (o->gpu_index >= 0) score = (int)i == o->gpu_index ? 100 : -1;
         if (score > best_score) { best = (int)i; best_score = score; }
     }
     if (best < 0) log_fatal("no Vulkan device can present to this window");
@@ -516,12 +610,25 @@ static void pick_device(renderer *r, int want_index)
     find_queue(r, r->pd, &r->qfam);
     vkGetPhysicalDeviceProperties(r->pd, &r->props);
     vkGetPhysicalDeviceMemoryProperties(r->pd, &r->memprops);
-    gpu_offer offer = {.instance_api = r->instance_api, .device_api = r->props.apiVersion};
-    gpucaps_choose(&offer, 0, &r->caps);
+    gpu_offer offer;
+    query_offer(r, o, &offer);
+    char unknown[64];
+    uint32_t disable = gpucaps_parse_disable(getenv("MC_VK_DISABLE"), unknown, sizeof unknown);
+    if (unknown[0]) log_warn("MC_VK_DISABLE: unknown feature names ignored: %s", unknown);
+    gpucaps_choose(&offer, disable, &r->caps);
     gpucaps_summary(&r->caps, r->api, sizeof r->api);
     log_info("GPU: %s (%s; device %u.%u, instance %u.%u)", r->props.deviceName, r->api,
              GPU_API_MAJOR(r->props.apiVersion), GPU_API_MINOR(r->props.apiVersion), GPU_API_MAJOR(r->instance_api),
              GPU_API_MINOR(r->instance_api));
+    if (r->caps.disabled) {
+        char off[160] = "";
+        for (uint32_t b = 1; b & GPUCAP_ALL; b <<= 1) {
+            size_t used = strlen(off);
+            if (r->caps.disabled & b)
+                (void)snprintf(off + used, sizeof off - used, "%s%s", used ? "," : "", gpucaps_name(b));
+        }
+        log_info("turned off by MC_VK_DISABLE: %s", off);
+    }
 }
 
 static void create_device(renderer *r)
@@ -529,11 +636,60 @@ static void create_device(renderer *r)
     float prio = 1.0f;
     VkDeviceQueueCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = r->qfam,
                                   .queueCount = 1, .pQueuePriorities = &prio};
-    const char *ext = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
-    VkPhysicalDeviceFeatures feats = {0}; /* nothing optional: runs everywhere */
-    VkDeviceCreateInfo di = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .queueCreateInfoCount = 1,
-                             .pQueueCreateInfos = &qi, .enabledExtensionCount = 1,
-                             .ppEnabledExtensionNames = &ext, .pEnabledFeatures = &feats};
+    const char *exts[4];
+    uint32_t n = 0;
+    exts[n++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+    /* Exactly what gpucaps chose: the 1.0 features through pEnabledFeatures,
+     * newer ones through one structure per version (per KHR extension on
+     * 1.2), each chained only when something in it is enabled. */
+    uint32_t m = r->caps.enabled;
+    VkPhysicalDeviceFeatures feats = {0};
+    feats.multiDrawIndirect = feats.drawIndirectFirstInstance = (m & GPUCAP_MDI) ? VK_TRUE : VK_FALSE;
+    feats.samplerAnisotropy = (m & GPUCAP_ANISO) ? VK_TRUE : VK_FALSE;
+    void *chain = NULL;
+    VkPhysicalDeviceVulkan12Features v12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+                                            .timelineSemaphore = (m & GPUCAP_TIMELINE) ? VK_TRUE : VK_FALSE,
+                                            .hostQueryReset = (m & GPUCAP_HOSTRESET) ? VK_TRUE : VK_FALSE};
+    if (v12.timelineSemaphore || v12.hostQueryReset) chain = &v12;
+    VkPhysicalDeviceVulkan13Features v13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+                                            .dynamicRendering = (m & GPUCAP_DYNREND) && !r->caps.dynrend_khr ? VK_TRUE
+                                                                                                             : VK_FALSE,
+                                            .synchronization2 = (m & GPUCAP_SYNC2) && !r->caps.sync2_khr ? VK_TRUE
+                                                                                                         : VK_FALSE};
+    if (v13.dynamicRendering || v13.synchronization2) {
+        v13.pNext = chain;
+        chain = &v13;
+    }
+    VkPhysicalDeviceDynamicRenderingFeaturesKHR dr = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR, .dynamicRendering = VK_TRUE};
+    if (r->caps.dynrend_khr) {
+        dr.pNext = chain;
+        chain = &dr;
+        exts[n++] = "VK_KHR_dynamic_rendering";
+    }
+    VkPhysicalDeviceSynchronization2FeaturesKHR s2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR, .synchronization2 = VK_TRUE};
+    if (r->caps.sync2_khr) {
+        s2.pNext = chain;
+        chain = &s2;
+        exts[n++] = "VK_KHR_synchronization2";
+    }
+#ifdef VK_API_VERSION_1_4
+    VkPhysicalDeviceVulkan14Features v14 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+                                            .hostImageCopy = VK_TRUE};
+    if (m & GPUCAP_HOSTCOPY) {
+        v14.pNext = chain;
+        chain = &v14;
+    }
+#endif
+    if (m & GPUCAP_BUDGET) exts[n++] = "VK_EXT_memory_budget";
+    VkDeviceCreateInfo di = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+                             .pNext = chain,
+                             .queueCreateInfoCount = 1,
+                             .pQueueCreateInfos = &qi,
+                             .enabledExtensionCount = n,
+                             .ppEnabledExtensionNames = exts,
+                             .pEnabledFeatures = &feats};
     VK_CHECK(vkCreateDevice(r->pd, &di, r->ac, &r->dev));
     vkGetDeviceQueue(r->dev, r->qfam, 0, &r->queue);
 }
@@ -1314,7 +1470,7 @@ renderer *renderer_create(GLFWwindow *win, const render_opts *o)
 
     create_instance(r, o->validate);
     VK_CHECK(glfwCreateWindowSurface(r->inst, win, r->ac, &r->surf));
-    pick_device(r, o->gpu_index);
+    pick_device(r, o);
     create_device(r);
     choose_surface_format(r);
     r->depth_fmt = pick_depth_format(r);

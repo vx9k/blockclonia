@@ -45,9 +45,9 @@ static void test_versions(void)
 }
 
 /* The renderer's sequence: instance from the loader, the headers and
- * MC_VK_API, then an offer holding only the two versions (no optional
- * feature is implemented yet). The renderer used to request 1.0 and show
- * "Vulkan 1.0" whatever the system offered. */
+ * MC_VK_API, then the device's offer, here one with no optional features.
+ * The renderer used to request 1.0 and show "Vulkan 1.0" whatever the
+ * system offered. */
 static uint32_t renderer_api(uint32_t loader, uint32_t headers, const char *env, uint32_t device, char *s, size_t n)
 {
     uint32_t cap = 0;
