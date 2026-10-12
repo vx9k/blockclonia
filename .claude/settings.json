@@ -1,12 +1,13 @@
 {
-  "advisorModel": "opus",
   "enabledPlugins": {
-    "claude-mem@thedotmack": true
+    "claude-mem@thedotmack": true,
+    "ponytail@ponytail": true
   },
-  "maxEffortLevel": "high",
   "outputStyle": "Proactive",
-  "showThinkingSummaries": true,
   "sandbox": {
     "enabled": true
-  }
+  },
+  "maxEffortLevel": "high",
+  "advisorModel": "opus",
+  "showThinkingSummaries": true
 }
