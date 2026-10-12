@@ -209,10 +209,13 @@ save_db *save_db_open(const char *dir)
         return NULL;
     }
     /* Write-ahead logging: a save appends to world.db-wal and syncs only at
-     * checkpoints, which keeps autosaves cheap on an SD card; a crash still
-     * leaves every committed save. With the exclusive lock the WAL needs
-     * no shared-memory file. A filesystem without WAL keeps the default
-     * rollback journal. The first write also takes the exclusive lock.
+     * checkpoints, which keeps autosaves cheap on an SD card. A crash of
+     * the game keeps every committed save, but a power cut or an OS crash
+     * can lose those since the last checkpoint (the file is not damaged:
+     * the world opens as of an earlier commit). With the exclusive lock
+     * the WAL needs no shared-memory file. A filesystem without WAL keeps
+     * the default rollback journal. The first write also takes the
+     * exclusive lock.
      * Persistent WAL stays off even where a build turns it on by default
      * (the system library on macOS appears to): closing then checkpoints
      * and deletes world.db-wal, so world.db alone is the world when it is
