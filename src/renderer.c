@@ -212,6 +212,9 @@ struct renderer {
     VkSemaphore timeline;
     PFN_vkWaitSemaphores wait_semaphores;
     PFN_vkGetSemaphoreCounterValue semaphore_value;
+    /* GPUCAP_SYNC2: the 1.3 (or KHR) barrier and submit, loaded; NULL: 1.0. */
+    PFN_vkCmdPipelineBarrier2 cmd_barrier2;
+    PFN_vkQueueSubmit2 queue_submit2;
 
     frame frames[FRAMES];
     uint32_t frame_index, image_index;
@@ -316,20 +319,65 @@ static void one_shot_end(renderer *r, VkCommandBuffer cmd)
     vkFreeCommandBuffers(r->dev, r->cmdpool, 1, &cmd);
 }
 
-static void image_barrier(VkCommandBuffer cmd, VkImage img, VkImageAspectFlags aspect, uint32_t mips,
+/* Barriers take 1.0 stage and access flags; with GPUCAP_SYNC2 they are
+ * recorded through vkCmdPipelineBarrier2, whose 64-bit flags give every 1.0
+ * bit the same value. */
+static void image_barrier(const renderer *r, VkCommandBuffer cmd, VkImage img, VkImageAspectFlags aspect, uint32_t mips,
                           uint32_t layers, VkImageLayout from, VkImageLayout to, VkAccessFlags src_access,
-                          VkAccessFlags dst_access, VkPipelineStageFlags src_stage,
-                          VkPipelineStageFlags dst_stage)
+                          VkAccessFlags dst_access, VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage)
 {
+    VkImageSubresourceRange range = {aspect, 0, mips, 0, layers};
+    if (r->cmd_barrier2) {
+        VkImageMemoryBarrier2 b = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+                                   .srcStageMask = src_stage,
+                                   .srcAccessMask = src_access,
+                                   .dstStageMask = dst_stage,
+                                   .dstAccessMask = dst_access,
+                                   .oldLayout = from,
+                                   .newLayout = to,
+                                   .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                                   .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                                   .image = img,
+                                   .subresourceRange = range};
+        VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                               .imageMemoryBarrierCount = 1,
+                               .pImageMemoryBarriers = &b};
+        r->cmd_barrier2(cmd, &di);
+        return;
+    }
     VkImageMemoryBarrier b = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = src_access, .dstAccessMask = dst_access,
-        .oldLayout = from, .newLayout = to,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .srcAccessMask = src_access,
+        .dstAccessMask = dst_access,
+        .oldLayout = from,
+        .newLayout = to,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .image = img,
-        .subresourceRange = {aspect, 0, mips, 0, layers},
+        .subresourceRange = range,
     };
     vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, NULL, 0, NULL, 1, &b);
+}
+
+static void memory_barrier(const renderer *r, VkCommandBuffer cmd, VkAccessFlags src_access, VkAccessFlags dst_access,
+                           VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage)
+{
+    if (r->cmd_barrier2) {
+        VkMemoryBarrier2 b = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                              .srcStageMask = src_stage,
+                              .srcAccessMask = src_access,
+                              .dstStageMask = dst_stage,
+                              .dstAccessMask = dst_access};
+        VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                               .memoryBarrierCount = 1,
+                               .pMemoryBarriers = &b};
+        r->cmd_barrier2(cmd, &di);
+        return;
+    }
+    VkMemoryBarrier b = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                         .srcAccessMask = src_access,
+                         .dstAccessMask = dst_access};
+    vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 1, &b, 0, NULL, 0, NULL);
 }
 
 static float srgb_to_linear(float c)
@@ -727,6 +775,17 @@ static void create_device(renderer *r)
     if (m & GPUCAP_BUDGET)
         r->memprops2 = (PFN_vkGetPhysicalDeviceMemoryProperties2)
             vkGetInstanceProcAddr(r->inst, "vkGetPhysicalDeviceMemoryProperties2");
+    if (m & GPUCAP_SYNC2) {
+        int khr = r->caps.sync2_khr;
+        r->cmd_barrier2 = (PFN_vkCmdPipelineBarrier2)vkGetDeviceProcAddr(r->dev, khr ? "vkCmdPipelineBarrier2KHR"
+                                                                                     : "vkCmdPipelineBarrier2");
+        r->queue_submit2 = (PFN_vkQueueSubmit2)vkGetDeviceProcAddr(r->dev,
+                                                                   khr ? "vkQueueSubmit2KHR" : "vkQueueSubmit2");
+        if (!r->cmd_barrier2 || !r->queue_submit2) {
+            r->cmd_barrier2 = NULL;
+            r->queue_submit2 = NULL;
+        }
+    }
 }
 
 /* -------------------------------------------------------------- swapchain */
@@ -1225,13 +1284,13 @@ static void create_font(renderer *r)
                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
     ui_font_build(st.map);
     VkCommandBuffer cmd = one_shot_begin(r);
-    image_barrier(cmd, r->font, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_UNDEFINED,
+    image_barrier(r, cmd, r->font, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_UNDEFINED,
                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
                   VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
     VkBufferImageCopy region = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                                 .imageExtent = {UI_ATLAS_W, UI_ATLAS_H, 1}};
     vkCmdCopyBufferToImage(cmd, st.buf, r->font, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-    image_barrier(cmd, r->font, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    image_barrier(r, cmd, r->font, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
                   VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
     one_shot_end(r, cmd);
@@ -1291,7 +1350,7 @@ static void create_texture(renderer *r)
     texgen_build(st.map);
 
     VkCommandBuffer cmd = one_shot_begin(r);
-    image_barrier(cmd, r->tex, VK_IMAGE_ASPECT_COLOR_BIT, TEX_MIPS, T_COUNT, VK_IMAGE_LAYOUT_UNDEFINED,
+    image_barrier(r, cmd, r->tex, VK_IMAGE_ASPECT_COLOR_BIT, TEX_MIPS, T_COUNT, VK_IMAGE_LAYOUT_UNDEFINED,
                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
                   VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
     VkBufferImageCopy regions[TEX_MIPS];
@@ -1302,10 +1361,9 @@ static void create_texture(renderer *r)
                                          .imageExtent = {s, s, 1}};
     }
     vkCmdCopyBufferToImage(cmd, st.buf, r->tex, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, TEX_MIPS, regions);
-    image_barrier(cmd, r->tex, VK_IMAGE_ASPECT_COLOR_BIT, TEX_MIPS, T_COUNT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
-                  VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    image_barrier(r, cmd, r->tex, VK_IMAGE_ASPECT_COLOR_BIT, TEX_MIPS, T_COUNT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
     one_shot_end(r, cmd);
     buffer_destroy(r, &st);
 
@@ -1969,6 +2027,55 @@ static int collect_visible(renderer *r, const world *w, const render_view *v, co
     return nvis;
 }
 
+/* Submits the frame's command buffer: it waits for the acquired image and
+ * signals render_done for the present, plus, with a timeline, the frame's
+ * serial instead of the slot's fence. */
+static void submit_frame(renderer *r, frame *f)
+{
+    VkSemaphore done = r->render_done[r->image_index];
+    VkFence fence = r->timeline ? VK_NULL_HANDLE : f->fence;
+    if (r->queue_submit2) {
+        VkSemaphoreSubmitInfo wait = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                                      .semaphore = f->image_ready,
+                                      .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT};
+        VkSemaphoreSubmitInfo sig[2] = {{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                                         .semaphore = done,
+                                         .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT},
+                                        {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                                         .semaphore = r->timeline,
+                                         .value = f->serial,
+                                         .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}};
+        VkCommandBufferSubmitInfo cb = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = f->cmd};
+        VkSubmitInfo2 si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+                            .waitSemaphoreInfoCount = 1,
+                            .pWaitSemaphoreInfos = &wait,
+                            .commandBufferInfoCount = 1,
+                            .pCommandBufferInfos = &cb,
+                            .signalSemaphoreInfoCount = r->timeline ? 2u : 1u,
+                            .pSignalSemaphoreInfos = sig};
+        VK_CHECK(r->queue_submit2(r->queue, 1, &si, fence));
+        return;
+    }
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSemaphore signals[2] = {done, r->timeline};
+    uint64_t values[2] = {0, f->serial}; /* binary semaphores ignore their value */
+    VkTimelineSemaphoreSubmitInfo ti = {.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+                                        .waitSemaphoreValueCount = 1,
+                                        .pWaitSemaphoreValues = values,
+                                        .signalSemaphoreValueCount = 2,
+                                        .pSignalSemaphoreValues = values};
+    VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                       .pNext = r->timeline ? &ti : NULL,
+                       .waitSemaphoreCount = 1,
+                       .pWaitSemaphores = &f->image_ready,
+                       .pWaitDstStageMask = &wait_stage,
+                       .commandBufferCount = 1,
+                       .pCommandBuffers = &f->cmd,
+                       .signalSemaphoreCount = r->timeline ? 2u : 1u,
+                       .pSignalSemaphores = signals};
+    VK_CHECK(vkQueueSubmit(r->queue, 1, &si, fence));
+}
+
 /* The frame-independent part of the stats, then publishes them. */
 static void finish_stats(renderer *r, render_stats *st)
 {
@@ -2012,10 +2119,8 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         copied = 1;
     }
     if (copied) {
-        VkMemoryBarrier mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-                              .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT};
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 1, &mb, 0,
-                             NULL, 0, NULL);
+        memory_barrier(r, cmd, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT);
     }
 
     /* Camera and fog. */
@@ -2265,16 +2370,16 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                       VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
         VkImage img = r->images[r->image_index];
-        image_barrier(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        image_barrier(r, cmd, img, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                       VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                       VK_PIPELINE_STAGE_TRANSFER_BIT);
         VkBufferImageCopy region = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                                     .imageExtent = {r->extent.width, r->extent.height, 1}};
         vkCmdCopyImageToBuffer(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, shot_buf.buf, 1, &region);
-        image_barrier(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                      VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_READ_BIT, 0,
-                      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+        image_barrier(r, cmd, img, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                      VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_READ_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                      VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
     } else if (r->shot_pending && !r->shot_supported) {
         log_error("this surface does not allow reading back swapchain images");
         r->shot_pending = 0;
@@ -2287,26 +2392,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     VK_CHECK(vkEndCommandBuffer(cmd));
 
     f->serial = ++r->submitted;
-    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .waitSemaphoreCount = 1,
-                       .pWaitSemaphores = &f->image_ready, .pWaitDstStageMask = &wait_stage,
-                       .commandBufferCount = 1, .pCommandBuffers = &cmd, .signalSemaphoreCount = 1,
-                       .pSignalSemaphores = &r->render_done[r->image_index]};
-    /* Timeline: also signal the frame's serial (binary semaphores ignore
-     * their value), and no fence. */
-    VkSemaphore signals[2] = {r->render_done[r->image_index], r->timeline};
-    uint64_t values[2] = {0, f->serial};
-    VkTimelineSemaphoreSubmitInfo ti = {.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
-                                        .waitSemaphoreValueCount = 1,
-                                        .pWaitSemaphoreValues = values,
-                                        .signalSemaphoreValueCount = 2,
-                                        .pSignalSemaphoreValues = values};
-    if (r->timeline) {
-        si.pNext = &ti;
-        si.signalSemaphoreCount = 2;
-        si.pSignalSemaphores = signals;
-    }
-    VK_CHECK(vkQueueSubmit(r->queue, 1, &si, r->timeline ? VK_NULL_HANDLE : f->fence));
+    submit_frame(r, f);
     st.cpu_ms = (float)((glfwGetTime() - t_start) * 1000.0); /* present can wait for vsync: not counted */
 
     VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .waitSemaphoreCount = 1,

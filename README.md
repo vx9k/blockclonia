@@ -252,6 +252,7 @@ entirely.
 | Memory budget (`budget`, `VK_EXT_memory_budget` on 1.1+) | The vertex pool stops growing at the driver's budget instead of evicting other memory (or, with shared memory, squeezing the system); F3 shows use against the budget |
 | Relaxed FIFO with vsync on (`relaxed`, where the surface offers it) | A frame that misses a vblank tears briefly instead of waiting a whole refresh |
 | One timeline semaphore paces the frames (`timeline`, 1.2) | One counter tells which frames have finished, instead of a fence per frame to wait on and reset |
+| Synchronization2 barriers and submits (`sync2`; 1.3, or the KHR extension on 1.2) | The same synchronization through the newer API; dynamic rendering needs it |
 | GPU timestamps around each frame (`timestamps`; reset from the CPU with `hostreset` on 1.2) | F3 shows the GPU time of a frame next to the CPU time spent recording it |
 | Pipeline cache kept on disk between runs (`pcache`) | Pipelines build from it where the driver has no shader cache of its own (Intel with Mesa's cache off: 40 ms to 3 ms) |
 
