@@ -225,6 +225,10 @@ struct renderer {
     VkQueryPool queries;
     PFN_vkResetQueryPool reset_queries;
     float gpu_ms;
+    /* GPUCAP_BUDGET: vkGetPhysicalDeviceMemoryProperties2 (1.1, loaded),
+     * else NULL; the last reading for the stats. */
+    PFN_vkGetPhysicalDeviceMemoryProperties2 memprops2;
+    uint32_t vram_used_mb, vram_budget_mb;
     int pool_full_warned;
 };
 
@@ -714,6 +718,9 @@ static void create_device(renderer *r)
                              .pEnabledFeatures = &feats};
     VK_CHECK(vkCreateDevice(r->pd, &di, r->ac, &r->dev));
     vkGetDeviceQueue(r->dev, r->qfam, 0, &r->queue);
+    if (m & GPUCAP_BUDGET)
+        r->memprops2 = (PFN_vkGetPhysicalDeviceMemoryProperties2)
+            vkGetInstanceProcAddr(r->inst, "vkGetPhysicalDeviceMemoryProperties2");
 }
 
 /* -------------------------------------------------------------- swapchain */
@@ -1394,9 +1401,36 @@ static void create_static_buffers(renderer *r)
 
 /* ------------------------------------------------------------ vertex pool */
 
+/* This process's use of device-local memory and the budget the driver
+ * grants it (VK_EXT_memory_budget), in bytes; both 0 without GPUCAP_BUDGET. */
+static void query_budget(const renderer *r, VkDeviceSize *used, VkDeviceSize *budget)
+{
+    *used = *budget = 0;
+    if (!r->memprops2) return;
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT mb = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
+    VkPhysicalDeviceMemoryProperties2 mp = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2,
+                                            .pNext = &mb};
+    r->memprops2(r->pd, &mp);
+    for (uint32_t h = 0; h < mp.memoryProperties.memoryHeapCount && h < VK_MAX_MEMORY_HEAPS; h++)
+        if (mp.memoryProperties.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+            *used += mb.heapUsage[h];
+            *budget += mb.heapBudget[h];
+        }
+}
+
 static int pool_add_block(renderer *r, VkDeviceSize bytes)
 {
     if (r->pool_blocks == MAX_POOL_BLOCKS) return 0;
+    if (r->pool_blocks) {
+        /* Growing past the budget would evict other memory, or on a
+         * shared-memory device (the Pi) squeeze the rest of the system:
+         * keep the old meshes instead. Without the budget the driver's
+         * refusal is the only limit. */
+        VkDeviceSize used, budget;
+        query_budget(r, &used, &budget);
+        if (budget && used + bytes > budget) return 0;
+    }
     pool_block *b = &r->pool[r->pool_blocks];
     /* Integrated GPUs share RAM with the CPU: meshes are written straight
      * into the pool and the staging copy is skipped. */
@@ -1898,6 +1932,25 @@ static int collect_visible(renderer *r, const world *w, const render_view *v, co
     return nvis;
 }
 
+/* The frame-independent part of the stats, then publishes them. */
+static void finish_stats(renderer *r, render_stats *st)
+{
+    st->gpu_ms = r->gpu_ms;
+    if (r->memprops2 && r->submitted % 30 == 1) { /* twice a second at 60 fps is plenty for F3 */
+        VkDeviceSize used, budget;
+        query_budget(r, &used, &budget);
+        r->vram_used_mb = (uint32_t)(used >> 20);
+        r->vram_budget_mb = (uint32_t)(budget >> 20);
+    }
+    st->vram_used_mb = r->vram_used_mb;
+    st->vram_budget_mb = r->vram_budget_mb;
+    for (int b = 0; b < r->pool_blocks; b++) {
+        st->pool_used_kb += (uint32_t)((uint64_t)r->pool[b].alloc.used * 4 / 1024);
+        st->pool_total_kb += (uint32_t)((uint64_t)r->pool[b].alloc.total * 4 / 1024);
+    }
+    r->stats = *st;
+}
+
 void renderer_end_frame(renderer *r, const world *w, const physics *ph, const render_view *v, double alpha)
 {
     if (!r->frame_active) return;
@@ -2220,12 +2273,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     }
 
     st.sections_drawn = nvis;
-    st.gpu_ms = r->gpu_ms;
-    for (int b = 0; b < r->pool_blocks; b++) {
-        st.pool_used_kb += (uint32_t)((uint64_t)r->pool[b].alloc.used * 4 / 1024);
-        st.pool_total_kb += (uint32_t)((uint64_t)r->pool[b].alloc.total * 4 / 1024);
-    }
-    r->stats = st;
+    finish_stats(r, &st);
     r->frame_active = 0;
     r->frame_index = (r->frame_index + 1) % FRAMES;
 }
