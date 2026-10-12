@@ -9,15 +9,9 @@
 #include <stdlib.h>
 
 /* flockfile keeps the message and its newline together when worker threads
- * log at the same time as the main thread. The Windows C runtime calls it
- * _lock_file. */
-#ifdef _WIN32
-#define MC_LOCK_FILE _lock_file
-#define MC_UNLOCK_FILE _unlock_file
-#else
+ * log at the same time as the main thread. */
 #define MC_LOCK_FILE flockfile
 #define MC_UNLOCK_FILE funlockfile
-#endif
 /* clang-format off */
 #define MC_LOG_LINE(...)                        \
     do {                                        \

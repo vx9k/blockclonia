@@ -12,8 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Longest world folder path, resolved; Linux's PATH_MAX. MSVC has no
- * PATH_MAX and MinGW's is MAX_PATH, shorter than UTF-8 paths can be. */
+/* Longest world folder path, resolved; Linux's PATH_MAX, fixed here so
+ * the buffers do not shrink where PATH_MAX is smaller. */
 #define DB_PATH_MAX 4096
 
 /* SQLITE_OPEN_NOFOLLOW and trusted_schema, which opening shared files
@@ -166,9 +166,7 @@ static int check_or_create(sqlite3 *h, const char *path)
 
 /* The database and the files SQLite keeps beside it must be regular files
  * or absent: a symlink planted as world.db-journal would otherwise have
- * SQLite write through it (older SQLite releases do not refuse one, and
- * its Windows VFS ignores SQLITE_OPEN_NOFOLLOW altogether, which leaves
- * this check as the guard there). */
+ * SQLite write through it (older SQLite releases do not refuse one). */
 static int side_files_ok(const char *path)
 {
     static const char *const SUFFIX[] = {"", "-journal", "-wal", "-shm"};

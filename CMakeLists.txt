@@ -60,12 +60,6 @@ endif()
 
 set(MC_CPU_FLAGS "")
 if(MC_CPU STREQUAL "")
-elseif(MSVC)
-  if(MC_CPU STREQUAL "x86-64-v3")
-    set(MC_CPU_FLAGS /arch:AVX2)
-  elseif(NOT MC_CPU STREQUAL "x86-64-v2")
-    message(WARNING "MC_CPU=${MC_CPU} is ignored with MSVC")
-  endif()
 elseif(MC_CPU STREQUAL "native")
   if(MC_ARM32 AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
     # Raspberry Pi OS's gcc defaults to -mfpu=vfp; auto derives NEON from the CPU.
@@ -97,9 +91,7 @@ endif()
 if(MC_CPU_FLAGS)
   message(STATUS "blockclonia: CPU flags ${MC_CPU_FLAGS}")
   add_compile_options(${MC_CPU_FLAGS})
-  if(NOT MSVC)
-    add_link_options(${MC_CPU_FLAGS}) # LTO code generation happens at link time
-  endif()
+  add_link_options(${MC_CPU_FLAGS}) # LTO code generation happens at link time
 endif()
 
 # ---------------------------------------------------------------- dependencies
@@ -129,12 +121,8 @@ endif()
 # Linked privately to our own targets, so fetched GLFW and mimalloc never
 # see these flags. The gcc/clang set is in cmake/warnings.cmake.
 add_library(mc_warnings INTERFACE)
-if(MSVC)
-  target_compile_options(mc_warnings INTERFACE /W4 $<$<BOOL:${MC_WERROR}>:/WX>)
-else()
-  include(warnings)
-  target_compile_options(mc_warnings INTERFACE ${MC_WARNINGS})
-endif()
+include(warnings)
+target_compile_options(mc_warnings INTERFACE ${MC_WARNINGS})
 
 # ---------------------------------------------------------------- core
 # Everything that does not touch Vulkan or a window: the tests and the
@@ -183,15 +171,7 @@ function(mc_add_core name)
   if(NOT MC_SANITIZE)
     target_link_libraries(${name} PUBLIC mc::mimalloc)
   endif()
-  if(NOT MSVC)
-    target_link_libraries(${name} PUBLIC m)
-  else()
-    # sound.c's lock-free ring needs <stdatomic.h>, which MSVC (17.5+) only
-    # offers behind this switch. The CRT "secure" variants (strcpy_s, ...)
-    # would split the code by platform for no gain over its own checks.
-    target_compile_options(${name} PUBLIC /experimental:c11atomics)
-    target_compile_definitions(${name} PUBLIC _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
-  endif()
+  target_link_libraries(${name} PUBLIC m)
   if(MC_VK_MIMALLOC AND NOT MC_SANITIZE AND TARGET Vulkan::Headers)
     target_compile_definitions(${name} PRIVATE MC_VK_MIMALLOC) # only mem.c reads it
     target_link_libraries(${name} PRIVATE Vulkan::Headers)
@@ -201,15 +181,11 @@ endfunction()
 mc_add_core(mccore)
 
 if(MC_SANITIZE)
-  if(MSVC)
-    target_compile_options(mccore PUBLIC /fsanitize=address)
-  else()
-    # -fno-sanitize-recover: a UBSan finding fails the test instead of
-    # printing a line nobody reads.
-    set(_san -fsanitize=address,undefined -fno-sanitize-recover=undefined)
-    target_compile_options(mccore PUBLIC ${_san} -fno-omit-frame-pointer)
-    target_link_options(mccore PUBLIC ${_san})
-  endif()
+  # -fno-sanitize-recover: a UBSan finding fails the test instead of
+  # printing a line nobody reads.
+  set(_san -fsanitize=address,undefined -fno-sanitize-recover=undefined)
+  target_compile_options(mccore PUBLIC ${_san} -fno-omit-frame-pointer)
+  target_link_options(mccore PUBLIC ${_san})
   # ASan cannot see mi_* allocations, so sanitizer builds use libc malloc.
   target_compile_definitions(mccore PUBLIC MC_MEM_LIBC)
 endif()
@@ -223,22 +199,11 @@ if(MC_BUILD_GAME)
     add_executable(blockclonia src/main.c src/renderer.c src/audio_null.c)
   endif()
   target_link_libraries(blockclonia PRIVATE mccore Vulkan::Vulkan mc::glfw mc_warnings)
-  # Windows: a manifest switches the narrow APIs to UTF-8 (see the file).
-  if(MSVC)
-    target_sources(blockclonia PRIVATE cmake/windows/blockclonia.manifest)
-  elseif(WIN32)
-    enable_language(RC)
-    target_sources(blockclonia PRIVATE cmake/windows/blockclonia.rc)
-    set_property(SOURCE cmake/windows/blockclonia.rc APPEND PROPERTY
-      INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/windows")
-  endif()
 
   include(Shaders)
   mc_compile_shaders(blockclonia
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders
     SOURCES block.vert block.frag entity.vert line.vert line.frag ui.vert ui.frag)
-  mc_copy_runtime_dlls(blockclonia) # Windows: mimalloc DLLs next to the exe
-  set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT blockclonia)
 endif()
 
 # ---------------------------------------------------------------- tests
@@ -249,11 +214,6 @@ if(MC_BUILD_TESTS)
                           tests/test_health_debug.c tests/test_defib.c tests/test_paths.c
                           tests/test_save_db.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
-  if(MSVC)
-    # C4127 (constant condition) fires on CHECKs of compile-time facts, such
-    # as a table's length, which the tests verify on purpose.
-    target_compile_options(mc_tests PRIVATE /wd4127)
-  endif()
   add_test(NAME unit COMMAND mc_tests)
   set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT 120)
 

@@ -6,7 +6,7 @@
 #           toolchain file) if a usable version is found, else the pinned
 #           release below, downloaded and built as part of this project
 #   SYSTEM  the system only; never touches the network (distro packaging)
-#   FETCH   always the pinned release (Windows/macOS builds, portable Linux
+#   FETCH   always the pinned release (macOS builds, portable Linux
 #           tarballs, reproducible CI)
 #
 # Provides the interface targets mc::mimalloc, mc::sqlite and mc::glfw.
@@ -50,10 +50,6 @@ endfunction()
 #   Linux/BSD  shared libmimalloc (system package) or static with MI_OVERRIDE:
 #              either way the process's malloc symbol resolves to mimalloc,
 #              including in drivers the Vulkan loader dlopen()s later.
-#   Windows    (MSVC) only the DLL build with mimalloc-redirect.dll next to
-#              the exe patches the CRT's malloc, and only with the dynamic
-#              CRT (/MD, CMake's default).
-#   MinGW      no override; the game's own mi_* calls still use mimalloc.
 #   macOS      static build registers mimalloc as the default malloc zone
 #              (expected from mimalloc's docs; not yet tested here).
 #   Android    no override is possible (bionic); explicit mi_* only.
@@ -61,7 +57,6 @@ endfunction()
 # glfwInitAllocator (GLFW 3.4+) are the way to reach third-party code.
 add_library(mc_mimalloc INTERFACE)
 add_library(mc::mimalloc ALIAS mc_mimalloc)
-set(MC_MIMALLOC_DLL "") # Windows: DLLs to ship next to the exe
 
 # The game targets mimalloc 3.x (the pinned release). AUTO only takes a
 # system copy at least as new as MC_MIMALLOC_MIN_AUTO and otherwise builds
@@ -113,11 +108,7 @@ else()
     # Newer mimalloc releases can add -march=armv8.1-a (LSE atomics) on
     # arm64, which faults on the Pi 4's Cortex-A72 (ARMv8.0). MC_CPU decides.
     set(MI_OPT_ARCH OFF)
-    if(MSVC)
-      set(MI_BUILD_SHARED ON)
-      set(MI_BUILD_STATIC OFF)
-      set(MI_OVERRIDE ON)
-    elseif(ANDROID OR MINGW)
+    if(ANDROID)
       set(MI_BUILD_SHARED OFF)
       set(MI_BUILD_STATIC ON)
       set(MI_OVERRIDE OFF)
@@ -133,35 +124,9 @@ else()
     FetchContent_MakeAvailable(mimalloc)
   endfunction()
   _mc_fetch_mimalloc()
-  if(MSVC)
-    target_link_libraries(mc_mimalloc INTERFACE mimalloc)
-    # Load mimalloc.dll before any other DLL allocates.
-    if(CMAKE_SIZEOF_VOID_P EQUAL 4)
-      target_link_options(mc_mimalloc INTERFACE /INCLUDE:_mi_version)
-    else()
-      target_link_options(mc_mimalloc INTERFACE /INCLUDE:mi_version)
-    endif()
-    FetchContent_GetProperties(mimalloc SOURCE_DIR _mi_src)
-    if(CMAKE_SIZEOF_VOID_P EQUAL 4)
-      set(_redirect "${_mi_src}/bin/mimalloc-redirect32.dll")
-    else()
-      set(_redirect "${_mi_src}/bin/mimalloc-redirect.dll")
-    endif()
-    set(MC_MIMALLOC_DLL "$<TARGET_FILE:mimalloc>;${_redirect}")
-  else()
-    target_link_libraries(mc_mimalloc INTERFACE mimalloc-static)
-  endif()
+  target_link_libraries(mc_mimalloc INTERFACE mimalloc-static)
   message(STATUS "blockclonia: mimalloc ${MC_MIMALLOC_VERSION} (built from source)")
 endif()
-
-# Copies the mimalloc DLLs next to an executable (Windows only; no-op elsewhere).
-function(mc_copy_runtime_dlls target)
-  if(MC_MIMALLOC_DLL)
-    add_custom_command(TARGET ${target} POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${MC_MIMALLOC_DLL} $<TARGET_FILE_DIR:${target}>
-      COMMAND_EXPAND_LISTS VERBATIM)
-  endif()
-endfunction()
 
 # ---------------------------------------------------------------- SQLite
 # World saves (save_db.c), so the core needs it, game or not. 3.31 is the
@@ -205,10 +170,8 @@ else()
   # crafted world file can reach.
   target_compile_definitions(mc_sqlite_impl PRIVATE SQLITE_OMIT_LOAD_EXTENSION SQLITE_DQS=0
                              SQLITE_OMIT_SHARED_CACHE SQLITE_OMIT_DEPRECATED SQLITE_DEFAULT_MEMSTATUS=0)
-  if(NOT MSVC)
-    target_compile_options(mc_sqlite_impl PRIVATE -w)
-    target_link_libraries(mc_sqlite_impl PUBLIC Threads::Threads m)
-  endif()
+  target_compile_options(mc_sqlite_impl PRIVATE -w)
+  target_link_libraries(mc_sqlite_impl PUBLIC Threads::Threads m)
   target_link_libraries(mc_sqlite INTERFACE mc_sqlite_impl)
   message(STATUS "blockclonia: SQLite ${MC_SQLITE_VERSION} (built from source)")
 endif()
@@ -267,7 +230,7 @@ endif()
 # ---------------------------------------------------------------- miniaudio
 # Sound output only: the game mixes its own procedural sounds and hands
 # miniaudio a callback. miniaudio loads the platform's audio library at run
-# time (ALSA, PulseAudio, PipeWire through Pulse, WASAPI, CoreAudio, AAudio),
+# time (ALSA, PulseAudio, PipeWire through Pulse, CoreAudio, AAudio),
 # so nothing new is linked. Its implementation is compiled once, trimmed to
 # the device API, in a target of its own without the game's warnings.
 # Provides mc::miniaudio and sets MC_SOUND_ENABLED.
@@ -312,10 +275,8 @@ if(MC_BUILD_GAME AND MC_SOUND)
     configure_file("${_ma_impl}.in" "${_ma_impl}" COPYONLY)
     add_library(mc_miniaudio_impl STATIC "${_ma_impl}")
     target_include_directories(mc_miniaudio_impl SYSTEM PUBLIC "${_ma_dir}")
-    if(NOT MSVC)
-      target_compile_options(mc_miniaudio_impl PRIVATE -w)
-      target_link_libraries(mc_miniaudio_impl PUBLIC ${CMAKE_DL_LIBS} Threads::Threads m)
-    endif()
+    target_compile_options(mc_miniaudio_impl PRIVATE -w)
+    target_link_libraries(mc_miniaudio_impl PUBLIC ${CMAKE_DL_LIBS} Threads::Threads m)
     target_compile_definitions(mc_miniaudio_impl PUBLIC MA_NO_DECODING MA_NO_ENCODING MA_NO_GENERATION
                                MA_NO_RESOURCE_MANAGER MA_NO_NODE_GRAPH MA_NO_ENGINE)
     add_library(mc_miniaudio INTERFACE)
