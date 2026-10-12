@@ -1192,8 +1192,7 @@ static void create_frames(renderer *r, uint32_t pool_mb)
 
 static void on_mesh_free(void *user, section_mesh *m)
 {
-    renderer *r = user;
-    if (m->vtx_capacity) defer_free(r, m->block, m->vtx_offset, m->vtx_capacity);
+    if (m->vtx_capacity) defer_free(user, m->block, m->vtx_offset, m->vtx_capacity);
     memset(m, 0, sizeof *m);
 }
 

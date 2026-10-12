@@ -15,8 +15,10 @@ camera_pose camera_update(camera_anim *c, const player *p, float landing, float 
 
     /* The stride: one step per ~0.7-1.2 m depending on pace, so the bob
      * follows the feet instead of a clock. */
-    float step = 0.7f + 0.08f * hs;
-    if (walking) c->stride = fmodf(c->stride + hs * dt / step * (float)MC_PI, 2.0f * (float)MC_PI);
+    if (walking) {
+        float step = 0.7f + 0.08f * hs;
+        c->stride = fmodf(c->stride + hs * dt / step * (float)MC_PI, 2.0f * (float)MC_PI);
+    }
     c->bob = anim_approach(c->bob, walking ? anim_clamp01(hs / (float)SPRINT_SPEED * 1.25f) : 0.0f, 8.0f, dt);
     c->sprint = anim_approach(c->sprint, p->sprinting ? 1.0f : 0.0f, 6.0f, dt);
     c->crouch = anim_approach(c->crouch, p->sneaking ? 0.3f : 0.0f, 12.0f, dt);
@@ -38,12 +40,12 @@ camera_pose camera_update(camera_anim *c, const player *p, float landing, float 
 
     float s = sinf(c->stride);
     float amp = (0.05f + 0.035f * c->sprint) * c->bob;
-    float vertical = -amp * s * s;             /* lowest as each foot lands */
     float lateral = amp * 0.9f * s; /* sways toward the stance foot, one side per step */
     float rx = cosf(p->yaw), rz = sinf(p->yaw); /* camera right */
 
     o.dy = -c->crouch;
     if (effects) {
+        float vertical = -amp * s * s; /* lowest as each foot lands */
         o.dx = rx * lateral;
         o.dz = rz * lateral;
         o.dy += vertical + c->dip;

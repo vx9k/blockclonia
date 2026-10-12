@@ -663,7 +663,7 @@ static void apply_hurt(health *h, const char *list)
     char buf[256];
     snprintf(buf, sizeof buf, "%s", list);
     char *save = NULL;
-    for (char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
+    for (const char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
         /* "pads" puts a defibrillator's pads on rather than causing an
          * injury, so it isn't in HEALTH_DEBUG_KINDS with the rest. */
         if (!strcmp(t, "pads")) {
