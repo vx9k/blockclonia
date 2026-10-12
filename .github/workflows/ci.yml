@@ -199,12 +199,25 @@ jobs:
           MVK_CONFIG_LOG_LEVEL: 2
         run: |
           rc=0
-          for off in "" hostcopy all; do
-            echo "== MC_VK_DISABLE=$off"
+          mkdir -p shots
+          # Each run holds something, so the screenshots show the view model:
+          # a solid block and an item card (it has transparent texels).
+          for run in default:log default:stick hostcopy:stick all:stick; do
+            off=${run%%:*} held=${run#*:}
+            [ "$off" = default ] && off=
+            echo "== MC_VK_DISABLE=$off holding $held"
             MC_VK_DISABLE=$off lldb --batch -o run -k 'bt 30' -k 'quit 1' -- \
-              ./build/macos/blockclonia --validate --no-sound --no-save --seed 1337 --play --frames 60 || rc=1
+              ./build/macos/blockclonia --validate --no-sound --no-save --seed 1337 --play --frames 60 \
+              --give "$held:1" --screenshot "shots/${run/:/-}.ppm" || rc=1
           done
           exit $rc
+      - name: Upload the macOS screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-screenshots
+          path: shots/
+          if-no-files-found: ignore
 
   # Every push to main that passes the jobs below replaces the "nightly"
   # prerelease (and its tag) with the packages built from that commit.

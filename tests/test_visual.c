@@ -126,7 +126,7 @@ static void test_vm_parts(void)
     CHECK(n == 3 && vm.shown_id == B_LOG);
     const block_def *d = block_get(B_LOG);
     CHECK(out[HELD].tex == ((uint32_t)d->tex[0] | (uint32_t)d->tex[2] << 8 | (uint32_t)d->tex[3] << 16));
-    CHECK(fabsf(out[HELD].scale[0] - 0.22f) < 1e-6f && fabsf(out[HELD].scale[2] - 0.22f) < 1e-6f);
+    CHECK(fabsf(out[HELD].scale[0] - 0.18f) < 1e-6f && fabsf(out[HELD].scale[2] - 0.18f) < 1e-6f);
     CHECK(faces_seen(&out[HELD]) == 3); /* top and two sides */
     CHECK(vm_sane(out, n) && in_view(out[HELD].pos));
     CHECK(dist3(out[HELD].pos, out[HAND].pos) < 0.2f); /* in the hand */
