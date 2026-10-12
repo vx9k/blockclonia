@@ -247,6 +247,7 @@ entirely.
 | Meshing and generation on worker threads from private snapshots | Main thread never waits, edits never race |
 | Procedural textures with mipmaps and procedural sound, generated at startup | No asset files to ship or parse |
 | Vulkan 1.0 core with zero required optional features | Runs on anything with a Vulkan driver, including Raspberry Pi (V3DV) |
+| Pipeline cache kept on disk between runs (`pcache`) | Pipelines build from it where the driver has no shader cache of its own (Intel with Mesa's cache off: 40 ms to 3 ms) |
 
 By default the renderer negotiates the highest API version the loader,
 the Vulkan headers it was built against and the renderer itself (1.4)

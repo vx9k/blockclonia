@@ -4,6 +4,8 @@
 #include "log.h"
 #include "mem.h"
 #include "mesher.h"
+#include "paths.h"
+#include "save.h"
 #include "texgen.h"
 
 /* GLFW_INCLUDE_VULKAN adds vulkan.h on top of the default OpenGL header;
@@ -30,6 +32,9 @@
 #define DYN_SIZE (1u << 20)
 #define DYN_LINES_BYTES 1024u
 #define ZNEAR 0.05f
+/* The renderer's seven pipelines make a cache of a few hundred KB; a file
+ * many times larger is not one this build wrote. */
+#define PCACHE_MAX (16u << 20)
 
 static const uint32_t SPV_BLOCK_VERT[] =
 #include "block.vert.inc"
@@ -179,6 +184,8 @@ struct renderer {
     VkDeviceMemory font_mem;
     VkImageView font_view;
     VkCommandPool cmdpool;
+    VkPipelineCache pcache;       /* VK_NULL_HANDLE without GPUCAP_PCACHE */
+    char pcache_path[PATHS_MAX];
 
     VkImage tex;
     VkDeviceMemory tex_mem;
@@ -911,6 +918,55 @@ static void create_render_pass(renderer *r)
     VK_CHECK(vkCreateRenderPass(r->dev, &ci, r->ac, &r->pass));
 }
 
+/* Pipelines build from the cache file of the last run where it was written
+ * by this driver on this device; the file is untrusted, so anything torn,
+ * oversized or foreign (gpucaps_pipeline_cache_load) starts an empty
+ * cache instead. Returns the data handed to the driver (mem_alloc'd, may
+ * be NULL) so the save can skip an unchanged cache. */
+static void *create_pipeline_cache(renderer *r, const render_opts *o, size_t *loaded)
+{
+    *loaded = 0;
+    if (!(r->caps.enabled & GPUCAP_PCACHE)) return NULL;
+    const char *path = o->pipeline_cache ? o->pipeline_cache : "blockclonia.pipelines";
+    size_t n = strlen(path);
+    if (n >= sizeof r->pcache_path) return NULL;
+    memcpy(r->pcache_path, path, n + 1);
+    void *data = gpucaps_pipeline_cache_load(path, PCACHE_MAX, r->props.vendorID, r->props.deviceID,
+                                             r->props.pipelineCacheUUID, loaded);
+    VkPipelineCacheCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
+                                    .initialDataSize = *loaded,
+                                    .pInitialData = data};
+    if (vkCreatePipelineCache(r->dev, &ci, r->ac, &r->pcache) != VK_SUCCESS) {
+        /* A driver may still refuse data it wrote itself: start empty. */
+        ci.initialDataSize = 0;
+        ci.pInitialData = NULL;
+        VK_CHECK(vkCreatePipelineCache(r->dev, &ci, r->ac, &r->pcache));
+    }
+    return data;
+}
+
+/* Writes the cache once the pipelines exist (they are all made at start-up),
+ * through save_write_file's temporary file and rename, unless the driver
+ * returns exactly what was loaded. */
+static void save_pipeline_cache(renderer *r, const void *loaded, size_t loaded_size)
+{
+    if (!r->pcache) return;
+    size_t n = 0;
+    /* A bare header holds nothing (lavapipe caches nothing); bigger than the cap would be refused next run. */
+    if (vkGetPipelineCacheData(r->dev, r->pcache, &n, NULL) != VK_SUCCESS || n <= GPUCACHE_HEADER_SIZE ||
+        n > PCACHE_MAX)
+        return;
+    void *data = mem_alloc(n);
+    if (vkGetPipelineCacheData(r->dev, r->pcache, &n, data) == VK_SUCCESS &&
+        !(n == loaded_size && loaded && memcmp(data, loaded, n) == 0)) {
+        char dir[PATHS_MAX];
+        if (paths_parent(r->pcache_path, dir, sizeof dir) == 0) (void)paths_make_dirs(dir);
+        if (save_write_file(r->pcache_path, data, n) != 0)
+            log_warn("could not write pipeline cache %s", r->pcache_path);
+    }
+    mem_free(data);
+}
+
 static VkShaderModule make_module(renderer *r, const uint32_t *code, size_t bytes)
 {
     VkShaderModuleCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = bytes,
@@ -986,7 +1042,7 @@ static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
                                        .renderPass = r->pass,
                                        .subpass = 0};
     VkPipeline p;
-    VK_CHECK(vkCreateGraphicsPipelines(r->dev, VK_NULL_HANDLE, 1, &ci, r->ac, &p));
+    VK_CHECK(vkCreateGraphicsPipelines(r->dev, r->pcache, 1, &ci, r->ac, &p));
     return p;
 }
 
@@ -1476,8 +1532,17 @@ renderer *renderer_create(GLFWwindow *win, const render_opts *o)
     r->depth_fmt = pick_depth_format(r);
     create_render_pass(r);
     if (!create_swapchain(r)) log_fatal("window has zero size at startup");
+    size_t cache_size;
+    void *cache = create_pipeline_cache(r, o, &cache_size);
+    double t0 = glfwGetTime();
     create_pipelines(r);
     create_ui_pipeline(r);
+    log_info("pipelines built in %.1f ms (%s)", (glfwGetTime() - t0) * 1000.0,
+             !r->pcache ? "no cache"
+             : cache    ? "from the cache"
+                        : "no usable cache file, starting empty");
+    save_pipeline_cache(r, cache, cache_size);
+    mem_free(cache);
 
     uint32_t pool_mb = o->pool_mb;
     if (!pool_mb) {
@@ -1541,6 +1606,7 @@ void renderer_destroy(renderer *r)
     destroy_swap_resources(r);
     vkDestroySwapchainKHR(r->dev, r->swap, r->ac);
     vkDestroyRenderPass(r->dev, r->pass, r->ac);
+    vkDestroyPipelineCache(r->dev, r->pcache, r->ac);
     vkDestroyDevice(r->dev, r->ac);
     vkDestroySurfaceKHR(r->inst, r->surf, r->ac);
     if (r->dbg) {

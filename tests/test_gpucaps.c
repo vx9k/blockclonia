@@ -1,7 +1,11 @@
 /* Choosing Vulkan features from what the GPU offers (gpucaps.c). */
 #include "gpucaps.h"
+#include "mem.h"
+#include "paths.h"
+#include "save.h"
 #include "test_util.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* A 1.4 desktop device offering everything the renderer can use. */
@@ -339,6 +343,54 @@ static void test_pipeline_cache_header(void)
     CHECK(!gpucaps_pipeline_cache_ok(blob, sizeof blob, 1u << 20, 0x8086, 0x46d0, uuid)); /* header past the end */
 }
 
+/* The cache file is untrusted: only a regular file whose header matches the
+ * device and that fits the cap reaches the driver. */
+static void test_pipeline_cache_load(void)
+{
+    char dir[256], good[300], other[300], link[300], sub[300];
+    if (!tmp_dir_make(dir, sizeof dir, "mc_pcache_")) {
+        CHECK(0);
+        return;
+    }
+    snprintf(good, sizeof good, "%s/good", dir);
+    snprintf(other, sizeof other, "%s/other", dir);
+    snprintf(link, sizeof link, "%s/link", dir);
+    snprintf(sub, sizeof sub, "%s/sub", dir);
+    uint8_t uuid[16];
+    for (int i = 0; i < 16; i++) uuid[i] = (uint8_t)(i + 3);
+    uint8_t blob[100];
+    memset(blob, 0x5A, sizeof blob);
+    put_u32(blob, 32);
+    put_u32(blob + 4, 1);
+    put_u32(blob + 8, 0x8086);
+    put_u32(blob + 12, 0x46d0);
+    memcpy(blob + 16, uuid, 16);
+    size_t n = 7;
+    void *p;
+
+    CHECK(gpucaps_pipeline_cache_load(good, 4096, 0x8086, 0x46d0, uuid, &n) == NULL && n == 0); /* missing */
+    CHECK(save_write_file(good, blob, sizeof blob) == 0);
+    p = gpucaps_pipeline_cache_load(good, 4096, 0x8086, 0x46d0, uuid, &n);
+    CHECK(p && n == sizeof blob && memcmp(p, blob, n) == 0);
+    mem_free(p);
+    CHECK(gpucaps_pipeline_cache_load(good, 99, 0x8086, 0x46d0, uuid, &n) == NULL && n == 0); /* over the cap */
+    CHECK(gpucaps_pipeline_cache_load(good, 4096, 0x1002, 0x46d0, uuid, &n) == NULL); /* other GPU */
+    CHECK(save_write_file(other, blob, 20) == 0); /* torn header */
+    CHECK(gpucaps_pipeline_cache_load(other, 4096, 0x8086, 0x46d0, uuid, &n) == NULL);
+    CHECK(save_write_file(other, "garbage", 7) == 0);
+    CHECK(gpucaps_pipeline_cache_load(other, 4096, 0x8086, 0x46d0, uuid, &n) == NULL);
+    if (tmp_symlink(good, link)) /* never followed */
+        CHECK(gpucaps_pipeline_cache_load(link, 4096, 0x8086, 0x46d0, uuid, &n) == NULL);
+    CHECK(paths_make_dirs(sub) == 0); /* not a regular file */
+    CHECK(gpucaps_pipeline_cache_load(sub, 4096, 0x8086, 0x46d0, uuid, &n) == NULL);
+
+    tmp_remove(sub);
+    tmp_remove(link);
+    tmp_remove(other);
+    tmp_remove(good);
+    tmp_remove(dir);
+}
+
 void test_gpucaps_all(void)
 {
     test_versions();
@@ -352,4 +404,5 @@ void test_gpucaps_all(void)
     test_overrides();
     test_summary();
     test_pipeline_cache_header();
+    test_pipeline_cache_load();
 }

@@ -48,6 +48,7 @@ The game treats these as **untrusted input**:
 |---|---|---|
 | World folders | `world/` or `--world DIR`: `level.dat`, `player.dat`, `c.X.Z.bin` column files | People share worlds. A world folder must never be able to crash the game in a memory-unsafe way, make it read or write files outside that folder, or hang it. |
 | Settings file | `blockclonia.cfg` or `--config FILE` | Hand-edited, and possibly copied from someone else. |
+| Pipeline cache | `$XDG_CACHE_HOME/blockclonia/blockclonia.pipelines` | Copied between machines or left by another driver, and its contents go to the GPU driver, which may not survive garbage. It is read through `save_read_file` (regular file, no symlink, at most 16 MB) and only handed over when its header names this vendor, device and driver UUID (`gpucaps_pipeline_cache_load`); anything else starts an empty cache. |
 | Command line | `--give`, `--hurt`, `--spawn`, sizes and so on | Launchers and scripts pass these through. |
 
 In scope:

@@ -122,5 +122,11 @@ void gpucaps_summary(const gpu_choice *c, char *buf, size_t n);
 #define GPUCACHE_HEADER_SIZE 32u
 int gpucaps_pipeline_cache_ok(const void *data, size_t size, size_t max_size, uint32_t vendor, uint32_t device,
                               const uint8_t uuid[16]);
+/* Reads a saved pipeline cache through save_read_file (a regular file, no
+ * symlink followed, at most max_size bytes) and returns it in a mem_alloc
+ * buffer with its length in *size, or NULL (*size 0) when the file is
+ * missing or unreadable or gpucaps_pipeline_cache_ok rejects it. */
+void *gpucaps_pipeline_cache_load(const char *path, size_t max_size, uint32_t vendor, uint32_t device,
+                                  const uint8_t uuid[16], size_t *size);
 
 #endif

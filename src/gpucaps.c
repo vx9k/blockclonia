@@ -1,4 +1,6 @@
 #include "gpucaps.h"
+#include "mem.h"
+#include "save.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -204,4 +206,18 @@ int gpucaps_pipeline_cache_ok(const void *data, size_t size, size_t max_size, ui
     if (header_size < GPUCACHE_HEADER_SIZE || header_size > size || read_u32(p + 4) != 1u) return 0;
     if (read_u32(p + 8) != vendor || read_u32(p + 12) != device) return 0;
     return memcmp(p + 16, uuid, 16) == 0;
+}
+
+void *gpucaps_pipeline_cache_load(const char *path, size_t max_size, uint32_t vendor, uint32_t device,
+                                  const uint8_t uuid[16], size_t *size)
+{
+    *size = 0;
+    uint8_t *buf = mem_alloc(max_size ? max_size : 1);
+    long len = save_read_file(path, buf, max_size);
+    if (len < 0 || !gpucaps_pipeline_cache_ok(buf, (size_t)len, max_size, vendor, device, uuid)) {
+        mem_free(buf);
+        return NULL;
+    }
+    *size = (size_t)len;
+    return buf;
 }
