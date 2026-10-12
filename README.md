@@ -200,7 +200,7 @@ the file given with `--config`) as one `key value` pair per line. See
 "Where files live" below for the exact path. Unknown keys and
 out-of-range values are ignored. A file the game can't use (a symlink or
 anything else that isn't a regular file, one it can't read, one over
-64 KB, or one without a single setting in it) is left alone: the game
+64 KiB, or one without a single setting in it) is left alone: the game
 starts with the defaults and doesn't save changes over it.
 
 | Tab | Setting | Range |
@@ -452,7 +452,8 @@ src/hud.c         HUD, H panel, monitor            src/invui.c   hotbar and inve
 src/debug.c       F3 overlay           src/ui.c        2D overlay batch and font
 src/camera.c      camera motion        src/viewmodel.c the first-person arm
 src/fx.c          debris, splashes and the entity list      src/anim.h   easing helpers
-src/settings.c    the settings file    src/save.c      world files
+src/settings.c    the settings file    src/save.c      column codec, file access
+src/save_db.c     world.db (SQLite)
 src/jobs.c        thread pool          src/gpupool.c   vertex pool allocator
 src/mem.c         mimalloc wrappers    src/log.c       logging, save-on-fatal hook
 src/bench.c       --bench
