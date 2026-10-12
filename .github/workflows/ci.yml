@@ -3,6 +3,11 @@
 #   linux     Ubuntu 26.04, gcc and clang, Release flags, -Werror, system
 #             packages only; unit tests, --bench, and a 120-frame render on
 #             Mesa lavapipe (software Vulkan) under Xvfb with validation.
+#   old-vulkan-ubuntu, old-vulkan-debian
+#             the build and tests against the oldest Vulkan headers the
+#             code supports: 1.3.275 (Ubuntu 24.04, system packages) and
+#             1.3.239 (Debian bookworm), so the VK_API_VERSION_1_4 guards
+#             keep compiling.
 #   sanitize  ASan + UBSan (gcc).
 #   lint      tools/lint.sh: clang-tidy, cppcheck, shader checks, and
 #             clang-format on the lines this change touches.
@@ -46,6 +51,40 @@ jobs:
       - run: cmake --preset ci-${{ matrix.compiler }}
       - run: cmake --build --preset ci-${{ matrix.compiler }}
       - run: ctest --preset ci-${{ matrix.compiler }}
+
+  old-vulkan-ubuntu:
+    runs-on: ubuntu-24.04 # Vulkan headers 1.3.275, GLFW 3.3, mimalloc 2.1
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev \
+            mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
+      - run: cmake --preset ci-gcc
+      - run: cmake --build --preset ci-gcc
+      - run: ctest --preset ci-gcc
+
+  old-vulkan-debian:
+    runs-on: ubuntu-26.04
+    container: debian:bookworm # Vulkan headers 1.3.239
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install packages
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build ca-certificates glslc \
+            libvulkan-dev libsqlite3-dev pkg-config \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev libwayland-bin libxkbcommon-dev \
+            mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
+      # bookworm's mimalloc 2.0 is too old even for MC_DEPS=SYSTEM, so AUTO
+      # builds the pinned mimalloc and GLFW from source, as pi-arm64 does.
+      - run: cmake --preset release -DMC_DEPS=AUTO -DMC_WERROR=ON
+      - run: cmake --build --preset release
+      - run: ctest --preset release
 
   sanitize:
     runs-on: ubuntu-26.04
