@@ -41,7 +41,7 @@ int paths_app_dir(const char *var, const char *home_rel, char *out, size_t cap)
 
 static void resolve(char *out, const char *var, const char *home_rel, const char *name, const char *old_name, int *xdg)
 {
-    char dir[PATHS_MAX];
+    char dir[PATHS_MAX] = {0};
     int w = -1;
     if (paths_app_dir(var, home_rel, dir, sizeof dir) == 0) w = snprintf(out, PATHS_MAX, "%s/%s", dir, name);
     *xdg = w > 0 && w < PATHS_MAX;
@@ -58,7 +58,7 @@ void paths_resolve(paths *p)
 
 int paths_make_dirs(const char *dir)
 {
-    char buf[PATHS_MAX];
+    char buf[PATHS_MAX] = {0};
     size_t n = strlen(dir);
     if (n == 0 || n >= sizeof buf) return -1;
     memcpy(buf, dir, n + 1);

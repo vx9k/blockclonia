@@ -154,7 +154,7 @@ int save_ensure_dir(const char *dir)
 
 int save_read_seed(const char *dir, uint32_t *seed)
 {
-    char path[512], buf[64];
+    char path[512] = {0}, buf[64] = {0};
     int n = snprintf(path, sizeof path, "%s/level.dat", dir);
     if (n < 0 || (size_t)n >= sizeof path) return -1;
     long len = os_read_regular(path, (uint8_t *)buf, sizeof buf - 1);
@@ -162,7 +162,7 @@ int save_read_seed(const char *dir, uint32_t *seed)
     buf[len] = '\0';
     /* strtoul would accept spaces, '+' and '-' (negation wraps): digits only. */
     if (strncmp(buf, "seed ", 5) != 0 || buf[5] < '0' || buf[5] > '9') return -1;
-    char *end;
+    char *end = NULL;
     errno = 0;
     unsigned long v = strtoul(buf + 5, &end, 10);
     if (errno || end == buf + 5 || (*end != '\n' && *end != '\0') || v > UINT32_MAX) return -1;
@@ -178,7 +178,7 @@ long save_read_file(const char *path, void *buf, size_t cap)
 
 int save_write_file(const char *path, const void *data, size_t len)
 {
-    char tmp[512];
+    char tmp[512] = {0};
     int n = snprintf(tmp, sizeof tmp, "%s.tmp", path);
     if (n < 0 || (size_t)n >= sizeof tmp) return -1;
     return os_write_atomic(path, tmp, data, len);
@@ -200,14 +200,14 @@ int save_copy_file(const char *from, const char *to, size_t cap)
 int save_column_name(const char *name, int *cx, int *cz)
 {
     if (strncmp(name, "c.", 2) != 0) return 0;
-    char *end;
+    char *end = NULL;
     errno = 0;
     long long x = strtoll(name + 2, &end, 10);
     if (errno || *end != '.') return 0;
     const char *zs = end + 1;
     long long z = strtoll(zs, &end, 10);
     if (errno || end == zs || x < INT_MIN || x > INT_MAX || z < INT_MIN || z > INT_MAX) return 0;
-    char canon[64];
+    char canon[64] = {0};
     int n = snprintf(canon, sizeof canon, "c.%d.%d.bin", (int)x, (int)z);
     if (n <= 0 || (size_t)n >= sizeof canon || strcmp(canon, name) != 0) return 0;
     *cx = (int)x;
@@ -218,7 +218,7 @@ int save_column_name(const char *name, int *cx, int *cz)
 /* Copies one file of a world folder; 1 if it was copied. */
 static int copy_world_file(const char *from, const char *to, const char *name, uint8_t *buf)
 {
-    char src[512], dst[512];
+    char src[512] = {0}, dst[512] = {0};
     int a = snprintf(src, sizeof src, "%s/%s", from, name), b = snprintf(dst, sizeof dst, "%s/%s", to, name);
     if (a < 0 || (size_t)a >= sizeof src || b < 0 || (size_t)b >= sizeof dst || exists(dst)) return 0;
     /* Symlinks, FIFOs and oversized files are left behind, as loading
@@ -229,9 +229,9 @@ static int copy_world_file(const char *from, const char *to, const char *name, u
 
 int save_copy_world(const char *from, const char *to)
 {
-    uint32_t seed;
-    char dst[512], db[512];
-    int cx, cz;
+    uint32_t seed = 0;
+    char dst[512] = {0}, db[512] = {0};
+    int cx = 0, cz = 0;
     int n = snprintf(dst, sizeof dst, "%s/level.dat", to), m = snprintf(db, sizeof db, "%s/world.db", to);
     if (n < 0 || (size_t)n >= sizeof dst || m < 0 || (size_t)m >= sizeof db || exists(dst) || exists(db) ||
         save_read_seed(from, &seed) != 0)
@@ -241,7 +241,7 @@ int save_copy_world(const char *from, const char *to)
     if (!d) return 0;
     uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
     int copied = 0;
-    const char *name;
+    const char *name = NULL;
     while ((name = os_dir_next(d)) != NULL)
         if (strcmp(name, "player.dat") == 0 || save_column_name(name, &cx, &cz))
             copied += copy_world_file(from, to, name, buf);

@@ -332,7 +332,7 @@ void health_init_varied(health *h, uint32_t seed)
 
 static wound *add_wound(health *h, int part, int kind, float depth, int arterial, float contamination)
 {
-    wound *w;
+    wound *w = NULL;
     if (h->wound_count < HEALTH_MAX_WOUNDS) {
         w = &h->wounds[h->wound_count++];
     } else {
@@ -514,7 +514,7 @@ void health_struck(health *h, double mass, double speed, double height, double s
     if (e < 20.0) return;
     /* Severity on a log scale between a harmless and a devastating blow. */
 #define SEV(lo, hi) (float)((log10(e) - log10(lo)) / (log10(hi) - log10(lo)))
-    int part;
+    int part = 0;
     if (height >= 0.87) part = BP_HEAD;
     else if (height >= 0.6) part = frand(h) < 0.6f ? BP_CHEST : (frand(h) < 0.5f ? BP_LARM : BP_RARM);
     else if (height >= 0.45) part = BP_ABDOMEN;
@@ -674,7 +674,7 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
             snprintf(msg, msg_size, "No open wound to dress on the %s", pn);
             return 0;
         }
-        int kind;
+        int kind = 0;
         if (inv_take(inv, I_BANDAGE, 1)) {
             kind = BANDAGE_STERILE;
         } else if (inv_count(inv, I_FIBRE) >= 2) {
@@ -729,7 +729,7 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
             snprintf(msg, msg_size, "No wound on the %s", pn);
             return 0;
         }
-        float c_mul, i_mul;
+        float c_mul = 0.0f, i_mul = 0.0f;
         if (inv_take(inv, I_ANTISEPTIC, 1)) {
             c_mul = 0.15f;
             i_mul = 0.5f;
@@ -919,7 +919,7 @@ static void write_samples(health *h, const health_env *e, double dt)
         h->wave_acc -= 1.0f;
         double ts = t0 + ds * ++k;
         if (ts > h->t) ts = h->t;
-        float ecg = 0.0f, art, pleth, capno;
+        float ecg = 0.0f, art = 0.0f, pleth = 0.0f, capno = 0.0f;
         const int r = h->rhythm;
         /* Pulseless VT and PEA still show organised complexes, at a rate
          * of their own; PEA's slow as the starved myocardium gives out. */
@@ -1105,7 +1105,7 @@ static void step_bleeding(health *h, const health_env *e, double dt, float gh, f
     float ext = 0.0f;
     for (int i = 0; i < h->wound_count; i++) {
         wound *w = &h->wounds[i];
-        float bf = 1.0f, tau;
+        float bf = 1.0f, tau = 0.0f;
         if (w->bandage == BANDAGE_STERILE) bf = w->arterial ? 0.35f : 0.08f;
         else if (w->bandage == BANDAGE_IMPROVISED) bf = w->arterial ? 0.5f : 0.15f;
         if (w->arterial) tau = w->bandage ? 600.0f : 1e9f;
@@ -1369,7 +1369,7 @@ static float step_heat(health *h, const health_env *e, double dt, float gh, floa
         /* Skin blood flow. Limbs also constrict with local cold, then open
          * again in cold-induced vasodilation while the core is warm; local
          * heat flushes the skin with blood. */
-        float dil = h->vaso, k;
+        float dil = h->vaso, k = 0.0f;
         if (is_limb(i)) {
             dil *= 0.3f + 0.7f * ramp(bp->skin, 8.0f, 26.0f);
             k = K_MIN[i] + (K_MAX[i] - K_MIN[i]) * dil +
@@ -1994,7 +1994,7 @@ void health_step(health *h, const health_env *e, double dt)
     contract *= (1.0f + 0.35f * beta) / (1.0f + 0.02f * h->strain) * rhythm_pump(h->rhythm);
     float vu = 4.05f - 1.3f * h->symp + 0.5f * h->sepsis - 0.3f * alpha; /* unstressed volume, venoconstriction */
     float pms = maxf(0.0f, (veff - vu) / CSYS) * (1.0f + 1.3f * ex); /* muscle pump */
-    float rap, co = 0.0f;
+    float rap = 0.0f, co = 0.0f;
     if (!arrest) {
         float rvr = RVR0 * (1.0f - 0.4f * ex);
         co = solve_output(h->hr, contract, pms, rvr, 12.0f * h->pneumothorax * h->pneumothorax, &rap);
@@ -2193,7 +2193,7 @@ health_limits health_get_limits(const health *h)
 {
     health_limits l = {0.0f, 0, 0, 0, 0};
     if (h->dead || h->conscious == CONS_UNCONSCIOUS) return l;
-    float leg[2];
+    float leg[2] = {0};
     for (int k = 0; k < 2; k++) {
         const body_part *p = &h->part[BP_LLEG + k];
         float f = 1.0f;
@@ -2402,7 +2402,7 @@ static void status_add(status_text *s, int sev, const char *fmt, ...)
 static void status_add(status_text *s, int sev, const char *fmt, ...)
 {
     if (s->len) cat(s->buf, s->n, &s->len, ", ");
-    char item[96];
+    char item[96] = {0};
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(item, sizeof item, fmt, ap);
@@ -2450,7 +2450,7 @@ static void status_wounds(const health *h, int part, status_text *s)
     if (p->frost) status_add(s, p->frost, "%s", FROST[p->frost]);
     else if (p->skin < 12.0f) status_add(s, 1, "numb with cold (%.0f" DEG "C)", (double)p->skin);
     if (wounds) {
-        char what[48], extra[48] = "";
+        char what[48] = {0}, extra[48] = "";
         if (wounds == 1) snprintf(what, sizeof what, "%s", arterial ? "cut artery" : (grazes ? "abrasion" : "wound"));
         else if (grazes == wounds) snprintf(what, sizeof what, "%d abrasions", wounds);
         else snprintf(what, sizeof what, "%d wounds%s", wounds, arterial ? ", artery" : "");
@@ -2487,7 +2487,7 @@ int health_part_status(const health *h, int part, char *buf, size_t n)
 int health_organ_status(const health *h, int organ, char *buf, size_t n)
 {
     float f = h->organ[organ];
-    const char *s;
+    const char *s = NULL;
     int sev = f > 0.85f ? 0 : (f > 0.6f ? 1 : (f > 0.3f ? 2 : 3));
     switch (organ) {
     case ORG_BRAIN:

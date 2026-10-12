@@ -47,7 +47,7 @@ static inline mat4 m4_identity(void)
 
 static inline mat4 m4_mul(mat4 a, mat4 b)
 {
-    mat4 r;
+    mat4 r = {0};
     for (int c = 0; c < 4; c++)
         for (int row = 0; row < 4; row++) {
             float s = 0.0f;
@@ -119,7 +119,7 @@ typedef struct { float p[4][4]; } frustum;
 
 static inline frustum frustum_from(mat4 vp)
 {
-    frustum f;
+    frustum f = {0};
     const float *m = vp.m;
     for (int i = 0; i < 4; i++) {
         float r3 = m[i * 4 + 3], r0 = m[i * 4 + 0], r1 = m[i * 4 + 1];

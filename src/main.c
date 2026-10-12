@@ -116,7 +116,7 @@ static paths g_paths; /* where files go unless --config or --world say otherwise
 /* long long: `long` is 32-bit on 32-bit ARM, where (long)UINT32_MAX is -1. */
 static int parse_int(const char *s, long long lo, long long hi, long long *out)
 {
-    char *end;
+    char *end = NULL;
     errno = 0;
     long long v = strtoll(s, &end, 10);
     if (errno || end == s || *end || v < lo || v > hi) return 0;
@@ -127,7 +127,7 @@ static int parse_int(const char *s, long long lo, long long hi, long long *out)
 /* "<a><sep><b>" with both integers in [lo, hi], e.g. 1280x720 or -40,12. */
 static int parse_int_pair(const char *s, char sep, long long lo, long long hi, long long *a, long long *b)
 {
-    char *end;
+    char *end = NULL;
     errno = 0;
     long long x = strtoll(s, &end, 10);
     if (errno || end == s || *end != sep || x < lo || x > hi) return 0;
@@ -142,7 +142,7 @@ static int parse_int_pair(const char *s, char sep, long long lo, long long hi, l
 /* "<a>,<b>" with both finite floats of magnitude at most `lim`. */
 static int parse_float_pair(const char *s, float lim, float *a, float *b)
 {
-    char *end;
+    char *end = NULL;
     errno = 0;
     float x = strtof(s, &end);
     if (errno || end == s || *end != ',' || !(fabsf(x) <= lim)) return 0;
@@ -261,7 +261,7 @@ static int parse_int_option(options *o, const char *a, const char *v, int *ok)
     };
     for (size_t i = 0; i < sizeof ints / sizeof ints[0]; i++) {
         if (strcmp(a, ints[i].name) != 0) continue;
-        long long n;
+        long long n = 0;
         *ok = parse_int(v, ints[i].lo, ints[i].hi, &n);
         if (*ok) {
             *ints[i].field = (int)n;
@@ -558,7 +558,7 @@ typedef struct {
 static int save_player(void *user)
 {
     const save_ctx *sc = user;
-    uint8_t buf[PLAYER_FILE_SIZE];
+    uint8_t buf[PLAYER_FILE_SIZE] = {0};
     size_t n = survival_encode_player(sc->pl, sc->inv, thermo_day_time(sc->th), buf, sizeof buf);
     if (n && save_db_put_blob(sc->db, "player", buf, n) == 0) return 0;
     log_warn("could not save the player");
@@ -570,7 +570,7 @@ static int save_player(void *user)
 static int load_player(save_db *db, player *pl, inventory *inv, double *day)
 {
     if (!db) return 0;
-    uint8_t buf[PLAYER_FILE_SIZE + 1];
+    uint8_t buf[PLAYER_FILE_SIZE + 1] = {0};
     long n = save_db_get_blob(db, "player", buf, sizeof buf);
     if (n < 0) return n == -2 ? -1 : 0;
     if (survival_decode_player(pl, inv, day, buf, (size_t)n) != 0) {
@@ -593,7 +593,7 @@ static void save_on_fatal(void *user)
  * underscores ("plant_fibre:4"). */
 static void give_items(inventory *inv, const char *list)
 {
-    char buf[256];
+    char buf[256] = {0};
     snprintf(buf, sizeof buf, "%s", list);
     char *save = NULL;
     for (char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
@@ -703,7 +703,7 @@ static void thermal_env(const thermo *th, const world *w, const player *p, healt
  * debug menu (K) uses, so the two can't drift apart. */
 static void apply_hurt(health *h, const char *list)
 {
-    char buf[256];
+    char buf[256] = {0};
     snprintf(buf, sizeof buf, "%s", list);
     char *save = NULL;
     for (const char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
@@ -953,7 +953,7 @@ static void frame_sound(game *g, double dt, const render_view *v)
     int on_title = g->backdrop;
     float wind = wind_level(&g->w, &g->pl, v->eye), water = water_level(&g->w, &g->pl, v->eye);
     sound_ambience(g->snd, wind * (on_title ? 0.6f : 1.0f), water);
-    dvec3 fires[SOUND_MAX_FIRES];
+    dvec3 fires[SOUND_MAX_FIRES] = {0};
     int nf = thermo_fires_near(g->th, &g->w, v->eye, 24.0, fires, SOUND_MAX_FIRES);
     sound_fires(g->snd, fires, nf);
     if (!g->in_menu && !on_title) sound_body(g, dt);
@@ -1009,7 +1009,7 @@ static void open_start_screen(game *g)
  * and never overwrite, so running an old build again still finds its own. */
 static void use_xdg_paths(const options *o)
 {
-    char dir[PATHS_MAX];
+    char dir[PATHS_MAX] = {0};
     if (o->config == g_paths.config && g_paths.xdg_config && paths_parent(o->config, dir, sizeof dir) == 0) {
         if (paths_make_dirs(dir) != 0) log_warn("cannot create %s", dir);
         int r = save_copy_file("blockclonia.cfg", o->config, SETTINGS_MAX_FILE);
@@ -1048,7 +1048,7 @@ static uint32_t choose_seed(options *o, save_db **db)
         return seed;
     }
     if (n > 0) log_info("imported %d world files into %s/world.db; they stay but are no longer read", n, o->world_dir);
-    uint32_t saved;
+    uint32_t saved = 0;
     int got = save_db_get_seed(*db, &saved);
     if (got == 0) {
         if (o->have_seed && saved != o->seed) log_warn("--seed ignored: world '%s' uses seed %u", o->world_dir, saved);
@@ -1097,7 +1097,7 @@ static void set_fullscreen(game *g, int on)
         int count = 0;
         GLFWmonitor **mons = glfwGetMonitors(&count);
         for (int i = 0; i < count; i++) {
-            int mx, my;
+            int mx = 0, my = 0;
             const GLFWvidmode *vm = glfwGetVideoMode(mons[i]);
             glfwGetMonitorPos(mons[i], &mx, &my);
             int cx = g->win_x + g->win_w / 2, cy = g->win_y + g->win_h / 2;
@@ -1197,7 +1197,7 @@ static void open_world(game *g, const char *dir, int backdrop)
     g->hs.alert_count = 0;
     if (g->db) {
         save_db_set_meta(g->db, "last_played", (int64_t)time(NULL));
-        int64_t gen;
+        int64_t gen = 0;
         if (save_db_get_meta(g->db, "generator", &gen) == -1) save_db_set_meta(g->db, "generator", WORLDGEN_VERSION);
     }
 }
@@ -1253,9 +1253,9 @@ static void game_init(game *g)
     g_in.focused = glfwGetWindowAttrib(g->win, GLFW_FOCUSED) != 0;
     game_init_world(g);
 
-    char mi[48];
+    char mi[48] = {0};
     mem_version_string(mi, sizeof mi);
-    int gmaj, gmin, grev;
+    int gmaj = 0, gmin = 0, grev = 0;
     glfwGetVersion(&gmaj, &gmin, &grev);
     /* The Vulkan version and features get their own lines in F3. */
     snprintf(g->versions, sizeof g->versions, "%s  GLFW %d.%d.%d", mi, gmaj, gmin, grev);
@@ -1374,7 +1374,7 @@ static void frame_simulate(game *g, const player_input *in, double dt)
         survival_before sb = survival_capture(&g->pl);
         physics_step(&g->ph, &g->pl, in);
         if ((float)g->pl.fall_speed > landing) landing = (float)g->pl.fall_speed;
-        health_env env;
+        health_env env = {0};
         survival_env(&g->w, &g->pl, &sb, g->actions, &env);
         thermal_env(g->th, &g->w, &g->pl, &env);
         g->actions = 0;
@@ -1534,7 +1534,7 @@ static void draw_debug(game *g, ui *u, int fb_w, int fb_h, double alpha)
     const player *pl = &g->pl;
     dvec3 ip = dv3_lerp(pl->prev_pos, pl->pos, alpha);
     render_stats rs = renderer_stats(g->rd);
-    debug_info di;
+    debug_info di = {0};
     memset(&di, 0, sizeof di);
     di.frames = &g->dframes;
     di.phys_ms = g->phys_ms;
@@ -1609,7 +1609,7 @@ static void refresh_worlds(game *g)
         char when[32] = "never played";
         if (e->info.last_played > 0) {
             time_t t = (time_t)e->info.last_played;
-            struct tm tmv;
+            struct tm tmv = {0};
             if (localtime_r(&t, &tmv)) strftime(when, sizeof when, "played %Y-%m-%d %H:%M", &tmv);
         }
         switch (e->info.status) {
@@ -1639,7 +1639,7 @@ static void refresh_worlds(game *g)
 /* Leaves whatever world is loaded and plays the one in dir. */
 static void play_world(game *g, const char *dir)
 {
-    char path[WORLDS_PATH_MAX];
+    char path[WORLDS_PATH_MAX] = {0};
     snprintf(path, sizeof path, "%s", dir); /* dir may point into the list close_world outlives */
     close_world(g);
     open_world(g, path, 0);
@@ -1666,7 +1666,7 @@ static void world_action(game *g, menu_action a)
             break;
         }
         uint32_t seed = worlds_seed_from_text(m->text_seed, (uint32_t)time(NULL) * 2654435761u);
-        char dir[WORLDS_PATH_MAX];
+        char dir[WORLDS_PATH_MAX] = {0};
         if (worlds_create(g->worlds_root, name, seed, dir, sizeof dir) != 0) {
             snprintf(m->note, sizeof m->note, "Could not create the world (see the log).");
             break;
@@ -1769,8 +1769,8 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
 /* The mouse in UI pixels, or -1 when unknown. */
 static void cursor_ui(const game *g, const ui *u, int fb_w, int fb_h, float *mx, float *my)
 {
-    double wx, wy;
-    int ww, wh;
+    double wx = 0.0, wy = 0.0;
+    int ww = 0, wh = 0;
     glfwGetCursorPos(g->win, &wx, &wy);
     glfwGetWindowSize(g->win, &ww, &wh);
     *mx = *my = -1.0f;
@@ -1783,9 +1783,9 @@ static void cursor_ui(const game *g, const ui *u, int fb_w, int fb_h, float *mx,
 /* The 2D overlay: HUD, hotbar, inventory, F3 and menus. Returns the quads. */
 static int draw_overlay(game *g, double dt, double alpha)
 {
-    int max_quads, fb_w, fb_h;
+    int max_quads = 0, fb_w = 0, fb_h = 0;
     ui_vertex *uv = renderer_ui_buffer(g->rd, &max_quads, &fb_w, &fb_h);
-    ui u;
+    ui u = {0};
     ui_begin(&u, uv, max_quads, fb_w, fb_h);
     ui_set_scale(&u, g->st.gui_scale, fb_w, fb_h);
     int on_title = g->backdrop;
@@ -1800,7 +1800,7 @@ static int draw_overlay(game *g, double dt, double alpha)
     hud_update(hs, &g->hl, g->in_menu ? 0.0f : (float)dt);
     if (!on_title) hud_draw(&u, &g->hl, hs);
     if (!on_title && !g->hl.dead && !g_in.panel && !g_in.inv_open) invui_hotbar(&u, &g->iu, &g->inv, (float)dt);
-    float mx, my;
+    float mx = 0.0f, my = 0.0f;
     cursor_ui(g, &u, fb_w, fb_h, &mx, &my);
     if (g_in.inv_open && !g->in_menu && !g->hl.dead) {
         invui_input in = {mx,
@@ -1854,7 +1854,7 @@ static void frame_bookkeeping(game *g, double now)
         g->title_t = now;
         render_stats rs = renderer_stats(g->rd);
         const item_stack *held = &g->inv.slot[g->inv.selected];
-        char title[256];
+        char title[256] = {0};
         snprintf(title, sizeof title,
                  "blockclonia | %.0f fps | %.1f %.1f %.1f | %s%s | draws %d | bodies %d | mesh %u/%u MB", fps,
                  g->pl.pos.x, g->pl.pos.y, g->pl.pos.z, held->count ? item_get(held->id)->name : "empty hand",

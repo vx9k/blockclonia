@@ -7,6 +7,7 @@
 #include "save_db.h"
 #include "survival.h"
 
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -29,7 +30,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     }
     static const char *const SIDE[] = {"", "-wal", "-journal", "-shm"};
     for (size_t i = 0; i < sizeof SIDE / sizeof SIDE[0]; i++) {
-        char p[340];
+        char p[340] = {0};
         snprintf(p, sizeof p, "%s%s", path, SIDE[i]);
         unlink(p);
     }
@@ -37,7 +38,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
     save_db *db = save_db_open(dir);
     if (!db) return 0;
-    uint32_t seed;
+    uint32_t seed = 0;
     save_db_get_seed(db, &seed);
     for (int cz = -1; cz <= 1; cz++)
         for (int cx = -1; cx <= 1; cx++) {
@@ -51,9 +52,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     static uint8_t buf[PLAYER_FILE_SIZE + 1];
     long n = save_db_get_blob(db, "player", buf, sizeof buf);
     if (n >= 0) {
-        player p;
-        inventory inv;
-        double day;
+        player p = {0};
+        inventory inv = {0};
+        double day = 0.0;
         memset(&p, 0, sizeof p);
         memset(&inv, 0, sizeof inv);
         survival_decode_player(&p, &inv, &day, buf, (size_t)n);

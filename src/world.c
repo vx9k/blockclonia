@@ -351,7 +351,7 @@ static void mesh_done(job *j)
  * worker then meshes a private snapshot, so edits never race with it. */
 static void gather(const world *w, int cx, int cz, int sy, mesh_input *in)
 {
-    const column *cols[3][3];
+    const column *cols[3][3] = {0};
     for (int dz = -1; dz <= 1; dz++)
         for (int dx = -1; dx <= 1; dx++)
             cols[dz + 1][dx + 1] = world_column(w, cx + dx, cz + dz);

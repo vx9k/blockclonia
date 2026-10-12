@@ -26,7 +26,7 @@ int worlds_list(const char *root, world_entry *out, int max)
     os_dir *d = os_dir_open(root);
     if (!d) return 0;
     int n = 0;
-    const char *name;
+    const char *name = NULL;
     while (n < max && (name = os_dir_next(d)) != NULL) {
         if (name[0] == '.' || strlen(name) >= sizeof out[n].folder) continue;
         world_entry *e = &out[n];
@@ -81,7 +81,7 @@ int worlds_create(const char *root, const char *name, uint32_t seed, char *dir_o
         log_error("cannot create %s", root);
         return -1;
     }
-    char base[40], dir[WORLDS_PATH_MAX];
+    char base[40] = {0}, dir[WORLDS_PATH_MAX] = {0};
     worlds_folder_name(name, base, sizeof base);
     int made = 0;
     for (int k = 1; k < 1000 && !made; k++) {
@@ -132,13 +132,13 @@ static int world_file(const char *name)
                                         "world.db-journal", "level.dat",    "player.dat"};
     for (size_t i = 0; i < sizeof FILES / sizeof FILES[0]; i++)
         if (strcmp(name, FILES[i]) == 0) return 1;
-    int cx, cz;
+    int cx = 0, cz = 0;
     return save_column_name(name, &cx, &cz);
 }
 
 int worlds_delete(const char *dir)
 {
-    save_peek p;
+    save_peek p = {0};
     save_db_peek(dir, &p);
     if (p.status == SAVE_PEEK_IN_USE) {
         log_error("%s is open in a game; not deleting it", dir);
@@ -160,11 +160,11 @@ int worlds_delete(const char *dir)
         return -1;
     }
     int removed = 0, kept = 0;
-    const struct dirent *e;
+    const struct dirent *e = NULL;
     /* cppcheck-suppress readdirCalled */
     while ((e = readdir(d)) != NULL) {
         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
-        struct stat st;
+        struct stat st = {0};
         int ours = world_file(e->d_name) && fstatat(fd, e->d_name, &st, AT_SYMLINK_NOFOLLOW) == 0 &&
                    !S_ISDIR(st.st_mode);
         if (ours && unlinkat(fd, e->d_name, 0) == 0) removed++;

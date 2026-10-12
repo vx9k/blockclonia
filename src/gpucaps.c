@@ -81,7 +81,7 @@ uint32_t gpucaps_parse_disable(const char *s, char *unknown, size_t unknown_len)
     if (unknown && unknown_len) unknown[0] = '\0';
     if (!s) return 0;
     uint32_t mask = 0;
-    char tok[32];
+    char tok[32] = {0};
     size_t len = 0;
     for (const char *p = s;; p++) {
         if (*p == ',' || *p == '\0') {
@@ -141,7 +141,7 @@ void gpucaps_choose(const gpu_offer *o, uint32_t disable, gpu_choice *c)
     memset(c, 0, sizeof *c);
     c->instance_api = strip_patch(o->instance_api);
     c->device_api = gpucaps_device_api(o->device_api, o->instance_api);
-    int dynrend_khr, sync2_khr;
+    int dynrend_khr = 0, sync2_khr = 0;
     uint32_t avail = offered(o, c->device_api, &dynrend_khr, &sync2_khr);
     uint32_t m = avail & ~disable;
     /* Dependencies, in an order where each rule sees the result of the ones
@@ -165,7 +165,7 @@ void gpucaps_summary(const gpu_choice *c, char *buf, size_t n)
 {
     if (!buf || !n) return;
     uint32_t m = c->enabled;
-    char aniso[24];
+    char aniso[24] = {0};
     (void)snprintf(aniso, sizeof aniso, "%dx anisotropic", (int)c->anisotropy);
     /* Order of the README: what saves the most first. */
     const struct {
@@ -194,7 +194,7 @@ void gpucaps_summary(const gpu_choice *c, char *buf, size_t n)
 
 static uint32_t read_u32(const uint8_t *p)
 {
-    uint32_t v;
+    uint32_t v = 0;
     memcpy(&v, p, sizeof v); /* written by the driver in host byte order */
     return v;
 }

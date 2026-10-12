@@ -123,7 +123,7 @@ void fx_step(fx_state *f, const world *w, double dt)
 
 static entity_instance cube_at(dvec3 p, dvec3 eye, uint32_t tex, quat q, float sx, float sy, float sz, float light)
 {
-    entity_instance e;
+    entity_instance e = {0};
     e.pos[0] = (float)(p.x - eye.x);
     e.pos[1] = (float)(p.y - eye.y);
     e.pos[2] = (float)(p.z - eye.z);

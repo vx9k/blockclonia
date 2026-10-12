@@ -43,7 +43,7 @@ void *mem_realloc(void *ptr, size_t size)
 size_t mem_array_size(size_t count, size_t size)
 {
 #if defined(__GNUC__)
-    size_t total;
+    size_t total = 0;
     if (__builtin_mul_overflow(count, size, &total))
         log_fatal("allocation size overflow (%zu * %zu)", count, size);
     return total;
@@ -81,7 +81,7 @@ void mem_process_info(size_t *rss, size_t *commit)
 {
     *rss = *commit = 0;
 #ifndef MC_MEM_LIBC
-    size_t elapsed, user, sys, peak_rss, peak_commit, faults;
+    size_t elapsed = 0, user = 0, sys = 0, peak_rss = 0, peak_commit = 0, faults = 0;
     mi_process_info(&elapsed, &user, &sys, rss, &peak_rss, commit, &peak_commit, &faults);
 #endif
 }

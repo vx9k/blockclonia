@@ -11,7 +11,7 @@
 /* A 1.4 desktop device offering everything the renderer can use. */
 static gpu_offer full_offer(void)
 {
-    gpu_offer o;
+    gpu_offer o = {0};
     memset(&o, 0, sizeof o);
     o.instance_api = GPU_API(1, 4);
     o.device_api = GPU_API(1, 4) | 363u; /* patch bits, as drivers report */
@@ -56,11 +56,11 @@ static uint32_t renderer_api(uint32_t loader, uint32_t headers, const char *env,
 {
     uint32_t cap = 0;
     (void)gpucaps_parse_api(env, &cap);
-    gpu_offer o;
+    gpu_offer o = {0};
     memset(&o, 0, sizeof o);
     o.instance_api = gpucaps_instance_api(loader, headers, cap);
     o.device_api = device;
-    gpu_choice c;
+    gpu_choice c = {0};
     gpucaps_choose(&o, 0, &c);
     CHECK(c.enabled == 0 && c.instance_api == o.instance_api);
     gpucaps_summary(&c, s, n);
@@ -69,7 +69,7 @@ static uint32_t renderer_api(uint32_t loader, uint32_t headers, const char *env,
 
 static void test_renderer_versions(void)
 {
-    char s[64];
+    char s[64] = {0};
     uint32_t v14 = GPU_API(1, 4) | 357u, v13 = GPU_API(1, 3) | 275u, pi = GPU_API(1, 3) | 239u;
     /* Loader and headers 1.4.357, Mesa 26 at 1.4.363. */
     CHECK(renderer_api(v14, v14, NULL, GPU_API(1, 4) | 363u, s, sizeof s) == GPU_API(1, 4));
@@ -103,7 +103,7 @@ static void test_parse_api(void)
 
 static void test_parse_disable(void)
 {
-    char unk[64];
+    char unk[64] = {0};
     CHECK(gpucaps_parse_disable(NULL, unk, sizeof unk) == 0 && unk[0] == '\0');
     CHECK(gpucaps_parse_disable("", unk, sizeof unk) == 0);
     CHECK(gpucaps_parse_disable("mdi", unk, sizeof unk) == GPUCAP_MDI);
@@ -129,7 +129,7 @@ static void test_parse_disable(void)
 static void test_choose_full(void)
 {
     gpu_offer o = full_offer();
-    gpu_choice c;
+    gpu_choice c = {0};
     gpucaps_choose(&o, 0, &c);
     CHECK(c.device_api == GPU_API(1, 4));
     CHECK(c.enabled == GPUCAP_ALL);
@@ -152,7 +152,7 @@ static void test_choose_full(void)
 static void test_choose_versions(void)
 {
     gpu_offer o = full_offer();
-    gpu_choice c;
+    gpu_choice c = {0};
     uint32_t always = GPUCAP_MDI | GPUCAP_ANISO | GPUCAP_TIMESTAMPS | GPUCAP_PCACHE | GPUCAP_RELAXED;
 
     o.instance_api = GPU_API(1, 0); /* MC_VK_API=1.0 on a 1.4 device */
@@ -188,7 +188,7 @@ static void test_choose_versions(void)
 /* A Vulkan 1.0 device with no optional features gets the plain path. */
 static void test_choose_minimal(void)
 {
-    gpu_offer o;
+    gpu_offer o = {0};
     memset(&o, 0, sizeof o);
     o.instance_api = GPU_API(1, 4);
     o.device_api = GPU_API(1, 0);
@@ -196,13 +196,13 @@ static void test_choose_minimal(void)
     o.timestamp_period = 1.0f;
     o.host_image_copy = o.timeline_semaphore = o.dynamic_rendering = o.synchronization2 = 1; /* not at 1.0 */
     o.ext_memory_budget = 1;
-    gpu_choice c;
+    gpu_choice c = {0};
     gpucaps_choose(&o, 0, &c);
     CHECK(c.enabled == 0);
     CHECK(c.anisotropy == 1.0f);
     CHECK(c.max_draw_indirect_count == 1);
     CHECK(c.timestamp_mask == 0);
-    char s[160];
+    char s[160] = {0};
     gpucaps_summary(&c, s, sizeof s);
     CHECK(strcmp(s, "Vulkan 1.0") == 0);
 }
@@ -210,7 +210,7 @@ static void test_choose_minimal(void)
 static void test_dependencies(void)
 {
     gpu_offer o = full_offer();
-    gpu_choice c;
+    gpu_choice c = {0};
     /* The section origin rides on firstInstance: MDI without it is useless. */
     o.draw_indirect_first_instance = 0;
     gpucaps_choose(&o, 0, &c);
@@ -269,7 +269,7 @@ static void test_portability(void)
 {
     gpu_offer o = full_offer();
     o.portability_subset = 1;
-    gpu_choice c;
+    gpu_choice c = {0};
     gpucaps_choose(&o, 0, &c);
     CHECK(c.enabled == (GPUCAP_ALL & ~GPUCAP_HOSTCOPY));
     gpucaps_choose(&o, GPUCAP_HOSTCOPY, &c); /* MC_VK_DISABLE=hostcopy: it was never on offer */
@@ -279,7 +279,7 @@ static void test_portability(void)
 static void test_overrides(void)
 {
     gpu_offer o = full_offer();
-    gpu_choice c;
+    gpu_choice c = {0};
     uint32_t off = gpucaps_parse_disable("mdi,dynrend,sync2,timeline,aniso,hostcopy,budget,timestamps,pcache", NULL, 0);
     gpucaps_choose(&o, off, &c);
     CHECK(c.enabled == GPUCAP_RELAXED); /* hostreset went with timestamps */
@@ -303,8 +303,8 @@ static void test_summary(void)
 {
     gpu_offer o = full_offer();
     o.present_relaxed = 0;
-    gpu_choice c;
-    char s[256];
+    gpu_choice c = {0};
+    char s[256] = {0};
     gpucaps_choose(&o, 0, &c);
     gpucaps_summary(&c, s, sizeof s);
     CHECK(strcmp(s, "Vulkan 1.4: multi-draw indirect, dynamic rendering, synchronization2, timeline semaphores, "
@@ -315,7 +315,7 @@ static void test_summary(void)
     CHECK(strcmp(s, "Vulkan 1.2: dynamic rendering (KHR), synchronization2 (KHR), timeline semaphores, "
                     "8x anisotropic, memory budget, GPU timestamps") == 0);
     /* Truncation keeps a terminated prefix. */
-    char small[12];
+    char small[12] = {0};
     memset(small, 'x', sizeof small);
     gpucaps_summary(&c, small, sizeof small);
     CHECK(small[sizeof small - 1] == '\0' && strncmp(small, "Vulkan 1.2:", 11) == 0);
@@ -325,13 +325,13 @@ static void put_u32(uint8_t *p, uint32_t v) { memcpy(p, &v, sizeof v); }
 
 static void test_pipeline_cache_header(void)
 {
-    uint8_t uuid[16], other[16];
+    uint8_t uuid[16] = {0}, other[16] = {0};
     for (int i = 0; i < 16; i++) {
         uuid[i] = (uint8_t)(i * 7 + 1);
         other[i] = uuid[i];
     }
     other[15] ^= 1u;
-    uint8_t blob[64];
+    uint8_t blob[64] = {0};
     memset(blob, 0xAB, sizeof blob);
     put_u32(blob, 32);
     put_u32(blob + 4, 1);
@@ -359,7 +359,7 @@ static void test_pipeline_cache_header(void)
  * device and that fits the cap reaches the driver. */
 static void test_pipeline_cache_load(void)
 {
-    char dir[256], good[300], other[300], link[300], sub[300];
+    char dir[256] = {0}, good[300] = {0}, other[300] = {0}, link[300] = {0}, sub[300] = {0};
     if (!tmp_dir_make(dir, sizeof dir, "mc_pcache_")) {
         CHECK(0);
         return;
@@ -368,9 +368,9 @@ static void test_pipeline_cache_load(void)
     snprintf(other, sizeof other, "%s/other", dir);
     snprintf(link, sizeof link, "%s/link", dir);
     snprintf(sub, sizeof sub, "%s/sub", dir);
-    uint8_t uuid[16];
+    uint8_t uuid[16] = {0};
     for (int i = 0; i < 16; i++) uuid[i] = (uint8_t)(i + 3);
-    uint8_t blob[100];
+    uint8_t blob[100] = {0};
     memset(blob, 0x5A, sizeof blob);
     put_u32(blob, 32);
     put_u32(blob + 4, 1);
@@ -378,7 +378,7 @@ static void test_pipeline_cache_load(void)
     put_u32(blob + 12, 0x46d0);
     memcpy(blob + 16, uuid, 16);
     size_t n = 7;
-    void *p;
+    void *p = NULL;
 
     CHECK(gpucaps_pipeline_cache_load(good, 4096, 0x8086, 0x46d0, uuid, &n) == NULL && n == 0); /* missing */
     CHECK(save_write_file(good, blob, sizeof blob) == 0);

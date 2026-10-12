@@ -25,7 +25,7 @@ static void build_icons(void)
     for (int id = ITEM_FIRST; id < ITEM_END; id++)
         for (int y = 0; y < 16; y++)
             for (int x = 0; x < 16; x++) {
-                uint8_t c[4];
+                uint8_t c[4] = {0};
                 texgen_texel(item_get(id)->tex, x, y, c);
                 g_sprite[id - ITEM_FIRST][y][x] = pack(c);
             }
@@ -41,7 +41,7 @@ static void build_icons(void)
                     int alpha = 0;
                     for (int y = 0; y < 4; y++)
                         for (int x = 0; x < 4; x++) {
-                            uint8_t c[4];
+                            uint8_t c[4] = {0};
                             texgen_texel(layer[f], i * 4 + x, j * 4 + y, c);
                             float wgt = (float)c[3] / 255.0f;
                             for (int k = 0; k < 3; k++) sum[k] += (float)c[k] * wgt;
@@ -102,7 +102,7 @@ void invui_icon(ui *u, int id, float x, float y, float size, float alpha)
 static void count_label(ui *u, const item_stack *st, float x, float y, float a)
 {
     if (st->count <= 1) return;
-    char b[8];
+    char b[8] = {0};
     snprintf(b, sizeof b, "%d", st->count);
     float w = ui_text_width(b, 1);
     ui_text_shadow(u, x + SLOT - 2 - w, y + SLOT - 9, 1, ui_alpha(C_HEAD, a), b);
@@ -151,7 +151,7 @@ void invui_hotbar(ui *u, invui *s, const inventory *inv, float dt)
 {
     track_pops(s, inv, dt);
     const float w = INV_HOTBAR * SLOT + (INV_HOTBAR - 1) * GAP;
-    float x0, y0;
+    float x0 = 0.0f, y0 = 0.0f;
     hotbar_origin(u, &x0, &y0);
     ui_rect(u, x0 - 3, y0 - 3, w + 6, SLOT + 6, ui_rgba(0, 0, 0, 120));
     if (s->last_sel < 0) s->sel_x = (float)inv->selected;
@@ -257,7 +257,7 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
         ui_frame(u, cx, ry, cw, 18, 1, ui_alpha(hot && ok ? C_ECG : C_BORDER, st));
         float a = st * (ok ? 1.0f : 0.45f);
         invui_icon(u, rc->out.id, cx + 2, ry + 1, 16, a);
-        char b[48];
+        char b[48] = {0};
         snprintf(b, sizeof b, "%dx", rc->out.count);
         ui_text(u, cx + 20, ry + 5, 1, ui_alpha(C_TEXT, a), b);
         float ix = cx + 42;

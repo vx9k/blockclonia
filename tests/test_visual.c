@@ -14,7 +14,7 @@
 
 static viewmodel_input vm_input(int held)
 {
-    viewmodel_input in;
+    viewmodel_input in = {0};
     memset(&in, 0, sizeof in);
     in.held_id = held;
     in.light = 1.0f;
@@ -56,7 +56,7 @@ static int vm_sane(const entity_instance *e, int n)
         for (int c = 0; c < 8; c++) {
             float v[3] = {(c & 1 ? 0.5f : -0.5f) * e[i].scale[0], (c & 2 ? 0.5f : -0.5f) * e[i].scale[1],
                           (c & 4 ? 0.5f : -0.5f) * e[i].scale[2]};
-            float r[3];
+            float r[3] = {0};
             quat_apply(inst_q(&e[i]), v, r);
             if (!(e[i].pos[2] + r[2] < NEAR_Z)) return 0;
         }
@@ -76,7 +76,7 @@ static int faces_seen(const entity_instance *e)
 {
     int seen = 0;
     for (int f = 0; f < 6; f++) {
-        float nrm[3] = {0, 0, 0}, r[3];
+        float nrm[3] = {0, 0, 0}, r[3] = {0};
         nrm[f / 2] = (f & 1) ? -1.0f : 1.0f;
         quat_apply(inst_q(e), nrm, r);
         float to_eye = -(r[0] * e->pos[0] + r[1] * e->pos[1] + r[2] * e->pos[2]);
@@ -107,8 +107,8 @@ static float frnd(uint32_t *s) { return (float)(xs(s) >> 8) * (1.0f / 16777216.0
 
 static void test_vm_parts(void)
 {
-    entity_instance out[VIEWMODEL_MAX];
-    viewmodel vm;
+    entity_instance out[VIEWMODEL_MAX] = {0};
+    viewmodel vm = {0};
     viewmodel_init(&vm);
     viewmodel_input in = vm_input(0);
     int n = vm_run(&vm, &in, 0.5f, out);
@@ -138,7 +138,7 @@ static void test_vm_parts(void)
     CHECK(out[HELD].scale[2] < 0.05f && out[HELD].scale[0] > 0.2f); /* a thin card */
     /* The card's face, not its edge, is toward the eye: the angle between
      * its normal and the line of sight is under 60 degrees. */
-    float nz[3] = {0.0f, 0.0f, 1.0f}, r[3];
+    float nz[3] = {0.0f, 0.0f, 1.0f}, r[3] = {0};
     quat_apply(inst_q(&out[HELD]), nz, r);
     float cosang = fabsf(r[0] * out[HELD].pos[0] + r[1] * out[HELD].pos[1] + r[2] * out[HELD].pos[2]) /
                    sqrtf(out[HELD].pos[0] * out[HELD].pos[0] + out[HELD].pos[1] * out[HELD].pos[1] +
@@ -165,18 +165,18 @@ static void test_vm_parts(void)
 static void test_vm_equip(void)
 {
     entity_instance out[VIEWMODEL_MAX] = {0};
-    viewmodel vm;
+    viewmodel vm = {0};
     viewmodel_init(&vm);
     viewmodel_input in = vm_input(B_STONE);
     vm_run(&vm, &in, 1.0f, out);
     CHECK(vm.equip == 1.0f && vm.shown_id == B_STONE);
-    float rest[3];
+    float rest[3] = {0};
     memcpy(rest, out[HAND].pos, sizeof rest);
     /* A twin that keeps the stone, stepped in lockstep: the arm breathes,
      * so "back up" means back where the twin is. */
     viewmodel twin = vm;
     viewmodel_input tin = in;
-    entity_instance tout[VIEWMODEL_MAX];
+    entity_instance tout[VIEWMODEL_MAX] = {0};
 
     /* Switch: the stone stays drawn while the arm drops, the planks appear
      * at the bottom, and the arm is back within 0.5 s. */
@@ -214,16 +214,16 @@ static void test_vm_equip(void)
 
 static void test_vm_swing(void)
 {
-    entity_instance out[VIEWMODEL_MAX];
-    viewmodel vm;
+    entity_instance out[VIEWMODEL_MAX] = {0};
+    viewmodel vm = {0};
     viewmodel_init(&vm);
     viewmodel_input in = vm_input(B_DIRT);
     vm_run(&vm, &in, 1.0f, out);
-    float rest[3];
+    float rest[3] = {0};
     memcpy(rest, out[HAND].pos, sizeof rest);
     viewmodel twin = vm; /* never swings: where the arm rests at each moment */
     viewmodel_input tin = in;
-    entity_instance tout[VIEWMODEL_MAX];
+    entity_instance tout[VIEWMODEL_MAX] = {0};
 
     /* One action: interact sets swing to 1 and eases it out at 3.5 /s. */
     in.swing = 1.0f;
@@ -257,7 +257,7 @@ static void test_vm_swing(void)
     h.dt = 0.001f;
     h.swinging = 1;
     h.swing = 1.0f;
-    float prev[3], max_step = 0.0f, late_max = 0.0f, chip = 0.0f;
+    float prev[3] = {0}, max_step = 0.0f, late_max = 0.0f, chip = 0.0f;
     viewmodel_build(&vm, &h, out, VIEWMODEL_MAX);
     memcpy(prev, out[HAND].pos, sizeof prev);
     for (int i = 1; i < 2000; i++) {
@@ -281,8 +281,8 @@ static void test_vm_swing(void)
 
 static void test_vm_motion(void)
 {
-    entity_instance out[VIEWMODEL_MAX], rest_out[VIEWMODEL_MAX];
-    viewmodel vm;
+    entity_instance out[VIEWMODEL_MAX] = {0}, rest_out[VIEWMODEL_MAX] = {0};
+    viewmodel vm = {0};
     viewmodel_init(&vm);
     viewmodel_input in = vm_input(B_STONE);
     vm_run(&vm, &in, 1.0f, rest_out);
@@ -375,8 +375,8 @@ static void test_vm_motion(void)
 
 static void test_vm_robust(void)
 {
-    entity_instance out[VIEWMODEL_MAX], again[VIEWMODEL_MAX];
-    viewmodel vm;
+    entity_instance out[VIEWMODEL_MAX] = {0}, again[VIEWMODEL_MAX] = {0};
+    viewmodel vm = {0};
 
     /* dt = 0: finite output, nothing advances, the same pose twice. */
     viewmodel_init(&vm);

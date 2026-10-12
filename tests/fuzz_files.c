@@ -17,8 +17,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
     static uint8_t out[PLAYER_FILE_SIZE];
-    player p;
-    inventory inv;
+    player p = {0};
+    inventory inv = {0};
     double day = 0.0;
     memset(&p, 0, sizeof p);
     if (survival_decode_player(&p, &inv, &day, data, size) == 0 &&
@@ -33,7 +33,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     size_t n = size < SETTINGS_MAX_FILE ? size : SETTINGS_MAX_FILE;
     memcpy(text, data, n);
     text[n] = '\0';
-    settings s, t;
+    settings s = {0}, t = {0};
     settings_default(&s);
     settings_parse(&s, text);
     settings_format(&s, text, (int)sizeof text);

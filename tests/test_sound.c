@@ -106,7 +106,7 @@ static void test_bank(void)
 static void test_mixing(void)
 {
     float *buf = mem_alloc(sizeof(float) * FRAMES * 2);
-    double el, er;
+    double el = 0.0, er = 0.0;
 
     /* Nothing playing: silence. */
     sound *s = fresh(1);
@@ -122,7 +122,7 @@ static void test_mixing(void)
     dvec3 at2 = dv3(0, 0, -2), at16 = dv3(0, 0, -16);
     sound_play(near, SND_BREAK, &at2, B_STONE, 1.0f);
     sound_play(far, SND_BREAK, &at16, B_STONE, 1.0f);
-    double en_l, en_r, ef_l, ef_r;
+    double en_l = 0.0, en_r = 0.0, ef_l = 0.0, ef_r = 0.0;
     render(near, buf, FRAMES / 2, &en_l, &en_r);
     render(far, buf, FRAMES / 2, &ef_l, &ef_r);
     CHECK(ef_l + ef_r < 0.2 * (en_l + en_r) && ef_l + ef_r > 0.0);
@@ -156,8 +156,8 @@ static void test_mixing(void)
         sound_play(crowd, i % 2 ? SND_THUD : SND_SHATTER, &at, B_STONE, 2.0f);
     }
     p = render(crowd, buf, FRAMES / 2, &el, &er);
-    int voices;
-    float load;
+    int voices = 0;
+    float load = 0.0f;
     sound_stats(crowd, &voices, &load);
     CHECK(voices <= 48 && voices > 10 && p <= 1.0f && all_finite(buf, FRAMES));
 

@@ -103,7 +103,7 @@ static int apply_line(settings *s, const char *line)
     size_t klen = (size_t)(sp - line);
     const char *v = sp + 1;
     if (!((*v >= '0' && *v <= '9') || (*v == '-' && v[1] >= '0' && v[1] <= '9'))) return 0;
-    char *end;
+    char *end = NULL;
     errno = 0;
     long n = strtol(v, &end, 10);
     if (errno || (*end != '\0' && *end != '\r')) return 0;
@@ -123,7 +123,7 @@ int settings_parse(settings *s, const char *text)
     while (*p) {
         const char *eol = strchr(p, '\n');
         size_t len = eol ? (size_t)(eol - p) : strlen(p);
-        char line[96];
+        char line[96] = {0};
         if (len < sizeof line) {
             memcpy(line, p, len);
             line[len] = '\0';
@@ -150,7 +150,7 @@ int settings_load(settings *s, const char *path)
 {
     char *buf = mem_alloc(SETTINGS_MAX_FILE + 1);
     long n = save_read_file(path, buf, SETTINGS_MAX_FILE);
-    int r;
+    int r = 0;
     if (n < 0) {
         r = os_path_kind(path) == OS_MISSING ? SETTINGS_MISSING : SETTINGS_UNUSABLE;
     } else {
@@ -164,7 +164,7 @@ int settings_load(settings *s, const char *path)
 
 int settings_save(const settings *s, const char *path)
 {
-    char buf[4096]; /* the file is ~300 bytes; room for comments a player adds */
+    char buf[4096] = {0}; /* the file is ~300 bytes; room for comments a player adds */
     int n = settings_format(s, buf, (int)sizeof buf);
     return save_write_file(path, buf, (size_t)n);
 }

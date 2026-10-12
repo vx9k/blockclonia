@@ -44,7 +44,7 @@ static int read_small(const char *path, char *buf, size_t cap)
 /* "48K", "1M" or a plain byte count, as /sys reports cache sizes. */
 static uint32_t parse_size(const char *s)
 {
-    char *end;
+    char *end = NULL;
     unsigned long long v = strtoull(s, &end, 10);
     if (end == s) return 0;
     if (*end == 'K') v *= 1024ull;
@@ -68,13 +68,13 @@ void sys_detect(sys_info *si)
 #else
     long pages = sysconf(_SC_PHYS_PAGES), page = sysconf(_SC_PAGESIZE);
     if (pages > 0 && page > 0) si->ram = (uint64_t)pages * (uint64_t)page;
-    char buf[4096];
+    char buf[4096] = {0};
     if (read_small("/proc/meminfo", buf, sizeof buf) == 0) {
         const char *p = strstr(buf, "MemAvailable:");
         if (p) si->ram_avail = strtoull(p + 13, NULL, 10) * 1024ull;
     }
     for (int i = 0; i < 8; i++) {
-        char path[96], level[16], type[32], size[32];
+        char path[96] = {0}, level[16] = {0}, type[32] = {0}, size[32] = {0};
         snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu0/cache/index%d/level", i);
         if (read_small(path, level, sizeof level) != 0) break;
         snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu0/cache/index%d/type", i);

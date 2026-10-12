@@ -47,7 +47,7 @@ static void grow_tree(column *c, uint32_t h, int x, int y, int z)
 void worldgen_column(uint32_t seed, column *c)
 {
     int bx = c->cx * CHUNK_W, bz = c->cz * CHUNK_W;
-    int hm[CHUNK_W + 2][CHUNK_W + 2];
+    int hm[CHUNK_W + 2][CHUNK_W + 2] = {0};
     for (int z = 0; z < CHUNK_W + 2; z++)
         for (int x = 0; x < CHUNK_W + 2; x++)
             hm[z][x] = worldgen_height(seed, bx + x - 1, bz + z - 1);
@@ -58,7 +58,7 @@ void worldgen_column(uint32_t seed, column *c)
         for (int x = 0; x < CHUNK_W; x++) {
             int h = hm[z + 1][x + 1];
             int slope = clampi(abs(hm[z + 1][x] - hm[z + 1][x + 2]) + abs(hm[z][x + 1] - hm[z + 2][x + 1]), 0, 64);
-            uint8_t top, filler;
+            uint8_t top = 0, filler = 0;
             if (h <= SEA_LEVEL - 5) { top = B_GRAVEL; filler = B_GRAVEL; }
             else if (h <= SEA_LEVEL + 1) { top = B_SAND; filler = B_SAND; }
             else if (slope > 5) { top = B_STONE; filler = B_STONE; }

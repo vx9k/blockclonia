@@ -184,13 +184,13 @@ static void test_device_vf(void)
     health_pads(c, 1);
     health_arrest(c, RHYTHM_VF);
     live(c, &e, 9.0);
-    hud_state hs;
+    hud_state hs = {0};
     memset(&hs, 0, sizeof hs);
     hud_update(&hs, c, 0.1f);
     int found = 0;
     for (int i = 0; i < hs.alert_count; i++) found |= strstr(hs.alerts[i].text, "charging") != NULL;
     CHECK(found);
-    ui u;
+    ui u = {0};
     ui_begin(&u, mem, MAXQ, 1280, 720);
     hs.panel = 1;
     hud_draw(&u, c, &hs);
@@ -332,20 +332,20 @@ static void test_defib_item(void)
 {
     CHECK(item_valid(I_DEFIBRILLATOR) && item_get(I_DEFIBRILLATOR)->stack == 1);
     CHECK(!strcmp(item_get(I_DEFIBRILLATOR)->name, "Defibrillator"));
-    inventory inv;
+    inventory inv = {0};
     inv_starting_kit(&inv);
     CHECK(inv_count(&inv, I_DEFIBRILLATOR) == 1);
-    uint8_t buf[INV_ENCODED_SIZE];
+    uint8_t buf[INV_ENCODED_SIZE] = {0};
     CHECK(inv_encode(&inv, buf, sizeof buf) == INV_ENCODED_SIZE);
-    inventory back;
+    inventory back = {0};
     CHECK(inv_decode(&back, buf, sizeof buf) == 0 && inv_count(&back, I_DEFIBRILLATOR) == 1);
     for (int i = 0; i < INV_SLOTS; i++)
         if (buf[8 + 2 * i] == I_DEFIBRILLATOR) buf[8 + 2 * i + 1] = 2; /* two in a slot of one */
     CHECK(inv_decode(&back, buf, sizeof buf) == -1);
 
     health *h = new_body(51);
-    char msg[128];
-    inventory none;
+    char msg[128] = {0};
+    inventory none = {0};
     inv_init(&none);
     CHECK(health_treat(h, &none, BP_CHEST, TREAT_DEFIB, 0, msg, sizeof msg) == 0 && h->defib.phase == DEFIB_OFF);
     CHECK(health_treat(h, &inv, BP_CHEST, TREAT_DEFIB, 0, msg, sizeof msg) == 1 && h->defib.phase != DEFIB_OFF);
@@ -354,18 +354,18 @@ static void test_defib_item(void)
     mem_free(h);
 
     /* Right-click with it in hand asks for the pads and places nothing. */
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
     fx_state *fx = mem_alloc(sizeof *fx);
     fx_init(fx, 5);
-    player p;
+    player p = {0};
     player_spawn(&p, &t.w, 0.5, 0.5);
     p.pitch = -1.2f;
     t.ph.pl = &p;
-    inventory held;
+    inventory held = {0};
     inv_init(&held);
     inv_add(&held, I_DEFIBRILLATOR, 1);
-    interact s;
+    interact s = {0};
     interact_init(&s, 3);
     dvec3 eye = dv3(p.pos.x, p.pos.y + PLAYER_EYE, p.pos.z);
     vec3 dir = look_dir(p.yaw, p.pitch);

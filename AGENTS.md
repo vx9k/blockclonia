@@ -53,6 +53,13 @@ and clang. `.clang-tidy` and `cppcheck` run in `tools/lint.sh`.
   on the heap. Budgets that depend on the machine (threads, caches,
   default view distance) come from `sys_plan`, not fixed numbers. Casts are explicit wherever a conversion narrows
   or changes sign.
+- **Initialise every local**: scalars and pointers to `0`, `0.0f` or
+  `NULL`, structs and arrays with `= {0}` (or a designated initialiser
+  where zero is not a valid enum value). clang-tidy's
+  `cppcoreguidelines-init-variables` enforces the scalars. Leave a buffer
+  uninitialised only where zeroing it measurably slows a hot path and it
+  is fully written before any read, with a comment saying so (the
+  mesher's per-section buffers). `va_list` is never initialised.
 - **Allocate through `src/mem.h` only** (`mem_alloc`, `mem_calloc`,
   `mem_realloc`, `mem_free`, `mem_array_size` for `n * size`). Never call
   `malloc`/`free`/`mi_*` directly. Allocation failure aborts, so callers

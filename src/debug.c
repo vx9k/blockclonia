@@ -40,7 +40,7 @@ static void line(column_ctx *c, uint32_t col, const char *fmt, ...)
 
 static void line(column_ctx *c, uint32_t col, const char *fmt, ...)
 {
-    char b[160];
+    char b[160] = {0};
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(b, sizeof b, fmt, ap);
@@ -93,7 +93,7 @@ static void frame_graph(ui *u, const debug_frames *f, float x, float y, float w,
         uint32_t col = ms <= 17.5f ? C_ECG : (ms <= 34.0f ? C_CO2 : C_ART);
         ui_rect(u, x + (float)c, y + h - bh, 1, bh, ui_alpha(col, 0.85f));
     }
-    char b[64];
+    char b[64] = {0};
     snprintf(b, sizeof b, "avg %.1f  max %.1f ms", (double)(sum / (float)cols), (double)worst);
     ui_text(u, x + 2, y + 2, 1, C_TEXT, b);
     ui_text(u, x + w - 2 - ui_text_width("60", 1), y60 - 9, 1, ui_alpha(C_ECG, 0.8f), "60");

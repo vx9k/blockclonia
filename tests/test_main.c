@@ -31,9 +31,9 @@
 
 static void test_gpupool(void)
 {
-    gpupool p;
+    gpupool p = {0};
     gpupool_init(&p, 1024, 64);
-    uint32_t got;
+    uint32_t got = 0;
     uint32_t a = gpupool_alloc(&p, 10, &got);
     CHECK(a == 0 && got == 64);
     uint32_t b = gpupool_alloc(&p, 100, &got);
@@ -165,11 +165,11 @@ static int file_is(const char *path, const char *text)
 /* A shared world folder must not be able to redirect saves elsewhere. */
 static void test_save_files(void)
 {
-    char dir[256];
+    char dir[256] = {0};
     int made = tmp_dir_make(dir, sizeof dir, "mc_test_");
     CHECK(made);
     if (!made) return;
-    char victim[300], p[340];
+    char victim[300] = {0}, p[340] = {0};
     snprintf(victim, sizeof victim, "%s/victim.txt", dir);
     FILE *f = fopen(victim, "wb");
     CHECK(f && fputs("precious", f) >= 0);
@@ -218,7 +218,7 @@ static void test_mesher(void)
 {
     mesh_input *in = mem_alloc(sizeof *in);
     uint32_t *out = mem_alloc(sizeof(uint32_t) * 4 * MESH_MAX_QUADS);
-    uint32_t o, t;
+    uint32_t o = 0, t = 0;
 
     fill_input(in, B_AIR);
     in->blocks[mesh_pidx(5, 5, 5)] = B_STONE;
@@ -299,7 +299,7 @@ static void test_mesher(void)
 
 static void test_world_basics(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
     CHECK(world_get(&t.w, 0, 0, 0) == B_BEDROCK);
     CHECK(world_get(&t.w, -5, 12, -9) == B_GRASS);
@@ -320,9 +320,9 @@ static void test_world_basics(void)
 
 static void test_player_physics(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
-    player p;
+    player p = {0};
     player_spawn(&p, &t.w, 0.5, 0.5);
     CHECK(fabs(p.pos.y - GROUND) < 1e-9);
 
@@ -370,9 +370,9 @@ static void test_player_physics(void)
 
 static void test_sprint_sneak(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
-    player p;
+    player p = {0};
 
     /* Sprinting forward reaches sprint speed; walking stays at walking pace. */
     player_spawn(&p, &t.w, 0.5, 20.5);
@@ -427,9 +427,9 @@ static void test_sprint_sneak(void)
 
 static void test_camera(void)
 {
-    camera_anim c;
+    camera_anim c = {0};
     camera_init(&c);
-    player p;
+    player p = {0};
     memset(&p, 0, sizeof p);
     p.on_ground = 1;
     p.vel = dv3(0, 0, -WALK_SPEED);
@@ -473,11 +473,11 @@ static void test_camera(void)
 
 static double slide_distance(uint8_t floor_block)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
     for (int z = -30; z <= 30; z++)
         for (int x = -2; x <= 2; x++) world_set(&t.w, x, GROUND - 1, z, floor_block, 0);
-    player p;
+    player p = {0};
     player_spawn(&p, &t.w, 0.5, 20.5);
     p.vel = dv3(0, 0, -4.0);
     player_input idle = {0};
@@ -498,7 +498,7 @@ static void test_friction(void)
 
 static void test_structure(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
     physics *ph = &t.ph;
 
@@ -519,7 +519,7 @@ static void test_structure(void)
     CHECK(fell == 3 + 7); /* pillar above the gap plus the arm */
 
     /* The bodies fall, land and re-solidify. */
-    player p;
+    player p = {0};
     player_spawn(&p, &t.w, 10.5, 10.5);
     player_input idle = {0};
     run_steps(&t, &p, &idle, 240);
@@ -549,10 +549,10 @@ static void test_structure(void)
  * gets through must not depend on how fast the machine is. */
 static void test_structure_budget(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
     physics *ph = &t.ph;
-    player p;
+    player p = {0};
     player_spawn(&p, &t.w, 0.5, 0.5);
     player_input idle = {0};
 
@@ -580,7 +580,7 @@ static void test_structure_budget(void)
 
 static void test_buoyancy(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
     /* A 6-deep pool. */
     for (int y = GROUND - 6; y < GROUND; y++)
@@ -592,7 +592,7 @@ static void test_buoyancy(void)
     t.ph.bodies[0] = (body){.pos = dv3(0, GROUND - 5, 0), .prev_pos = dv3(0, GROUND - 5, 0), .block = B_LOG};
     t.ph.bodies[1] = (body){.pos = dv3(2, GROUND - 1, 2), .prev_pos = dv3(2, GROUND - 1, 2), .block = B_STONE};
     t.ph.body_count = 2;
-    player p;
+    player p = {0};
     player_spawn(&p, &t.w, 20.5, 20.5);
     player_input idle = {0};
     double max_log_y = 0;
@@ -610,7 +610,7 @@ static void test_buoyancy(void)
 
 static void test_settle(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
     /* Falling bodies are put back into the world before a save. */
     t.ph.bodies[0] = (body){.pos = dv3(2, GROUND + 6.3, 2), .block = B_SAND};
@@ -635,7 +635,7 @@ static long total_water(const world *w, int r)
 
 static void test_fluid(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
     /* Pour 5 full blocks of water from above onto flat ground. */
     for (int y = GROUND + 3; y < GROUND + 8; y++) world_set(&t.w, 0, y, 0, B_WATER, 0);
@@ -655,7 +655,7 @@ static void test_fluid(void)
 
 static void test_raycast(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
     ray_hit h = physics_raycast(&t.w, dv3(0.5, GROUND + 1.6, 0.5), v3(0, -1, 0), 5.0);
     CHECK(h.hit && h.block.y == GROUND - 1 && h.before.y == GROUND && h.id == B_GRASS);
@@ -692,7 +692,7 @@ static void test_health_rest(void)
     CHECK(wave_span(h->ecg) > 0.8f);   /* QRS complexes */
     CHECK(wave_span(h->art) > 25.0f);  /* pulse pressure */
     CHECK(wave_span(h->capno) > 25.0f); /* breaths */
-    char buf[96];
+    char buf[96] = {0};
     for (int p = 0; p < BP_COUNT; p++) {
         CHECK(health_part_status(h, p, buf, sizeof buf) == 0);
         CHECK(!strcmp(buf, "OK"));
@@ -730,11 +730,11 @@ static void test_health_bleeding(void)
     health_env e = calm_env();
     health_cut(a, BP_LLEG, 0.8f, 1, 0.2f);
     health_cut(b, BP_LLEG, 0.8f, 1, 0.2f);
-    inventory ia, ib;
+    inventory ia = {0}, ib = {0};
     inv_init(&ia);
     inv_init(&ib);
     inv_add(&ib, I_BANDAGE, 1);
-    char msg[128];
+    char msg[128] = {0};
     CHECK(health_treat(b, &ib, BP_LLEG, TREAT_BANDAGE, 0, msg, sizeof msg) == 1);
     CHECK(inv_count(&ib, I_BANDAGE) == 0);
     live(a, &e, 60.0);
@@ -779,7 +779,7 @@ static void test_health_drowning(void)
     CHECK(h->sao2 < sat - 0.2f);
     CHECK(h->hr < 70.0f); /* diving reflex */
     CHECK(h->lung_water > 0.05f);
-    char buf[64];
+    char buf[64] = {0};
     CHECK(health_organ_status(h, ORG_LUNGS, buf, sizeof buf) >= 2);
     live(h, &e, 420.0);
     CHECK(h->dead && h->cause == DEATH_DROWNING);
@@ -792,7 +792,7 @@ static void test_health_drowning(void)
 static void test_health_fractures(void)
 {
     health *h = new_body(5);
-    inventory inv;
+    inventory inv = {0};
     inv_init(&inv);
     health_env e = calm_env();
     health_fall(h, sqrt(2.0 * 9.81 * 1.2), 1.0); /* jumping off a block */
@@ -808,7 +808,7 @@ static void test_health_fractures(void)
     CHECK(h->part[BP_RLEG].fracture == FX_CLOSED);
     l = health_get_limits(h);
     CHECK(!l.can_sprint && !l.can_jump && l.move_scale < 0.6f);
-    char msg[128], buf[96];
+    char msg[128] = {0}, buf[96] = {0};
     CHECK(health_part_status(h, BP_RLEG, buf, sizeof buf) >= 2);
     CHECK(strstr(buf, "closed fracture") != NULL);
     float pain = h->part[BP_RLEG].pain;
@@ -839,8 +839,8 @@ static void test_health_infection(void)
     e.speed = 0.0;
     health_cut(a, BP_RARM, 0.6f, 0, 0.5f);
     health_cut(b, BP_RARM, 0.6f, 0, 0.5f);
-    char msg[128];
-    inventory inv;
+    char msg[128] = {0};
+    inventory inv = {0};
     inv_init(&inv);
     inv_add(&inv, I_ANTISEPTIC, 1);
     inv_add(&inv, I_ANTIBIOTIC, 1);
@@ -862,7 +862,7 @@ static void test_health_infection(void)
     CHECK(inf_a > 0.6f);
     CHECK(a->sepsis > 0.3f && a->temp > 38.0f && a->hr > 90.0f);
     CHECK(inf_b < 0.2f && b->sepsis < 0.05f);
-    char buf[96];
+    char buf[96] = {0};
     CHECK(health_part_status(a, BP_RARM, buf, sizeof buf) == 3);
     CHECK(strstr(buf, "infection") != NULL);
     mem_free(a);
@@ -874,13 +874,13 @@ static void test_health_infection(void)
 static void test_health_needs(void)
 {
     health *h = new_body(8);
-    inventory inv;
+    inventory inv = {0};
     inv_init(&inv);
     health_env e = calm_env();
     live(h, &e, 600.0); /* half a survival day */
     float hyd = health_hydration(h), hun = health_hunger(h);
     CHECK(hyd < 0.9f && hun > 0.2f);
-    char msg[128];
+    char msg[128] = {0};
     CHECK(health_treat(h, &inv, BP_CHEST, TREAT_DRINK, 0, msg, sizeof msg) == 0); /* no water in reach */
     for (int i = 0; i < 4; i++) {
         CHECK(health_treat(h, &inv, BP_CHEST, TREAT_DRINK, 1, msg, sizeof msg) == 1);
@@ -889,7 +889,7 @@ static void test_health_needs(void)
     CHECK(health_hydration(h) > hyd);
     CHECK(health_treat(h, &inv, BP_CHEST, TREAT_EAT, 0, msg, sizeof msg) == 0); /* no food */
     uint32_t rng = 99;
-    item_stack drops[3];
+    item_stack drops[3] = {0};
     CHECK(item_drops(B_LOG, &rng, drops) == 1 && drops[0].id == B_LOG);
     for (int i = 0; i < 60; i++) {
         int n = item_drops(B_LEAVES, &rng, drops);
@@ -906,9 +906,9 @@ static void test_health_needs(void)
  * broken leg slows the player's input. */
 static void test_survival(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
-    player p;
+    player p = {0};
     player_input idle = {0};
     health *h = new_body(9);
 
@@ -936,7 +936,7 @@ static void test_survival(void)
     CHECK(h->part[BP_LLEG].integrity + h->part[BP_RLEG].integrity < before - 0.2f);
 
     /* Environment: air at the eyes on dry land, water when submerged. */
-    health_env e;
+    health_env e = {0};
     survival_before b = survival_capture(&p);
     survival_env(&t.w, &p, &b, 0, &e);
     CHECK(e.airway == AIRWAY_AIR && e.on_ground);
@@ -979,7 +979,7 @@ static void test_ui(void)
 
     enum { MAXQ = 8192 };
     ui_vertex *mem = mem_alloc(sizeof(ui_vertex) * 4 * MAXQ);
-    ui u;
+    ui u = {0};
     ui_begin(&u, mem, MAXQ, 1280, 720);
     CHECK(u.w == 640.0f && u.h == 360.0f);
     CHECK(ui_text(&u, 0, 0, 1, 0xffffffffu, "a b") == 17.0f);
@@ -990,11 +990,11 @@ static void test_ui(void)
     CHECK(ui_text_wrap(&u, 0, 0, 29, 3, 1, 0xffffffffu, "unbreakableword") == 3); /* hard breaks */
 
     /* A full buffer drops quads instead of writing past it. */
-    ui small;
+    ui small = {0};
     ui_begin(&small, mem, 3, 640, 360);
     ui_text(&small, 0, 0, 1, 0xffffffffu, "abcdef");
     CHECK(small.quads == 3 && small.overflow == 3);
-    ui none;
+    ui none = {0};
     ui_begin(&none, NULL, MAXQ, 640, 360);
     ui_rect(&none, 0, 0, 10, 10, 0xffffffffu);
     CHECK(none.quads == 0);
@@ -1043,7 +1043,7 @@ static int inv_equal(const inventory *a, const inventory *b)
 
 static void test_inventory(void)
 {
-    inventory inv;
+    inventory inv = {0};
     inv_init(&inv);
     /* Stacks fill up to their size, the hotbar first; the rest overflows. */
     CHECK(inv_add(&inv, B_STONE, 100) == 0);
@@ -1051,7 +1051,7 @@ static void test_inventory(void)
     CHECK(inv_add(&inv, I_BUCKET, 3) == 0 && inv.slot[2].count == 1 && inv.slot[4].id == I_BUCKET);
     CHECK(inv_add(&inv, B_WATER, 1) == 1 && inv_add(&inv, B_BEDROCK, 2) == 2); /* not items */
     CHECK(inv_count(&inv, B_STONE) == 100);
-    inventory full;
+    inventory full = {0};
     inv_init(&full);
     CHECK(inv_add(&full, B_DIRT, 64 * INV_SLOTS + 5) == 5);
     /* Taking empties the backpack end first. */
@@ -1099,9 +1099,9 @@ static void test_inventory(void)
     /* Encoding round-trips; corrupt bytes are rejected untouched. */
     inv.selected = 4;
     inv.cursor = (item_stack){I_STICK, 7};
-    uint8_t buf[INV_ENCODED_SIZE];
+    uint8_t buf[INV_ENCODED_SIZE] = {0};
     CHECK(inv_encode(&inv, buf, sizeof buf) == INV_ENCODED_SIZE);
-    inventory back;
+    inventory back = {0};
     CHECK(inv_decode(&back, buf, sizeof buf) == 0 && inv_equal(&back, &inv));
     buf[8] = B_BEDROCK;
     buf[9] = 1;
@@ -1119,16 +1119,16 @@ static void test_inventory(void)
     }
 
     /* The player file. */
-    player p;
+    player p = {0};
     memset(&p, 0, sizeof p);
     p.pos = dv3(-123.25, 70.5, 9999.75);
     p.yaw = 1.25f;
     p.pitch = -0.5f;
     p.flying = 1;
-    uint8_t pf[PLAYER_FILE_SIZE];
+    uint8_t pf[PLAYER_FILE_SIZE] = {0};
     CHECK(survival_encode_player(&p, &inv, 0.75, pf, sizeof pf) == PLAYER_FILE_SIZE);
-    player q;
-    inventory qi;
+    player q = {0};
+    inventory qi = {0};
     double day = 0.0;
     CHECK(survival_decode_player(&q, &qi, &day, pf, sizeof pf) == 0);
     CHECK(fabs(day - 0.75) < 1e-4);
@@ -1149,9 +1149,9 @@ static void test_inventory(void)
 
 static void test_items_physics(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
-    player p;
+    player p = {0};
     player_spawn(&p, &t.w, 0.5, 0.5);
     t.ph.pl = &p;
     /* Dropped from 3 m, an item falls, bounces a little and comes to rest
@@ -1191,7 +1191,7 @@ static void test_items_physics(void)
     p.pos = dv3(5.5, GROUND, 5.5);
     physics_drop_item(&t.ph, dv3(6.7, GROUND + 0.2, 5.5), dv3(0, 0, 0), I_APPLE, 2, 0.1f);
     t.ph.magnet = 1;
-    inventory inv;
+    inventory inv = {0};
     inv_init(&inv);
     int got = 0;
     for (int i = 0; i < 120 && !got; i++) {
@@ -1200,7 +1200,7 @@ static void test_items_physics(void)
     }
     CHECK(got == 1 && inv_count(&inv, I_APPLE) == 2 && t.ph.item_count == 0);
     /* A full inventory leaves the item on the ground. */
-    inventory full;
+    inventory full = {0};
     inv_init(&full);
     inv_add(&full, B_DIRT, 64 * INV_SLOTS);
     physics_drop_item(&t.ph, dv3(5.5, GROUND + 0.9, 5.5), dv3(0, 0, 0), I_APPLE, 1, 0.0f);
@@ -1211,17 +1211,17 @@ static void test_items_physics(void)
 
 static void test_interact(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
     fx_state *fx = mem_alloc(sizeof *fx);
     fx_init(fx, 5);
-    player p;
+    player p = {0};
     player_spawn(&p, &t.w, 0.5, 0.5);
     p.pitch = -1.2f;
     t.ph.pl = &p;
-    inventory inv;
+    inventory inv = {0};
     inv_init(&inv);
-    interact s;
+    interact s = {0};
     interact_init(&s, 3);
     dvec3 eye = dv3(p.pos.x, p.pos.y + PLAYER_EYE, p.pos.z);
     vec3 dir = look_dir(p.yaw, p.pitch);
@@ -1301,9 +1301,9 @@ static void test_interact(void)
  * crack overlay is never crowded out of the entity list. */
 static void test_review_fixes(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
-    player p;
+    player p = {0};
     player_spawn(&p, &t.w, 0.5, 0.5);
     t.ph.pl = &p;
     player_input idle = {0};
@@ -1321,10 +1321,10 @@ static void test_review_fixes(void)
         for (int z = 5; z <= 7; z++)
             if (x != 6 || z != 6)
                 for (int y = GROUND; y <= GROUND + 2; y++) world_set(&t.w, x, y, z, B_GLASS, 0); /* a well */
-    inventory inv;
+    inventory inv = {0};
     inv_init(&inv);
     inv_add(&inv, B_PLANKS, 1);
-    interact s;
+    interact s = {0};
     interact_init(&s, 9);
     fx_state *fx = mem_alloc(sizeof *fx);
     fx_init(fx, 9);
@@ -1363,11 +1363,11 @@ static void test_review_fixes(void)
 static void test_sysinfo(void)
 {
     /* Detection reads something on any machine the tests run on. */
-    sys_info si;
+    sys_info si = {0};
     sys_detect(&si);
     CHECK(si.cores >= 1 && si.ram > 0);
 
-    sys_budget b;
+    sys_budget b = {0};
     /* A Raspberry Pi 4 (4 GB, 4 cores, 3 GB free): three workers, the old
      * defaults. */
     sys_info pi = {.ram = 4ull * 1024ull * 1024ull * 1024ull,
@@ -1388,7 +1388,7 @@ static void test_sysinfo(void)
     sys_plan(&tight, &b);
     CHECK(b.workers == 2 && b.render_distance == 6 && b.sqlite_cache_kb == 2048);
     /* Nothing known: a safe small plan, never zero workers. */
-    sys_info none;
+    sys_info none = {0};
     memset(&none, 0, sizeof none);
     sys_plan(&none, &b);
     CHECK(b.workers >= 1 && b.render_distance >= 6 && b.sqlite_cache_kb >= 2048 && b.arena_mb == 64);
@@ -1396,10 +1396,10 @@ static void test_sysinfo(void)
 
 static void test_settings(void)
 {
-    settings s, t;
+    settings s = {0}, t = {0};
     settings_default(&s);
     CHECK(s.fov == 70 && s.sensitivity == 100 && s.vsync == 1 && s.gui_scale == 0);
-    char buf[1024];
+    char buf[1024] = {0};
     s.fov = 95;
     s.sprint_toggle = 1;
     s.gui_scale = 3;
@@ -1419,7 +1419,7 @@ static void test_settings(void)
     CHECK(settings_parse(&t, "fov 500\nfov 12x\nbogus 3\n# fov 80\nsensitivity 250\r\nvsync -1\n fov 60\n") == 1);
     CHECK(t.fov == 70 && t.sensitivity == 250 && t.vsync == 1);
     /* A tiny buffer truncates instead of overflowing. */
-    char tiny[8];
+    char tiny[8] = {0};
     CHECK(settings_format(&s, tiny, (int)sizeof tiny) == 7 && tiny[7] == '\0');
 }
 
@@ -1429,7 +1429,7 @@ static void test_settings(void)
  * setting in it is reported unusable. */
 static void test_settings_file(void)
 {
-    char dir[256], p[300], q[300];
+    char dir[256] = {0}, p[300] = {0}, q[300] = {0};
     int made = tmp_dir_make(dir, sizeof dir, "mc_cfg_");
     CHECK(made);
     if (!made) return;
@@ -1439,7 +1439,7 @@ static void test_settings_file(void)
     len += (size_t)snprintf(text + len, cap - len, "fov 90\n");
     snprintf(p, sizeof p, "%s/big.cfg", dir);
     CHECK(save_write_file(p, text, len) == 0);
-    settings s;
+    settings s = {0};
     settings_default(&s);
     CHECK(settings_load(&s, p) == 1 && s.fov == 90);
 
@@ -1487,12 +1487,12 @@ static menu_action menu_run(menu *m, ui *u, ui_vertex *mem, settings *s, const m
 static void test_menu_worlds(void)
 {
     ui_vertex *mem = mem_alloc(sizeof(ui_vertex) * 4 * 8192);
-    ui u;
-    settings s;
+    ui u = {0};
+    settings s = {0};
     settings_default(&s);
-    menu m;
+    menu m = {0};
     menu_init(&m);
-    menu_world list[10];
+    menu_world list[10] = {0};
     for (int i = 0; i < 10; i++) {
         snprintf(list[i].name, sizeof list[i].name, "World %d", i);
         snprintf(list[i].detail, sizeof list[i].detail, "seed %d", i);
@@ -1562,10 +1562,10 @@ static void test_menu_worlds(void)
 static void test_menu(void)
 {
     ui_vertex *mem = mem_alloc(sizeof(ui_vertex) * 4 * 8192);
-    ui u;
-    settings s;
+    ui u = {0};
+    settings s = {0};
     settings_default(&s);
-    menu m;
+    menu m = {0};
     menu_init(&m);
     menu_input idle = {.mx = -1, .my = -1, .dt = 1.0f / 60.0f};
 
@@ -1638,11 +1638,11 @@ static void test_menu(void)
     CHECK(got == MENU_QUIT);
 
     /* The F3 overlay fits the buffer. */
-    debug_frames f;
+    debug_frames f = {0};
     memset(&f, 0, sizeof f);
     for (int i = 0; i < 500; i++) debug_frames_push(&f, 10.0f + (float)(i % 7));
     CHECK(f.fps > 70.0f && f.fps < 100.0f);
-    debug_info d;
+    debug_info d = {0};
     memset(&d, 0, sizeof d);
     d.frames = &f;
     d.has_target = 1;

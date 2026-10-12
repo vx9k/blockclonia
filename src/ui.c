@@ -203,7 +203,7 @@ static void white_uv(uint16_t *uu, uint16_t *vv)
 void ui_rect4(ui *u, float x, float y, float w, float h, uint32_t tl, uint32_t tr, uint32_t br, uint32_t bl)
 {
     if (w <= 0.0f || h <= 0.0f) return;
-    uint16_t wu, wv;
+    uint16_t wu = 0, wv = 0;
     white_uv(&wu, &wv);
     float xy[8] = {x, y, x + w, y, x + w, y + h, x, y + h};
     uint32_t c[4] = {tl, tr, br, bl};
@@ -238,7 +238,7 @@ void ui_line(ui *u, float x0, float y0, float x1, float y1, float thick, uint32_
     y0 -= ey;
     x1 += ex;
     y1 += ey;
-    uint16_t wu, wv;
+    uint16_t wu = 0, wv = 0;
     white_uv(&wu, &wv);
     float xy[8] = {x0 + nx, y0 + ny, x1 + nx, y1 + ny, x1 - nx, y1 - ny, x0 - nx, y0 - ny};
     uint32_t c[4] = {rgba, rgba, rgba, rgba};
@@ -247,7 +247,7 @@ void ui_line(ui *u, float x0, float y0, float x1, float y1, float thick, uint32_
 
 void ui_quad(ui *u, const float xy[8], uint32_t rgba)
 {
-    uint16_t wu, wv;
+    uint16_t wu = 0, wv = 0;
     white_uv(&wu, &wv);
     uint32_t c[4] = {rgba, rgba, rgba, rgba};
     quad(u, xy, wu, wv, wu, wv, c);
@@ -310,7 +310,7 @@ float ui_text_shadow(ui *u, float x, float y, int size, uint32_t rgba, const cha
 
 float ui_textf(ui *u, float x, float y, int size, uint32_t rgba, const char *fmt, ...)
 {
-    char buf[512];
+    char buf[512] = {0};
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(buf, sizeof buf, fmt, ap);
@@ -322,7 +322,7 @@ int ui_text_wrap(ui *u, float x, float y, float width, int max_lines, int size, 
 {
     int cols = (int)((width + (float)size) / (float)(UI_CELL_W * size));
     if (cols < 1) cols = 1;
-    char line[256];
+    char line[256] = {0};
     int lines = 0;
     while (*s && lines < max_lines) {
         while (*s == ' ') s++;

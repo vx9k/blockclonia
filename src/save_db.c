@@ -88,7 +88,7 @@ static int schema_is_ours(sqlite3 *h, int *empty)
         return -1;
     }
     unsigned seen = 0;
-    int rows = 0, ours = 1, rc;
+    int rows = 0, ours = 1, rc = 0;
     while ((rc = sqlite3_step(s)) == SQLITE_ROW) {
         rows++;
         int k = -1;
@@ -149,7 +149,7 @@ static int check_or_create(sqlite3 *h, const char *path)
         return -1;
     }
     if (empty && app == 0 && version == 0) {
-        char sql[512];
+        char sql[512] = {0};
         int n = snprintf(sql, sizeof sql,
                          "BEGIN; %s; %s; %s; PRAGMA application_id = %d; PRAGMA user_version = %d; COMMIT",
                          TABLE_SQL[0], TABLE_SQL[1], TABLE_SQL[2], APP_ID, FORMAT);
@@ -171,7 +171,7 @@ static int side_files_ok(const char *path)
 {
     static const char *const SUFFIX[] = {"", "-journal", "-wal", "-shm"};
     for (size_t i = 0; i < sizeof SUFFIX / sizeof SUFFIX[0]; i++) {
-        char p[DB_PATH_MAX + 32];
+        char p[DB_PATH_MAX + 32] = {0};
         int n = snprintf(p, sizeof p, "%s%s", path, SUFFIX[i]);
         if (n < 0 || (size_t)n >= sizeof p) return 0;
         int kind = os_path_kind(p);
@@ -196,7 +196,7 @@ save_db *save_db_open(const char *dir)
     /* SQLITE_OPEN_NOFOLLOW refuses a symlink anywhere in the path, and
      * homes are often reached through one (/home -> /var/home). Resolving
      * the folder first leaves only world.db itself to be refused. */
-    char real[DB_PATH_MAX], path[DB_PATH_MAX + 16];
+    char real[DB_PATH_MAX] = {0}, path[DB_PATH_MAX + 16] = {0};
     errno = 0;
     if (os_full_path(dir, real, sizeof real) != 0) {
         log_error("world folder %s: %s", dir, errno ? strerror(errno) : "cannot resolve it");
@@ -228,7 +228,7 @@ save_db *save_db_open(const char *dir)
     sqlite3_file_control(h, "main", SQLITE_FCNTL_PERSIST_WAL, &persist_wal);
     exec(h, "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL");
     if (g_cache_kb) {
-        char pragma[64];
+        char pragma[64] = {0};
         snprintf(pragma, sizeof pragma, "PRAGMA cache_size = -%d", g_cache_kb); /* negative: KiB */
         exec(h, pragma);
     }
@@ -334,7 +334,7 @@ int save_db_set_meta(save_db *db, const char *key, int64_t v)
 
 int save_db_get_seed(save_db *db, uint32_t *seed)
 {
-    int64_t v;
+    int64_t v = 0;
     int r = save_db_get_meta(db, "seed", &v);
     if (r != 0) return r;
     if (v < 0 || v > (int64_t)UINT32_MAX) return -1;
@@ -366,13 +366,13 @@ void save_db_peek(const char *dir, save_peek *p)
     memset(p, 0, sizeof *p);
     p->generator = 1;
     p->status = SAVE_PEEK_BAD;
-    char real[DB_PATH_MAX], path[DB_PATH_MAX + 16];
+    char real[DB_PATH_MAX] = {0}, path[DB_PATH_MAX + 16] = {0};
     if (os_full_path(dir, real, sizeof real) != 0) return;
     int n = snprintf(path, sizeof path, "%s/world.db", real);
     if (n < 0 || (size_t)n >= sizeof path) return;
     int kind = os_path_kind(path);
     if (kind == OS_MISSING) {
-        char old[DB_PATH_MAX + 16];
+        char old[DB_PATH_MAX + 16] = {0};
         n = snprintf(old, sizeof old, "%s/level.dat", real);
         p->status = n > 0 && (size_t)n < sizeof old && os_path_kind(old) == OS_FILE ? SAVE_PEEK_LEGACY : SAVE_PEEK_NONE;
         return;
@@ -401,7 +401,7 @@ void save_db_peek(const char *dir, save_peek *p)
         sqlite3_close(h);
         return;
     }
-    int64_t v;
+    int64_t v = 0;
     if (peek_meta(h, "seed", &v) == 0 && v >= 0 && v <= (int64_t)UINT32_MAX) {
         p->seed = (uint32_t)v;
         p->has_seed = 1;
@@ -411,7 +411,7 @@ void save_db_peek(const char *dir, save_peek *p)
     sqlite3_stmt *s = NULL;
     if (sqlite3_prepare_v2(h, STMT_SQL[S_GET_BLOB], -1, &s, NULL) == SQLITE_OK) {
         sqlite3_bind_text(s, 1, "name", -1, SQLITE_STATIC);
-        char name[SAVE_NAME_MAX + 1];
+        char name[SAVE_NAME_MAX + 1] = {0};
         long len = read_blob(s, name, SAVE_NAME_MAX);
         if (len > 0 && save_name_valid(name, (size_t)len)) {
             memcpy(p->name, name, (size_t)len);
@@ -486,7 +486,7 @@ static int import_file(save_db *db, const char *dir, const char *name, int *fail
 {
     int cx = 0, cz = 0, player = strcmp(name, "player.dat") == 0;
     if (!player && !save_column_name(name, &cx, &cz)) return 0;
-    char path[512];
+    char path[512] = {0};
     int n = snprintf(path, sizeof path, "%s/%s", dir, name);
     if (n < 0 || (size_t)n >= sizeof path) return 0;
     /* Symlinks, FIFOs and oversized files stay behind: loading them from
@@ -501,7 +501,7 @@ static int import_file(save_db *db, const char *dir, const char *name, int *fail
 
 int save_db_import(save_db *db, const char *dir)
 {
-    uint32_t seed, have;
+    uint32_t seed = 0, have = 0;
     /* A seed that is there but could not be read must not let the old
      * files, which stay in the folder, be imported over the newer world. */
     int got = save_db_get_seed(db, &have);
@@ -514,7 +514,7 @@ int save_db_import(save_db *db, const char *dir)
         return -1;
     }
     int files = 1, failed = 0; /* level.dat */
-    const char *name;
+    const char *name = NULL;
     while (!failed && (name = os_dir_next(d)) != NULL) files += import_file(db, dir, name, &failed);
     os_dir_close(d);
     if (!failed && save_db_set_seed(db, seed) == 0 && save_db_commit(db) == 0) return files;

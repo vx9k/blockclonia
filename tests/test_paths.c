@@ -34,7 +34,7 @@ static void env_restore(void)
 
 static int app_dir_is(const char *var, const char *rel, const char *want)
 {
-    char out[PATHS_MAX];
+    char out[PATHS_MAX] = {0};
     return paths_app_dir(var, rel, out, sizeof out) == 0 && strcmp(out, want) == 0;
 }
 
@@ -59,7 +59,7 @@ static void test_app_dir(void)
     CHECK(app_dir_is("XDG_DATA_HOME", ".local/share", "/.local/share/blockclonia"));
 
     /* No absolute XDG value and no usable $HOME: nothing to build on. */
-    char out[PATHS_MAX];
+    char out[PATHS_MAX] = {0};
     env_set(NULL, NULL, NULL, NULL);
     CHECK(paths_app_dir("XDG_CONFIG_HOME", ".config", out, sizeof out) == -1);
     env_set("", NULL, NULL, NULL);
@@ -74,7 +74,7 @@ static void test_app_dir(void)
 
 static void test_resolve(void)
 {
-    paths p;
+    paths p = {0};
     env_set("/home/u", NULL, "/data", "");
     paths_resolve(&p);
     CHECK(strcmp(p.config, "/home/u/.config/blockclonia/blockclonia.cfg") == 0 && p.xdg_config);
@@ -89,7 +89,7 @@ static void test_resolve(void)
     CHECK(strcmp(p.pipelines, "blockclonia.pipelines") == 0 && !p.xdg_pipelines);
 
     /* A value too long for the buffers is not truncated into another path. */
-    char big[PATHS_MAX + 16];
+    char big[PATHS_MAX + 16] = {0};
     memset(big, 'a', sizeof big - 1);
     big[0] = '/';
     big[sizeof big - 1] = '\0';
@@ -101,7 +101,7 @@ static void test_resolve(void)
 
 static void test_parent(void)
 {
-    char out[64];
+    char out[64] = {0};
     CHECK(paths_parent("/a/b/c.cfg", out, sizeof out) == 0 && strcmp(out, "/a/b") == 0);
     CHECK(paths_parent("b/c", out, sizeof out) == 0 && strcmp(out, "b") == 0);
     CHECK(paths_parent("c.cfg", out, sizeof out) == -1);
@@ -113,14 +113,14 @@ static void test_parent(void)
  * first. Entries are unlinked, never followed. */
 static void rm_dir(const char *root, const char *sub)
 {
-    char dir[400];
+    char dir[400] = {0};
     snprintf(dir, sizeof dir, "%s%s", root, sub);
     os_dir *d = os_dir_open(dir);
     if (d) {
-        const char *name;
+        const char *name = NULL;
         while ((name = os_dir_next(d)) != NULL) {
             if (!strcmp(name, ".") || !strcmp(name, "..")) continue;
-            char p[700];
+            char p[700] = {0};
             snprintf(p, sizeof p, "%s/%s", dir, name);
             tmp_remove(p);
         }
@@ -131,7 +131,7 @@ static void rm_dir(const char *root, const char *sub)
 
 static int put_file(const char *dir, const char *name, const char *text)
 {
-    char p[512];
+    char p[512] = {0};
     snprintf(p, sizeof p, "%s/%s", dir, name);
     return save_write_file(p, text, strlen(text));
 }
@@ -139,7 +139,7 @@ static int put_file(const char *dir, const char *name, const char *text)
 /* 1 if dir/name is a regular file holding text. */
 static int has_file(const char *dir, const char *name, const char *text)
 {
-    char p[512], buf[64];
+    char p[512] = {0}, buf[64] = {0};
     snprintf(p, sizeof p, "%s/%s", dir, name);
     long n = save_read_file(p, buf, sizeof buf - 1);
     if (n < 0) return 0;
@@ -149,18 +149,18 @@ static int has_file(const char *dir, const char *name, const char *text)
 
 static int missing(const char *dir, const char *name)
 {
-    char p[512];
+    char p[512] = {0};
     snprintf(p, sizeof p, "%s/%s", dir, name);
     return os_path_kind(p) == OS_MISSING;
 }
 
 static void test_make_dirs(const char *root)
 {
-    char d[400], f[400];
+    char d[400] = {0}, f[400] = {0};
     snprintf(d, sizeof d, "%s/a/b/c", root);
     CHECK(paths_make_dirs(d) == 0);
     CHECK(os_is_dir(d));
-    struct stat st;
+    struct stat st = {0};
     CHECK(stat(d, &st) == 0 && (st.st_mode & 0777) == 0700);
     CHECK(paths_make_dirs(d) == 0); /* already there */
     snprintf(d, sizeof d, "%s/a/b/c/", root);
@@ -176,13 +176,13 @@ static void test_make_dirs(const char *root)
 
 static void test_copy(const char *root)
 {
-    char from[400], to[400], victim[400], link[450];
+    char from[400] = {0}, to[400] = {0}, victim[400] = {0}, link[450] = {0};
     snprintf(from, sizeof from, "%s/old", root);
     snprintf(to, sizeof to, "%s/new", root);
     CHECK(os_mkdir(from, 0700) == 0 && os_mkdir(to, 0700) == 0);
 
     /* save_copy_file: copies once, then never overwrites. */
-    char a[450], b[450];
+    char a[450] = {0}, b[450] = {0};
     snprintf(a, sizeof a, "%s/blockclonia.cfg", from);
     snprintf(b, sizeof b, "%s/blockclonia.cfg", to);
     CHECK(save_copy_file(a, b, 64) == 0); /* nothing to copy */
@@ -225,7 +225,7 @@ static void test_copy(const char *root)
     CHECK(save_copy_world(from, to) == 0 && has_file(to, "player.dat", "player"));
 
     /* An old world reached through a symlinked folder is not copied. */
-    char via[400], to2[400];
+    char via[400] = {0}, to2[400] = {0};
     snprintf(via, sizeof via, "%s/via", root);
     snprintf(to2, sizeof to2, "%s/new2", root);
     CHECK(tmp_symlink(from, via) == linked && os_mkdir(to2, 0700) == 0);
@@ -240,7 +240,7 @@ void test_paths_all(void)
     env_restore();
     test_parent();
 
-    char root[256];
+    char root[256] = {0};
     int made = tmp_dir_make(root, sizeof root, "mc_paths_");
     CHECK(made);
     if (!made) return;

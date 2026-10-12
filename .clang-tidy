@@ -5,6 +5,9 @@
 # bugprone-signed-bitwise (newer clang-tidy) is off too: block ids, packed
 # vertices and hashes mix int and bitwise operators by design, and
 # -Wconversion/-Wsign-conversion already catch the conversions that matter.
+# cppcoreguidelines-init-variables keeps every local scalar and pointer
+# initialised (structs and arrays get = {0} by hand; see mesher.c for the
+# one measured exception).
 Checks: >
   -*,
   bugprone-*,
@@ -15,6 +18,7 @@ Checks: >
   cert-*,
   -cert-err33-c,
   clang-analyzer-*,
+  cppcoreguidelines-init-variables,
   -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
   misc-*,
   -misc-include-cleaner,
