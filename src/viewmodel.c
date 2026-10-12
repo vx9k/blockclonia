@@ -33,7 +33,7 @@ static const float PIVOT[3] = {0.46f, -0.38f, -0.28f};
 #define HAND_LEN 0.14f
 #define HAND_W 0.11f
 #define HAND_Z (-(SLEEVE_LEN + HAND_LEN * 0.5f - 0.005f)) /* overlaps the cuff by 5 mm */
-#define BLOCK_SIZE 0.22f
+#define BLOCK_SIZE 0.18f
 #define CARD_SIZE 0.30f
 #define CARD_THICK 0.02f
 
@@ -183,20 +183,23 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
      * per stride, two dips, one per foot); sprinting pulls the arm down,
      * out and back. */
     float base[3];
-    base[0] = PIVOT[0] + 0.030f * bob * ss + 0.002f * rest * breath_x + 0.03f * sprint - 0.02f * eat;
-    base[1] = PIVOT[1] + 0.016f * bob * s2 + 0.004f * rest * breath - 0.05f * sprint + (0.012f * chew - 0.03f) * eat;
-    base[2] = PIVOT[2] + 0.04f * sprint + 0.10f * eat;
+    base[0] = PIVOT[0] + 0.045f * bob * ss + 0.002f * rest * breath_x + 0.03f * sprint - 0.02f * eat;
+    base[1] = PIVOT[1] + 0.026f * bob * s2 + 0.004f * rest * breath - 0.05f * sprint + (0.012f * chew - 0.03f) * eat -
+              0.04f * a;
+    /* A hit is thrown from the shoulder: it reaches forward as it drops. */
+    base[2] = PIVOT[2] + 0.04f * sprint + 0.06f * eat - 0.06f * a;
 
     /* The arm's aim: sprinting points it down and rolls it outward (the
      * tilt), eating turns it in and up to the mouth. */
-    float yaw = REST_YAW + 0.5f * eat - 0.02f * bob * ss;
-    float pitch = REST_PITCH - 0.22f * sprint + 0.35f * eat + 0.05f * eat * chew;
+    float yaw = REST_YAW + 0.35f * eat - 0.02f * bob * ss;
+    float pitch = REST_PITCH - 0.22f * sprint + 0.22f * eat + 0.05f * eat * chew + 0.03f * bob * s2;
     float roll = -0.35f * sprint + 0.04f * bob * ss;
     quat arm = quat_mul(quat_axis(0.0f, 1.0f, 0.0f, yaw),
                         quat_mul(quat_axis(1.0f, 0.0f, 0.0f, pitch), quat_axis(0.0f, 0.0f, 1.0f, roll)));
-    /* The swing: about the pivot, around an axis tilted so the hand
-     * sweeps down and in toward the crosshair. */
-    arm = quat_norm(quat_mul(quat_axis(-0.6f, 1.0f, 0.0f, 0.55f * a), arm));
+    /* The swing: about the pivot, mostly a downward chop (pitch) with a
+     * little turn in toward the crosshair, so the hand drops along an arc
+     * instead of sweeping sideways. */
+    arm = quat_norm(quat_mul(quat_axis(1.0f, 0.45f, 0.0f, -0.75f * a), arm));
 
     /* Lag rotates the whole view model about the eye (yaw is positive to
      * the right, so the view-space angle is its negative). */
@@ -217,7 +220,7 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
          * face the eye. */
         const block_def *d = block_get((uint8_t)id);
         uint32_t tex = (uint32_t)d->tex[0] | (uint32_t)d->tex[2] << 8 | (uint32_t)d->tex[3] << 16;
-        const float at[3] = {-0.02f, 0.12f, HAND_Z - 0.03f};
+        const float at[3] = {-0.02f, 0.10f, HAND_Z - 0.03f};
         quat own = quat_mul(flick, quat_axis(0.0f, 1.0f, 0.0f, 0.62f));
         parts[n++] = part(lag, base, arm, at, own, BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE, tex, light);
     } else if (id > 0) {
