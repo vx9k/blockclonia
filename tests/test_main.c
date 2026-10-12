@@ -1473,13 +1473,90 @@ static menu_action menu_run(menu *m, ui *u, ui_vertex *mem, settings *s, const m
     menu_action last = MENU_NONE;
     for (int i = 0; i < frames; i++) {
         menu_input in = *in0;
-        if (i) in.click = in.up = in.down = in.left = in.right = in.enter = in.back = 0;
+        if (i) in.click = in.up = in.down = in.left = in.right = in.enter = in.back = in.text_len = in.backspace = 0;
         ui_begin(u, mem, 8192, 1280, 720);
         menu_action a = menu_frame(m, u, &in, s);
         CHECK(u->overflow == 0);
         if (a != MENU_NONE) last = a;
     }
     return last;
+}
+
+/* The world screens: choosing, scrolling, typing a name and confirming a
+ * delete, all from the keyboard. */
+static void test_menu_worlds(void)
+{
+    ui_vertex *mem = mem_alloc(sizeof(ui_vertex) * 4 * 8192);
+    ui u;
+    settings s;
+    settings_default(&s);
+    menu m;
+    menu_init(&m);
+    menu_world list[10];
+    for (int i = 0; i < 10; i++) {
+        snprintf(list[i].name, sizeof list[i].name, "World %d", i);
+        snprintf(list[i].detail, sizeof list[i].detail, "seed %d", i);
+        list[i].playable = i != 2;
+    }
+    m.worlds = list;
+    m.world_count = 10;
+    menu_open(&m, SCREEN_WORLDS);
+    menu_input idle = {.mx = -1, .my = -1, .dt = 1.0f / 60.0f};
+    menu_input down = idle, up = idle, enter = idle, esc = idle;
+    down.down = 1;
+    up.up = 1;
+    enter.enter = 1;
+    esc.back = 1;
+    menu_run(&m, &u, mem, &s, &idle, 20);
+    /* Enter plays the focused row; a row that cannot be played does not. */
+    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_WORLD_PLAY && m.world_sel == 0);
+    menu_run(&m, &u, mem, &s, &down, 1);
+    menu_run(&m, &u, mem, &s, &down, 1);
+    CHECK(m.world_sel == 2 && menu_run(&m, &u, mem, &s, &enter, 1) == MENU_NONE);
+    /* Down past the seventh row scrolls; up at the top scrolls back. */
+    for (int i = 0; i < 7; i++) menu_run(&m, &u, mem, &s, &down, 1);
+    menu_run(&m, &u, mem, &s, &idle, 1);
+    CHECK(m.world_sel == 9 && m.world_scroll == 3);
+    for (int i = 0; i < 9; i++) menu_run(&m, &u, mem, &s, &up, 1);
+    menu_run(&m, &u, mem, &s, &idle, 1);
+    CHECK(m.world_sel == 0 && m.world_scroll == 0);
+
+    /* Create: typing goes into the name, and W/S/D do not move the focus
+     * there; Enter asks for the world. */
+    menu_open(&m, SCREEN_CREATE_WORLD);
+    m.text_name[0] = m.text_seed[0] = '\0';
+    menu_run(&m, &u, mem, &s, &idle, 20);
+    menu_input type = idle;
+    snprintf(type.text, sizeof type.text, "sword");
+    type.text_len = 5;
+    type.letter_nav = 1;
+    type.down = 1; /* the S as a navigation key */
+    menu_run(&m, &u, mem, &s, &type, 1);
+    CHECK(strcmp(m.text_name, "sword") == 0 && m.focus == 0);
+    menu_input bs = idle;
+    bs.backspace = 1;
+    menu_run(&m, &u, mem, &s, &bs, 1);
+    CHECK(strcmp(m.text_name, "swor") == 0);
+    menu_input bad = idle;
+    bad.text[0] = '\t';
+    bad.text[1] = (char)0xc3;
+    bad.text_len = 2;
+    menu_run(&m, &u, mem, &s, &bad, 1);
+    CHECK(strcmp(m.text_name, "swor") == 0); /* nothing the font cannot draw */
+    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_WORLD_CREATE);
+    menu_run(&m, &u, mem, &s, &esc, 1);
+    CHECK(m.screen == SCREEN_WORLDS);
+
+    /* Delete: the focus starts on Cancel, so Enter keeps the world. */
+    m.world_sel = 3;
+    menu_open(&m, SCREEN_DELETE_WORLD);
+    menu_run(&m, &u, mem, &s, &idle, 20);
+    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_NONE && m.screen == SCREEN_WORLDS);
+    menu_open(&m, SCREEN_DELETE_WORLD);
+    menu_run(&m, &u, mem, &s, &idle, 20);
+    menu_run(&m, &u, mem, &s, &up, 1);
+    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_WORLD_DELETE && m.world_sel == 3);
+    mem_free(mem);
 }
 
 static void test_menu(void)
@@ -1492,11 +1569,17 @@ static void test_menu(void)
     menu_init(&m);
     menu_input idle = {.mx = -1, .my = -1, .dt = 1.0f / 60.0f};
 
-    /* Title: the first button is Play and has the focus; Enter plays. */
+    /* Title: the first button is Play and has the focus; Enter opens the
+     * world list, and Esc comes back. */
     CHECK(menu_run(&m, &u, mem, &s, &idle, 30) == MENU_NONE);
     menu_input enter = idle;
     enter.enter = 1;
-    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_PLAY);
+    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_WORLDS && m.screen == SCREEN_WORLDS);
+    menu_input esc = idle;
+    esc.back = 1;
+    menu_run(&m, &u, mem, &s, &esc, 1);
+    CHECK(m.screen == SCREEN_TITLE);
+    menu_run(&m, &u, mem, &s, &idle, 30);
     /* Down, Enter: Settings. Esc goes back to the title. */
     menu_input down = idle;
     down.down = 1;
@@ -1603,6 +1686,7 @@ int main(void)
     test_survival();
     test_ui();
     test_settings();
+    test_menu_worlds();
     test_sysinfo();
     test_settings_file();
     test_menu();

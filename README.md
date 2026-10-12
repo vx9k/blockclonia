@@ -186,13 +186,27 @@ or burns.
 
 ## Saves
 
-Each world is one SQLite database, `world.db`, in the world's directory
-(named `world` unless `--world` says otherwise). A folder written by an
-older build (`level.dat`, `player.dat`, `c.X.Z.bin`) is imported into the
-database the first time it is opened; the old files are left in place but
-are no longer read. Only one running game can hold a world's database
-open at a time: pointing a second instance at the same directory disables
-saving for it instead of touching the world.
+**Play** on the title screen opens the world list: every world under the
+worlds folder (see "Where files live"), most recently played first, with
+its seed and when it was last played. From there you can play, create
+(a name, and a seed: a number, any text, which always gives the same
+world, or empty for a random one), rename or delete a world. Deleting
+asks first. The menus sit over a fixed backdrop world that is never
+saved, so no world of yours is open while you manage them. `--play`
+skips the menus and plays the default world, `worlds/world`, or the one
+`--world DIR` names.
+
+Each world is one SQLite database, `world.db`, in its own folder. The
+folder name comes from the world's first name and stays put when you
+rename it. A world records the terrain generator version it was made
+with; a build refuses a world from a newer generator instead of joining
+different terrain onto it. A folder written by an older build
+(`level.dat`, `player.dat`, `c.X.Z.bin`) is imported into the database
+the first time it is opened; the old files are left in place but are no
+longer read. Only one running game can hold a world's database open at a
+time: the list shows such a world as open in another game, and pointing a
+second instance at the same directory disables saving for it instead of
+touching the world.
 
 ## Settings
 
@@ -300,13 +314,13 @@ cmake --preset native && cmake --build --preset native
 blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
             [--threads N] [--pool-mb N] [--gpu N] [--world DIR | --no-save]
             [--config FILE] [--validate] [--no-sound]
-            [--play] [--screen title|pause|settings|controls|debug-health|inventory]
+            [--play] [--screen title|worlds|create|pause|settings|controls|debug-health|inventory]
             [--debug] [--time HH] [--give LIST] [--hurt LIST]
             [--frames N] [--screenshot F] [--look YAW,PITCH] [--spawn X,Z]
             [--demo] [--health-panel] [--bench] [--mem-stats]
 ```
 
-- `--play` skips the title screen; `--screen` opens a menu at start and
+- `--play` skips the menus and plays the default world; `--screen` opens a menu at start and
   `--debug` turns F3 on.
 - `--give log:8,sand:4` starts you with items (names as shown in game).
   `--time 21` starts at 21:00.
