@@ -117,6 +117,24 @@ long os_read_regular(const char *path, uint8_t *buf, size_t cap)
     return (long)len;
 }
 
+/* Makes a rename in path's folder survive a power cut. Best effort: the
+ * file is already in place, and only the folder entry could be lost. */
+static void sync_parent(const char *path)
+{
+    char dir[PATH_MAX];
+    const char *slash = strrchr(path, '/');
+    size_t n = slash ? (size_t)(slash - path) : 0;
+    if (slash == path) n = 1; /* "/name" lives in "/" */
+    if (n >= sizeof dir) return;
+    if (n) memcpy(dir, path, n);
+    else dir[n++] = '.';
+    dir[n] = '\0';
+    int fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0) return;
+    (void)fsync(fd);
+    close(fd);
+}
+
 int os_write_atomic(const char *path, const char *tmp, const void *data, size_t len)
 {
     unlink(tmp); /* a stale or planted temp entry; unlink never follows */
@@ -130,9 +148,14 @@ int os_write_atomic(const char *path, const char *tmp, const void *data, size_t 
         if (n <= 0) break;
         done += (size_t)n;
     }
-    int ok = done == len;
+    /* Data on disk before the rename: without it a power cut can leave the
+     * new name on an empty file, the old contents already gone. */
+    int ok = done == len && fsync(fd) == 0;
     ok &= close(fd) == 0;
-    if (ok && rename(tmp, path) == 0) return 0;
+    if (ok && rename(tmp, path) == 0) {
+        sync_parent(path);
+        return 0;
+    }
     unlink(tmp);
     return -1;
 }
