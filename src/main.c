@@ -1413,6 +1413,8 @@ static void draw_debug(game *g, ui *u, int fb_w, int fb_h, double alpha)
     di.draw_calls = rs.draw_calls;
     di.sections = rs.sections_drawn;
     di.quads = rs.quads;
+    di.render_cpu_ms = rs.cpu_ms;
+    di.gpu_ms = rs.gpu_ms;
     di.pool_used_kb = rs.pool_used_kb;
     di.pool_total_kb = rs.pool_total_kb;
     di.ui_quads = u->quads;

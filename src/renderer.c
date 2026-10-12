@@ -86,6 +86,7 @@ typedef struct {
     copy_list copies[MAX_POOL_BLOCKS]; /* staging -> pool copies, per pool block */
     gbuf dyn;                     /* per-frame section origins, body instances, lines */
     gbuf ui;                      /* overlay quads, written in place by the game */
+    int timed;                    /* its last submission wrote both timestamps */
 } frame;
 
 /* Chunk meshes live in a few big vertex buffers ("pool blocks"). The first
@@ -212,6 +213,13 @@ struct renderer {
     visible *vis;
     int vis_cap;
     render_stats stats;
+    /* GPU frame time: a start and an end timestamp per frame slot, read
+     * once the slot's fence has signalled. NULL handles without
+     * GPUCAP_TIMESTAMPS; reset_queries only with GPUCAP_HOSTRESET (else
+     * the command buffer resets them). */
+    VkQueryPool queries;
+    PFN_vkResetQueryPool reset_queries;
+    float gpu_ms;
     int pool_full_warned;
 };
 
@@ -1441,6 +1449,33 @@ static void release_frees(renderer *r)
     memmove(r->frees, r->frees + n, sizeof *r->frees * (size_t)r->free_count);
 }
 
+static void create_queries(renderer *r)
+{
+    if (!(r->caps.enabled & GPUCAP_TIMESTAMPS)) return;
+    VkQueryPoolCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+                                .queryType = VK_QUERY_TYPE_TIMESTAMP,
+                                .queryCount = FRAMES * 2};
+    VK_CHECK(vkCreateQueryPool(r->dev, &qi, r->ac, &r->queries));
+    /* 1.2 core, so loaded rather than linked. */
+    if (r->caps.enabled & GPUCAP_HOSTRESET)
+        r->reset_queries = (PFN_vkResetQueryPool)vkGetDeviceProcAddr(r->dev, "vkResetQueryPool");
+    if (r->reset_queries) r->reset_queries(r->dev, r->queries, 0, FRAMES * 2);
+}
+
+/* Called once the slot's fence has signalled, so the results are there. */
+static void read_gpu_time(renderer *r, frame *f)
+{
+    uint32_t q = (uint32_t)(f - r->frames) * 2;
+    if (f->timed) {
+        uint64_t t[2];
+        if (vkGetQueryPoolResults(r->dev, r->queries, q, 2, sizeof t, t, sizeof t[0], VK_QUERY_RESULT_64_BIT) ==
+            VK_SUCCESS)
+            r->gpu_ms = (float)((double)((t[1] - t[0]) & r->caps.timestamp_mask) * r->caps.timestamp_ms_per_tick);
+        if (r->reset_queries) r->reset_queries(r->dev, r->queries, q, 2);
+    }
+    f->timed = 0;
+}
+
 static void create_frames(renderer *r, uint32_t pool_mb)
 {
     VkCommandPoolCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -1581,6 +1616,7 @@ renderer *renderer_create(GLFWwindow *win, const render_opts *o)
     }
     if (pool_mb > 512) pool_mb = 512;
     create_frames(r, pool_mb);
+    create_queries(r);
     create_texture(r);
     create_font(r);
     create_static_buffers(r);
@@ -1630,6 +1666,7 @@ void renderer_destroy(renderer *r)
     vkDestroyPipelineLayout(r->dev, r->layout, r->ac);
     vkDestroyDescriptorSetLayout(r->dev, r->dsl, r->ac);
     vkDestroyCommandPool(r->dev, r->cmdpool, r->ac);
+    vkDestroyQueryPool(r->dev, r->queries, r->ac);
     destroy_swap_resources(r);
     vkDestroySwapchainKHR(r->dev, r->swap, r->ac);
     vkDestroyRenderPass(r->dev, r->pass, r->ac);
@@ -1690,6 +1727,7 @@ int renderer_begin_frame(renderer *r)
 
     frame *f = &r->frames[r->frame_index];
     VK_CHECK(vkWaitForFences(r->dev, 1, &f->fence, VK_TRUE, UINT64_MAX));
+    if (r->queries) read_gpu_time(r, f);
     release_frees(r);
     f->staging_used = 0;
     for (int b = 0; b < MAX_POOL_BLOCKS; b++) f->copies[b].count = 0;
@@ -1819,12 +1857,18 @@ static int collect_visible(renderer *r, const world *w, const render_view *v, co
 void renderer_end_frame(renderer *r, const world *w, const physics *ph, const render_view *v, double alpha)
 {
     if (!r->frame_active) return;
+    double t_start = glfwGetTime();
     frame *f = &r->frames[r->frame_index];
     VkCommandBuffer cmd = f->cmd;
     VK_CHECK(vkResetCommandBuffer(cmd, 0));
     VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     VK_CHECK(vkBeginCommandBuffer(cmd, &bi));
+    uint32_t query = (uint32_t)r->frame_index * 2;
+    if (r->queries) {
+        if (!r->reset_queries) vkCmdResetQueryPool(cmd, r->queries, query, 2);
+        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, r->queries, query);
+    }
 
     int copied = 0;
     for (int b = 0; b < r->pool_blocks; b++) {
@@ -2102,6 +2146,10 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         r->shot_pending = 0;
     }
 
+    if (r->queries) {
+        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, r->queries, query + 1);
+        f->timed = 1;
+    }
     VK_CHECK(vkEndCommandBuffer(cmd));
 
     f->serial = ++r->submitted;
@@ -2111,6 +2159,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
                        .commandBufferCount = 1, .pCommandBuffers = &cmd, .signalSemaphoreCount = 1,
                        .pSignalSemaphores = &r->render_done[r->image_index]};
     VK_CHECK(vkQueueSubmit(r->queue, 1, &si, f->fence));
+    st.cpu_ms = (float)((glfwGetTime() - t_start) * 1000.0); /* present can wait for vsync: not counted */
 
     VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .waitSemaphoreCount = 1,
                            .pWaitSemaphores = &r->render_done[r->image_index], .swapchainCount = 1,
@@ -2127,6 +2176,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     }
 
     st.sections_drawn = nvis;
+    st.gpu_ms = r->gpu_ms;
     for (int b = 0; b < r->pool_blocks; b++) {
         st.pool_used_kb += (uint32_t)((uint64_t)r->pool[b].alloc.used * 4 / 1024);
         st.pool_total_kb += (uint32_t)((uint64_t)r->pool[b].alloc.total * 4 / 1024);

@@ -65,7 +65,7 @@ typedef struct {
     int indirect_draws;   /* draws inside those calls issued by multi-draw indirect */
     uint32_t quads;
     uint32_t pool_used_kb, pool_total_kb;
-    float cpu_ms;         /* CPU time renderer_end_frame took (recording, submit, present) */
+    float cpu_ms;         /* CPU time renderer_end_frame took to record and submit (not the present) */
     float gpu_ms;         /* GPU time of a recent frame, from timestamps; 0 when unsupported */
     /* Device-local memory in use by this process and the budget the driver
      * grants it (VK_EXT_memory_budget), in MiB; both 0 when unknown. */
