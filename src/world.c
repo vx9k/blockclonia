@@ -178,7 +178,9 @@ int world_surface_y(const world *w, int x, int z)
 
 typedef struct {
     job base;
-    world *w;
+    world *w;                                    /* for gen_done, on the main thread */
+    void (*generator)(uint32_t seed, column *c); /* copied from w: gen_run never reads the world */
+    uint32_t seed;
     column *c;
     uint8_t *saved; /* the column's saved bytes, fetched on the main thread */
     long saved_len; /* -1: never saved, -2: unusable row */
@@ -195,8 +197,7 @@ static void gen_run(job *j)
         g->saved = NULL;
     }
     if (!loaded) {
-        if (g->w->generator) g->w->generator(g->w->seed, g->c);
-        else worldgen_column(g->w->seed, g->c);
+        g->generator(g->seed, g->c);
         mem_free(g->c->meta);
         g->c->meta = NULL;
     }
@@ -235,6 +236,8 @@ static void request_column(world *w, int cx, int cz)
     g->base.run = gen_run;
     g->base.done = gen_done;
     g->w = w;
+    g->generator = w->generator ? w->generator : worldgen_column;
+    g->seed = w->seed;
     g->c = c;
     g->saved_len = w->db ? save_db_get_column(w->db, cx, cz, &g->saved) : -1;
     w->gen_in_flight++;
