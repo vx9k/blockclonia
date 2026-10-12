@@ -164,7 +164,7 @@ static void test_vm_parts(void)
 
 static void test_vm_equip(void)
 {
-    entity_instance out[VIEWMODEL_MAX];
+    entity_instance out[VIEWMODEL_MAX] = {0};
     viewmodel vm;
     viewmodel_init(&vm);
     viewmodel_input in = vm_input(B_STONE);
