@@ -15,7 +15,7 @@ typedef struct {
     int vsync;
     int render_distance;  /* columns; applies on the next start */
     int show_hints;       /* key hints on the HUD */
-    int filtering;        /* anisotropic filtering of distant textures (where the GPU has it) */
+    int filtering;        /* trilinear, and anisotropic where the GPU has it, filtering of distant textures */
     int volume_master;    /* percent */
     int volume_effects;   /* percent */
     int volume_ambient;   /* percent */

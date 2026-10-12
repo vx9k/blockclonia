@@ -209,7 +209,7 @@ starts with the defaults and doesn't save changes over it.
 | Video | GUI scale | automatic, or 1–4 |
 | Video | VSync | on/off |
 | Video | Render distance | 2–32 columns; applies on the next start |
-| Video | Texture filtering (distance) | on/off |
+| Video | Texture filtering (distance) | on (default): trilinear between mipmaps, with up to 8× anisotropic filtering where the GPU supports it; off: the nearest texel of the nearest mipmap, sharper but shimmering in the distance. Up close textures stay pixel-sharp either way |
 | Video | View bobbing, FOV effects | on/off |
 | Controls | Mouse sensitivity | 10–300% |
 | Controls | Invert Y, sprint toggle, key hints | on/off |
@@ -247,6 +247,7 @@ entirely.
 | Meshing and generation on worker threads from private snapshots | Main thread never waits, edits never race |
 | Procedural textures with mipmaps and procedural sound, generated at startup | No asset files to ship or parse |
 | Vulkan 1.0 core with zero required optional features | Runs on anything with a Vulkan driver, including Raspberry Pi (V3DV) |
+| Trilinear and up to 8× anisotropic texture filtering (`aniso`; trilinear only without it) | Distant ground stays sharp at grazing angles instead of blurring or shimmering |
 | Pipeline cache kept on disk between runs (`pcache`) | Pipelines build from it where the driver has no shader cache of its own (Intel with Mesa's cache off: 40 ms to 3 ms) |
 
 By default the renderer negotiates the highest API version the loader,

@@ -104,10 +104,10 @@ void renderer_on_resize(renderer *r);
 /* Switches between FIFO (FIFO_RELAXED where offered) and the fastest mode;
  * rebuilds the swapchain. */
 void renderer_set_vsync(renderer *r, int on);
-/* Terrain texture minification: 0 nearest (sharp, shimmers at a distance),
- * 1 trilinear with up to 8x anisotropy where supported. Magnification stays
- * nearest either way (pixel art up close). Waits for the GPU to go idle, so
- * call it from a settings change, not every frame. */
+/* Terrain texture minification: 0 nearest texel of the nearest mip (sharp,
+ * shimmers at a distance), 1 trilinear with up to 8x anisotropy where
+ * supported. Magnification stays nearest either way (pixel art up close).
+ * Takes effect with the next frame recorded; frames in flight keep theirs. */
 void renderer_set_filtering(renderer *r, int enabled);
 const char *renderer_device_name(const renderer *r);
 /* "Vulkan 1.3: multi-draw indirect, dynamic rendering, ...": the API

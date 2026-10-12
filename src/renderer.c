@@ -104,6 +104,7 @@ typedef struct {
 
 _Static_assert(sizeof(entity_instance) == 48, "entity_instance is the instance vertex layout");
 _Static_assert(T_FIRE0 == 32 && T_WATER == 14 && T_LEAVES == 8, "update the layer constants in push_vert.glsl");
+_Static_assert(TEX_SIZE == 16, "update TEXELS in block.frag");
 
 typedef struct {
     const section_mesh *m;
@@ -171,7 +172,7 @@ struct renderer {
     VkRenderPass pass;
     VkDescriptorSetLayout dsl;
     VkDescriptorPool dpool;
-    VkDescriptorSet dset;
+    VkDescriptorSet dsets[2];     /* the terrain texture with r->sampler, and with sampler_filtered */
     VkPipelineLayout layout;
     VkPipeline p_opaque, p_trans, p_entity, p_entity_trans, p_line_world, p_line_screen;
     /* Overlay: its own layout (a 2D font atlas, 2D push constants). */
@@ -190,7 +191,8 @@ struct renderer {
     VkImage tex;
     VkDeviceMemory tex_mem;
     VkImageView tex_view;
-    VkSampler sampler;
+    VkSampler sampler;            /* nearest: the font, and terrain with filtering off */
+    VkSampler sampler_filtered;
 
     gbuf index, cube;
     pool_block pool[MAX_POOL_BLOCKS];
@@ -202,7 +204,7 @@ struct renderer {
     frame frames[FRAMES];
     uint32_t frame_index, image_index;
     int frame_active;
-    int resized, vsync, radius;
+    int resized, vsync, radius, filtering;
 
     char shot_path[512];
     int shot_pending;
@@ -1286,19 +1288,42 @@ static void create_texture(renderer *r)
                               .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
                               .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT, .maxLod = (float)TEX_MIPS};
     VK_CHECK(vkCreateSampler(r->dev, &si, r->ac, &r->sampler));
+    /* Filtered: trilinear between texgen's box-filtered mips (each layer is
+     * its own array slice, so nothing bleeds in from a neighbour), plus
+     * anisotropy where the device has it. Magnification stays nearest:
+     * pixel art up close. */
+    si.minFilter = VK_FILTER_LINEAR;
+    si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    si.anisotropyEnable = (r->caps.enabled & GPUCAP_ANISO) ? VK_TRUE : VK_FALSE;
+    si.maxAnisotropy = r->caps.anisotropy;
+    VK_CHECK(vkCreateSampler(r->dev, &si, r->ac, &r->sampler_filtered));
 
-    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
-    VkDescriptorPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1,
-                                     .poolSizeCount = 1, .pPoolSizes = &ps};
+    /* One set per sampler, written once: switching filtering only changes
+     * which set the next recorded frame binds, so frames in flight are never
+     * touched. */
+    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2};
+    VkDescriptorPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+                                     .maxSets = 2,
+                                     .poolSizeCount = 1,
+                                     .pPoolSizes = &ps};
     VK_CHECK(vkCreateDescriptorPool(r->dev, &pi, r->ac, &r->dpool));
+    VkDescriptorSetLayout layouts[2] = {r->dsl, r->dsl};
     VkDescriptorSetAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                                       .descriptorPool = r->dpool, .descriptorSetCount = 1, .pSetLayouts = &r->dsl};
-    VK_CHECK(vkAllocateDescriptorSets(r->dev, &dai, &r->dset));
-    VkDescriptorImageInfo dii = {r->sampler, r->tex_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet w = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = r->dset,
-                              .dstBinding = 0, .descriptorCount = 1,
-                              .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &dii};
-    vkUpdateDescriptorSets(r->dev, 1, &w, 0, NULL);
+                                       .descriptorPool = r->dpool,
+                                       .descriptorSetCount = 2,
+                                       .pSetLayouts = layouts};
+    VK_CHECK(vkAllocateDescriptorSets(r->dev, &dai, r->dsets));
+    VkDescriptorImageInfo dii[2] = {{r->sampler, r->tex_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                                    {r->sampler_filtered, r->tex_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
+    VkWriteDescriptorSet w[2];
+    for (int i = 0; i < 2; i++)
+        w[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                      .dstSet = r->dsets[i],
+                                      .dstBinding = 0,
+                                      .descriptorCount = 1,
+                                      .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                      .pImageInfo = &dii[i]};
+    vkUpdateDescriptorSets(r->dev, 2, w, 0, NULL);
 }
 
 static uint32_t pack_cube_vertex(const int p[3], int face)
@@ -1521,6 +1546,7 @@ renderer *renderer_create(GLFWwindow *win, const render_opts *o)
     r->win = win;
     r->ac = vk_callbacks();
     r->vsync = o->vsync;
+    r->filtering = !!o->filtering;
     r->radius = o->render_radius < 32 ? o->render_radius : 32;
     r->shot_usage = o->screenshots;
 
@@ -1583,6 +1609,7 @@ void renderer_destroy(renderer *r)
     buffer_destroy(r, &r->index);
     buffer_destroy(r, &r->cube);
     vkDestroySampler(r->dev, r->sampler, r->ac);
+    vkDestroySampler(r->dev, r->sampler_filtered, r->ac);
     vkDestroyImageView(r->dev, r->tex_view, r->ac);
     vkDestroyImage(r->dev, r->tex, r->ac);
     vkFreeMemory(r->dev, r->tex_mem, r->ac);
@@ -1627,6 +1654,8 @@ void renderer_set_vsync(renderer *r, int on)
     r->vsync = !!on;
     r->resized = 1; /* the present mode is fixed per swapchain */
 }
+
+void renderer_set_filtering(renderer *r, int enabled) { r->filtering = !!enabled; }
 
 const char *renderer_device_name(const renderer *r) { return r->props.deviceName; }
 
@@ -1837,7 +1866,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     pv.fog[3] = daylight;
     push_frag pf;
     for (int i = 0; i < 3; i++) pf.color[i] = r->swap_srgb ? srgb_to_linear(fogc[i]) : fogc[i];
-    pf.color[3] = 1.0f;
+    pf.color[3] = r->filtering ? 1.0f : 0.0f; /* block.frag: the filtered set is bound */
 
     VkClearValue clears[2];
     clears[0].color = (VkClearColorValue){{pf.color[0], pf.color[1], pf.color[2], 1.0f}};
@@ -1863,7 +1892,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     /* Opaque, front to back for early-Z. Face groups that point away from
      * the camera are skipped; adjacent groups merge into one draw. */
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_opaque);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->layout, 0, 1, &r->dset, 0, NULL);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->layout, 0, 1, &r->dsets[r->filtering], 0, NULL);
     vkCmdBindVertexBuffers(cmd, 1, 1, &f->dyn.buf, &zero);
     vkCmdBindIndexBuffer(cmd, r->index.buf, 0, VK_INDEX_TYPE_UINT16);
     vkCmdPushConstants(cmd, r->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof pv, &pv);
