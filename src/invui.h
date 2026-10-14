@@ -15,7 +15,10 @@ typedef struct {
     float name_age;      /* s since the item in hand changed */
     int last_sel, last_id;
     float pop[INV_SLOTS];/* per-slot pulse when a stack grows (pickup) */
-    int recipe_top;      /* first recipe row shown (the list scrolls) */
+    int recipe_top;      /* first crafting row shown (the list scrolls) */
+    uint32_t cat_open;   /* bit per recipe category: expanded */
+    int only_craftable;  /* hide recipes that cannot be made right now */
+    int opened;          /* shown once already (the defaults are applied) */
     uint8_t last_count[INV_SLOTS];
     uint8_t last_slot_id[INV_SLOTS];
 } invui;
@@ -49,5 +52,10 @@ void invui_hotbar(ui *u, invui *s, const inventory *inv, float dt);
 
 /* The inventory screen. Handles slot clicks, crafting and tooltips. */
 invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in);
+
+/* The categories the inventory screen groups recipes in, by what a recipe
+ * makes. */
+enum { RCAT_BASICS, RCAT_BUILDING, RCAT_SMELTING, RCAT_TOOLS, RCAT_WEAPONS, RCAT_MEDICAL, RCAT_COUNT };
+int invui_recipe_category(int r);
 
 #endif

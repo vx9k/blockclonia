@@ -1,5 +1,6 @@
 #include "invui.h"
 #include "anim.h"
+#include "combat.h"
 #include "palette.h"
 #include "texgen.h"
 
@@ -193,6 +194,31 @@ void invui_hotbar(ui *u, invui *s, const inventory *inv, float dt)
 static int inside(const invui_input *in, float x, float y, float w, float h)
 { return in->mx >= x && in->mx < x + w && in->my >= y && in->my < y + h; }
 
+static const char *const CAT_NAME[RCAT_COUNT] = {"Basics", "Building", "Smelting & cooking",
+                                                 "Tools",  "Weapons",  "Medical"};
+
+int invui_recipe_category(int r)
+{
+    if (r < 0 || r >= g_recipe_count) return RCAT_BASICS;
+    int id = g_recipes[r].out.id, kind = 0, tier = 0;
+    if (item_tool(id, &kind, &tier)) return kind == TOOL_KNIFE || kind == TOOL_SWORD ? RCAT_WEAPONS : RCAT_TOOLS;
+    switch (id) {
+    case B_GLASS:
+    case B_BRICK:
+    case B_FURNACE: return RCAT_BUILDING;
+    case I_COPPER_INGOT:
+    case I_IRON_INGOT:
+    case I_COOKED_MEAT: return RCAT_SMELTING;
+    case I_RIFLE:
+    case I_CARTRIDGE:
+    case I_GUNPOWDER: return RCAT_WEAPONS;
+    case I_SPLINT:
+    case I_BANDAGE: return RCAT_MEDICAL;
+    default: return RCAT_BASICS;
+    }
+}
+
+/* A small tooltip by the cursor: the name, and one line under it. */
 static void tooltip(ui *u, float mx, float my, const char *title, const char *line, uint32_t line_col)
 {
     float w = ui_text_width(title, 1);
@@ -208,25 +234,110 @@ static void tooltip(ui *u, float mx, float my, const char *title, const char *li
     if (line && line[0]) ui_text(u, x + 4, y + 13, 1, line_col, line);
 }
 
+/* The facts about an item worth knowing before using it, one per line. */
+static int item_facts(const item_stack *st, char lines[4][48])
+{
+    int n = 0, id = st->id, kind = 0, tier = 0;
+    float water = 0.0f, kcal = item_food(id, &water);
+    int dur = item_durability(id);
+    if (dur) snprintf(lines[n++], 48, "%d of %d uses left", dur - st->wear, dur);
+    if (item_tool(id, &kind, &tier)) {
+        static const uint8_t WORKS[3] = {B_ROCK, B_LOG, B_DIRT};
+        static const char *const ON[3] = {"rock", "wood", "soil"};
+        if (kind <= TOOL_SHOVEL)
+            snprintf(lines[n++], 48, "Breaks %s %.1fx faster", ON[kind], (double)item_dig_speed(id, WORKS[kind]));
+        snprintf(lines[n++], 48, "Blow: %.1f", (double)combat_blow(id));
+    } else if (id == I_RIFLE) {
+        snprintf(lines[n++], 48, "Bullet: 14 at 400 m/s");
+    }
+    if (kcal > 0.0f) snprintf(lines[n++], 48, "%.0f kcal", (double)kcal);
+    if (item_is_block(id) && n < 4) {
+        const block_def *b = block_get((uint8_t)id);
+        snprintf(lines[n++], 48, "%.0f kg/m3, spans %d", (double)b->density, b->span);
+    }
+    return n;
+}
+
+/* The card under the slots: a big icon, the description and the facts of
+ * the hovered slot or recipe (or the item in hand). */
+static void detail_card(ui *u, float x, float y, float w, float h, const inventory *inv, const item_stack *st, int rec,
+                        int stations, float a)
+{
+    ui_rect(u, x, y, w, h, ui_alpha(ui_rgba(20, 24, 30, 220), a));
+    ui_frame(u, x, y, w, h, 1, ui_alpha(C_BORDER, a));
+    if (!st->count) {
+        ui_text(u, x + 6, y + 6, 1, ui_alpha(C_DIM, a), "Point at an item or a recipe.");
+        ui_text(u, x + 6, y + 18, 1, ui_alpha(C_DIM, a), "Left: take/place  Right: split");
+        ui_text(u, x + 6, y + 30, 1, ui_alpha(C_DIM, a), "Shift: move to the other bar");
+        return;
+    }
+    const item_def *d = item_get(st->id);
+    invui_icon(u, st->id, x + 6, y + 6, 32, a);
+    ui_text(u, x + 44, y + 7, 1, ui_alpha(C_HEAD, a), d->name);
+    ui_text_wrap(u, x + 44, y + 18, w - 50, 2, 1, ui_alpha(C_DIM, a), d->desc);
+    float ly = y + 44;
+    if (rec >= 0) {
+        /* What it takes, have/need per ingredient, and where. */
+        const recipe *rc = &g_recipes[rec];
+        for (int m = 0; m < 3 && rc->in[m].id; m++) {
+            int have = inv_count(inv, rc->in[m].id);
+            invui_icon(u, rc->in[m].id, x + 6, ly - 1, 10, a);
+            ui_textf(u, x + 20, ly, 1, ui_alpha(have >= rc->in[m].count ? C_TEXT : C_ART, a), "%s  %d/%d",
+                     item_get(rc->in[m].id)->name, have < 99 ? have : 99, rc->in[m].count);
+            ly += 11;
+        }
+        if (rc->station) {
+            int ok = (stations & rc->station) == rc->station;
+            const char *where = rc->station & STATION_FURNACE ? (ok ? "At a furnace" : "Needs a furnace nearby")
+                                                              : (ok ? "By a fire" : "Needs a burning campfire nearby");
+            ui_text(u, x + 6, ly, 1, ui_alpha(ok ? C_CO2 : C_ART, a), where);
+        }
+        return;
+    }
+    char lines[4][48] = {{0}};
+    int n = item_facts(st, lines);
+    for (int i = 0; i < n && ly + 11.0f * (float)i < y + h - 8; i++)
+        ui_text(u, x + 6, ly + 11.0f * (float)i, 1, ui_alpha(C_TEXT, a), lines[i]);
+    int dur = item_durability(st->id);
+    if (dur) {
+        float left = 1.0f - (float)st->wear / (float)dur;
+        ui_bar(u, x + w - 56, y + 46, 50, 4, left, pal_mix(C_ART, C_ECG, left), ui_rgba(10, 10, 12, 230));
+    }
+}
+
+/* One row of the crafting list: a category header or a recipe. */
+typedef struct {
+    int cat;             /* RCAT_*, for headers */
+    int recipe;          /* g_recipes index, -1 for a header */
+} craft_row;
+
+/* How many recipes a category has, and how many can be made now. */
+static int cat_counts(const inventory *inv, int cat, int stations, int *can)
+{
+    int total = 0;
+    *can = 0;
+    for (int k = 0; k < g_recipe_count; k++)
+        if (invui_recipe_category(k) == cat) {
+            total++;
+            *can += inv_can_craft(inv, k, stations);
+        }
+    return total;
+}
+
 invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in)
 {
     invui_result r = {0, {0, 0, 0}, -1, 0, -1, 0, 0};
+    if (!s->opened) {
+        s->opened = 1;
+        s->cat_open = 1u << RCAT_BASICS;
+    }
     s->open_t += in->dt;
     track_pops(s, inv, in->dt);
     float t = ease_out_back(s->open_t / 0.25f), fade = ease_out_cubic(s->open_t / 0.18f);
     ui_rect(u, 0, 0, u->w, u->h, ui_rgba(0, 0, 0, (int)(120.0f * fade)));
 
-    const float grid_w = INV_HOTBAR * SLOT + (INV_HOTBAR - 1) * GAP;
-    /* Tall enough for the recipe rows shown (20 px each from y 36); the
-     * wheel scrolls through the rest. shortcut: one scrolling column, until
-     * the redesign groups recipes in categories. */
-    enum { RECIPE_ROWS = 14 };
-    const int rows = g_recipe_count < RECIPE_ROWS ? g_recipe_count : RECIPE_ROWS;
-    s->recipe_top -= (int)in->wheel;
-    if (s->recipe_top > g_recipe_count - rows) s->recipe_top = g_recipe_count - rows;
-    if (s->recipe_top < 0) s->recipe_top = 0;
-    const float pw = 8 + grid_w + 12 + 190 + 8,
-                ph = fmaxf(170.0f, 36.0f + 20.0f * (float)rows + 16.0f /* room for the "more" hint */);
+    const float grid_w = INV_HOTBAR * SLOT + (INV_HOTBAR - 1) * GAP, cw = 224, ph = 254;
+    const float pw = 8 + grid_w + 12 + cw + 8;
     const float x0 = floorf((u->w - pw) * 0.5f), y0 = floorf((u->h - ph) * 0.5f + (1.0f - t) * 10.0f);
     ui_rect(u, x0, y0, pw, ph, ui_alpha(C_PANEL, fade));
     ui_frame(u, x0, y0, pw, ph, 1, ui_alpha(C_BORDER, fade));
@@ -247,7 +358,6 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
         if (i == inv->selected) ui_rect(u, x + 1, y + SLOT - 2, SLOT - 2, 1, ui_alpha(C_ECG, st));
         slot_item(u, &inv->slot[i], x, y - s->pop[i] * 2.0f, 1.0f + 0.15f * s->pop[i], st);
     }
-    ui_text(u, x0 + 8, y0 + 24 + 4 * (SLOT + GAP) + 10, 1, ui_alpha(C_DIM, fade), "Right: split  Shift: move");
 
     if (hover >= 0 && (in->click || in->rclick)) {
         r.click_slot = hover;
@@ -261,70 +371,115 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
         r.changed = 1;
     }
 
-    /* Crafting: one row per recipe; greyed out when something is missing. */
-    const float cx = x0 + 8 + grid_w + 12, cw = 190;
-    ui_text(u, cx, y0 + 24, 1, ui_alpha(C_HEAD, fade), "CRAFTING");
+    /* Crafting: categories that open and close, each with its recipes; a
+     * recipe that cannot be made now is greyed out, or hidden with the
+     * filter on. The wheel scrolls the list. */
+    const float cx = x0 + 8 + grid_w + 12, top = y0 + 24, row_h = 18;
+    ui_text(u, cx, top, 1, ui_alpha(C_HEAD, fade), "CRAFTING");
+    const char *chip = s->only_craftable ? "[x] can make" : "[ ] can make";
+    float chip_w = ui_text_width(chip, 1), chip_x = cx + cw - chip_w - 2;
+    int chip_hot = inside(in, chip_x - 2, top - 2, chip_w + 4, 11);
+    ui_text(u, chip_x, top, 1, ui_alpha(chip_hot ? C_HEAD : (s->only_craftable ? C_ECG : C_DIM), fade), chip);
+    if (chip_hot && in->click) {
+        s->only_craftable = !s->only_craftable;
+        s->recipe_top = 0;
+    }
+
+    craft_row rows[RCAT_COUNT + 64] = {{0}};
+    int nrows = 0;
+    const int max_rows = (int)(sizeof rows / sizeof rows[0]);
+    for (int cat = 0; cat < RCAT_COUNT && nrows < max_rows; cat++) {
+        int can = 0, total = cat_counts(inv, cat, in->stations, &can);
+        if (!total || (s->only_craftable && !can)) continue;
+        rows[nrows++] = (craft_row){cat, -1};
+        if (!(s->cat_open & (1u << cat))) continue;
+        for (int k = 0; k < g_recipe_count && nrows < max_rows; k++)
+            if (invui_recipe_category(k) == cat && (!s->only_craftable || inv_can_craft(inv, k, in->stations)))
+                rows[nrows++] = (craft_row){cat, k};
+    }
+    const int shown = (int)((ph - 46) / (row_h + 2));
+    s->recipe_top -= (int)in->wheel;
+    if (s->recipe_top > nrows - shown) s->recipe_top = nrows - shown;
+    if (s->recipe_top < 0) s->recipe_top = 0;
+
     int hover_recipe = -1;
-    if (s->recipe_top > 0) ui_text(u, cx + cw - 50, y0 + 24, 1, ui_alpha(C_DIM, fade), "more ^");
-    if (s->recipe_top + rows < g_recipe_count)
-        ui_text(u, cx + cw - 50, y0 + ph - 12, 1, ui_alpha(C_DIM, fade), "more v");
-    for (int k = s->recipe_top; k < s->recipe_top + rows; k++) {
-        const recipe *rc = &g_recipes[k];
-        float ry = y0 + 36 + (float)(k - s->recipe_top) * 20;
-        int ok = inv_can_craft(inv, k, in->stations);
-        int hot = inside(in, cx, ry, cw, 18);
-        if (hot) hover_recipe = k;
-        float st = ease_out_cubic((s->open_t - 0.03f * (float)(k - s->recipe_top)) / 0.25f);
-        ui_rect(u, cx, ry, cw, 18, ui_alpha(hot && ok ? ui_rgba(40, 52, 50, 235) : ui_rgba(22, 26, 32, 220), st));
-        ui_frame(u, cx, ry, cw, 18, 1, ui_alpha(hot && ok ? C_ECG : C_BORDER, st));
+    for (int k = s->recipe_top; k < nrows && k < s->recipe_top + shown; k++) {
+        const craft_row *cr = &rows[k];
+        float ry = top + 14 + (float)(k - s->recipe_top) * (row_h + 2);
+        int hot = inside(in, cx, ry, cw, row_h);
+        float st = ease_out_cubic((s->open_t - 0.02f * (float)(k - s->recipe_top)) / 0.25f) * fade;
+        if (cr->recipe < 0) {
+            /* A category header: its name, how many can be made, a toggle. */
+            int open = (s->cat_open & (1u << cr->cat)) != 0, can = 0;
+            int total = cat_counts(inv, cr->cat, in->stations, &can);
+            ui_rect(u, cx, ry, cw, row_h, ui_alpha(hot ? ui_rgba(36, 42, 52, 240) : ui_rgba(28, 32, 40, 230), st));
+            ui_rect(u, cx, ry + row_h - 1, cw, 1, ui_alpha(C_BORDER, st));
+            ui_textf(u, cx + 4, ry + 5, 1, ui_alpha(C_HEAD, st), "%s %s", open ? "-" : "+", CAT_NAME[cr->cat]);
+            char cnt[16] = {0};
+            snprintf(cnt, sizeof cnt, "%d/%d", can, total);
+            ui_text(u, cx + cw - 4 - ui_text_width(cnt, 1), ry + 5, 1, ui_alpha(can ? C_ECG : C_DIM, st), cnt);
+            if (hot && in->click) s->cat_open ^= 1u << cr->cat;
+            continue;
+        }
+        const recipe *rc = &g_recipes[cr->recipe];
+        int ok = inv_can_craft(inv, cr->recipe, in->stations);
+        if (hot) hover_recipe = cr->recipe;
+        ui_rect(u, cx + 6, ry, cw - 6, row_h,
+                ui_alpha(hot && ok ? ui_rgba(40, 52, 50, 235) : ui_rgba(22, 26, 32, 220), st));
+        ui_frame(u, cx + 6, ry, cw - 6, row_h, 1, ui_alpha(hot && ok ? C_ECG : (hot ? C_DIM : C_BORDER), st));
         float a = st * (ok ? 1.0f : 0.45f);
-        invui_icon(u, rc->out.id, cx + 2, ry + 1, 16, a);
-        char b[48] = {0};
-        snprintf(b, sizeof b, "%dx", rc->out.count);
-        ui_text(u, cx + 20, ry + 5, 1, ui_alpha(C_TEXT, a), b);
-        float ix = cx + 42;
-        ui_text(u, ix - 8, ry + 5, 1, ui_alpha(C_DIM, a), "<");
-        for (int m = 0; m < 3 && rc->in[m].id; m++) {
-            invui_icon(u, rc->in[m].id, ix, ry + 1, 16, a);
-            int have = inv_count(inv, rc->in[m].id);
+        invui_icon(u, rc->out.id, cx + 9, ry + 1, 16, a);
+        const char *name = item_get(rc->out.id)->name;
+        if (rc->out.count > 1) ui_textf(u, cx + 29, ry + 5, 1, ui_alpha(C_TEXT, a), "%dx %s", rc->out.count, name);
+        else ui_text(u, cx + 29, ry + 5, 1, ui_alpha(C_TEXT, a), name);
+        /* The ingredients at the right, red when short. */
+        float ix = cx + cw - 2;
+        for (int m = 2; m >= 0; m--) {
+            if (!rc->in[m].id) continue;
+            ix -= 22;
+            invui_icon(u, rc->in[m].id, ix, ry + 3, 12, a);
+            char b[8] = {0};
             snprintf(b, sizeof b, "%d", rc->in[m].count);
+            int have = inv_count(inv, rc->in[m].id);
             ui_text_shadow(u, ix + 12, ry + 9, 1, ui_alpha(have >= rc->in[m].count ? C_HEAD : C_ART, st), b);
-            ix += 26;
         }
-        if (rc->station) {
-            const char *sn = rc->station & STATION_FURNACE ? "furnace" : "fire";
-            ui_text(u, cx + cw - 4 - ui_text_width(sn, 1), ry + 5, 1,
-                    ui_alpha((in->stations & rc->station) == rc->station ? C_CO2 : C_DIM, st), sn);
-        }
+        /* A stripe on the left for a station: yellow when near, red if not. */
+        if (rc->station)
+            ui_rect(u, cx + 6, ry + 2, 2, row_h - 4,
+                    ui_alpha((in->stations & rc->station) == rc->station ? C_CO2 : C_ART, st));
         if (hot && in->click && ok) {
             int n = 0;
-            while (inv_craft(inv, k, in->stations) && ++n < (in->shift ? 64 : 1)) {}
+            while (inv_craft(inv, cr->recipe, in->stations) && ++n < (in->shift ? 64 : 1)) {}
             if (n) {
-                r.crafted = k;
+                r.crafted = cr->recipe;
                 r.craft_all = in->shift;
                 r.changed = 1;
             }
         }
     }
+    if (s->recipe_top > 0) ui_text(u, cx + cw * 0.5f - 3, top + 7, 1, ui_alpha(C_DIM, fade), "^");
+    if (s->recipe_top + shown < nrows) ui_text(u, cx + cw * 0.5f - 3, y0 + ph - 10, 1, ui_alpha(C_DIM, fade), "v");
 
-    /* Tooltips, then the stack riding the cursor on top of everything. */
+    /* The card: the hovered slot or recipe, else what is in hand. */
+    const float card_y = y0 + 24 + 4 * (SLOT + GAP) + 12;
+    item_stack card = inv->slot[inv->selected];
+    if (hover >= 0) card = inv->slot[hover];
+    else if (hover_recipe >= 0) card = (item_stack){g_recipes[hover_recipe].out.id, 1, 0};
+    detail_card(u, x0 + 8, card_y, grid_w, y0 + ph - 8 - card_y, inv, &card, hover >= 0 ? -1 : hover_recipe,
+                in->stations, fade);
+
+    /* A short tooltip at the cursor, then the stack riding it on top. */
     if (!inv->cursor.count) {
         if (hover >= 0 && inv->slot[hover].count) {
-            const item_stack *hs = &inv->slot[hover];
-            const item_def *d = item_get(hs->id);
-            int dur = item_durability(hs->id);
-            char worn[64] = {0};
-            if (dur) snprintf(worn, sizeof worn, "%s %d of %d uses left.", d->name, dur - hs->wear, dur);
-            tooltip(u, in->mx, in->my, dur ? worn : d->name, d->desc, C_DIM);
+            tooltip(u, in->mx, in->my, item_get(inv->slot[hover].id)->name, NULL, C_DIM);
         } else if (hover_recipe >= 0) {
             const recipe *rc = &g_recipes[hover_recipe];
-            const item_def *d = item_get(rc->out.id);
             int ok = inv_can_craft(inv, hover_recipe, in->stations);
             const char *why = "Missing ingredients";
             if (ok) why = "Click to craft, Shift-click for all";
             else if (rc->station & ~in->stations & STATION_FURNACE) why = "Needs a furnace nearby";
             else if (rc->station & ~in->stations & STATION_FIRE) why = "Needs a burning campfire nearby";
-            tooltip(u, in->mx, in->my, d->name, why, ok ? C_ECG : C_ART);
+            tooltip(u, in->mx, in->my, item_get(rc->out.id)->name, why, ok ? C_ECG : C_ART);
         }
     }
     if (inv->cursor.count) {
