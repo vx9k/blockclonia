@@ -237,7 +237,7 @@ if(MC_BUILD_TESTS)
                           tests/test_save_db.c tests/test_worlds.c tests/test_hud.c tests/test_cardio.c
                           tests/test_discord.c tests/test_netcrypto.c tests/test_wire.c tests/test_net.c tests/test_mp.c
                           tests/test_worldgen.c tests/test_tools.c
-                          tests/test_combat.c)
+                          tests/test_combat.c tests/test_invui.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)
   # Under qemu user emulation (cross builds) the suite runs several times

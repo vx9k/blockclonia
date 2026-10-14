@@ -24,10 +24,14 @@ Every texture and sound is generated at start-up, and all memory comes from
   metabolism, temperature and a long list of injuries, all treatable. See
   [Health](#health).
 - **Inventory and crafting** (press **Tab**): 36 slots, a hotbar, stacks
-  you can split and move, and recipes, some of which need a campfire or a
-  furnace. Items
-  you drop are physical objects that bob, spin and roll to you when you
-  walk past.
+  you can split and move, and recipes grouped in categories that open and
+  close (Basics, Building, Smelting & cooking, Tools, Weapons, Medical),
+  each showing how many you can make now; "can make" hides the rest, and
+  some need a campfire or a furnace nearby. A card under the slots tells
+  what the item or recipe under the mouse is: uses left, how fast it
+  breaks what, its blow, food energy, a block's density and span, or a
+  recipe's ingredients against what you have. Items you drop are physical
+  objects that bob, spin and roll to you when you walk past.
 - **Menus** in the same style as the HUD: a title screen, a pause menu, a
   settings screen with Video, Controls and Audio tabs, and a controls
   reference.
@@ -225,7 +229,7 @@ without a pickaxe (and take three times as long by hand), and copper and
 iron ore need one of stone or better. Every block broken wears the tool
 in hand by one use: wooden tools last 60, stone 130, copper 180 and iron
 250. A bar under the slot shows what is left; a worn-out tool is gone.
-The mouse wheel scrolls the recipe list while the inventory is open.
+The mouse wheel scrolls the crafting list while the inventory is open.
 
 Rock, the stone the world is made of, breaks into stone blocks; coal ore
 gives coal, and copper and iron ore give raw metal to smelt. A campfire

@@ -17,10 +17,12 @@ One branch and pull request per item, in this order:
    tracer or muzzle flash; no armour; a client's blows and shots are
    judged on the host, so they land one round trip late; more creatures
    (deer, bears, fish).
-3. **Inventory screen redesign**: recipes grouped in collapsible
-   categories with scrolling, richer tooltips (ingredients, station,
-   durability, stats), hover and selection states. After item 2, so it
-   is built around the full item list.
+3. **Inventory screen redesign** (`feat/inventory-redesign`, stacked on
+   item 2): recipes in collapsible categories with made/total counts, a
+   "can make" filter, a detail card (uses, speed, blow, food, block
+   density and span, ingredients against what you have) and a short
+   cursor tooltip. Left for later: search by name, favourites, dragging
+   a stack across slots to spread it.
 4. **Health**: adrenaline and stress hormones, harmful treatments (a
    shock to a healthy heart, overdoses, drug interactions), organ damage
    with effects felt in play (vision, movement, tremor, fainting), a
