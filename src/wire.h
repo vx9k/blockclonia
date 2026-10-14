@@ -75,7 +75,5 @@ typedef struct {
 
 void wire_put_fields(wire_w *w, const void *s, const wire_field *f, size_t n);
 void wire_get_fields(wire_r *r, void *s, const wire_field *f, size_t n);
-/* Bytes one table entry covers in the struct. */
-size_t wire_field_size(const wire_field *f);
 
 #endif

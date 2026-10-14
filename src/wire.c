@@ -141,15 +141,6 @@ int32_t wire_get_range(wire_r *r, int32_t lo, int32_t hi)
     return r->bad ? 0 : v;
 }
 
-size_t wire_field_size(const wire_field *f)
-{
-    switch (f->type) {
-    case WF_F64: return 8;
-    case WF_U8: return 1;
-    default: return 4;
-    }
-}
-
 void wire_put_fields(wire_w *w, const void *s, const wire_field *f, size_t n)
 {
     const uint8_t *b = (const uint8_t *)s;

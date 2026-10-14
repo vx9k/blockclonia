@@ -20,10 +20,10 @@
 #ifndef MC_PHYSICS_H
 #define MC_PHYSICS_H
 
-#include <stddef.h>
-#include <stdint.h>
 #include "mathlib.h"
 #include "world.h"
+#include <stddef.h>
+#include <stdint.h>
 
 #define PHYS_HZ 60
 #define PHYS_DT (1.0 / PHYS_HZ)

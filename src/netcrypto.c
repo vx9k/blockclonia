@@ -127,9 +127,7 @@ long nc_open(nc_session *s, const uint8_t *in, size_t len, uint8_t *out, size_t 
 }
 
 void nc_key_hex(const uint8_t key[NC_KEY_BYTES], char out[2 * NC_KEY_BYTES + 1])
-{
-    sodium_bin2hex(out, 2 * NC_KEY_BYTES + 1, key, NC_KEY_BYTES);
-}
+{ sodium_bin2hex(out, 2 * NC_KEY_BYTES + 1, key, NC_KEY_BYTES); }
 
 int nc_key_parse(const char *hex, uint8_t key[NC_KEY_BYTES])
 {

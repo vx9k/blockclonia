@@ -298,10 +298,24 @@ static double water_fraction(const world *w, aabb box)
 
 #define PF(f) WIRE_F64(player, f)
 static const wire_field PLAYER_FIELDS[] = {
-    PF(pos.x), PF(pos.y), PF(pos.z), PF(prev_pos.x), PF(prev_pos.y), PF(prev_pos.z), PF(vel.x), PF(vel.y), PF(vel.z),
-    WIRE_F32(player, yaw), WIRE_F32(player, pitch), WIRE_I32(player, on_ground),
-    WIRE_I32(player, flying), PF(submerged), WIRE_I32(player, sprinting),
-    WIRE_I32(player, sneaking), WIRE_I32(player, hit_wall), PF(fall_speed),
+    PF(pos.x),
+    PF(pos.y),
+    PF(pos.z),
+    PF(prev_pos.x),
+    PF(prev_pos.y),
+    PF(prev_pos.z),
+    PF(vel.x),
+    PF(vel.y),
+    PF(vel.z),
+    WIRE_F32(player, yaw),
+    WIRE_F32(player, pitch),
+    WIRE_I32(player, on_ground),
+    WIRE_I32(player, flying),
+    PF(submerged),
+    WIRE_I32(player, sprinting),
+    WIRE_I32(player, sneaking),
+    WIRE_I32(player, hit_wall),
+    PF(fall_speed),
 };
 #undef PF
 
@@ -313,9 +327,7 @@ size_t player_encode(const player *p, uint8_t *out, size_t cap)
 }
 
 static int pos_sane(dvec3 v)
-{
-    return fabs(v.x) < WORLD_LIMIT && fabs(v.z) < WORLD_LIMIT && v.y > -1024.0 && v.y < WORLD_H + 4096.0;
-}
+{ return fabs(v.x) < WORLD_LIMIT && fabs(v.z) < WORLD_LIMIT && v.y > -1024.0 && v.y < WORLD_H + 4096.0; }
 
 int player_decode(player *p, const uint8_t *in, size_t len)
 {
