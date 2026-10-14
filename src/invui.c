@@ -203,7 +203,7 @@ static void tooltip(ui *u, float mx, float my, const char *title, const char *li
 
 invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in)
 {
-    invui_result r = {0, {0, 0}, -1};
+    invui_result r = {0, {0, 0}, -1, 0, -1, 0, 0};
     s->open_t += in->dt;
     track_pops(s, inv, in->dt);
     float t = ease_out_back(s->open_t / 0.25f), fade = ease_out_cubic(s->open_t / 0.18f);
@@ -234,7 +234,10 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
     ui_text(u, x0 + 8, y0 + 24 + 4 * (SLOT + GAP) + 10, 1, ui_alpha(C_DIM, fade), "Right: split  Shift: move");
 
     if (hover >= 0 && (in->click || in->rclick)) {
-        inv_click(inv, hover, in->rclick ? 1 : 0, in->shift && in->click);
+        r.click_slot = hover;
+        r.click_button = in->rclick ? 1 : 0;
+        r.click_shift = in->shift && in->click;
+        inv_click(inv, hover, r.click_button, r.click_shift);
         r.changed = 1;
     } else if (inv->cursor.count && in->click && !inside(in, x0, y0, pw, ph)) {
         r.drop = inv->cursor; /* thrown out of the window */
@@ -277,6 +280,7 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
             while (inv_craft(inv, k, in->near_fire) && ++n < (in->shift ? 64 : 1)) {}
             if (n) {
                 r.crafted = k;
+                r.craft_all = in->shift;
                 r.changed = 1;
             }
         }

@@ -37,4 +37,12 @@ void viewmodel_init(viewmodel *vm);
 /* Advances the animation and writes up to max instances; returns how many. */
 int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *out, int max);
 
+/* Another player as a blocky figure of VIEWMODEL_FIGURE cubes in world
+ * orientation: feet relative to the camera, facing yaw with the head
+ * tilted by pitch; lower when sneaking, lying down when dead. Writes up to
+ * max instances and returns how many. */
+#define VIEWMODEL_FIGURE 6
+int viewmodel_figure(const float feet[3], float yaw, float pitch, int sneaking, int dead, float light,
+                     entity_instance *out, int max);
+
 #endif

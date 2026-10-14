@@ -259,3 +259,49 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
     memcpy(out, parts, (size_t)n * sizeof parts[0]);
     return n;
 }
+
+/* One cube of a figure: centre = feet + body * local, orientation body * own. */
+static entity_instance cube(const float feet[3], quat body, const float local[3], quat own, float sx, float sy,
+                            float sz, int layer, float light)
+{
+    entity_instance e = {0};
+    float r[3] = {0};
+    quat_apply(body, local, r);
+    vadd(e.pos, feet, r);
+    e.tex = same_tex(layer);
+    entity_set_rot(&e, quat_norm(quat_mul(body, own)));
+    e.scale[0] = sx;
+    e.scale[1] = sy;
+    e.scale[2] = sz;
+    e.light = light;
+    return e;
+}
+
+int viewmodel_figure(const float feet[3], float yaw, float pitch, int sneaking, int dead, float light,
+                     entity_instance *out, int max)
+{
+    /* Facing yaw: forward is -z turned toward +x, so -yaw about +y. Dead,
+     * the figure falls forward onto its front. */
+    quat body = quat_axis(0.0f, 1.0f, 0.0f, -yaw);
+    if (dead) body = quat_mul(body, quat_axis(1.0f, 0.0f, 0.0f, -0.5f * PI_F));
+    float low = sneaking ? 0.15f : 0.0f;
+    const struct {
+        float at[3], size[3];
+        int layer;
+    } PARTS[VIEWMODEL_FIGURE] = {
+        {{-0.125f, 0.375f, 0.0f}, {0.24f, 0.75f, 0.24f}, T_SLEEVE},  /* legs */
+        {{0.125f, 0.375f, 0.0f}, {0.24f, 0.75f, 0.24f}, T_SLEEVE},
+        {{0.0f, 1.1f, 0.0f}, {0.5f, 0.7f, 0.26f}, T_SLEEVE},         /* torso */
+        {{-0.37f, 1.1f, 0.0f}, {0.22f, 0.7f, 0.22f}, T_SKIN},        /* arms */
+        {{0.37f, 1.1f, 0.0f}, {0.22f, 0.7f, 0.22f}, T_SKIN},
+        {{0.0f, 1.68f, 0.0f}, {0.42f, 0.42f, 0.42f}, T_SKIN},        /* head */
+    };
+    int n = 0;
+    for (int i = 0; i < VIEWMODEL_FIGURE && n < max; i++) {
+        float at[3] = {PARTS[i].at[0], PARTS[i].at[1] - (i >= 2 ? low : 0.0f), PARTS[i].at[2]};
+        quat own = i == 5 ? quat_axis(1.0f, 0.0f, 0.0f, pitch) : quat_identity();
+        out[n++] = cube(feet, body, at, own, PARTS[i].size[0], PARTS[i].size[1], PARTS[i].size[2], PARTS[i].layer,
+                        light);
+    }
+    return n;
+}

@@ -31,6 +31,10 @@ typedef struct {
     int changed;         /* slots or crafting changed something */
     item_stack drop;     /* the cursor stack was dropped outside the panel */
     int crafted;         /* recipe index crafted this frame, -1 none */
+    int craft_all;       /* ... as often as it went (shift) */
+    /* The inv_click this frame, for a multiplayer host to repeat: slot,
+     * or -1 for none. */
+    int click_slot, click_button, click_shift;
 } invui_result;
 
 void invui_init(invui *s);
