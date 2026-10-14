@@ -160,25 +160,30 @@ const recipe g_recipes[] = {
     {{I_STICK, 4}, {{B_PLANKS, 2}}, 0},
     {{I_SPLINT, 1}, {{I_STICK, 2}, {I_FIBRE, 1}}, 0},
     {{I_BUCKET, 1}, {{B_PLANKS, 3}, {I_FIBRE, 1}}, 0},
-    {{B_GLASS, 1}, {{B_SAND, 2}}, 1},
-    {{B_BRICK, 1}, {{B_DIRT, 2}, {B_SAND, 1}}, 1},
+    {{B_GLASS, 1}, {{B_SAND, 2}}, STATION_FIRE},
+    {{B_BRICK, 1}, {{B_DIRT, 2}, {B_SAND, 1}}, STATION_FIRE},
     {{B_CAMPFIRE, 1}, {{I_STICK, 4}, {B_LOG, 1}}, 0},
+    {{B_FURNACE, 1}, {{B_STONE, 8}}, 0},
+    /* A campfire cannot reach the 1085-1540 C these metals need; a
+     * furnace burning the coal can. */
+    {{I_COPPER_INGOT, 1}, {{I_RAW_COPPER, 1}, {I_COAL, 1}}, STATION_FURNACE},
+    {{I_IRON_INGOT, 1}, {{I_RAW_IRON, 1}, {I_COAL, 2}}, STATION_FURNACE},
 };
 const int g_recipe_count = (int)(sizeof g_recipes / sizeof g_recipes[0]);
 
-int inv_can_craft(const inventory *inv, int r, int near_fire)
+int inv_can_craft(const inventory *inv, int r, int stations)
 {
     if (r < 0 || r >= g_recipe_count) return 0;
     const recipe *rc = &g_recipes[r];
-    if (rc->needs_fire && !near_fire) return 0;
+    if ((rc->station & stations) != rc->station) return 0;
     for (int k = 0; k < 3 && rc->in[k].id; k++)
         if (inv_count(inv, rc->in[k].id) < rc->in[k].count) return 0;
     return 1;
 }
 
-int inv_craft(inventory *inv, int r, int near_fire)
+int inv_craft(inventory *inv, int r, int stations)
 {
-    if (!inv_can_craft(inv, r, near_fire)) return 0;
+    if (!inv_can_craft(inv, r, stations)) return 0;
     const recipe *rc = &g_recipes[r];
     inventory trial = *inv;
     for (int k = 0; k < 3 && rc->in[k].id; k++) inv_take(&trial, rc->in[k].id, rc->in[k].count);

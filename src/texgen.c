@@ -122,6 +122,36 @@ static const sprite SPRITES[] = {
       {'r', {215, 40, 40, 255}},
       {'o', {245, 150, 30, 255}},
       {'h', {120, 125, 130, 255}}}},
+    {T_ITEM_COAL,
+     {"................", "................", "................", "......####......", "....##kkkk#.....",
+      "...#kkhkkkk##...", "...#khkkkkkkk#..", "..#kkkkkkhkkk#..", "..#kkkkkkkkkk#..", "..#kkkhkkkkk#...",
+      "...#kkkkkkkk#...", "....##kkkk##....", "......####......", "................", "................",
+      "................"},
+     {{'#', {20, 20, 22, 255}}, {'k', {45, 45, 48, 255}}, {'h', {95, 95, 100, 255}}}},
+    {T_ITEM_COPPER_INGOT,
+     {"................", "................", "................", "................", "................",
+      ".....########...", "....#hhhhhhh##..", "...#hhhhhhh#m#..", "..##########mm#.", "..#mmmmmmmmm#m#.",
+      "..#mmmmmmmmm##..", "..###########...", "................", "................", "................",
+      "................"},
+     {{'#', {110, 50, 25, 255}}, {'h', {235, 150, 95, 255}}, {'m', {190, 100, 55, 255}}}},
+    {T_ITEM_IRON_INGOT,
+     {"................", "................", "................", "................", "................",
+      ".....########...", "....#hhhhhhh##..", "...#hhhhhhh#m#..", "..##########mm#.", "..#mmmmmmmmm#m#.",
+      "..#mmmmmmmmm##..", "..###########...", "................", "................", "................",
+      "................"},
+     {{'#', {70, 72, 78, 255}}, {'h', {215, 218, 222, 255}}, {'m', {160, 163, 170, 255}}}},
+    {T_ITEM_RAW_COPPER,
+     {"................", "................", "................", "......###.......", "....##ahh##.....",
+      "...#aahaaam#....", "..#aaaaamaaa#...", "..#ammaaaahaa#..", "..#aaaahaaaam#..", "...#amaaaamaa#..",
+      "...#aaaammaa#...", "....##aaaa##....", "......####......", "................", "................",
+      "................"},
+     {{'#', {70, 50, 40, 255}}, {'a', {150, 95, 70, 255}}, {'h', {225, 140, 80, 255}}, {'m', {80, 150, 110, 255}}}},
+    {T_ITEM_RAW_IRON,
+     {"................", "................", "................", "......###.......", "....##ahh##.....",
+      "...#aahaaam#....", "..#aaaaamaaa#...", "..#ammaaaahaa#..", "..#aaaahaaaam#..", "...#amaaaamaa#..",
+      "...#aaaammaa#...", "....##aaaa##....", "......####......", "................", "................",
+      "................"},
+     {{'#', {70, 60, 55, 255}}, {'a', {165, 140, 120, 255}}, {'h', {215, 185, 160, 255}}, {'m', {120, 80, 65, 255}}}},
 };
 
 static int sprite_texel(int layer, int x, int y, rgba *out)
@@ -209,6 +239,30 @@ static rgba texel(int layer, int x, int y)
     }
     case T_ASH: return shade(110, 106, 102, 255, px_noise(layer, x, y, 20));
     case T_STONE: return shade(125, 125, 125, 255, n);
+    case T_COAL_ORE:
+    case T_COPPER_ORE:
+    case T_IRON_ORE: {
+        /* Stone with clusters of mineral: a texel is ore where a coarse
+         * hash says so and a neighbour agrees, giving blobs, not dust. */
+        static const rgba MINERAL[3] = {{30, 30, 32, 255}, {200, 110, 60, 255}, {196, 160, 130, 255}};
+        int k = layer - T_COAL_ORE;
+        int ore = px_noise(layer, x / 2, y / 2, 100) > 55 && px_noise(layer, x, y, 100) > -20;
+        if (!ore) return shade(125, 125, 125, 255, n);
+        return shade(MINERAL[k].r, MINERAL[k].g, MINERAL[k].b, 255, n / 2);
+    }
+    case T_FURNACE_TOP: {
+        int edge = x == 0 || y == 0 || x == 15 || y == 15;
+        return shade(edge ? 100 : 118, edge ? 100 : 118, edge ? 100 : 118, 255, n / 2);
+    }
+    case T_FURNACE_FRONT: {
+        /* Stone blocks around a dark firebox mouth with embers inside. */
+        if (x >= 4 && x <= 11 && y >= 7 && y <= 13) {
+            if (y >= 11) return shade(220, 90, 25, 255, px_noise(layer, x, y, 60));
+            return shade(28, 24, 22, 255, n / 4);
+        }
+        int row = y / 4, mortar = y % 4 == 3 || ((x + (row % 2) * 4) % 8) == 7;
+        return mortar ? shade(80, 80, 80, 255, n / 3) : shade(130, 130, 130, 255, n);
+    }
     case T_BEDROCK: return shade(60, 60, 60, 255, px_noise(layer, x, y, 30));
     case T_DIRT: return shade(134, 96, 67, 255, n);
     case T_GRASS_TOP: return shade(95, 159, 53, 255, n);

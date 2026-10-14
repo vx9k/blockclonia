@@ -72,7 +72,12 @@ static float grit_under(const world *w, const player *p)
     case B_ASH: return 0.55f;
     case B_STONE:
     case B_BEDROCK:
-    case B_BRICK: return 0.4f;
+    case B_BRICK:
+    case B_COAL_ORE:
+    case B_COPPER_ORE:
+    case B_IRON_ORE:
+    case B_ROCK:
+    case B_FURNACE: return 0.4f;
     case B_PLANKS:
     case B_LOG: return 0.3f;
     default: return 0.0f;

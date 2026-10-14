@@ -1105,6 +1105,9 @@ static uint32_t choose_seed(options *o, save_db **db)
     int got = save_db_get_seed(*db, &saved);
     if (got == 0) {
         if (o->have_seed && saved != o->seed) log_warn("--seed ignored: world '%s' uses seed %u", o->world_dir, saved);
+        /* A world saved before generators were recorded was made by the first. */
+        int64_t gen = 0;
+        if (save_db_get_meta(*db, "generator", &gen) == -1) save_db_set_meta(*db, "generator", 1);
         return saved;
     }
     if (got != -1) {
@@ -1116,6 +1119,7 @@ static uint32_t choose_seed(options *o, save_db **db)
         return seed;
     }
     if (save_db_set_seed(*db, seed) != 0) log_warn("could not store the world seed");
+    save_db_set_meta(*db, "generator", WORLDGEN_VERSION);
     return seed;
 }
 
@@ -1193,6 +1197,9 @@ static void open_world(game *g, const char *dir, int backdrop)
     log_info("%s, seed %u", backdrop ? "menu backdrop" : (o->world_dir ? o->world_dir : "unsaved world"), g->seed);
 
     world_init(&g->w, g->seed, o->radius, g->js, g->db);
+    int64_t gen = WORLDGEN_VERSION;
+    if (g->db) save_db_get_meta(g->db, "generator", &gen);
+    if (gen == 1) g->w.generator = worldgen_column_v1; /* no seams against what is saved */
     physics_init(&g->ph, &g->w);
     g->th = thermo_create(g->seed);
     g->hooks = (world_hooks){&g->ph, g->th, &g->w, NULL, 0, g->snd, g->fx};
@@ -1250,8 +1257,6 @@ static void open_world(game *g, const char *dir, int backdrop)
     g->hs.alert_count = 0;
     if (g->db) {
         save_db_set_meta(g->db, "last_played", (int64_t)time(NULL));
-        int64_t gen = 0;
-        if (save_db_get_meta(g->db, "generator", &gen) == -1) save_db_set_meta(g->db, "generator", WORLDGEN_VERSION);
     }
     /* The name goes out to Discord, and world files are shared: only a
      * valid one is used. */
@@ -2204,7 +2209,7 @@ static int draw_overlay(game *g, double dt, double alpha)
                           g_in.ui_click,
                           g_in.ui_rclick,
                           g_in.keys[GLFW_KEY_LEFT_SHIFT] || g_in.keys[GLFW_KEY_RIGHT_SHIFT],
-                          thermo_near_fire(g->th, &g->w, g->pl.pos, 3.0),
+                          thermo_stations(g->th, &g->w, g->pl.pos),
                           (float)dt};
         invui_result ir = invui_screen(&u, &g->iu, &g->inv, &in);
         if (g->client) {

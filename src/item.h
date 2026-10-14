@@ -22,6 +22,11 @@ enum {
     I_BUCKET,
     I_WATER_BUCKET,
     I_DEFIBRILLATOR,
+    I_COAL,
+    I_COPPER_INGOT,
+    I_IRON_INGOT,
+    I_RAW_COPPER,
+    I_RAW_IRON,
     ITEM_END
 };
 

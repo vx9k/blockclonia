@@ -362,7 +362,7 @@ static void host_op(mp *m, remote *r, wire_r *rd)
         break;
     case MP_OP_CRAFT:
         if (a < g_recipe_count) {
-            int near = thermo_near_fire(m->ctx.th, m->ctx.w, r->pl.pos, 3.0), n = 0;
+            int near = thermo_stations(m->ctx.th, m->ctx.w, r->pl.pos), n = 0;
             while (inv_craft(&r->inv, a, near) && ++n < (b ? 64 : 1)) {}
         }
         break;

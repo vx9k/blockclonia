@@ -59,6 +59,9 @@ float thermo_block_temp(const thermo *t, const world *w, int x, int y, int z);
 double thermo_radiant(const thermo *t, const world *w, dvec3 p);
 /* 1 if a burning campfire is within r metres of p (crafting glass, brick). */
 int thermo_near_fire(const thermo *t, const world *w, dvec3 p, double r);
+/* The crafting stations within reach of p, as STATION_* bits (inventory.h):
+ * a burning campfire, a furnace. */
+int thermo_stations(const thermo *t, const world *w, dvec3 p);
 /* The centres of the nearest burning campfires within r of p, nearest
  * first (at most max, max <= 64). Returns how many. */
 int thermo_fires_near(const thermo *t, const world *w, dvec3 p, double r, dvec3 *out, int max);
