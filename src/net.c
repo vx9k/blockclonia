@@ -295,14 +295,17 @@ static int send_pair(net *n, int to, const uint8_t *msg, size_t len)
     return r;
 }
 
-static void pair_start(net *n, int id)
+/* Sends this side's pair hello once; returns 1 if it has gone out. */
+static int pair_start(net *n, int id)
 {
     member *m = &n->m[id];
-    if (id == n->me || !m->present || m->pair_sent) return;
+    if (id == n->me || !m->present) return 0;
+    if (m->pair_sent) return 1;
     uint8_t msg[1 + NC_HELLO_BYTES] = {MSG_PAIR_HELLO};
     nc_hello_make(&n->id, &m->pair_eph, m->pair_mine);
     memcpy(msg + 1, m->pair_mine, NC_HELLO_BYTES);
     if (send_pair(n, id, msg, sizeof msg) == 0) m->pair_sent = 1;
+    return m->pair_sent;
 }
 
 static int chat_to(net *n, int id, const char *text)
@@ -324,10 +327,7 @@ static void on_pair_msg(net *n, const net_link *l, int from, const uint8_t *data
     if (data[0] == MSG_PAIR_HELLO && len == 1 + NC_HELLO_BYTES && !m->pair_up) {
         /* Only the identity the host vouched for may set up the pair. */
         if (memcmp(data + 1 + 4, m->pk, NC_KEY_BYTES) != 0) return;
-        if (!m->pair_sent) {
-            pair_start(n, from);
-            if (!m->pair_sent) return; /* no path to answer on yet */
-        }
+        if (!pair_start(n, from)) return; /* no path to answer on yet */
         if (nc_session_derive(&m->pair, &n->id, &m->pair_eph, m->pair_mine, data + 1) != 0) return;
         m->pair_up = 1;
         for (int i = 0; i < m->pending_n; i++) chat_to(n, from, m->pending[i]);
@@ -860,4 +860,7 @@ int net_player_direct(const net *n, int player)
 { return net_player_present(n, player) && n->m[player].direct && n->m[player].direct->state == LINK_UP; }
 
 const uint8_t *net_player_key(const net *n, int player)
-{ return net_player_present(n, player) ? n->m[player].pk : NULL; }
+{
+    if (!net_player_present(n, player)) return NULL;
+    return n->m[player].pk;
+}
