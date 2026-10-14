@@ -67,6 +67,120 @@ static int in_ring(int dx, int dz, int radius, int slack)
     return ax * ax + az * az <= radius * radius;
 }
 
+/* ------------------------------------------------------------ far columns */
+
+/* Columns held for anchors outside the ring, in an open-addressing table
+ * with linear probing. It stays at most half full, so a probe always
+ * meets an empty slot. */
+
+static uint32_t far_home(const world *w, int cx, int cz)
+{
+    uint32_t h = (uint32_t)cx * 73856093u ^ (uint32_t)cz * 19349663u;
+    return h & (uint32_t)(w->far_cap - 1);
+}
+
+static int far_find(const world *w, int cx, int cz)
+{
+    if (!w->far_count) return -1;
+    uint32_t mask = (uint32_t)(w->far_cap - 1);
+    for (uint32_t i = far_home(w, cx, cz);; i = (i + 1) & mask) {
+        const column *c = w->far[i];
+        if (!c) return -1;
+        if (c->cx == cx && c->cz == cz) return (int)i;
+    }
+}
+
+column *world_far_column(const world *w, int cx, int cz)
+{
+    int i = far_find(w, cx, cz);
+    column *c = i < 0 ? NULL : w->far[i];
+    return c && c->state == COL_READY ? c : NULL;
+}
+
+/* Into the first empty slot of c's probe run; the table has room. */
+static void far_put(world *w, column *c)
+{
+    uint32_t mask = (uint32_t)(w->far_cap - 1), i = far_home(w, c->cx, c->cz);
+    while (w->far[i]) i = (i + 1) & mask;
+    w->far[i] = c;
+    w->far_count++;
+}
+
+static void far_grow(world *w)
+{
+    column **old = w->far;
+    int old_cap = w->far_cap;
+    w->far_cap = old_cap ? 2 * old_cap : 256;
+    w->far = mem_calloc((size_t)w->far_cap, sizeof *w->far);
+    w->far_count = 0;
+    for (int i = 0; i < old_cap; i++)
+        if (old[i]) far_put(w, old[i]);
+    mem_free(old);
+}
+
+static void far_insert(world *w, column *c)
+{
+    if (2 * (w->far_count + 1) > w->far_cap) far_grow(w);
+    far_put(w, c);
+}
+
+/* Backward-shift deletion: later entries of the probe run move up into
+ * the hole, so lookups never need tombstones. */
+static void far_remove(world *w, int slot)
+{
+    uint32_t mask = (uint32_t)(w->far_cap - 1), i = (uint32_t)slot;
+    w->far[i] = NULL;
+    w->far_count--;
+    for (uint32_t j = (i + 1) & mask; w->far[j]; j = (j + 1) & mask) {
+        uint32_t home = far_home(w, w->far[j]->cx, w->far[j]->cz);
+        if (((j - home) & mask) >= ((j - i) & mask)) {
+            w->far[i] = w->far[j];
+            w->far[j] = NULL;
+            i = j;
+        }
+    }
+}
+
+/* Every column held: the ring's slots, then the far table's. */
+static int held_slots(const world *w) { return w->grid_w * w->grid_w + w->far_cap; }
+
+static column *held(const world *w, int i)
+{
+    int g = w->grid_w * w->grid_w;
+    return i < g ? w->grid[i] : w->far[i - g];
+}
+
+/* Takes a column out of the ring or the far table, wherever it is. */
+static void detach(world *w, const column *c)
+{
+    int slot = slot_of(w, c->cx, c->cz);
+    if (w->grid[slot] == c) {
+        w->grid[slot] = NULL;
+        return;
+    }
+    int f = far_find(w, c->cx, c->cz);
+    if (f >= 0 && w->far[f] == c) far_remove(w, f);
+}
+
+static int anchor_wants(const world *w, int cx, int cz, int slack)
+{
+    for (int i = 0; i < w->anchor_n; i++)
+        if (abs(cx - w->anchor[i][0]) <= w->anchor_r + slack && abs(cz - w->anchor[i][1]) <= w->anchor_r + slack)
+            return 1;
+    return 0;
+}
+
+void world_set_anchors(world *w, const int *xz, int n, int radius)
+{
+    if (w->on_column_request) n = 0;
+    w->anchor_n = n < WORLD_ANCHORS ? (n > 0 ? n : 0) : WORLD_ANCHORS;
+    w->anchor_r = clampi(radius, 1, 8);
+    for (int i = 0; i < w->anchor_n; i++) {
+        w->anchor[i][0] = xz[2 * i];
+        w->anchor[i][1] = xz[2 * i + 1];
+    }
+}
+
 /* ------------------------------------------------------------ block access */
 
 uint8_t world_get_meta(const world *w, int x, int y, int z)
@@ -213,8 +327,7 @@ static void gen_done(job *j)
     column *c = g->c;
     w->gen_in_flight--;
     if (c->want_unload) {
-        int slot = slot_of(w, c->cx, c->cz);
-        if (w->grid[slot] == c) w->grid[slot] = NULL;
+        detach(w, c);
         column_free(c);
         w->gen_cursor = 0;
     } else {
@@ -228,10 +341,11 @@ static void gen_done(job *j)
     mem_free(g);
 }
 
-static void request_column(world *w, int cx, int cz)
+/* Loads a column already placed in the ring or the far table, where the
+ * load's completion (gen_done) finds it. */
+static void start_load(world *w, column *c)
 {
-    column *c = column_alloc(cx, cz);
-    w->grid[slot_of(w, cx, cz)] = c;
+    int cx = c->cx, cz = c->cz;
     if (w->on_column_request) {
         w->gen_in_flight++;
         w->on_column_request(w->remote_user, cx, cz);
@@ -255,6 +369,28 @@ static void request_column(world *w, int cx, int cz)
     }
     w->gen_in_flight++;
     jobs_submit(w->jobs, &g->base);
+}
+
+/* A column entering the ring: taken over from the far table if an anchor
+ * already holds it (edits and all), else loaded. */
+static void request_column(world *w, int cx, int cz)
+{
+    int f = far_find(w, cx, cz);
+    if (f >= 0) {
+        column *c = w->far[f];
+        far_remove(w, f);
+        c->want_unload = 0;
+        w->grid[slot_of(w, cx, cz)] = c;
+        for (int s = 0; s < SECTIONS; s++) {
+            c->dirty[s] = 1;
+            c->version[s] = ++w->version_counter;
+        }
+        w->sched_pending = 1;
+        return;
+    }
+    column *c = column_alloc(cx, cz);
+    w->grid[slot_of(w, cx, cz)] = c;
+    start_load(w, c);
 }
 
 /* An unloading column is saved together with every other edited column
@@ -288,9 +424,24 @@ static int unload_column(world *w, column *c)
     if (w->on_mesh_free)
         for (int s = 0; s < SECTIONS; s++)
             if (c->mesh[s].vtx_capacity) w->on_mesh_free(w->render_user, &c->mesh[s]);
-    w->grid[slot_of(w, c->cx, c->cz)] = NULL;
+    detach(w, c);
     column_free(c);
     return 1;
+}
+
+/* A column leaving the ring that an anchor still needs moves to the far
+ * table: its meshes go back to the renderer, and mesh jobs still out for
+ * it are dropped as stale when they finish. */
+static void move_far(world *w, column *c)
+{
+    for (int s = 0; s < SECTIONS; s++) {
+        if (c->mesh[s].vtx_capacity && w->on_mesh_free) w->on_mesh_free(w->render_user, &c->mesh[s]);
+        memset(&c->mesh[s], 0, sizeof c->mesh[s]);
+        c->meshing[s] = 0;
+        c->dirty[s] = 1;
+    }
+    w->grid[slot_of(w, c->cx, c->cz)] = NULL;
+    far_insert(w, c);
 }
 
 /* -------------------------------------------------------------- mesh jobs */
@@ -593,8 +744,41 @@ static void set_center(world *w, int pcx, int pcz)
     w->sched_pending = 1;
     for (int i = 0; i < w->grid_w * w->grid_w; i++) {
         column *c = w->grid[i];
-        if (c && !in_ring(c->cx - pcx, c->cz - pcz, w->radius, 1)) unload_column(w, c);
+        if (!c || in_ring(c->cx - pcx, c->cz - pcz, w->radius, 1)) continue;
+        if (anchor_wants(w, c->cx, c->cz, 0)) move_far(w, c);
+        else unload_column(w, c);
     }
+}
+
+/* Loads what the anchors need that neither store holds, nearest first,
+ * and lets go of far columns no anchor needs any more. */
+static void stream_far(world *w)
+{
+    for (int i = 0; i < w->far_cap; i++) {
+        column *c = w->far[i];
+        if (!c || anchor_wants(w, c->cx, c->cz, 1)) continue;
+        if (c->state == COL_LOADING) c->want_unload = 1;
+        else if (unload_column(w, c)) i--; /* the slot now holds the next of its probe run */
+    }
+    for (int a = 0; a < w->anchor_n; a++)
+        for (int d = 0; d <= w->anchor_r; d++)
+            for (int dz = -d; dz <= d; dz++)
+                for (int dx = -d; dx <= d; dx++) {
+                    if (abs(dx) != d && abs(dz) != d) continue; /* the square ring at distance d */
+                    if (w->gen_in_flight >= w->max_gen_in_flight) return;
+                    int cx = w->anchor[a][0] + dx, cz = w->anchor[a][1] + dz;
+                    if (!in_limits(cx, cz)) continue;
+                    const column *g = w->grid[slot_of(w, cx, cz)];
+                    if (g && g->cx == cx && g->cz == cz) continue;
+                    int f = far_find(w, cx, cz);
+                    if (f >= 0) {
+                        w->far[f]->want_unload = 0;
+                        continue;
+                    }
+                    column *c = column_alloc(cx, cz);
+                    far_insert(w, c);
+                    start_load(w, c);
+                }
 }
 
 void world_update(world *w, double px, double py, double pz)
@@ -617,6 +801,7 @@ void world_update(world *w, double px, double py, double pz)
         }
         request_column(w, cx, cz);
     }
+    if (w->anchor_n || w->far_count) stream_far(w);
 
     schedule_meshes(w, w->retry != NULL);
 }
@@ -659,8 +844,8 @@ void world_save_all(world *w)
         return;
     }
     int ok = 1;
-    for (int i = 0; ok && i < w->grid_w * w->grid_w; i++) {
-        column *c = w->grid[i];
+    for (int i = 0; ok && i < held_slots(w); i++) {
+        column *c = held(w, i);
         if (!c || c->state != COL_READY || !c->unsaved) continue;
         if (save_db_put_column(w->db, c) == 0) c->unsaved = 2;
         else {
@@ -671,8 +856,8 @@ void world_save_all(world *w)
     if (ok && w->on_save) ok = w->on_save(w->save_user) == 0;
     if (ok) ok = save_db_commit(w->db) == 0;
     else save_db_rollback(w->db);
-    for (int i = 0; i < w->grid_w * w->grid_w; i++) {
-        column *c = w->grid[i];
+    for (int i = 0; i < held_slots(w); i++) {
+        column *c = held(w, i);
         if (c && c->unsaved == 2) c->unsaved = ok ? 0 : 1;
     }
     if (ok && w->save_failed) {
@@ -769,8 +954,8 @@ void world_destroy(world *w)
         mesh_free(m);
     }
     int lost = 0;
-    for (int i = 0; i < w->grid_w * w->grid_w; i++) {
-        column *c = w->grid[i];
+    for (int i = 0; i < held_slots(w); i++) {
+        column *c = held(w, i);
         if (!c) continue;
         lost += c->unsaved && w->db;
         if (w->on_mesh_free)
@@ -780,6 +965,7 @@ void world_destroy(world *w)
     }
     if (lost) log_error("%d edited columns could not be saved; their latest changes are lost", lost);
     mem_free(w->grid);
+    mem_free(w->far);
     mem_free(w->spiral);
     memset(w, 0, sizeof *w);
 }

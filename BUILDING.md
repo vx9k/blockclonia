@@ -43,7 +43,7 @@ a pinned release (GLFW 3.5.1, mimalloc 3.5.3, miniaudio 0.11.25, SQLite
 
 ```sh
 sudo apt install build-essential cmake ninja-build glslc libvulkan-dev \
-                 libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev \
+                 libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev libminiupnpc-dev \
                  mesa-vulkan-drivers
 cmake --preset native            # tuned for this machine (use this on a Pi)
 cmake --build --preset native
@@ -65,7 +65,7 @@ Arch packages are recent enough that nothing has to be downloaded:
 
 ```sh
 sudo pacman -S --needed base-devel cmake ninja shaderc vulkan-icd-loader \
-                        vulkan-headers glfw mimalloc sqlite miniaudio libsodium enet
+                        vulkan-headers glfw mimalloc sqlite miniaudio libsodium enet miniupnpc
 cmake --preset native
 cmake --build --preset native
 ./build/native/blockclonia
@@ -135,7 +135,7 @@ Options you can add when configuring, with `-D`:
 
 ## Dependencies
 
-`MC_DEPS` decides where GLFW, mimalloc, miniaudio, SQLite and ENet come from:
+`MC_DEPS` decides where GLFW, mimalloc, miniaudio, SQLite, ENet and miniupnpc come from:
 
 - `AUTO` (the default) uses the system's copy when it is new enough and
   downloads the pinned release otherwise. On macOS it always builds the

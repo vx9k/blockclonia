@@ -21,7 +21,8 @@ typedef enum {
     SCREEN_WORLDS,       /* the player's worlds */
     SCREEN_CREATE_WORLD,
     SCREEN_RENAME_WORLD,
-    SCREEN_DELETE_WORLD  /* the confirmation */
+    SCREEN_DELETE_WORLD, /* the confirmation */
+    SCREEN_MULTIPLAYER   /* join by address, or pick a world to host */
 } screen_id;
 
 typedef enum {
@@ -37,6 +38,9 @@ typedef enum {
     MENU_SETTINGS,     /* a setting changed (apply it; saved when leaving) */
     MENU_DEBUG_INJURE, /* debug menu: apply debug_kind to debug_part (see below) */
     MENU_DEBUG_RESET,  /* debug menu: heal the body back to new */
+    MENU_MP,           /* the multiplayer screen opened: fill text_player if empty */
+    MENU_MP_JOIN,      /* join text_addr as text_player */
+    MENU_MP_OPEN,      /* pause: open the world being played to other players */
 } menu_action;
 
 typedef struct {
@@ -53,6 +57,8 @@ typedef struct {
 
 #define MENU_NAME_MAX 32 /* SAVE_NAME_MAX */
 #define MENU_SEED_MAX 20
+#define MENU_PLAYER_MAX 16 /* NET_NAME_MAX */
+#define MENU_ADDR_MAX 63
 
 /* One row of the world list, as main.c describes it. */
 typedef struct {
@@ -94,6 +100,16 @@ typedef struct {
     char text_seed[MENU_SEED_MAX + 1];
     char note[96];
     int text_focus;    /* a text field had the focus last frame */
+    /* Multiplayer: the name and address typed, whether the world picked
+     * next is hosted (the world list was opened from the multiplayer
+     * screen), how players connect when hosting (0 to each other, 1 to
+     * the host only), and whether the pause menu may offer to open the
+     * world (main.c: single player, not already a session). */
+    char text_player[MENU_PLAYER_MAX + 1];
+    char text_addr[MENU_ADDR_MAX + 1];
+    int host_pick;
+    int client_server;
+    int can_open;
 } menu;
 
 void menu_init(menu *m);

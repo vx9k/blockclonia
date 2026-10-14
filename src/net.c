@@ -1,10 +1,14 @@
 #include "net.h"
 #include "log.h"
 #include "mem.h"
+#include "os.h"
+#include "upnp.h"
 #include "wire.h"
 
 #include <enet/enet.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define MAX_LINKS (NET_MAX_PLAYERS * 2)
@@ -72,6 +76,15 @@ struct net {
     uint8_t expect[NC_KEY_BYTES];
     int has_expect;
     double now;
+    uint8_t stun_tx[12];          /* the STUN request's transaction id */
+    uint8_t pub_ip[4];            /* this side's public address, once STUN answered */
+    uint16_t pub_port;
+    int have_pub;
+    ENetAddress punch_to;
+    double punch_until, punch_t;
+    ENetAddress host_addr;        /* a joiner's dial target */
+    upnp *upnp;                   /* the router forward, when hosting */
+    double dial_until;            /* < 0: set at the first poll */
     net_event q[QUEUE_LEN];
     int qh, qn;
     uint8_t *rx, *tx;
@@ -79,6 +92,20 @@ struct net {
 };
 
 static int g_enet_users;
+
+#define STUN_SERVER "stun.l.google.com"
+#define STUN_PORT 19302
+#define PUNCH_SECONDS 30.0
+#define DIAL_SECONDS 60.0 /* a joiner redials this long, while the host punches a way in */
+static const uint8_t PUNCH_MAGIC[8] = {'B', 'C', 'P', 'U', 'N', 'C', 'H', '1'};
+static const uint8_t STUN_COOKIE[4] = {0x21, 0x12, 0xA4, 0x42};
+
+/* ENet's raw-packet hook has no user pointer: each host's net, by host. */
+#define NETS_MAX 16
+static struct {
+    const ENetHost *h;
+    net *n;
+} g_nets[NETS_MAX];
 
 /* ---------------------------------------------------------------- checks */
 
@@ -267,8 +294,9 @@ static void put_member(wire_w *w, const net *n, int id)
     wire_u8(w, (uint8_t)id);
     wire_str(w, m->name, NET_NAME_MAX);
     wire_bytes(w, m->pk, NC_KEY_BYTES);
-    wire_u32(w, m->ip);
-    wire_u16(w, m->port);
+    /* No address in client-server mode: a port of 0 means "do not dial". */
+    wire_u32(w, n->no_mesh ? 0u : m->ip);
+    wire_u16(w, n->no_mesh ? 0 : m->port);
 }
 
 /* Reads a member entry into scratch; the caller checks r->bad. */
@@ -665,6 +693,15 @@ static int on_receive(net *n, net_link *l, int ch, const uint8_t *data, size_t l
 
 static void on_disconnect(net *n, net_link *l, uint32_t why)
 {
+    if (l == n->up && l->state == LINK_DIALING && n->now < n->dial_until) {
+        /* No answer yet: the host's router may still be closed to us
+         * (hole punching). Dial again. */
+        link_free(n, l);
+        ENetPeer *ep = enet_host_connect(n->h, &n->host_addr, NET_CHANNELS, 0);
+        n->up = ep ? link_new(n, ep, ROLE_JOIN) : NULL;
+        if (!n->up) end_session(n, bye_text(BYE_NONE));
+        return;
+    }
     if (l == n->up) {
         end_session(n, bye_text(why));
     } else if (n->host && l->role == ROLE_JOIN && l->player > 0 && n->m[l->player].direct == l) {
@@ -686,9 +723,19 @@ static void expire_hellos(net *n)
     }
 }
 
+static void punch_tick(net *n)
+{
+    if (!n->h || n->now >= n->punch_until || n->now - n->punch_t < 0.2) return;
+    n->punch_t = n->now;
+    ENetBuffer b = {.data = (void *)(uintptr_t)PUNCH_MAGIC, .dataLength = sizeof PUNCH_MAGIC};
+    enet_socket_send(n->h->socket, &n->punch_to, &b, 1);
+}
+
 int net_poll(net *n, double now, net_event *ev)
 {
     n->now = now;
+    if (n->dial_until < 0.0) n->dial_until = now + DIAL_SECONDS;
+    punch_tick(n);
     for (;;) {
         if (n->qn) {
             *ev = n->q[n->qh];
@@ -729,6 +776,104 @@ void net_flush(net *n)
     if (n && n->h) enet_host_flush(n->h);
 }
 
+/* ---------------------------------------------------------------- NAT */
+
+int net_stun_parse(const uint8_t *data, size_t len, const uint8_t tx[12], uint8_t ip[4], uint16_t *port)
+{
+    const uint8_t *d = data;
+    /* A binding success response for our request: type 0x0101, then the
+     * attributes; XOR-MAPPED-ADDRESS (0x0020) or MAPPED-ADDRESS (0x0001),
+     * IPv4 only. */
+    if (len < 20 || d[0] != 0x01 || d[1] != 0x01 || memcmp(d + 4, STUN_COOKIE, 4) != 0 || memcmp(d + 8, tx, 12) != 0)
+        return -1;
+    size_t end = 20 + ((size_t)d[2] << 8 | d[3]);
+    if (end > len) return -1;
+    for (size_t at = 20; at + 4 <= end;) {
+        unsigned type = (unsigned)d[at] << 8 | d[at + 1];
+        size_t alen = (size_t)d[at + 2] << 8 | d[at + 3];
+        if (at + 4 + alen > end) return -1;
+        const uint8_t *v = d + at + 4;
+        if ((type == 0x0020 || type == 0x0001) && alen >= 8 && v[1] == 0x01) {
+            int x = type == 0x0020;
+            *port = (uint16_t)(((unsigned)v[2] << 8 | v[3]) ^ (x ? 0x2112u : 0u));
+            for (int k = 0; k < 4; k++) ip[k] = (uint8_t)(v[4 + k] ^ (x ? STUN_COOKIE[k] : 0));
+            return 0;
+        }
+        at += 4 + ((alen + 3) & ~(size_t)3); /* attributes are padded to 4 bytes */
+    }
+    return -1;
+}
+
+/* Raw packets ENet would otherwise drop as garbage: punches (opening a
+ * router, nothing to read) and STUN answers. ENet's callback type fixes
+ * the non-const host. */
+/* cppcheck-suppress constParameterCallback */
+static int on_raw(ENetHost *h, ENetEvent *ev)
+{
+    (void)ev;
+    const uint8_t *d = h->receivedData;
+    size_t len = h->receivedDataLength;
+    if (len == sizeof PUNCH_MAGIC && memcmp(d, PUNCH_MAGIC, len) == 0) return 1;
+    net *n = NULL;
+    for (int i = 0; i < NETS_MAX; i++)
+        if (g_nets[i].h == h) n = g_nets[i].n;
+    if (!n || net_stun_parse(d, len, n->stun_tx, n->pub_ip, &n->pub_port) != 0) return 0;
+    n->have_pub = 1;
+    char a[32] = {0};
+    net_public_addr(n, a, sizeof a);
+    log_info("net: the world sees this game at %s", a);
+    return 1;
+}
+
+void net_stun(net *n)
+{
+    ENetAddress a = {.port = STUN_PORT};
+    if (!n->h || enet_address_set_host(&a, STUN_SERVER) != 0) {
+        log_warn("net: cannot look up %s; this game's public address stays unknown", STUN_SERVER);
+        return;
+    }
+    /* Only matched against the answer, so it need not be secret. */
+    uint64_t t = (uint64_t)(os_now() * 1e9) ^ (uint64_t)(uintptr_t)n;
+    for (int i = 0; i < 12; i++) n->stun_tx[i] = (uint8_t)(t >> (8 * (i % 8))) ^ (uint8_t)(i * 37);
+    uint8_t req[20] = {0x00, 0x01, 0x00, 0x00};
+    memcpy(req + 4, STUN_COOKIE, 4);
+    memcpy(req + 8, n->stun_tx, 12);
+    ENetBuffer b = {.data = req, .dataLength = sizeof req};
+    enet_socket_send(n->h->socket, &a, &b, 1);
+}
+
+int net_public_addr(const net *n, char *out, size_t cap)
+{
+    if (!n->have_pub) return 0;
+    snprintf(out, cap, "%u.%u.%u.%u:%u", n->pub_ip[0], n->pub_ip[1], n->pub_ip[2], n->pub_ip[3], (unsigned)n->pub_port);
+    return 1;
+}
+
+void net_upnp(net *n)
+{
+    if (n->host && n->h && !n->upnp) n->upnp = upnp_open(n->port);
+}
+
+int net_upnp_state(const net *n, char *out, size_t cap) { return n->upnp ? upnp_state(n->upnp, out, cap) : 0; }
+
+int net_punch(net *n, const char *addr)
+{
+    char host[64] = {0};
+    snprintf(host, sizeof host, "%s", addr);
+    char *colon = strrchr(host, ':');
+    char *end = NULL;
+    long port = colon ? strtol(colon + 1, &end, 10) : 0;
+    if (!colon || !end || *end || port < 1 || port > 65535) return -1;
+    *colon = '\0';
+    ENetAddress a = {.port = (enet_uint16)port};
+    if (enet_address_set_host_ip(&a, host) != 0) return -1;
+    n->punch_to = a;
+    n->punch_until = n->now + PUNCH_SECONDS;
+    n->punch_t = -1.0;
+    punch_tick(n);
+    return 0;
+}
+
 /* ---------------------------------------------------------------- setup */
 
 static net *net_new(const nc_keypair *id, const char *name, uint16_t port)
@@ -744,6 +889,7 @@ static net *net_new(const nc_keypair *id, const char *name, uint16_t port)
     g_enet_users++;
     net *n = mem_calloc(1, sizeof *n);
     n->enet_ref = 1;
+    n->dial_until = -1.0;
     n->id = *id;
     snprintf(n->name, sizeof n->name, "%s", name);
     n->me = -1;
@@ -760,6 +906,13 @@ static net *net_new(const nc_keypair *id, const char *name, uint16_t port)
     n->h->maximumPacketSize = NET_MAX_MESSAGE + NC_OVERHEAD;
     n->h->maximumWaitingData = 4 * (NET_MAX_MESSAGE + NC_OVERHEAD);
     n->h->duplicatePeers = NET_MAX_PLAYERS;
+    n->h->intercept = on_raw;
+    for (int i = 0; i < NETS_MAX; i++)
+        if (!g_nets[i].h) {
+            g_nets[i].h = n->h;
+            g_nets[i].n = n;
+            break;
+        }
     ENetAddress bound = {0};
     n->port = enet_socket_get_address(n->h->socket, &bound) == 0 ? bound.port : port;
     return n;
@@ -788,6 +941,7 @@ net *net_join(const nc_keypair *id, const char *name, const char *addr, uint16_t
     ENetAddress a = {0};
     a.port = port ? port : NET_PORT;
     ENetPeer *ep = enet_address_set_host(&a, addr) == 0 ? enet_host_connect(n->h, &a, NET_CHANNELS, 0) : NULL;
+    n->host_addr = a;
     n->up = ep ? link_new(n, ep, ROLE_JOIN) : NULL;
     if (!n->up) {
         log_error("net: cannot reach '%s'", addr);
@@ -801,6 +955,12 @@ net *net_join(const nc_keypair *id, const char *name, const char *addr, uint16_t
 void net_destroy(net *n)
 {
     if (!n) return;
+    upnp_close(n->upnp);
+    for (int i = 0; i < NETS_MAX; i++)
+        if (g_nets[i].n == n) {
+            g_nets[i].h = NULL;
+            g_nets[i].n = NULL;
+        }
     if (n->h) {
         for (int i = 0; i < MAX_LINKS; i++)
             if (n->links[i].state != LINK_FREE && n->links[i].ep)
@@ -857,7 +1017,8 @@ int net_chat(net *n, const char *text)
 int net_is_host(const net *n) { return n->host; }
 int net_me(const net *n) { return n->me; }
 uint16_t net_port(const net *n) { return n->port; }
-void net_test_no_mesh(net *n) { n->no_mesh = 1; }
+const uint8_t *net_my_key(const net *n) { return n->id.pk; }
+void net_no_mesh(net *n) { n->no_mesh = 1; }
 
 net *net_offline_host(const nc_keypair *id, const char *name)
 {

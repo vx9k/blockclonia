@@ -170,6 +170,7 @@ set(MC_CORE_SOURCES
   src/texgen.c
   src/thermo.c
   src/ui.c
+  src/upnp.c
   src/viewmodel.c
   src/world.c
   src/worldgen.c
@@ -188,7 +189,7 @@ endif()
 function(mc_add_core name)
   add_library(${name} STATIC ${MC_CORE_SOURCES})
   target_include_directories(${name} PUBLIC src)
-  target_link_libraries(${name} PUBLIC Threads::Threads mc::sqlite mc::sodium mc::enet PRIVATE mc_warnings)
+  target_link_libraries(${name} PUBLIC Threads::Threads mc::sqlite mc::sodium mc::enet mc::upnp PRIVATE mc_warnings)
   if(MC_MEM_LIBC)
     target_compile_definitions(${name} PUBLIC MC_MEM_LIBC)
   else()

@@ -78,6 +78,7 @@ typedef struct {
     int have_time;       /* --time */
     double time_of_day;  /* 0..1 */
     int host;            /* --host: open the world to other players */
+    int client_server;   /* --client-server: players connect to the host only */
     const char *join;    /* --join ADDR[:PORT]: play in someone else's world */
     int port;            /* --port: where to host (0: NET_PORT) */
     const char *name;    /* --name: shown to other players */
@@ -124,6 +125,7 @@ typedef struct {
 
 static input_state g_in;
 static paths g_paths; /* where files go unless --config or --world say otherwise */
+static char g_mp_name[NET_NAME_MAX + 1]; /* the name typed in the multiplayer screen; o.name points here */
 
 /* ---------------------------------------------------------- arguments */
 
@@ -209,8 +211,8 @@ static void usage(void)
            "  --spawn X,Z       spawn position (default: nearest dry land)\n"
            USAGE_CONFIG
            "  --play            skip the menus and play the default world (or --world)\n"
-           "  --screen NAME     open title, worlds, create, pause, settings, controls or\n"
-           "                    debug-health at start\n"
+           "  --screen NAME     open title, worlds, create, multiplayer, pause, settings,\n"
+           "                    controls or debug-health at start\n"
            "  --debug           start with the F3 overlay on\n"
            "  --give LIST       start with items, e.g. log:8,sand:4 (names as shown in game)\n"
            "  --time HH         start at this hour of the day (0-23)\n"
@@ -224,6 +226,8 @@ static void usage(void)
            "  --host            let others join this world (UDP port 27450, or --port)\n"
            "  --join ADDR[:P]   play in the world another player hosts\n"
            "  --port N          UDP port to host on\n"
+           "  --client-server   with --host: players connect to this game only, not to each\n"
+           "                    other (their addresses stay private; chat goes through it)\n"
            "  --name NAME       name other players see (1-16 letters, digits, ' ', -, _, .)\n",
            hurt_names());
     /* clang-format on */
@@ -245,6 +249,7 @@ static int parse_flag(options *o, const char *a)
         {"--mem-stats", &o->mem_stats},
         {"--no-sound", &o->no_sound},
         {"--host", &o->host},
+        {"--client-server", &o->client_server},
     };
     for (size_t i = 0; i < sizeof flags / sizeof flags[0]; i++)
         if (strcmp(a, flags[i].name) == 0) {
@@ -295,7 +300,7 @@ static int parse_int_option(options *o, const char *a, const char *v, int *ok)
 static int valid_screen(const char *v)
 {
     static const char *const NAMES[] = {"title", "pause",     "settings", "controls", "debug-health",
-                                        "game",  "inventory", "worlds",   "create"};
+                                        "game",  "inventory", "worlds",   "create",   "multiplayer"};
     for (size_t i = 0; i < sizeof NAMES / sizeof NAMES[0]; i++)
         if (strcmp(v, NAMES[i]) == 0) return 1;
     return 0;
@@ -626,6 +631,7 @@ typedef struct {
     const inventory *inv;
     const thermo *th;
     save_db *db;
+    mp *const *mp; /* the session, if hosting: its players are saved too */
 } save_ctx;
 
 /* The world's on_save hook: the player goes into the transaction that
@@ -637,9 +643,15 @@ static int save_player(void *user)
     const save_ctx *sc = user;
     uint8_t buf[PLAYER_FILE_SIZE] = {0};
     size_t n = survival_encode_player(sc->pl, sc->inv, thermo_day_time(sc->th), buf, sizeof buf);
-    if (n && save_db_put_blob(sc->db, "player", buf, n) == 0) return 0;
-    log_warn("could not save the player");
-    return -1;
+    if (!n || save_db_put_blob(sc->db, "player", buf, n) != 0) {
+        log_warn("could not save the player");
+        return -1;
+    }
+    if (*sc->mp && mp_save_players(*sc->mp) != 0) {
+        log_warn("could not save the other players");
+        return -1;
+    }
+    return 0;
 }
 
 /* 1 if a saved player was loaded into pl and inv, -1 if it could not be
@@ -1052,6 +1064,7 @@ static void open_start_screen(game *g)
         else if (!strcmp(o->screen, "debug-health")) g_in.screen = SCREEN_DEBUG_HEALTH;
         else if (!strcmp(o->screen, "worlds")) g_in.screen = SCREEN_WORLDS;
         else if (!strcmp(o->screen, "create")) g_in.screen = SCREEN_CREATE_WORLD;
+        else if (!strcmp(o->screen, "multiplayer")) g_in.screen = SCREEN_MULTIPLAYER;
         else g_in.screen = SCREEN_NONE;
         g_in.inv_open = !strcmp(o->screen, "inventory");
     }
@@ -1212,7 +1225,7 @@ static void open_world(game *g, const char *dir, int backdrop)
     g->w.edit_user = &g->hooks;
     g->w.on_block_changed = on_block_changed;
     g->w.on_column_unload = on_column_unload;
-    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, g->db};
+    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, g->db, &g->mp};
     log_set_fatal_hook(save_on_fatal, &g->sc);
     renderer_bind_world(g->rd, &g->w);
 
@@ -1277,18 +1290,17 @@ static void open_world(game *g, const char *dir, int backdrop)
  * frees everything open_world made. */
 static void close_world(game *g)
 {
-    /* Leaving ends the session: a host's players are told, a client's
-     * world was never saved here. */
+    if (g->client) g->w.on_save = NULL; /* a client's world was never saved here */
+    log_set_fatal_hook(NULL, NULL);
+    physics_settle_bodies(&g->ph, NULL);
+    if (g->hl.dead) g->w.on_save = NULL; /* quitting dead keeps the last saved player */
+    world_save_all(&g->w);               /* a host's joined players too: before the session ends */
+    /* Leaving ends the session: a host's players are told. */
     mp_destroy(g->mp);
     g->mp = NULL;
     g->hooks.mp = NULL;
     g_in.mp_active = g_in.chat_open = 0;
-    if (g->client) g->w.on_save = NULL;
     g->client = 0;
-    log_set_fatal_hook(NULL, NULL);
-    physics_settle_bodies(&g->ph, NULL);
-    if (g->hl.dead) g->w.on_save = NULL; /* quitting dead keeps the last saved player */
-    world_save_all(&g->w);
     world_destroy(&g->w); /* waits for the jobs and hands the meshes back to the renderer */
     save_db_close(g->db);
     g->db = NULL;
@@ -1327,7 +1339,7 @@ static mp_world mp_ctx(game *g)
 {
     static char known[PATHS_MAX + 32];
     key_path(g, "known_players", known, sizeof known);
-    return (mp_world){&g->w, &g->ph, g->th, g->fx, &g->pl, &g->hl, &g->inv, g->seed, known, &g->mobs, &g->cb};
+    return (mp_world){&g->w, &g->ph, g->th, g->fx, &g->pl, &g->hl, &g->inv, g->seed, known, &g->mobs, &g->cb, g->db};
 }
 
 /* Opens the world being played to other players. */
@@ -1343,6 +1355,9 @@ static void start_host(game *g)
         g->hs.msg_age = 0.0f;
         return;
     }
+    if (g->o.client_server) net_no_mesh(n);
+    net_stun(n);
+    net_upnp(n);
     mp_world ctx = mp_ctx(g);
     g->mp = mp_create(n, &ctx);
     g->hooks.mp = g->mp;
@@ -1363,7 +1378,7 @@ static void open_remote_world(game *g, uint32_t seed)
     g->hooks = (world_hooks){&g->ph, g->th, &g->w, g->mp, 1, g->snd, g->fx};
     g->w.edit_user = &g->hooks;
     g->w.on_block_changed = on_block_changed;
-    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, NULL};
+    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, NULL, &g->mp};
     renderer_bind_world(g->rd, &g->w);
     memset(&g->pl, 0, sizeof g->pl);
     inv_init(&g->inv);
@@ -1376,6 +1391,16 @@ static void open_remote_world(game *g, uint32_t seed)
     g->world_name[0] = '\0';
     g->play_start = (int64_t)time(NULL);
     g->client = 1;
+}
+
+/* Streams the world around this player and, on a host, around every
+ * joined player too. */
+static void stream_world(game *g)
+{
+    int at[WORLD_ANCHORS][2] = {{0}};
+    int n = g->mp && mp_is_host(g->mp) ? mp_anchors(g->mp, at, WORLD_ANCHORS) : 0;
+    world_set_anchors(&g->w, &at[0][0], n, MP_ANCHOR_RADIUS);
+    world_update(&g->w, g->pl.pos.x, g->pl.pos.y + PLAYER_EYE, g->pl.pos.z);
 }
 
 /* Polls the session until done() holds, it ends, the time runs out or the
@@ -1437,11 +1462,13 @@ static void start_join(game *g, const char *where)
         return;
     }
     close_world(g);
+    net_stun(n);
     mp_world ctx = mp_ctx(g);
     g->mp = mp_create(n, &ctx);
-    log_info("joining %s as %s", host_id, name);
+    log_info("joining %s as %s (if the host is behind a router, they type /punch with the address shown below)",
+             host_id, name);
     uint32_t seed = 0;
-    if (wait_session(g, welcomed, 15.0) && mp_welcome(g->mp, &seed)) {
+    if (wait_session(g, welcomed, 65.0) && mp_welcome(g->mp, &seed)) {
         open_remote_world(g, seed);
         ctx = mp_ctx(g);
         mp_attach(g->mp, &ctx);
@@ -2149,6 +2176,48 @@ static void world_action(game *g, menu_action a)
     }
 }
 
+/* The name from the multiplayer screen becomes this player's name. 0 if
+ * it is not one other players may see. */
+static int take_mp_name(game *g)
+{
+    if (!net_name_valid(g->mn.text_player)) {
+        snprintf(g->mn.note, sizeof g->mn.note, "Names are 1-16 letters, digits, spaces, '-', '_' or '.'.");
+        return 0;
+    }
+    snprintf(g_mp_name, sizeof g_mp_name, "%s", g->mn.text_player);
+    g->o.name = g_mp_name;
+    return 1;
+}
+
+/* Opens the world being played to others, from the menus. */
+static void menu_host(game *g)
+{
+    g->o.client_server = g->mn.client_server;
+    start_host(g);
+    g->mn.host_pick = 0;
+}
+
+static void menu_join(game *g)
+{
+    menu *m = &g->mn;
+    if (!take_mp_name(g)) return;
+    if (!m->text_addr[0]) {
+        snprintf(m->note, sizeof m->note, "Type the host's address first.");
+        return;
+    }
+    g->note[0] = '\0';
+    start_join(g, m->text_addr);
+    if (g->mp) {
+        set_captured(g->win, 1);
+        return;
+    }
+    /* Back where the player was, with the reason. */
+    menu_open(m, SCREEN_MULTIPLAYER);
+    snprintf(m->note, sizeof m->note, "%.95s", g->note);
+    g->note[0] = '\0';
+    g_in.screen = SCREEN_MULTIPLAYER;
+}
+
 /* Menus take the mouse: returns the action, applied here. */
 static void run_menu(game *g, ui *u, float mx, float my, double dt)
 {
@@ -2170,6 +2239,7 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     int mins = (int)(g->hl.t / 60.0);
     snprintf(g->mn.status, sizeof g->mn.status, "Alive %d:%02d   core %.1f" UI_CH_DEGREE "C   %s", mins / 60, mins % 60,
              (double)g->hl.temp, g->hl.dead ? "dead" : "");
+    g->mn.can_open = !g->backdrop && !g->mp && !g->client;
     menu_action act = menu_frame(&g->mn, u, &mi, &g->st);
     switch (act) {
     case MENU_RESUME:
@@ -2189,7 +2259,30 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     case MENU_WORLD_PLAY:
     case MENU_WORLD_CREATE:
     case MENU_WORLD_RENAME:
-    case MENU_WORLD_DELETE: world_action(g, act); break;
+    case MENU_WORLD_DELETE:
+        if ((act == MENU_WORLD_PLAY || act == MENU_WORLD_CREATE) && g->mn.host_pick && !take_mp_name(g)) {
+            menu_open(&g->mn, SCREEN_MULTIPLAYER);
+            break;
+        }
+        world_action(g, act);
+        if (g->mn.host_pick && !g->backdrop && !g->mp) menu_host(g);
+        break;
+    case MENU_MP: {
+        if (!g->mn.text_player[0]) {
+            nc_keypair id = {0};
+            my_identity(g, &id, g->mn.text_player, sizeof g->mn.text_player);
+            nc_wipe(&id, sizeof id);
+        }
+    } break;
+    case MENU_MP_JOIN: menu_join(g); break;
+    case MENU_MP_OPEN:
+        if (g->mn.text_player[0] && !take_mp_name(g)) break;
+        menu_host(g);
+        if (g->mp) {
+            g_in.screen = SCREEN_NONE;
+            set_captured(g->win, 1);
+        }
+        break;
     case MENU_QUIT: glfwSetWindowShouldClose(g->win, GLFW_TRUE); break;
     case MENU_SETTINGS:
         if (g->o.no_vsync && g->st.vsync) g->o.no_vsync = 0; /* turned back on in the menu: a real choice */
@@ -2471,7 +2564,7 @@ int main(int argc, char **argv)
         frame_simulate(g, &in, dt);
         frame_interact(g, dt);
         if (g->o.demo) demo_step(&g->w, &g->ph, g->fx, &g->pl, &g->demo, g->frame);
-        world_update(&g->w, g->pl.pos.x, g->pl.pos.y + PLAYER_EYE, g->pl.pos.z);
+        stream_world(g);
         frame_render(g, now, dt);
         if (g->mp) mp_flush(g->mp, now);
         g_in.ui_click = g_in.ui_rclick = g_in.ui_up = g_in.ui_dn = g_in.ui_left = g_in.ui_right = g_in.ui_enter =

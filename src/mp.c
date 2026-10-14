@@ -3,6 +3,7 @@
 #include "mem.h"
 #include "netkeys.h"
 #include "save.h"
+#include "save_db.h"
 #include "survival.h"
 #include "wire.h"
 
@@ -80,6 +81,7 @@ typedef struct {
     uint8_t pk[NC_KEY_BYTES];
     health *hl;
     inventory inv;
+    player pl;
     uint32_t rng;
 } gone;
 
@@ -111,7 +113,7 @@ typedef struct {
 struct mp {
     net *n;
     mp_world ctx;
-    int host, ended;
+    int host, ended, told_pub;
     char why[NET_CHAT_MAX + 1];
     remote r[NET_MAX_PLAYERS]; /* host: by player id, 0 unused */
     client c;
@@ -262,6 +264,55 @@ int mp_ended(const mp *m, const char **why)
 
 /* ---------------------------------------------------------------- host */
 
+/* The database row of the player with this identity key. */
+static void saved_name(const uint8_t *key, char *out, size_t cap)
+{
+    char hex[2 * NC_KEY_BYTES + 1] = {0};
+    nc_key_hex(key, hex);
+    snprintf(out, cap, "player:%s", hex);
+}
+
+/* What the world kept of this key from an earlier session: 1 with *pl and
+ * *inv set, 0 if nothing usable (the row is untrusted and decoded with
+ * the single-player checks). */
+static int load_saved(const mp *m, const uint8_t *key, player *pl, inventory *inv)
+{
+    if (!m->ctx.db || !key) return 0;
+    char name[80] = {0};
+    saved_name(key, name, sizeof name);
+    uint8_t buf[PLAYER_FILE_SIZE + 1] = {0};
+    long n = save_db_get_blob(m->ctx.db, name, buf, sizeof buf);
+    if (n <= 0) return 0;
+    if (survival_decode_player(pl, inv, NULL, buf, (size_t)n) != 0) {
+        log_warn("mp: the saved state of %.15s... is corrupt; a fresh start", name);
+        return 0;
+    }
+    return 1;
+}
+
+static int save_one(const mp *m, const uint8_t *key, const player *pl, const inventory *inv)
+{
+    char name[80] = {0};
+    saved_name(key, name, sizeof name);
+    uint8_t buf[PLAYER_FILE_SIZE] = {0};
+    size_t n = survival_encode_player(pl, inv, thermo_day_time(m->ctx.th), buf, sizeof buf);
+    return n && save_db_put_blob(m->ctx.db, name, buf, n) == 0 ? 0 : -1;
+}
+
+int mp_save_players(const mp *m)
+{
+    if (!m->host || !m->ctx.db) return 0;
+    for (int id = 1; id < NET_MAX_PLAYERS; id++) {
+        const remote *r = &m->r[id];
+        if (r->active && !r->hl->dead && save_one(m, m->keys[id], &r->pl, &r->inv) != 0) return -1;
+    }
+    for (int i = 0; i < GONE_MAX; i++) {
+        const gone *g = &m->gone[i];
+        if (g->used && !(g->hl && g->hl->dead) && save_one(m, g->pk, &g->pl, &g->inv) != 0) return -1;
+    }
+    return 0;
+}
+
 static void host_join(mp *m, int id)
 {
     remote *r = &m->r[id];
@@ -272,12 +323,16 @@ static void host_join(mp *m, int id)
     r->col_t = m->now;
     const uint8_t *key = net_player_key(m->n, id);
     gone *back = NULL;
+    player was = {0};
+    int have_was = 0;
     for (int i = 0; i < GONE_MAX && key; i++)
         if (m->gone[i].used && memcmp(m->gone[i].pk, key, NC_KEY_BYTES) == 0) back = &m->gone[i];
     if (back) {
         r->hl = back->hl;
         r->inv = back->inv;
         r->rng = back->rng;
+        was = back->pl;
+        have_was = 1;
         back->hl = NULL;
         back->used = 0;
     } else {
@@ -286,12 +341,20 @@ static void host_join(mp *m, int id)
         r->hl = mem_alloc(sizeof *r->hl);
         health_init_varied(r->hl, r->rng);
         inv_init(&r->inv);
-        inv_starting_kit(&r->inv);
+        have_was = load_saved(m, key, &was, &r->inv);
+        if (!have_was) inv_starting_kit(&r->inv);
     }
     interact_init(&r->ia, r->rng);
-    /* Next to the host, inside the terrain its world has loaded. */
+    /* Where they were (they wait there while the terrain loads), else
+     * next to the host. */
     const player *h = m->ctx.pl;
-    player_spawn(&r->pl, m->ctx.w, floor(h->pos.x) + 0.5 + (double)(id % 3) - 1.0, floor(h->pos.z) + 3.5);
+    if (have_was) {
+        r->pl = was;
+        r->pl.vel = dv3(0, 0, 0);
+        r->pl.prev_pos = r->pl.pos;
+    } else {
+        player_spawn(&r->pl, m->ctx.w, floor(h->pos.x) + 0.5 + (double)(id % 3) - 1.0, floor(h->pos.z) + 3.5);
+    }
     r->cur.selected = 0;
 
     uint8_t buf[32] = {0};
@@ -322,6 +385,7 @@ static void host_leave(mp *m, int id, const uint8_t *key)
         memcpy(g->pk, key, NC_KEY_BYTES);
         g->hl = r->hl;
         g->inv = r->inv;
+        g->pl = r->pl;
         g->rng = r->rng;
         r->hl = NULL;
     }
@@ -573,6 +637,30 @@ static void host_hands(mp *m, remote *r, int who)
 
 const mobs *mp_client_mobs(const mp *m) { return &m->c.mobs; }
 
+int mp_anchors(const mp *m, int (*at)[2], int max)
+{
+    int n = 0;
+    for (int id = 1; m->host && id < NET_MAX_PLAYERS && n < max; id++) {
+        if (!m->r[id].active) continue;
+        at[n][0] = chunk_of((int)floor(m->r[id].pl.pos.x));
+        at[n][1] = chunk_of((int)floor(m->r[id].pl.pos.z));
+        n++;
+    }
+    return n;
+}
+
+/* The terrain a player could touch this step is loaded: their column and
+ * its neighbours. Until then they wait where they are (unloaded cells
+ * count as solid, and the body would be stuck inside one). */
+static int terrain_ready(const world *w, const player *p)
+{
+    int cx = chunk_of((int)floor(p->pos.x)), cz = chunk_of((int)floor(p->pos.z));
+    for (int dz = -1; dz <= 1; dz++)
+        for (int dx = -1; dx <= 1; dx++)
+            if (!world_column(w, cx + dx, cz + dz)) return 0;
+    return 1;
+}
+
 combat_targets mp_targets(mp *m) { return (combat_targets){m->tpl, m->thl, m->tn}; }
 
 void mp_host_step(mp *m, const player_input *local_in)
@@ -584,7 +672,7 @@ void mp_host_step(mp *m, const player_input *local_in)
     int n = 1;
     for (int id = 1; id < NET_MAX_PLAYERS && n < PHYS_MAX_PLAYERS; id++) {
         remote *r = &m->r[id];
-        if (!r->active) continue;
+        if (!r->active || !terrain_ready(m->ctx.w, &r->pl)) continue;
         while (r->qn > INPUT_KEEP) {
             r->qh = (r->qh + 1) % INPUT_QUEUE;
             r->qn--;
@@ -631,8 +719,10 @@ void mp_host_step(mp *m, const player_input *local_in)
         if (!r->hl->dead) host_hands(m, r, k);
     }
     m->step++;
-    for (int k = 1; k < n; k++) {
-        int id = who[k];
+    /* Players waiting for their terrain are told too, so they see where
+     * they are. */
+    for (int id = 1; id < NET_MAX_PLAYERS; id++) {
+        if (!m->r[id].active) continue;
         if (m->step % SNAP_EVERY == 0) host_snapshot(m, id);
         if (m->step % HEALTH_EVERY == 0) {
             uint8_t *buf = scratch(m, HEALTH_NET_MAX + 1);
@@ -1017,9 +1107,34 @@ static void announce(mp *m, int id)
     }
 }
 
+/* Once, in the chat: where the internet reaches this game. A host whose
+ * router opened the port (UPnP) needs nothing more; otherwise friends get
+ * in by hole punching. */
+static void tell_reach(mp *m)
+{
+    char pub[96] = {0}, why[96] = {0}, line[NET_CHAT_MAX + 1] = {0};
+    int up = net_upnp_state(m->n, m->host ? pub : why, sizeof pub);
+    if (m->told_pub || (m->host && up == 0)) return;
+    if (up == 1) {
+        snprintf(line, sizeof line, "friends join you at %.60s (your router opened the port)", pub);
+    } else {
+        if (!net_public_addr(m->n, pub, sizeof pub)) return;
+        if (m->host && up < 0) net_upnp_state(m->n, why, sizeof why);
+        if (m->host)
+            snprintf(line, sizeof line,
+                     "friends join you at %.40s; %.80s, so they send you their address and you type "
+                     "/punch it",
+                     pub, why);
+        else snprintf(line, sizeof line, "the internet sees this game at %s", pub);
+    }
+    chat_add(m, "", line);
+    m->told_pub = 1;
+}
+
 void mp_poll(mp *m, double now)
 {
     m->now = now;
+    tell_reach(m);
     net_event e;
     while (net_poll(m->n, now, &e)) {
         char line[NET_CHAT_MAX + 1] = {0};
@@ -1059,9 +1174,44 @@ void mp_flush(mp *m, double now)
     net_flush(m->n);
 }
 
+/* The safety numbers with one player (by name) or with everyone, as
+ * notices on this side only. */
+static void show_safety(mp *m, const char *name)
+{
+    int shown = 0;
+    for (int id = 0; id < NET_MAX_PLAYERS; id++) {
+        const uint8_t *theirs = net_player_key(m->n, id);
+        const char *who = net_player_name(m->n, id);
+        if (id == net_me(m->n) || !theirs || (*name && strcmp(name, who) != 0)) continue;
+        char num[NC_SAFETY_CHARS] = {0}, line[NET_CHAT_MAX + 1] = {0};
+        nc_safety_number(net_my_key(m->n), theirs, num);
+        snprintf(line, sizeof line, "safety number with %s: %s", who, num);
+        chat_add(m, "", line);
+        shown++;
+    }
+    if (!shown) chat_add(m, "", *name ? "no player by that name" : "nobody else is here");
+}
+
+/* "/punch a.b.c.d:port": open this side's router to a friend's address. */
+static void punch(mp *m, const char *addr)
+{
+    char line[NET_CHAT_MAX + 1] = {0};
+    if (net_punch(m->n, addr) == 0)
+        snprintf(line, sizeof line, "punching a way in for %s for 30 s: they join now", addr);
+    else snprintf(line, sizeof line, "usage: /punch a.b.c.d:port (the address the other player's game shows)");
+    chat_add(m, "", line);
+}
+
 void mp_say(mp *m, const char *text)
 {
     if (!net_chat_valid(text, strlen(text))) return;
+    if (text[0] == '/') {
+        if (strncmp(text, "/punch ", 7) == 0) punch(m, text + 7);
+        else if (strncmp(text, "/safety", 7) == 0 && (text[7] == '\0' || text[7] == ' '))
+            show_safety(m, text[7] ? text + 8 : "");
+        else chat_add(m, "", "commands: /safety [name] (compare keys), /punch a.b.c.d:port (let a friend in)");
+        return;
+    }
     net_chat(m->n, text);
     chat_add(m, net_player_name(m->n, net_me(m->n)), text);
 }

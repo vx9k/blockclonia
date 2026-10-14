@@ -46,7 +46,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev \
+            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev libminiupnpc-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
       - run: cmake --preset ci-${{ matrix.compiler }}
       - run: cmake --build --preset ci-${{ matrix.compiler }}
@@ -60,7 +60,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev \
+            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev libminiupnpc-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
       - run: cmake --preset ci-gcc
       - run: cmake --build --preset ci-gcc

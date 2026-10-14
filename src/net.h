@@ -19,9 +19,16 @@
  * channels: NET_CH_GAME (reliable, in order) and NET_CH_STATE
  * (unreliable, newest wins). Their contents are the game's business.
  *
+ * NAT traversal by UDP hole punching, without a server of our own: each
+ * side asks a public STUN server what address its router shows the
+ * world (net_stun), the players swap addresses out of band, the joiner
+ * keeps dialling the host's public address for a minute, and the host
+ * sends packets to the joiner's (net_punch), which opens the host's
+ * router to them. Works across most home routers, not across symmetric
+ * NATs (some mobile networks), which would need a relay.
+ *
  * Not here: deciding whether the host's identity key is the one seen
- * last time (the caller pins it and passes it in), files, NAT traversal
- * (peers need a reachable address: LAN, forwarded port or VPN), IPv6
+ * last time (the caller pins it and passes it in), files, IPv6
  * (ENet 1.3 is IPv4 only) and handing the authority to another player
  * when the host leaves (the session ends). */
 #ifndef MC_NET_H
@@ -110,11 +117,37 @@ int net_player_direct(const net *n, int player);
 /* The host's identity key once the link to it is up (for pinning), or
  * NULL; on the host, its own. */
 const uint8_t *net_host_key(const net *n);
+/* This side's own identity key. */
+const uint8_t *net_my_key(const net *n);
 /* The UDP port this side listens on. */
 uint16_t net_port(const net *n);
 
-/* For the tests: never dial other players, so chat goes through the host. */
-void net_test_no_mesh(net *n);
+/* Asks a public STUN server, from this side's own UDP socket, for the
+ * address and port the world sees it at; the answer arrives through
+ * net_poll. Blocks on a DNS lookup. */
+void net_stun(net *n);
+/* That address as "a.b.c.d:port" in out; 1 once known, else 0. */
+int net_public_addr(const net *n, char *out, size_t cap);
+/* Host: asks the home router (UPnP) to forward this side's UDP port, so
+ * friends can join by address alone; runs in the background. */
+void net_upnp(net *n);
+/* Host: 0 while asking, 1 once the router forwards the port (out: the
+ * address friends join), -1 if not (out: why). Also 0 if never asked. */
+int net_upnp_state(const net *n, char *out, size_t cap);
+/* Sends small packets to addr ("a.b.c.d:port") for 30 s from this side's
+ * socket, so this side's router lets that address in. 0, or -1 if addr
+ * does not parse. */
+int net_punch(net *n, const char *addr);
+/* For the tests: a STUN binding response's mapped address. 0 with ip
+ * (4 bytes, network order) and port set, -1 if data is not a response to
+ * the request with this transaction id. */
+int net_stun_parse(const uint8_t *data, size_t len, const uint8_t tx[12], uint8_t ip[4], uint16_t *port);
+
+/* Client-server mode. On a host: players are not told each other's
+ * addresses, so they connect to the host only, never see each other's IP
+ * address, and their chat goes through the host (still sealed end to
+ * end). Call before anyone joins. On a joiner: never dial other players. */
+void net_no_mesh(net *n);
 /* For fuzzing: a host with no socket, whose players are added by hand
  * (each arrives as NET_EV_JOINED). Messages to them go nowhere. */
 net *net_offline_host(const nc_keypair *id, const char *name);

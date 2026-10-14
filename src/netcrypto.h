@@ -68,6 +68,14 @@ long nc_open(nc_session *s, const uint8_t *in, size_t len, uint8_t *out, size_t 
 void nc_key_hex(const uint8_t key[NC_KEY_BYTES], char out[2 * NC_KEY_BYTES + 1]);
 int nc_key_parse(const char *hex, uint8_t key[NC_KEY_BYTES]);
 
+/* The safety number of two identity keys: 30 digits in groups of five,
+ * the same whichever key comes first. Two players who read the same
+ * number to each other (in person, by voice) know that each one's chat
+ * is sealed to the other's real key, and not to a key a host slipped in
+ * between them. */
+#define NC_SAFETY_CHARS 36 /* six groups of five digits, spaces, NUL */
+void nc_safety_number(const uint8_t a[NC_KEY_BYTES], const uint8_t b[NC_KEY_BYTES], char out[NC_SAFETY_CHARS]);
+
 /* Wipes keys from memory (the compiler may not drop it). */
 void nc_wipe(void *p, size_t n);
 

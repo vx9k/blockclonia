@@ -162,7 +162,7 @@ static void test_session(void)
     /* Carol cannot reach anyone directly: her chat goes through the host,
      * sealed with keys the host does not have. */
     p[3].n = net_join(&kc, "Carol", "127.0.0.1", port, 0, NULL);
-    net_test_no_mesh(p[3].n);
+    net_no_mesh(p[3].n);
     CHECK(wait_for(p, 4, &p[3], NET_EV_JOINED, 3) != NULL);
     pump(p, 4, 0.2);
     CHECK(!net_player_direct(p[3].n, 2) && !net_player_direct(p[2].n, 3) && net_player_direct(p[3].n, 0));
@@ -239,6 +239,19 @@ static void test_keys(void)
     tmp_remove(id);
     tmp_remove(hosts);
     tmp_remove(dir);
+
+    /* Safety numbers: the same from both ends, different for another key,
+     * and laid out as six groups of five digits. */
+    char ab[NC_SAFETY_CHARS] = {0}, ba[NC_SAFETY_CHARS] = {0}, ac[NC_SAFETY_CHARS] = {0};
+    nc_keypair c = {0};
+    nc_keypair_new(&c);
+    nc_safety_number(a.pk, c.pk, ab);
+    nc_safety_number(c.pk, a.pk, ba);
+    nc_safety_number(b.pk, c.pk, ac);
+    CHECK(strcmp(ab, ba) == 0 && strcmp(ab, ac) != 0);
+    int shape = strlen(ab) == NC_SAFETY_CHARS - 1;
+    for (int i = 0; i < NC_SAFETY_CHARS - 1; i++) shape &= i % 6 == 5 ? ab[i] == ' ' : (ab[i] >= '0' && ab[i] <= '9');
+    CHECK(shape);
 }
 
 /* Someone who knows only Bob's public key dials Alice claiming to be
@@ -300,6 +313,91 @@ static void test_forged_mesh(void)
     for (int i = 2; i >= 0; i--) net_destroy(p[i].n);
 }
 
+/* Client-server mode: players connect to the host only and are not told
+ * each other's addresses, and their chat still arrives, through the host. */
+static void test_client_server(void)
+{
+    nc_keypair kh = {0}, ka = {0}, kb = {0};
+    nc_keypair_new(&kh);
+    nc_keypair_new(&ka);
+    nc_keypair_new(&kb);
+    static peer p[3];
+    memset(p, 0, sizeof p);
+    uint16_t port = 0;
+    for (int tries = 0; tries < 20 && !p[0].n; tries++) {
+        port = (uint16_t)(30000 + (getpid() * 11 + tries * 173 + 3) % 30000);
+        p[0].n = net_host(&kh, "Server", port);
+    }
+    CHECK(p[0].n != NULL);
+    if (!p[0].n) return;
+    net_no_mesh(p[0].n);
+    p[1].n = net_join(&ka, "Alice", "127.0.0.1", port, 0, NULL);
+    CHECK(wait_for(p, 2, &p[1], NET_EV_JOINED, 1) != NULL);
+    p[2].n = net_join(&kb, "Bob", "127.0.0.1", port, 0, NULL);
+    CHECK(wait_for(p, 3, &p[2], NET_EV_JOINED, 2) != NULL && wait_for(p, 3, &p[1], NET_EV_JOINED, 2) != NULL);
+    pump(p, 3, 0.3);
+    CHECK(!net_player_direct(p[1].n, 2) && !net_player_direct(p[2].n, 1));
+    CHECK(net_player_direct(p[1].n, 0) && net_player_direct(p[2].n, 0));
+    CHECK(net_chat(p[1].n, "via the server") == 2);
+    const net_event *e = wait_for(p, 3, &p[2], NET_EV_CHAT, 1);
+    CHECK(e && strcmp(e->text, "via the server") == 0);
+    for (int i = 2; i >= 0; i--) net_destroy(p[i].n);
+}
+
+/* STUN answers are parsed with their bounds checked, and a punch is
+ * sent and swallowed without disturbing the session. */
+static void test_nat(void)
+{
+    const uint8_t tx[12] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+    /* 203.0.113.5:40000 as XOR-MAPPED-ADDRESS, after an unknown attribute. */
+    uint8_t r[44] = {0x01, 0x01, 0x00, 0x18, 0x21, 0x12, 0xA4, 0x42};
+    memcpy(r + 8, tx, 12);
+    /* An unknown attribute (3 bytes and padding), then XOR-MAPPED-ADDRESS:
+     * family 1, 40000 ^ 0x2112, 203.0.113.5 ^ the cookie. */
+    const uint8_t attrs[24] = "\x80\x22\x00\x03"
+                              "abc\0"
+                              "\x00\x20\x00\x08"
+                              "\x00\x01\xBD\x52"
+                              "\xEA\x12\xD5\x47";
+    memcpy(r + 20, attrs, sizeof attrs);
+    uint8_t ip[4] = {0};
+    uint16_t port = 0;
+    CHECK(net_stun_parse(r, 44, tx, ip, &port) == 0 && port == 40000 && ip[0] == 203 && ip[2] == 113 && ip[3] == 5);
+    uint8_t other[12] = {0};
+    CHECK(net_stun_parse(r, 44, other, ip, &port) == -1);
+    r[3] = 0x40; /* claims more than arrived */
+    CHECK(net_stun_parse(r, 44, tx, ip, &port) == -1);
+    r[3] = 0x18;
+    r[22] = 0x10; /* an attribute running past the end */
+    CHECK(net_stun_parse(r, 44, tx, ip, &port) == -1);
+    for (size_t n = 0; n < sizeof r; n++) net_stun_parse(r, n, tx, ip, &port); /* every truncation */
+
+    nc_keypair kh = {0}, ka = {0};
+    nc_keypair_new(&kh);
+    nc_keypair_new(&ka);
+    static peer p[2];
+    memset(p, 0, sizeof p);
+    uint16_t hp = 0;
+    for (int tries = 0; tries < 20 && !p[0].n; tries++) {
+        hp = (uint16_t)(30000 + (getpid() * 17 + tries * 191 + 5) % 30000);
+        p[0].n = net_host(&kh, "Host", hp);
+    }
+    CHECK(p[0].n != NULL);
+    if (!p[0].n) return;
+    char addr[32] = {0};
+    CHECK(!net_public_addr(p[0].n, addr, sizeof addr));
+    CHECK(net_punch(p[0].n, "nonsense") == -1 && net_punch(p[0].n, "127.0.0.1:0") == -1);
+    p[1].n = net_join(&ka, "Alice", "127.0.0.1", hp, 0, NULL);
+    CHECK(wait_for(p, 2, &p[1], NET_EV_JOINED, 1) != NULL);
+    snprintf(addr, sizeof addr, "127.0.0.1:%u", (unsigned)net_port(p[1].n));
+    CHECK(net_punch(p[0].n, addr) == 0); /* lands on Alice's socket, which ignores it */
+    pump(p, 2, 0.5);
+    CHECK(net_chat(p[1].n, "still here") == 1);
+    const net_event *e = wait_for(p, 2, &p[0], NET_EV_CHAT, 1);
+    CHECK(e && strcmp(e->text, "still here") == 0);
+    for (int i = 1; i >= 0; i--) net_destroy(p[i].n);
+}
+
 void test_net_all(void)
 {
     CHECK(nc_init() == 0);
@@ -307,4 +405,6 @@ void test_net_all(void)
     test_keys();
     test_session();
     test_forged_mesh();
+    test_client_server();
+    test_nat();
 }

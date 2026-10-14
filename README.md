@@ -383,11 +383,11 @@ cmake --preset native && cmake --build --preset native
 blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
             [--threads N] [--pool-mb N] [--gpu N] [--world DIR | --no-save]
             [--config FILE] [--validate] [--no-sound]
-            [--play] [--screen title|worlds|create|pause|settings|controls|debug-health|inventory]
+            [--play] [--screen title|worlds|create|multiplayer|pause|settings|controls|debug-health|inventory]
             [--debug] [--time HH] [--give LIST] [--hurt LIST]
             [--frames N] [--screenshot F] [--look YAW,PITCH] [--spawn X,Z]
             [--demo] [--health-panel] [--bench] [--mem-stats]
-            [--host [--port N] | --join ADDR[:PORT]] [--name NAME]
+            [--host [--port N] [--client-server] | --join ADDR[:PORT]] [--name NAME]
 ```
 
 - `--play` skips the menus and plays the default world; `--screen` opens a menu at start and
@@ -420,6 +420,11 @@ xvfb-run -a env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
 ## Multiplayer
 
 One player hosts and the others join; there is no separate server.
+From the title screen, **Multiplayer** asks for your name and the host's
+address to join, or lets you pick a world to host (and whether players
+connect to each other or only to you). A world you are already playing
+opens to others from the pause menu (**Open to other players**). From the
+command line:
 
 ```sh
 blockclonia --play --host --name Alice          # UDP port 27450, or --port N
@@ -443,24 +448,53 @@ mkdir -p /tmp/bob && blockclonia --config /tmp/bob/blockclonia.cfg --join 127.0.
   else is there, and players connect to each other directly (a mesh), so
   chat goes straight to each recipient. When routers keep two players
   apart, their chat travels through the host instead.
+- **Client-server.** `--host --client-server` keeps players apart: they
+  connect to the host only and are never told each other's addresses, so
+  no player learns another's IP address. Chat then always goes through
+  the host, still end-to-end encrypted. Use it for a session with people
+  you do not know, or when players' routers would refuse the direct
+  connections anyway.
 - **Encrypted.** Every connection starts with an X25519 handshake and
   seals every packet after it with ChaCha20-Poly1305 (libsodium). Chat is
   end-to-end on top of that: each pair of players has its own keys, so a
   host relaying chat cannot read or change it. The host does vouch for
   which key belongs to whom, though, so a host you do not trust could swap
-  keys to sit in the middle. Join notices show each player's key
-  fingerprint (`Bob joined [1a2b3c4d]`) to compare out of band, and the
-  game warns in the chat when a name comes back with a different key.
+  keys to sit in the middle. To rule that out, type `/safety Bob` in the
+  chat: it shows a 30-digit safety number for your key and the key you
+  were given for Bob. Bob types `/safety Alice`, and you read the numbers
+  to each other in person or by voice. If they match, nobody is in
+  between. Join notices also show each player's key fingerprint (`Bob
+  joined [1a2b3c4d]`), and the game warns in the chat when a name comes
+  back with a different key.
 - **Pinned keys.** Each player has an identity key, made on first use.
   The first time you join a host, its key is remembered for that address;
   if it is different next time (someone in the middle, or the host's key
   file was replaced) joining stops with a message instead of connecting.
   Other players' keys are remembered by name the same way.
-- **Limits of this first version.** The host's world loads around the
-  host, so other players need to stay within its view distance. Joined
-  players' bodies and inventories are not saved with the world; the host
-  keeps them for the rest of the session, so leaving and joining again
-  gives them back. When the host leaves, the session ends. Players need an address the others can reach: the same network,
+- **Everyone roams.** The host's world loads around every player, not
+  only the host, so each player can go anywhere: terrain is generated
+  where they go, and creatures, physics and building work there as
+  around the host. The host draws only its own surroundings.
+- **Saved players.** The host saves each joined player's place and
+  inventory with the world, by their identity key, so they get them back
+  when they next join, in this session or a later one (health is not
+  saved, the host's own included).
+- **Playing across the internet.** When you host, the game asks your
+  home router (UPnP) to open its port and shows in the chat where friends
+  join: "friends join you at 203.0.113.5:27450 (your router opened the
+  port)". Your friend types that address in Multiplayer and presses
+  Join; nothing else is needed. The port is closed again when you stop
+  hosting.
+
+  If your router has UPnP off (the chat says so), hole punching still
+  gets friends in: they join your shown address, their game keeps trying
+  for a minute and prints its own address in its log ("the world sees
+  this game at 198.51.100.7:41234"), they send it to you, and you type
+  `/punch 198.51.100.7:41234` in the chat (T) within that minute. That
+  works across most home routers, not when either side is behind a
+  symmetric NAT (some mobile and corporate networks); then forward UDP
+  port 27450 on the host's router by hand, or use a VPN.
+- **Limits.** When the host leaves, the session ends. Players need an address the others can reach: the same network,
   a forwarded UDP port or a VPN.
 
 ## Where files live

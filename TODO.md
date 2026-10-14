@@ -118,14 +118,17 @@ authoritative on one peer.
       prediction and reconciliation (`mp.c`)
 - [x] remote players drawn (entity list), chat UI (T), `--host`/`--join`,
       README and controls
-- [ ] host/join from the menus (a Multiplayer screen with an address
-      field); until then only the command line starts a session
+- [x] host/join from the menus: a Multiplayer screen (name, address,
+      how players connect, host a world) and "Open to other players" in
+      the pause menu. The name and address are not remembered between
+      runs yet (settings hold numbers only).
 
-**Known limits of the first version** (each also a reason for the
-headless server below): the authority's world streams around its own
-player, so others must stay within its view distance; remote players'
-bodies and inventories are not saved with the world; when the host
-leaves, the session ends (no handing the authority over).
+**Known limits** (also reasons for the headless server below): when the
+host leaves, the session ends (no handing the authority over); health is
+saved for nobody yet. Done: the authority's world loads around every
+player (anchors, `world_set_anchors`), so players roam freely; joined
+players' place and inventory are saved with the world by identity key
+(`mp_save_players`).
 
 **Security follow-ups** from the audit of 2026-10-14 (the rest were
 fixed on the branch):
@@ -136,17 +139,29 @@ fixed on the branch):
 - [x] `tests/fuzz_net.c` now covers what joiners send too (inputs,
   operations, column requests), through an offline host
   (`net_offline_host`) that steps its simulation after every message.
-- Safety numbers for chat: today a player compares key fingerprints from
-  the join notices by hand.
+- [x] Safety numbers for chat: `/safety [name]` shows a 30-digit number
+  from both identity keys to read to each other.
 
 **Later** (deferred, in this order):
 
-- *Client-server mode*: the same authority code with the mesh switched
-  off: clients connect only to the server, and chat is relayed as
-  ciphertext sealed to each recipient's key so it stays end-to-end.
+- [x] *Client-server mode* (`--host --client-server`): the host hands
+  out no addresses, so players connect to it only, and chat is relayed
+  as ciphertext sealed to each recipient's key.
 - *Headless server* (`--server`): runs the authority without a window,
   GPU or audio. Needs world streaming around every player instead of one
   camera, and a console for chat and admin.
-- *NAT traversal*: peers behind home routers need a forwarded port or a
-  rendezvous server for UDP hole punching. Only direct addresses (LAN,
-  forwarded port, VPN) work until then.
+- [x] *NAT traversal*: the host's router forwards the game's port by
+  UPnP (miniupnpc), so friends join by address alone; where UPnP is off,
+  STUN (stun.l.google.com) tells each game its public address, the
+  joiner redials for a minute, and the host's `/punch ADDR:PORT` opens
+  its router to the joiner. Left: NAT-PMP/PCP for routers that do those
+  but not UPnP, a rendezvous server so nobody swaps addresses by hand
+  when UPnP is off, the joiner's address on screen while it waits (only
+  the log has it), and a relay for symmetric NATs.
+- *Headless server* (`--server`): started on `feat/headless-server`
+  (local work, 2026-10-14): `mp_set_dedicated` (the server's stand-in
+  player is never seen or hit), `mp_kick`/`net_kick`,
+  `worldgen_find_spawn` shared with `main.c`. Still to write: `server.c`
+  (open/tick/close, a stdin console with /players, /kick, /save, /stop),
+  a `blockclonia-server` executable on the core library, `--server` in
+  `main.c`, and a test driving a server and a client in one thread.

@@ -13,7 +13,7 @@
 # autotools, and every platform the game runs on packages it.
 #
 # Provides the interface targets mc::mimalloc, mc::sqlite, mc::enet,
-# mc::sodium and mc::glfw.
+# mc::upnp, mc::sodium and mc::glfw.
 
 include(FetchContent)
 
@@ -34,6 +34,9 @@ set(MC_SQLITE_SHA256 "1e71ddf93849c6a6ecf58b827c0692073d2dd7ee40196158068f7b29f4
 set(MC_ENET_VERSION 1.3.18 CACHE STRING "ENet release used when fetching")
 set(MC_ENET_SHA256 "28603c895f9ed24a846478180ee72c7376b39b4bb1287b73877e5eae7d96b0dd"
     CACHE STRING "SHA256 of the ENet archive")
+set(MC_MINIUPNPC_VERSION 2_3_3 CACHE STRING "miniupnpc release (tag suffix) used when fetching")
+set(MC_MINIUPNPC_SHA256 "8cf2c833b3e76fc4893ff29c2a376e3394962449e5970e373c0a91421724d222"
+    CACHE STRING "SHA256 of the miniupnp archive")
 
 if(POLICY CMP0135) # CMake 3.24+: extracted files get the extraction time
   cmake_policy(SET CMP0135 NEW)
@@ -237,6 +240,56 @@ else()
   target_compile_options(mc_enet_impl PRIVATE -w)
   target_link_libraries(mc_enet INTERFACE mc_enet_impl)
   message(STATUS "blockclonia: ENet ${MC_ENET_VERSION} (built from source)")
+endif()
+
+# ---------------------------------------------------------------- miniupnpc
+# Opening the host's port on the home router with UPnP (upnp.c). The
+# 2.x API; upnp.c covers the change to UPNP_GetValidIGD in API 18.
+add_library(mc_upnp INTERFACE)
+add_library(mc::upnp ALIAS mc_upnp)
+if(NOT MC_DEPS STREQUAL "FETCH")
+  find_path(MC_UPNP_INCLUDE_DIR miniupnpc.h PATH_SUFFIXES miniupnpc)
+  find_library(MC_UPNP_LIBRARY NAMES miniupnpc)
+endif()
+if(MC_UPNP_INCLUDE_DIR AND MC_UPNP_LIBRARY)
+  target_include_directories(mc_upnp SYSTEM INTERFACE "${MC_UPNP_INCLUDE_DIR}")
+  target_link_libraries(mc_upnp INTERFACE "${MC_UPNP_LIBRARY}")
+  message(STATUS "blockclonia: miniupnpc ${MC_UPNP_LIBRARY} (system)")
+elseif(MC_DEPS STREQUAL "SYSTEM")
+  message(FATAL_ERROR "miniupnpc not found and MC_DEPS=SYSTEM. Install it "
+                      "(Debian/Ubuntu: libminiupnpc-dev) or use MC_DEPS=AUTO.")
+else()
+  # Built from its sources, as ENet is, with the version header its own
+  # build would generate.
+  _mc_hash_arg(hash "${MC_MINIUPNPC_SHA256}")
+  FetchContent_Declare(miniupnp
+    URL https://github.com/miniupnp/miniupnp/archive/refs/tags/miniupnpc_${MC_MINIUPNPC_VERSION}.tar.gz
+    ${hash}
+    SOURCE_SUBDIR no-cmake-project)
+  FetchContent_MakeAvailable(miniupnp)
+  set(_upnp_dir "${miniupnp_SOURCE_DIR}/miniupnpc")
+  set(_upnp_src igd_desc_parse.c miniupnpc.c minixml.c minisoap.c minissdpc.c miniwget.c upnpcommands.c
+                upnpdev.c upnpreplyparse.c upnperrors.c connecthostport.c portlistingparse.c receivedata.c
+                addr_is_reserved.c)
+  list(TRANSFORM _upnp_src PREPEND "${_upnp_dir}/src/")
+  string(REPLACE "_" "." _upnp_ver "${MC_MINIUPNPC_VERSION}")
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/miniupnpc_gen/miniupnpcstrings.h"
+       "#ifndef MINIUPNPCSTRINGS_H_INCLUDED\n#define MINIUPNPCSTRINGS_H_INCLUDED\n"
+       "#define OS_STRING \"${CMAKE_SYSTEM_NAME}\"\n#define MINIUPNPC_VERSION_STRING \"${_upnp_ver}\"\n"
+       "#define UPNP_VERSION_MAJOR 1\n#define UPNP_VERSION_MINOR 1\n#define UPNP_VERSION_STRING \"UPnP/1.1\"\n#endif\n")
+  add_library(mc_upnp_impl STATIC ${_upnp_src})
+  target_include_directories(mc_upnp_impl SYSTEM PUBLIC "${_upnp_dir}/include")
+  target_include_directories(mc_upnp_impl PRIVATE "${_upnp_dir}/src" "${CMAKE_CURRENT_BINARY_DIR}/miniupnpc_gen")
+  target_compile_definitions(mc_upnp_impl PUBLIC MINIUPNP_STATICLIB
+                             PRIVATE MINIUPNPC_SET_SOCKET_TIMEOUT MINIUPNPC_GET_SRC_ADDR _BSD_SOURCE _DEFAULT_SOURCE)
+  if(APPLE)
+    target_compile_definitions(mc_upnp_impl PRIVATE _DARWIN_C_SOURCE)
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_definitions(mc_upnp_impl PRIVATE _XOPEN_SOURCE=600)
+  endif()
+  target_compile_options(mc_upnp_impl PRIVATE -w)
+  target_link_libraries(mc_upnp INTERFACE mc_upnp_impl)
+  message(STATUS "blockclonia: miniupnpc ${_upnp_ver} (built from source)")
 endif()
 
 # ---------------------------------------------------------------- GLFW
