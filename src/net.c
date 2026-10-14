@@ -15,8 +15,20 @@
 #define QUEUE_LEN 64
 
 enum { ROLE_JOIN = 1, ROLE_MESH = 2 };
-enum { LINK_FREE, LINK_DIALING, LINK_HELLO, LINK_UP };
-enum { MSG_HELLO = 1, MSG_WELCOME, MSG_PEER_JOINED, MSG_PEER_LEFT, MSG_ROUTE, MSG_PAIR_HELLO, MSG_CHAT, MSG_MESH_OK };
+/* KEYED: keys derived, waiting for the other side's sealed CONFIRM, which
+ * proves it holds the identity key its hello named. */
+enum { LINK_FREE, LINK_DIALING, LINK_HELLO, LINK_KEYED, LINK_UP };
+enum {
+    MSG_HELLO = 1,
+    MSG_WELCOME,
+    MSG_PEER_JOINED,
+    MSG_PEER_LEFT,
+    MSG_ROUTE,
+    MSG_PAIR_HELLO,
+    MSG_CHAT,
+    MSG_MESH_OK,
+    MSG_IDENTITY
+};
 /* Sent as ENet's disconnect data, so the other side can say why. */
 enum { BYE_NONE, BYE_FULL, BYE_NAME, BYE_VERSION, BYE_HANDSHAKE, BYE_STRANGER, BYE_LEAVING };
 
@@ -193,7 +205,7 @@ static uint8_t *grow(uint8_t **buf, size_t *cap, size_t need)
 /* Seals a message for a link and queues it. */
 static int link_send(net *n, net_link *l, int ch, const uint8_t *data, size_t len)
 {
-    if (!l || l->state != LINK_UP) return -1;
+    if (!l || l->state < LINK_KEYED) return -1;
     uint8_t *out = grow(&n->tx, &n->tx_cap, len + NC_OVERHEAD);
     size_t sealed = nc_seal(&l->s, ch, data, len, out, len + NC_OVERHEAD);
     if (!sealed) return -1;
@@ -215,9 +227,6 @@ static void send_hello(net *n, net_link *l)
     wire_u16(&w, NET_PROTOCOL);
     wire_u8(&w, (uint8_t)l->role);
     wire_bytes(&w, l->mine, NC_HELLO_BYTES);
-    wire_str(&w, n->name, NET_NAME_MAX);
-    wire_u8(&w, (uint8_t)(n->me < 0 ? 0xff : n->me));
-    wire_u16(&w, n->port);
     ENetPacket *p = enet_packet_create(buf, w.len, ENET_PACKET_FLAG_RELIABLE);
     if (p && enet_peer_send(l->ep, NET_CH_CONTROL, p) != 0) enet_packet_destroy(p);
     l->state = LINK_HELLO;
@@ -305,11 +314,13 @@ static int chat_to(net *n, int id, const char *text)
     return sealed ? send_pair(n, id, msg, sealed + 1) : -1;
 }
 
-/* A chat-plane message from player `from`, direct or relayed. */
-static void on_pair_msg(net *n, int from, const uint8_t *data, size_t len)
+/* A chat-plane message from player `from`, over link l (direct) or
+ * relayed by the host (l NULL). */
+static void on_pair_msg(net *n, const net_link *l, int from, const uint8_t *data, size_t len)
 {
     if (from < 0 || from >= NET_MAX_PLAYERS || from == n->me || !n->m[from].present || len < 1) return;
     member *m = &n->m[from];
+    if (l && memcmp(l->s.peer, m->pk, NC_KEY_BYTES) != 0) return; /* a link left from someone else */
     if (data[0] == MSG_PAIR_HELLO && len == 1 + NC_HELLO_BYTES && !m->pair_up) {
         /* Only the identity the host vouched for may set up the pair. */
         if (memcmp(data + 1 + 4, m->pk, NC_KEY_BYTES) != 0) return;
@@ -387,6 +398,17 @@ static void host_player_left(net *n, int id)
     push(n, NET_EV_LEFT, id);
 }
 
+/* Drops mesh links that are or claim to be player id: that player left,
+ * or the id now belongs to someone else. */
+static void drop_links_of(net *n, int id)
+{
+    for (int i = 0; i < MAX_LINKS; i++) {
+        net_link *l = &n->links[i];
+        if (l->state != LINK_FREE && l != n->up && l->role == ROLE_MESH && (l->player == id || l->claim == id))
+            link_drop(n, l, BYE_NONE);
+    }
+}
+
 /* ---------------------------------------------------------------- mesh */
 
 /* Takes a called mesh link into use once the caller is a player the host
@@ -409,19 +431,31 @@ static void mesh_attach(net *n, net_link *l)
 
 /* ---------------------------------------------------------------- handshake */
 
+static void send_confirm(net *n, net_link *l)
+{
+    uint8_t buf[64] = {0};
+    wire_w w = wire_writer(buf, sizeof buf);
+    wire_u8(&w, MSG_IDENTITY);
+    wire_u16(&w, NET_PROTOCOL);
+    wire_u8(&w, (uint8_t)l->role);
+    wire_str(&w, n->name, NET_NAME_MAX);
+    wire_u8(&w, (uint8_t)(n->me < 0 ? 0xff : n->me));
+    wire_u16(&w, n->port);
+    link_send(n, l, NET_CH_CONTROL, buf, w.len);
+}
+
+/* The cleartext hello: version, role and keys. Everything else about the
+ * other side comes sealed, in its CONFIRM. */
 static void on_hello(net *n, net_link *l, const uint8_t *data, size_t len)
 {
     wire_r r = wire_reader(data, len);
     uint8_t theirs[NC_HELLO_BYTES] = {0};
-    char name[NET_NAME_MAX + 1] = {0};
     wire_get_u8(&r);
     unsigned proto = wire_get_u16(&r);
     int role = wire_get_u8(&r);
     wire_get_bytes(&r, theirs, NC_HELLO_BYTES);
-    wire_get_str(&r, name, sizeof name);
-    int claimed = wire_get_u8(&r);
-    uint16_t port = wire_get_u16(&r);
     if (r.bad || r.pos != len || role != l->role) {
+        if (l == n->up) end_session(n, bye_text(BYE_HANDSHAKE));
         link_drop(n, l, BYE_HANDSHAKE);
         return;
     }
@@ -435,24 +469,41 @@ static void on_hello(net *n, net_link *l, const uint8_t *data, size_t len)
         link_drop(n, l, BYE_HANDSHAKE);
         return;
     }
-    l->state = LINK_UP;
+    /* A key the caller pinned is checked now: there is nothing to
+     * confirm with an impostor. */
+    if (l == n->up && n->has_expect && memcmp(l->s.peer, n->expect, NC_KEY_BYTES) != 0) {
+        end_session(n, "the host's identity key changed since the last visit");
+        link_drop(n, l, BYE_HANDSHAKE);
+        return;
+    }
+    l->state = LINK_KEYED;
+    send_confirm(n, l);
+}
 
+/* The other side's CONFIRM opened with the session keys: it holds the
+ * identity key it named, and what it says about itself is authentic. */
+static void on_confirm(net *n, net_link *l, const uint8_t *data, size_t len)
+{
+    wire_r r = wire_reader(data, len);
+    char name[NET_NAME_MAX + 1] = {0};
+    wire_get_u8(&r);
+    unsigned proto = wire_get_u16(&r);
+    int role = wire_get_u8(&r);
+    wire_get_str(&r, name, sizeof name);
+    int claimed = wire_get_u8(&r);
+    uint16_t port = wire_get_u16(&r);
+    if (r.bad || r.pos != len || role != l->role || proto != NET_PROTOCOL || !net_name_valid(name)) {
+        if (l == n->up) end_session(n, bye_text(BYE_HANDSHAKE));
+        link_drop(n, l, BYE_HANDSHAKE);
+        return;
+    }
+    l->state = LINK_UP;
     if (n->host) {
         if (role == ROLE_JOIN) host_admit(n, l, name, port);
         else link_drop(n, l, BYE_STRANGER);
         return;
     }
     if (l == n->up) {
-        if (n->has_expect && memcmp(l->s.peer, n->expect, NC_KEY_BYTES) != 0) {
-            end_session(n, "the host's identity key changed since the last visit");
-            link_drop(n, l, BYE_HANDSHAKE);
-            return;
-        }
-        if (!net_name_valid(name)) {
-            end_session(n, bye_text(BYE_HANDSHAKE));
-            link_drop(n, l, BYE_HANDSHAKE);
-            return;
-        }
         member_set(n, 0, name, l->s.peer, l->ep->address.host, port);
         n->m[0].direct = l;
         l->player = 0;
@@ -520,7 +571,7 @@ static void on_control(net *n, net_link *l, const uint8_t *data, size_t len)
             /* Relay: the host writes in who it came from, so a player
              * cannot pretend to be another. */
             if (other == 0) {
-                on_pair_msg(n, l->player, data + 2, len - 2);
+                on_pair_msg(n, NULL, l->player, data + 2, len - 2);
             } else if (n->m[other].present && other != l->player) {
                 uint8_t *buf = mem_alloc(len);
                 memcpy(buf, data, len);
@@ -529,7 +580,7 @@ static void on_control(net *n, net_link *l, const uint8_t *data, size_t len)
                 mem_free(buf);
             }
         } else if (l == n->up) {
-            on_pair_msg(n, other, data + 2, len - 2);
+            on_pair_msg(n, NULL, other, data + 2, len - 2);
         }
         return;
     }
@@ -548,6 +599,7 @@ static void on_control(net *n, net_link *l, const uint8_t *data, size_t len)
         uint16_t port = 0;
         int id = get_member(&r, name, pk, &ip, &port);
         if (r.bad || r.pos != len || id == 0 || id == n->me) return;
+        drop_links_of(n, id);
         member_set(n, id, name, pk, ip, port);
         push(n, NET_EV_JOINED, id);
         for (int i = 0; i < MAX_LINKS; i++)
@@ -558,7 +610,7 @@ static void on_control(net *n, net_link *l, const uint8_t *data, size_t len)
     } else if (type == MSG_PEER_LEFT && len == 2) {
         int id = data[1];
         if (id <= 0 || id >= NET_MAX_PLAYERS || id == n->me || !n->m[id].present) return;
-        if (n->m[id].direct) link_drop(n, n->m[id].direct, BYE_NONE);
+        drop_links_of(n, id);
         member_clear(&n->m[id]);
         push(n, NET_EV_LEFT, id);
     }
@@ -574,15 +626,19 @@ static int on_receive(net *n, net_link *l, int ch, const uint8_t *data, size_t l
         else link_drop(n, l, BYE_HANDSHAKE);
         return 0;
     }
-    if (l->state != LINK_UP || len < NC_OVERHEAD) return 0;
+    if (l->state < LINK_KEYED || len < NC_OVERHEAD) return 0;
     uint8_t *out = grow(&n->rx, &n->rx_cap, len);
     int sealed_ch = -1;
     long got = nc_open(&l->s, data, len, out, len, &sealed_ch);
     if (got < 0 || sealed_ch != ch) return 0; /* forged, replayed or moved: dropped */
+    if (l->state == LINK_KEYED) {
+        if (ch == NET_CH_CONTROL && got > 0 && out[0] == MSG_IDENTITY) on_confirm(n, l, out, (size_t)got);
+        return 0;
+    }
     if (ch == NET_CH_CONTROL) {
         on_control(n, l, out, (size_t)got);
     } else if (ch == NET_CH_CHAT) {
-        on_pair_msg(n, l->player, out, (size_t)got);
+        on_pair_msg(n, l, l->player, out, (size_t)got);
     } else if (l->player >= 0 && (n->host ? l->role == ROLE_JOIN : l == n->up)) {
         memset(ev, 0, sizeof *ev);
         ev->type = NET_EV_MESSAGE;
@@ -609,7 +665,8 @@ static void expire_hellos(net *n)
 {
     for (int i = 0; i < MAX_LINKS; i++) {
         net_link *l = &n->links[i];
-        int waiting = l->state == LINK_HELLO || (l->state == LINK_UP && l->role == ROLE_MESH && l->player < 0);
+        int waiting = l->state == LINK_HELLO || l->state == LINK_KEYED ||
+                      (l->state == LINK_UP && l->role == ROLE_MESH && l->player < 0);
         if (waiting && n->now - l->since > HELLO_TIMEOUT) {
             if (l == n->up) end_session(n, bye_text(BYE_HANDSHAKE));
             link_drop(n, l, BYE_HANDSHAKE);
@@ -684,6 +741,12 @@ static net *net_new(const nc_keypair *id, const char *name, uint16_t port)
         net_destroy(n);
         return NULL;
     }
+    /* ENet's defaults let any sender make it buffer 32 MB per peer before
+     * a handshake. The largest message is a column; a few in flight is
+     * all a peer may queue. */
+    n->h->maximumPacketSize = NET_MAX_MESSAGE + NC_OVERHEAD;
+    n->h->maximumWaitingData = 4 * (NET_MAX_MESSAGE + NC_OVERHEAD);
+    n->h->duplicatePeers = NET_MAX_PLAYERS;
     ENetAddress bound = {0};
     n->port = enet_socket_get_address(n->h->socket, &bound) == 0 ? bound.port : port;
     return n;

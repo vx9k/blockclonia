@@ -5,6 +5,9 @@
 #include "netkeys.h"
 #include "os.h"
 #include "save.h"
+#include "wire.h"
+
+#include <enet/enet.h>
 #include "test_util.h"
 
 #include <stdio.h>
@@ -222,10 +225,70 @@ static void test_keys(void)
     tmp_remove(dir);
 }
 
+/* Someone who knows only Bob's public key dials Alice claiming to be
+ * Bob before Bob arrives. Without the sealed identity message the forged
+ * link was taken into use and Bob's real one refused, which cut their
+ * chat. Now it goes nowhere. */
+static void test_forged_mesh(void)
+{
+    nc_keypair kh = {0}, ka = {0}, kb = {0};
+    nc_keypair_new(&kh);
+    nc_keypair_new(&ka);
+    nc_keypair_new(&kb);
+    static peer p[3];
+    memset(p, 0, sizeof p);
+    uint16_t port = 0;
+    for (int tries = 0; tries < 20 && !p[0].n; tries++) {
+        port = (uint16_t)(30000 + (getpid() * 11 + tries * 151 + 3) % 30000);
+        p[0].n = net_host(&kh, "Host", port);
+    }
+    CHECK(p[0].n != NULL);
+    if (!p[0].n) return;
+    p[1].n = net_join(&ka, "Alice", "127.0.0.1", port, 0, NULL);
+    CHECK(wait_for(p, 2, &p[1], NET_EV_JOINED, 1) != NULL);
+
+    ENetHost *atk = enet_host_create(NULL, 1, NET_CHANNELS, 0, 0);
+    ENetAddress a = {.host = 0, .port = net_port(p[1].n)};
+    enet_address_set_host(&a, "127.0.0.1");
+    CHECK(atk && enet_host_connect(atk, &a, NET_CHANNELS, 0));
+    for (int i = 0; i < 400; i++) {
+        ENetEvent e;
+        while (atk && enet_host_service(atk, &e, 0) > 0) {
+            if (e.type == ENET_EVENT_TYPE_CONNECT) {
+                nc_keypair fake = {0}, eph = {0};
+                uint8_t hello[NC_HELLO_BYTES] = {0}, buf[128] = {0};
+                nc_keypair_new(&fake);
+                memcpy(fake.pk, kb.pk, NC_KEY_BYTES); /* Bob's public key, not his secret */
+                nc_hello_make(&fake, &eph, hello);
+                wire_w w = wire_writer(buf, sizeof buf);
+                wire_u8(&w, 1); /* hello */
+                wire_u16(&w, NET_PROTOCOL);
+                wire_u8(&w, 2); /* a mesh link */
+                wire_bytes(&w, hello, sizeof hello);
+                enet_peer_send(e.peer, NET_CH_CONTROL, enet_packet_create(buf, w.len, ENET_PACKET_FLAG_RELIABLE));
+            } else if (e.type == ENET_EVENT_TYPE_RECEIVE) {
+                enet_packet_destroy(e.packet);
+            }
+        }
+        if (atk) enet_host_flush(atk);
+        pump(p, 2, 0.001);
+    }
+    p[2].n = net_join(&kb, "Bob", "127.0.0.1", port, 0, NULL);
+    CHECK(wait_for(p, 3, &p[1], NET_EV_JOINED, 2) != NULL);
+    pump(p, 3, 0.3);
+    CHECK(net_player_direct(p[1].n, 2) && net_player_direct(p[2].n, 1));
+    CHECK(net_chat(p[2].n, "really Bob") == 2);
+    const net_event *e = wait_for(p, 3, &p[1], NET_EV_CHAT, 2);
+    CHECK(e && strcmp(e->text, "really Bob") == 0);
+    if (atk) enet_host_destroy(atk);
+    for (int i = 2; i >= 0; i--) net_destroy(p[i].n);
+}
+
 void test_net_all(void)
 {
     CHECK(nc_init() == 0);
     test_names();
     test_keys();
     test_session();
+    test_forged_mesh();
 }
