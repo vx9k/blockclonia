@@ -32,6 +32,7 @@ enum {
     I_GUNPOWDER,
     I_CARTRIDGE,
     I_RIFLE,
+    I_ADRENALINE,
     I_TOOL_FIRST /* then TOOL_KINDS x TIER_COUNT tools, kind-major, to ITEM_END */
 };
 

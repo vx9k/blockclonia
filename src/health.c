@@ -759,22 +759,36 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
             snprintf(msg, msg_size, "No painkillers left");
             return 0;
         }
-        /* Doubling up on paracetamol-type drugs strains the liver. */
-        if (h->painkiller > 3.0f) {
-            h->organ[ORG_LIVER] = maxf(0.0f, h->organ[ORG_LIVER] - 0.08f);
-            health_log(h, "Too many painkillers: liver strain");
+        /* Paracetamol-type: about 4 g a day is safe. Past that, the liver's
+         * glutathione runs out and a toxic metabolite kills its cells, a day
+         * or two later, not at once. */
+        h->pk_load += 1.0f;
+        if (h->pk_load > 4.0f) {
+            h->hepatotox = minf(1.0f, h->hepatotox + 0.12f * (h->pk_load - 4.0f));
+            health_log(h, "Over 4 g of painkiller in a day: the liver will suffer");
         }
         h->painkiller = 6.0f;
-        snprintf(msg, msg_size, "Took a painkiller (6 h)");
+        snprintf(msg, msg_size,
+                 h->pk_load > 4.0f ? "Took a painkiller (6 h). Too many today" : "Took a painkiller (6 h)");
         return 1;
-    case TREAT_ANTIBIOTIC:
+    case TREAT_ANTIBIOTIC: {
         if (!inv_take(inv, I_ANTIBIOTIC, 1)) {
             snprintf(msg, msg_size, "No antibiotics left");
             return 0;
         }
+        float worst = h->sepsis;
+        for (int i = 0; i < h->wound_count; i++) worst = maxf(worst, h->wounds[i].infection);
         h->antibiotic = 7.0f * 24.0f;
+        if (worst < 0.05f) {
+            /* Nothing to treat: they only clear the gut's own bacteria. */
+            h->gut_upset = 12.0f;
+            h->organ[ORG_GUT] = maxf(0.0f, h->organ[ORG_GUT] - 0.03f);
+            snprintf(msg, msg_size, "No infection to treat: the antibiotics upset your gut");
+            return 1;
+        }
         snprintf(msg, msg_size, "Started a 7-day course of antibiotics");
         return 1;
+    }
     case TREAT_EAT: {
         /* The food in hand, else the best there is. */
         static const int PREF[] = {I_COOKED_MEAT, I_APPLE, I_RAW_MEAT};
@@ -869,6 +883,40 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
         }
         health_pads(h, 1);
         snprintf(msg, msg_size, "Defibrillator pads on: it shocks by itself if the heart fibrillates");
+        return 1;
+    case TREAT_ADRENALINE: {
+        if (!inv_take(inv, I_ADRENALINE, 1)) {
+            snprintf(msg, msg_size, "No adrenaline auto-injector");
+            return 0;
+        }
+        /* 0.3 mg into the thigh: on a living circulation it peaks in minutes
+         * and races the heart; in arrest it is what is given every few
+         * minutes, and it can coarsen a flat line into a shockable one. */
+        h->catechol += 1.5f;
+        if (!health_rhythm_perfusing(h->rhythm)) {
+            if ((h->rhythm == RHYTHM_ASYSTOLE || h->rhythm == RHYTHM_PEA) && frand(h) < 0.15f) {
+                h->rhythm = RHYTHM_VF;
+                health_log(h, "Adrenaline: the heart fibrillates again (shockable)");
+            }
+            snprintf(msg, msg_size, "Injected adrenaline into a stopped heart");
+        } else {
+            snprintf(msg, msg_size,
+                     h->catechol > 3.0f ? "Adrenaline again: heart pounding, pressure soaring"
+                                        : "Injected adrenaline: heart racing, hands shaking");
+        }
+        return 1;
+    }
+    case TREAT_SHOCK:
+        if (h->defib.phase == DEFIB_OFF) {
+            snprintf(msg, msg_size, "Put the defibrillator pads on first");
+            return 0;
+        }
+        /* The override skips the analysis that keeps an AED from shocking
+         * a beating heart. */
+        health_shock(h);
+        h->defib.shocks++;
+        h->defib.since_shock = 0.0f;
+        snprintf(msg, msg_size, health_rhythm_perfusing(h->rhythm) ? "Shocked a beating heart" : "Shock delivered");
         return 1;
     default: snprintf(msg, msg_size, "?"); return 0;
     }
@@ -1507,6 +1555,8 @@ static void step_crush(health *h, float gh, float dehyd)
     h->organ[ORG_KIDNEYS] -= 0.0022f * h->myoglobin * gh * (0.6f + 8.0f * dehyd);
     h->myoglobin -= h->myoglobin * minf(1.0f, 0.3f * gh * maxf(kid, 0.1f));
     if (h->potassium > 4.2f) h->potassium -= (h->potassium - 4.2f) * minf(1.0f, 0.25f * gh * kid);
+    /* Kidneys that fail stop excreting the potassium every meal brings. */
+    if (kid < 0.5f) h->potassium += 0.15f * (0.5f - kid) * gh;
 }
 
 /* Bones and bruises heal, splints come off, and each part's pain adds up. */
@@ -1585,8 +1635,33 @@ static void step_parts(health *h, const health_env *e, double dt, float gh, int 
         sum2 += h->part[i].pain * h->part[i].pain;
     }
     float pain = minf(PAIN_SCALE, sqrtf(sum2) * h->base.pain_gain) * (h->painkiller > 0.0f ? 0.45f : 1.0f);
+    /* A sudden jump in pain sets off fight-or-flight: a short adrenaline
+     * surge, longer the worse the jump, which then dulls the pain itself
+     * (stress-induced analgesia). */
+    if (awake && pain - h->pain_ref > 3.0f && h->surge < 5.0f) {
+        h->surge = minf(60.0f, 10.0f + 5.0f * (pain - h->pain_ref));
+        health_log(h, "Adrenaline rush");
+    }
+    h->pain_ref = lag(h->pain_ref, pain, dt, 20.0);
+    pain *= 1.0f - 0.4f * catechol_beta(h);
     h->pain = awake ? lag(h->pain, pain, dt, 1.0) : 0.0f;
     h->painkiller = maxf(0.0f, h->painkiller - gh);
+    h->pk_load = maxf(0.0f, h->pk_load - gh / 6.0f); /* one dose cleared every 6 game hours */
+    if (h->hepatotox > 0.0f) {
+        /* The damage unfolds over about a day; the nausea comes first. */
+        float d = minf(h->hepatotox, 0.04f * gh);
+        if (h->hepatotox > 0.1f && h->organ[ORG_LIVER] > 0.9f && h->stomach_kcal > 50.0f) {
+            h->stomach_kcal *= 0.3f;
+            h->stomach_water *= 0.3f;
+            health_log(h, "Nauseous: you vomit");
+        }
+        h->organ[ORG_LIVER] = maxf(0.0f, h->organ[ORG_LIVER] - d);
+        h->hepatotox -= d;
+    }
+    if (h->gut_upset > 0.0f) {
+        h->water -= 0.08f * gh; /* diarrhoea */
+        h->gut_upset = maxf(0.0f, h->gut_upset - gh);
+    }
     h->antibiotic = maxf(0.0f, h->antibiotic - gh);
 }
 
@@ -1821,6 +1896,11 @@ static void step_catechol(health *h, double dt)
         h->catechol += SURGE_NG_S * (float)dt;
     }
     h->catechol *= (float)exp(-dt * 0.6931472 / (double)ADR_HALF_S);
+    /* A rush is paid for afterwards: the longer it ran high, the longer the
+     * shaky, tired spell once it wears off. */
+    float beta = catechol_beta(h);
+    if (beta > 0.4f) h->crash = minf(1.0f, h->crash + (float)dt / 90.0f);
+    else if (beta < 0.15f) h->crash = maxf(0.0f, h->crash - (float)dt / 240.0f);
 }
 
 /* The ventricles out of sinus control: AF passes a fast, irregular share
@@ -2199,6 +2279,23 @@ void health_step(health *h, const health_env *e, double dt)
 
 /* -------------------------------------------------------------- limits */
 
+health_senses health_get_senses(const health *h)
+{
+    health_senses v = {0};
+    if (h->dead) return v;
+    float beta = catechol_beta(h);
+    float crash = h->crash * (1.0f - fclamp(beta / 0.4f, 0.0f, 1.0f));
+    v.tremor = fclamp(maxf(maxf(0.8f * ramp(beta, 0.3f, 0.9f), 0.7f * crash),
+                           maxf(0.5f * ramp(150.0f - h->glycogen, 0.0f, 150.0f), ramp(36.0f - h->temp, 0.0f, 2.0f))),
+                      0.0f, 1.0f);
+    v.sway = fclamp(1.4f * (1.0f - h->organ[ORG_BRAIN]) + (h->confusion > 0.0f ? 0.5f : 0.0f) +
+                        (h->concussion > 0.0f ? 0.3f : 0.0f),
+                    0.0f, 1.0f);
+    v.tunnel = ramp(beta, 0.6f, 0.95f);
+    v.jaundice = fclamp((0.6f - h->organ[ORG_LIVER]) / 0.4f, 0.0f, 1.0f);
+    return v;
+}
+
 health_limits health_get_limits(const health *h)
 {
     health_limits l = {0.0f, 0, 0, 0, 0};
@@ -2228,9 +2325,15 @@ health_limits health_get_limits(const health *h)
     if (h->pain > 7.0f) sys *= 0.7f;
     if (h->conscious == CONS_CONFUSED) sys *= 0.7f;
     if (h->temp < 34.0f) sys *= 0.7f;
+    /* A damaged heart cannot raise its output, a failing liver tires, and
+     * a rush lends strength the crash after it takes back. */
+    float heart = h->organ[ORG_HEART], beta = catechol_beta(h);
+    sys *= 0.5f + 0.5f * heart;
+    if (h->organ[ORG_LIVER] < 0.5f) sys *= 0.85f;
+    sys *= 1.0f + 0.12f * beta - 0.2f * h->crash * (1.0f - fclamp(beta / 0.4f, 0.0f, 1.0f));
     l.move_scale = mob * sys;
     l.can_jump = leg[0] >= 0.6f && leg[1] >= 0.6f && h->wbal > 1500.0f && l.move_scale > 0.5f;
-    l.can_sprint = mob > 0.85f && sys > 0.8f && h->wbal > 0.1f * WPRIME && h->pain < 7.0f;
+    l.can_sprint = mob > 0.85f && sys > 0.8f && h->wbal > 0.1f * WPRIME && h->pain < 7.0f && heart > 0.5f;
     int arms_ok = 0;
     for (int k = BP_LARM; k <= BP_RARM; k++) {
         const body_part *p = &h->part[k];
@@ -2661,6 +2764,11 @@ static const wire_field HEALTH_FIELDS[] = {
     H(confusion),
     H(pain),
     H(painkiller),
+    H(pk_load),
+    H(hepatotox),
+    H(gut_upset),
+    H(crash),
+    H(pain_ref),
     H(antibiotic),
     H(sepsis),
     WIRE_I32R(health, conscious, CONS_UNCONSCIOUS, CONS_ALERT),

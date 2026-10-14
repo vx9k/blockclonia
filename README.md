@@ -80,9 +80,20 @@ right click takes half a stack or places one item; Shift+click moves a
 stack between the hotbar and the backpack; click outside the panel to
 drop what you are holding.
 
-**Health panel**: 1–7 or ↑/↓ pick a body part, then B bandage, S splint,
-D disinfect, P painkiller, A antibiotics, C cool a burn, X reduce a
-dislocation.
+**Health panel**: click a body part (or 1–7, ↑/↓), then a treatment
+button or its key: B bandage, S splint, D disinfect, P painkiller, A
+antibiotics, C cool a burn, X reduce a dislocation, N adrenaline
+injector, J shock now (defibrillator override), and Pads to put the
+defibrillator on or off. Hovering a button says what it does and what it
+risks: some treatments harm when they are the wrong thing. More than 4
+painkillers a day damage the liver a day later; antibiotics with no
+infection upset the gut; adrenaline on a beating heart races it and can
+derail the rhythm (in arrest it can turn a flat line shockable); a shock
+on a beating heart can stop it. A sudden bad injury sets off an
+adrenaline rush (pain dulled, a little more strength, tunnel vision) and
+a shaky, tired crash after it. Damaged organs are felt: a weak heart
+caps exertion, a failing liver tires and turns the view yellow, failing
+kidneys let potassium climb, a hurt brain makes the view drift.
 
 **Menus**: mouse, or arrows and Enter; ←/→ change a setting; Esc goes back.
 
