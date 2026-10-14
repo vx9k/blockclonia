@@ -226,7 +226,7 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
     if (s->recipe_top > g_recipe_count - rows) s->recipe_top = g_recipe_count - rows;
     if (s->recipe_top < 0) s->recipe_top = 0;
     const float pw = 8 + grid_w + 12 + 190 + 8,
-                ph = fmaxf(170.0f, 36.0f + 20.0f * (float)rows + (rows < g_recipe_count ? 16.0f : 6.0f));
+                ph = fmaxf(170.0f, 36.0f + 20.0f * (float)rows + 16.0f /* room for the "more" hint */);
     const float x0 = floorf((u->w - pw) * 0.5f), y0 = floorf((u->h - ph) * 0.5f + (1.0f - t) * 10.0f);
     ui_rect(u, x0, y0, pw, ph, ui_alpha(C_PANEL, fade));
     ui_frame(u, x0, y0, pw, ph, 1, ui_alpha(C_BORDER, fade));
