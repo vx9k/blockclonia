@@ -1124,7 +1124,7 @@ static VkShaderModule make_module(renderer *r, const uint32_t *code, size_t byte
 {
     VkShaderModuleCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = bytes,
                                    .pCode = code};
-    VkShaderModule m = NULL;
+    VkShaderModule m = VK_NULL_HANDLE;
     VK_CHECK(vkCreateShaderModule(r->dev, &ci, r->ac, &m));
     return m;
 }
@@ -1201,7 +1201,7 @@ static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
                                        .layout = d->layout ? d->layout : r->layout,
                                        .renderPass = r->pass,
                                        .subpass = 0};
-    VkPipeline p = NULL;
+    VkPipeline p = VK_NULL_HANDLE;
     VK_CHECK(vkCreateGraphicsPipelines(r->dev, r->pcache, 1, &ci, r->ac, &p));
     return p;
 }
