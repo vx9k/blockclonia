@@ -67,5 +67,6 @@ void test_paths_all(void);
 void test_save_db_all(void);
 void test_worlds_all(void);
 void test_discord_all(void);
+void test_netcrypto_all(void);
 
 #endif
