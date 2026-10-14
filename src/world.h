@@ -49,6 +49,7 @@ typedef struct column {
     uint8_t modified;      /* differs from generated terrain: keep a save file */
     uint8_t unsaved;       /* edited since it was last written to disk (2: written, not yet committed) */
     uint8_t keep_stored;   /* its saved row could not be read: generated instead, never saved over the row */
+    uint8_t waited;        /* asked of the host and still loading at the last world_retry_requests */
     uint8_t *blocks;       /* COL_VOL block ids */
     uint8_t *meta;         /* COL_VOL fluid levels, NULL when all zero */
     uint8_t dirty[SECTIONS];        /* needs re-meshing */
@@ -177,6 +178,11 @@ void world_save_all(world *w);
  * column that does not decode is generated from the seed instead. Returns
  * 0 if it was used, -1 if that column is no longer wanted. */
 int world_column_arrived(world *w, int cx, int cz, const uint8_t *data, size_t len);
+/* A multiplayer client's columns the host has not sent: asks again for
+ * those that were already waiting at the previous call (a host that
+ * dropped a request would otherwise leave them loading for good), and
+ * lets go of those no longer wanted. Call every few seconds. */
+void world_retry_requests(world *w);
 /* A column for a multiplayer client, in the save format: from memory if
  * it is loaded, else its saved row, else freshly generated. Returns the
  * length written to out (capacity SAVE_MAX_FILE), 0 if out of limits. */

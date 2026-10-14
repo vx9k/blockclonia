@@ -318,6 +318,51 @@ static void test_world_basics(void)
     tw_free(&t);
 }
 
+static int g_asked;
+static void count_request(void *user, int cx, int cz)
+{
+    (void)user;
+    (void)cx;
+    (void)cz;
+    g_asked++;
+}
+
+/* A multiplayer client asks the host again for columns it never sent,
+ * and lets go of the ones it no longer wants. */
+static void test_world_retry(void)
+{
+    jobs *js = jobs_create(0);
+    world w = {0};
+    world_init(&w, 1, 2, js, NULL);
+    w.on_column_request = count_request;
+    w.max_gen_in_flight = 1000;
+    g_asked = 0;
+    world_update(&w, 0.5, 60.0, 0.5);
+    int asked = g_asked;
+    CHECK(asked > 1 && w.gen_in_flight == asked);
+    world_retry_requests(&w); /* marks them as waiting */
+    CHECK(g_asked == asked);
+    uint8_t *col = mem_alloc(SAVE_MAX_FILE);
+    column *c = column_alloc(0, 0);
+    test_flat_gen(1, c);
+    size_t len = save_encode_column(c, col, SAVE_MAX_FILE);
+    column_free(c);
+    CHECK(len && world_column_arrived(&w, 0, 0, col, len) == 0);
+    world_retry_requests(&w);
+    CHECK(g_asked == 2 * asked - 1);
+    /* Out of range now: the old requests are dropped, not asked again. */
+    world_update(&w, 128.5, 60.0, 0.5); /* 8 columns: no ring slot in common */
+    CHECK(g_asked == 3 * asked - 1 && w.gen_in_flight == 2 * asked - 1);
+    world_retry_requests(&w);
+    CHECK(w.gen_in_flight == asked && g_asked == 3 * asked - 1);
+    CHECK(world_column_arrived(&w, 1, 0, col, len) == -1);
+    world_retry_requests(&w);
+    CHECK(g_asked == 4 * asked - 1);
+    mem_free(col);
+    world_destroy(&w);
+    jobs_destroy(js);
+}
+
 static void test_player_physics(void)
 {
     test_world t = {0};
@@ -1669,6 +1714,7 @@ int main(void)
     test_save_files();
     test_mesher();
     test_world_basics();
+    test_world_retry();
     test_player_physics();
     test_friction();
     test_sprint_sneak();

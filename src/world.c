@@ -714,6 +714,27 @@ int world_column_arrived(world *w, int cx, int cz, const uint8_t *data, size_t l
     return 0;
 }
 
+void world_retry_requests(world *w)
+{
+    if (!w->on_column_request) return;
+    for (int i = 0; i < w->grid_w * w->grid_w; i++) {
+        column *c = w->grid[i];
+        if (!c || c->state != COL_LOADING) continue;
+        if (!c->waited) {
+            c->waited = 1;
+            continue;
+        }
+        if (c->want_unload) {
+            w->grid[i] = NULL;
+            column_free(c);
+            w->gen_in_flight--;
+            w->gen_cursor = 0;
+            continue;
+        }
+        w->on_column_request(w->remote_user, c->cx, c->cz);
+    }
+}
+
 size_t world_column_encode(world *w, int cx, int cz, uint8_t *out, size_t cap)
 {
     if (!in_limits(cx, cz) || cap < SAVE_MAX_FILE) return 0;
