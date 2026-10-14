@@ -138,8 +138,9 @@ combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *
             /* A little spread: a rifle held standing, not clamped in a vice. */
             vec3 d = v3(dir.x + (frand(c) - 0.5f) * 0.004f, dir.y + (frand(c) - 0.5f) * 0.004f,
                         dir.z + (frand(c) - 0.5f) * 0.004f);
-            c->b[c->count++] = (bullet){eye, dv3((double)d.x * BULLET_SPEED, (double)d.y * BULLET_SPEED,
-                                                 (double)d.z * BULLET_SPEED),
+            c->b[c->count++] = (bullet){eye,
+                                        dv3((double)d.x * BULLET_SPEED, (double)d.y * BULLET_SPEED,
+                                            (double)d.z * BULLET_SPEED),
                                         BULLET_LIFE, who};
         }
         c->cooldown[who] = 1.2f; /* working the action */
@@ -221,11 +222,12 @@ int combat_step(combat *c, mobs *ms, physics *ph, const combat_targets *t)
                 done = 1;
             } else if (wall.hit) {
                 /* Glass and ice shatter; everything else stops it. */
-                if (block_get(wall.id)->flags & BF_BRITTLE) world_set(ph->w, wall.block.x, wall.block.y, wall.block.z,
-                                                                   B_AIR, 0);
+                if (block_get(wall.id)->flags & BF_BRITTLE)
+                    world_set(ph->w, wall.block.x, wall.block.y, wall.block.z, B_AIR, 0);
                 done = 1;
             } else {
-                b->pos = dv3(b->pos.x + b->vel.x * PHYS_DT, b->pos.y + b->vel.y * PHYS_DT, b->pos.z + b->vel.z * PHYS_DT);
+                b->pos = dv3(b->pos.x + b->vel.x * PHYS_DT, b->pos.y + b->vel.y * PHYS_DT,
+                             b->pos.z + b->vel.z * PHYS_DT);
             }
         }
         if (done) c->b[i--] = c->b[--c->count];

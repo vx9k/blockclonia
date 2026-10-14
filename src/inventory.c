@@ -173,7 +173,8 @@ const recipe g_recipes[] = {
     {{I_COPPER_INGOT, 1}, {{I_RAW_COPPER, 1}, {I_COAL, 1}}, STATION_FURNACE},
     {{I_IRON_INGOT, 1}, {{I_RAW_IRON, 1}, {I_COAL, 2}}, STATION_FURNACE},
 /* A head of the material on a stick handle. */
-#define TOOL_RECIPE(kind, tier, mat, n, sticks) {{I_TOOL_FIRST + (kind) * TIER_COUNT + (tier), 1}, {{mat, n}, {I_STICK, sticks}}, 0}
+#define TOOL_RECIPE(kind, tier, mat, n, sticks) \
+    {{I_TOOL_FIRST + (kind) * TIER_COUNT + (tier), 1}, {{mat, n}, {I_STICK, sticks}}, 0}
     TOOL_RECIPE(TOOL_PICKAXE, TIER_WOOD, B_PLANKS, 3, 2),
     TOOL_RECIPE(TOOL_PICKAXE, TIER_STONE, B_STONE, 3, 2),
     TOOL_RECIPE(TOOL_PICKAXE, TIER_COPPER, I_COPPER_INGOT, 3, 2),

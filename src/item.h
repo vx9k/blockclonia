@@ -40,7 +40,7 @@ enum {
  * I_TOOL_FIRST + kind * TIER_COUNT + tier. */
 enum { TOOL_PICKAXE, TOOL_AXE, TOOL_SHOVEL, TOOL_KNIFE, TOOL_SWORD, TOOL_KINDS };
 enum { TIER_WOOD, TIER_STONE, TIER_COPPER, TIER_IRON, TIER_COUNT };
-_Static_assert(TOOL_KINDS * TIER_COUNT == ITEM_END - I_TOOL_FIRST, "one item per tool kind and tier");
+_Static_assert((TOOL_KINDS * TIER_COUNT) == (ITEM_END - I_TOOL_FIRST), "one item per tool kind and tier");
 
 static inline int item_tool_id(int kind, int tier) { return I_TOOL_FIRST + kind * TIER_COUNT + tier; }
 /* 1 if id is a tool or blade, with its kind and tier. */

@@ -16,13 +16,15 @@ static void test_rules(void)
     int kind = 0, tier = 0;
     CHECK(item_tool(iron_pick, &kind, &tier) && kind == TOOL_PICKAXE && tier == TIER_IRON);
     CHECK(!item_tool(I_APPLE, &kind, &tier) && !item_durability(I_APPLE) && !item_durability(B_STONE));
-    CHECK(item_valid(iron_pick) && item_get(iron_pick)->stack == 1 && !strcmp(item_get(iron_pick)->name, "Iron pickaxe"));
+    CHECK(item_valid(iron_pick) && item_get(iron_pick)->stack == 1 &&
+          !strcmp(item_get(iron_pick)->name, "Iron pickaxe"));
     CHECK(item_durability(wood_pick) < item_durability(iron_pick) && item_durability(iron_pick) <= 255);
 
     /* The right tool is faster, better tiers more so; bare hands on rock
      * are slower than on soil. */
     CHECK(item_dig_speed(0, B_DIRT) == 1.0f && item_dig_speed(0, B_ROCK) < 1.0f);
-    CHECK(item_dig_speed(wood_pick, B_ROCK) > 1.0f && item_dig_speed(iron_pick, B_ROCK) > item_dig_speed(wood_pick, B_ROCK));
+    CHECK(item_dig_speed(wood_pick, B_ROCK) > 1.0f &&
+          item_dig_speed(iron_pick, B_ROCK) > item_dig_speed(wood_pick, B_ROCK));
     CHECK(item_dig_speed(axe, B_LOG) > 1.0f && item_dig_speed(axe, B_ROCK) < 1.0f);
     CHECK(item_dig_speed(item_tool_id(TOOL_SHOVEL, TIER_WOOD), B_SAND) > 1.0f);
 
@@ -69,7 +71,8 @@ static void test_wear(void)
     /* Dropped and picked up again, it keeps its wear. */
     test_world t = {0};
     tw_init(&t);
-    CHECK(physics_drop_stack(&t.ph, dv3(5.5, GROUND + 0.5, 5.5), dv3(0, 0, 0), (item_stack){(uint8_t)pick, 1, 33}, 0.0f));
+    CHECK(
+        physics_drop_stack(&t.ph, dv3(5.5, GROUND + 0.5, 5.5), dv3(0, 0, 0), (item_stack){(uint8_t)pick, 1, 33}, 0.0f));
     CHECK(t.ph.item_count == 1 && t.ph.items[0].wear == 33);
     inventory got = {0};
     inv_init(&got);

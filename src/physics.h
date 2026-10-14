@@ -20,8 +20,8 @@
 #ifndef MC_PHYSICS_H
 #define MC_PHYSICS_H
 
-#include "mathlib.h"
 #include "item.h"
+#include "mathlib.h"
 #include "world.h"
 #include <stddef.h>
 #include <stdint.h>

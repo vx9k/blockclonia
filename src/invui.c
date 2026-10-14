@@ -225,7 +225,8 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
     s->recipe_top -= (int)in->wheel;
     if (s->recipe_top > g_recipe_count - rows) s->recipe_top = g_recipe_count - rows;
     if (s->recipe_top < 0) s->recipe_top = 0;
-    const float pw = 8 + grid_w + 12 + 190 + 8, ph = fmaxf(170.0f, 36.0f + 20.0f * (float)rows + (rows < g_recipe_count ? 16.0f : 6.0f));
+    const float pw = 8 + grid_w + 12 + 190 + 8,
+                ph = fmaxf(170.0f, 36.0f + 20.0f * (float)rows + (rows < g_recipe_count ? 16.0f : 6.0f));
     const float x0 = floorf((u->w - pw) * 0.5f), y0 = floorf((u->h - ph) * 0.5f + (1.0f - t) * 10.0f);
     ui_rect(u, x0, y0, pw, ph, ui_alpha(C_PANEL, fade));
     ui_frame(u, x0, y0, pw, ph, 1, ui_alpha(C_BORDER, fade));
@@ -265,7 +266,8 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
     ui_text(u, cx, y0 + 24, 1, ui_alpha(C_HEAD, fade), "CRAFTING");
     int hover_recipe = -1;
     if (s->recipe_top > 0) ui_text(u, cx + cw - 50, y0 + 24, 1, ui_alpha(C_DIM, fade), "more ^");
-    if (s->recipe_top + rows < g_recipe_count) ui_text(u, cx + cw - 50, y0 + ph - 12, 1, ui_alpha(C_DIM, fade), "more v");
+    if (s->recipe_top + rows < g_recipe_count)
+        ui_text(u, cx + cw - 50, y0 + ph - 12, 1, ui_alpha(C_DIM, fade), "more v");
     for (int k = s->recipe_top; k < s->recipe_top + rows; k++) {
         const recipe *rc = &g_recipes[k];
         float ry = y0 + 36 + (float)(k - s->recipe_top) * 20;

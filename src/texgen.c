@@ -201,7 +201,9 @@ static const sprite SPRITES[] = {
 static int tool_texel(int layer, int x, int y, rgba *out)
 {
     if (layer < T_TOOL_FIRST || layer >= T_COUNT) return 0;
-    static const rgba HEAD[TIER_COUNT] = {{150, 112, 64, 255}, {128, 128, 128, 255}, {205, 120, 70, 255},
+    static const rgba HEAD[TIER_COUNT] = {{150, 112, 64, 255},
+                                          {128, 128, 128, 255},
+                                          {205, 120, 70, 255},
                                           {205, 208, 214, 255}};
     int kind = (layer - T_TOOL_FIRST) / TIER_COUNT, tier = (layer - T_TOOL_FIRST) % TIER_COUNT;
     float fx = (float)x + 0.5f, fy = (float)y + 0.5f;

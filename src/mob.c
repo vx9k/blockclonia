@@ -64,10 +64,7 @@ static double dist_xz(dvec3 a, dvec3 b) { return sqrt((a.x - b.x) * (a.x - b.x) 
 
 static float yaw_to(dvec3 from, dvec3 to) { return (float)atan2(to.x - from.x, -(to.z - from.z)); }
 
-static void remove_at(mobs *s, int i)
-{
-    s->m[i] = s->m[--s->count];
-}
+static void remove_at(mobs *s, int i) { s->m[i] = s->m[--s->count]; }
 
 /* Tries once to put a mob on open ground around a random player: boars on
  * grass by day, wolves on grass, snow or rock at night. */
@@ -247,7 +244,8 @@ int mobs_hurt(mobs *s, physics *ph, int i, float damage, dvec3 from)
     }
     if (m->hp > 0.0f) return 0;
     dvec3 at = dv3(m->body.pos.x, m->body.pos.y + 0.5, m->body.pos.z);
-    if (m->kind == MOB_BOAR) physics_drop_item(ph, at, dv3(0.0, 2.0, 0.0), I_RAW_MEAT, 2 + (int)(next(&m->rng) % 2u), 0.4f);
+    if (m->kind == MOB_BOAR)
+        physics_drop_item(ph, at, dv3(0.0, 2.0, 0.0), I_RAW_MEAT, 2 + (int)(next(&m->rng) % 2u), 0.4f);
     remove_at(s, i);
     return 1;
 }
@@ -293,8 +291,8 @@ int mob_figure(const mob *m, const float feet[3], float light, entity_instance *
     }
     /* A wolf's tail, a boar's snout. */
     if (n < max) {
-        float at[3] = {0.0f, m->kind == MOB_BOAR ? h * 0.72f : h * 0.75f, m->kind == MOB_BOAR ? -len * 0.5f - 0.38f
-                                                                                             : len * 0.5f + 0.2f};
+        float at[3] = {0.0f, m->kind == MOB_BOAR ? h * 0.72f : h * 0.75f,
+                       m->kind == MOB_BOAR ? -len * 0.5f - 0.38f : len * 0.5f + 0.2f};
         float size[3] = {m->kind == MOB_BOAR ? 0.2f : 0.1f, m->kind == MOB_BOAR ? 0.14f : 0.1f, 0.3f};
         out[n++] = box(feet, facing, at, quat_axis(1.0f, 0.0f, 0.0f, m->kind == MOB_WOLF ? 0.5f : 0.0f), size,
                        m->kind == MOB_BOAR ? T_SKIN : fur, lit);
