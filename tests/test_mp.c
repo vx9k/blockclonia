@@ -119,6 +119,120 @@ static void client_leave(host_side *h, client_side *c)
     }
 }
 
+/* An offline host (as fuzz_net drives it) shrugs off seeded garbage
+ * from three players on both channels, stepping after every message,
+ * and still answers a well-formed operation. */
+static void check_offline_host(host_side *h, const nc_keypair *kh)
+{
+    net *on = net_offline_host(kh, "Host");
+    nc_keypair kp[3] = {0};
+    for (int i = 0; i < 3; i++) {
+        nc_keypair_new(&kp[i]);
+        const char name[2] = {(char)('A' + i), 0};
+        net_test_add_player(on, i + 1, name, kp[i].pk);
+    }
+    mp_world offw = {&h->t.w, &h->t.ph, h->th, h->fx, &h->pl, h->hl, &h->inv, 1, NULL, NULL, NULL, NULL};
+    mp *om = mp_create(on, &offw);
+    mp_poll(om, 0.0);
+    mp_avatar oa[NET_MAX_PLAYERS];
+    CHECK(mp_avatars(om, 0.0, 1.0, oa, NET_MAX_PLAYERS) == 3);
+    uint32_t x = 12345u;
+    const player_input idle = {0};
+    for (int i = 0; i < 3000; i++) {
+        uint8_t g[64] = {0};
+        size_t len = 1 + (x >> 8) % sizeof g;
+        for (size_t k = 0; k < len; k++) {
+            x = x * 1664525u + 1013904223u;
+            g[k] = (uint8_t)(x >> 24);
+        }
+        g[0] = (uint8_t)(1 + g[0] % 3); /* mostly real message types */
+        mp_receive(om, 1 + i % 3, i % 2 ? NET_CH_STATE : NET_CH_GAME, g, len);
+        mp_host_step(om, &idle);
+        mp_flush(om, i / 60.0);
+    }
+    CHECK(isfinite(h->pl.pos.y));
+    mp_destroy(om);
+}
+
+/* Safety numbers: both sides show the same one, and the command is not
+ * sent as chat. */
+static void check_safety(host_side *h, client_side *c)
+{
+    mp_say(c->m, "/safety Host");
+    mp_say(h->m, "/safety Client");
+    const char *cs = strstr(last_chat(c->m)->text, ": "), *hs = strstr(last_chat(h->m)->text, ": ");
+    CHECK(cs && hs && strlen(cs) == NC_SAFETY_CHARS + 1 && strcmp(cs, hs) == 0);
+    for (int i = 0; i < 50; i++) frame(h, c, NULL);
+    CHECK(strncmp(last_chat(h->m)->text, "safety number with Client", 25) == 0);
+    mp_say(h->m, "/safety Nobody");
+    CHECK(strcmp(last_chat(h->m)->text, "no player by that name") == 0);
+}
+
+/* Joined players are kept in the world database by key: a saved one
+ * gets back their inventory and place, a corrupt record gives a fresh
+ * start, and a newcomer is written at the next save. */
+static void check_saved_players(host_side *h, const nc_keypair *kh, const char *dir)
+{
+    char wdir[300] = {0};
+    snprintf(wdir, sizeof wdir, "%s/world", dir);
+    CHECK(os_mkdir(wdir, 0700) == 0);
+    save_db *db = save_db_open(wdir);
+    CHECK(db != NULL);
+    nc_keypair kp[3] = {0};
+    for (int i = 0; i < 3; i++) nc_keypair_new(&kp[i]);
+    char name[80] = {0}, khex[2 * NC_KEY_BYTES + 1] = {0};
+    player was = h->pl;
+    was.pos.x += 2.0;
+    was.yaw = 1.25f;
+    inventory kept = {0};
+    inv_init(&kept);
+    inv_add(&kept, I_COAL, 7);
+    uint8_t rec[PLAYER_FILE_SIZE] = {0};
+    size_t rn = survival_encode_player(&was, &kept, 0.5, rec, sizeof rec);
+    nc_key_hex(kp[0].pk, khex);
+    snprintf(name, sizeof name, "player:%s", khex);
+    CHECK(rn && save_db_put_blob(db, name, rec, rn) == 0);
+    nc_key_hex(kp[1].pk, khex);
+    snprintf(name, sizeof name, "player:%s", khex);
+    CHECK(save_db_put_blob(db, name, "junk", 4) == 0);
+
+    net *on = net_offline_host(kh, "Host");
+    const char *names[3] = {"A", "B", "C"};
+    for (int i = 0; i < 3; i++) net_test_add_player(on, i + 1, names[i], kp[i].pk);
+    mp_world sw = {&h->t.w, &h->t.ph, h->th, h->fx, &h->pl, h->hl, &h->inv, 1, NULL, NULL, NULL, db};
+    mp *sm = mp_create(on, &sw);
+    mp_poll(sm, 0.0);
+    mp_avatar sa[NET_MAX_PLAYERS];
+    int na = mp_avatars(sm, 0.0, 1.0, sa, NET_MAX_PLAYERS), placed = 0;
+    for (int i = 0; i < na; i++)
+        placed |= sa[i].id == 1 && fabs(sa[i].pos.x - was.pos.x) < 1e-9 && sa[i].yaw == 1.25f;
+    CHECK(placed);
+    CHECK(save_db_begin(db) == 0 && mp_save_players(sm) == 0 && save_db_commit(db) == 0);
+    mp_destroy(sm);
+    player back = {0};
+    inventory got[3] = {0};
+    for (int i = 0; i < 3; i++) {
+        nc_key_hex(kp[i].pk, khex);
+        snprintf(name, sizeof name, "player:%s", khex);
+        uint8_t b[PLAYER_FILE_SIZE + 1] = {0};
+        long bn = save_db_get_blob(db, name, b, sizeof b);
+        CHECK(bn > 0 && survival_decode_player(&back, &got[i], NULL, b, (size_t)bn) == 0);
+    }
+    CHECK(inv_count(&got[0], I_COAL) == 7);
+    CHECK(inv_count(&got[1], I_COAL) == 0 && inv_count(&got[2], I_COAL) == 0);
+    int kit1 = 0, kit2 = 0;
+    for (int i = 0; i < INV_SLOTS; i++) {
+        kit1 += got[1].slot[i].count;
+        kit2 += got[2].slot[i].count;
+    }
+    CHECK(kit1 > 0 && kit1 == kit2); /* both got the starting kit */
+    save_db_close(db);
+    char wdb[320] = {0};
+    snprintf(wdb, sizeof wdb, "%s/world.db", wdir);
+    tmp_remove(wdb);
+    tmp_remove(wdir);
+}
+
 void test_mp_all(void)
 {
     CHECK(nc_init() == 0);
@@ -186,16 +300,7 @@ void test_mp_all(void)
         warned |= strstr(lines[i].text, "Client has a different key") != NULL;
     }
     CHECK(joined && warned);
-    /* Safety numbers: both sides show the same one, and the command is
-     * not sent as chat. */
-    mp_say(c.m, "/safety Host");
-    mp_say(h.m, "/safety Client");
-    const char *cs = strstr(last_chat(c.m)->text, ": "), *hs = strstr(last_chat(h.m)->text, ": ");
-    CHECK(cs && hs && strlen(cs) == NC_SAFETY_CHARS + 1 && strcmp(cs, hs) == 0);
-    for (int i = 0; i < 50; i++) frame(&h, &c, NULL);
-    CHECK(strncmp(last_chat(h.m)->text, "safety number with Client", 25) == 0);
-    mp_say(h.m, "/safety Nobody");
-    CHECK(strcmp(last_chat(h.m)->text, "no player by that name") == 0);
+    check_safety(&h, &c);
 
     /* An edit made now follows. */
     CHECK(world_set(&h.t.w, 4, GROUND, 4, B_STONE, 0));
@@ -276,103 +381,9 @@ void test_mp_all(void)
     CHECK(same && had.cursor.count > 0);
     client_leave(&h, &c);
 
-    /* An offline host (as fuzz_net drives it) shrugs off seeded garbage
-     * from three players on both channels, stepping after every message,
-     * and still answers a well-formed operation. */
-    {
-        net *on = net_offline_host(&kh, "Host");
-        nc_keypair kp[3] = {0};
-        for (int i = 0; i < 3; i++) {
-            nc_keypair_new(&kp[i]);
-            const char name[2] = {(char)('A' + i), 0};
-            net_test_add_player(on, i + 1, name, kp[i].pk);
-        }
-        mp_world offw = {&h.t.w, &h.t.ph, h.th, h.fx, &h.pl, h.hl, &h.inv, 1, NULL, NULL, NULL, NULL};
-        mp *om = mp_create(on, &offw);
-        mp_poll(om, 0.0);
-        mp_avatar oa[NET_MAX_PLAYERS];
-        CHECK(mp_avatars(om, 0.0, 1.0, oa, NET_MAX_PLAYERS) == 3);
-        uint32_t x = 12345u;
-        const player_input idle = {0};
-        for (int i = 0; i < 3000; i++) {
-            uint8_t g[64] = {0};
-            size_t len = 1 + (x >> 8) % sizeof g;
-            for (size_t k = 0; k < len; k++) {
-                x = x * 1664525u + 1013904223u;
-                g[k] = (uint8_t)(x >> 24);
-            }
-            g[0] = (uint8_t)(1 + g[0] % 3); /* mostly real message types */
-            mp_receive(om, 1 + i % 3, i % 2 ? NET_CH_STATE : NET_CH_GAME, g, len);
-            mp_host_step(om, &idle);
-            mp_flush(om, i / 60.0);
-        }
-        CHECK(isfinite(h.pl.pos.y));
-        mp_destroy(om);
-    }
+    check_offline_host(&h, &kh);
 
-    /* Joined players are kept in the world database by key: a saved one
-     * gets back their inventory and place, a corrupt record gives a fresh
-     * start, and a newcomer is written at the next save. */
-    {
-        char wdir[300] = {0};
-        snprintf(wdir, sizeof wdir, "%s/world", dir);
-        CHECK(os_mkdir(wdir, 0700) == 0);
-        save_db *db = save_db_open(wdir);
-        CHECK(db != NULL);
-        nc_keypair kp[3] = {0};
-        for (int i = 0; i < 3; i++) nc_keypair_new(&kp[i]);
-        char name[80] = {0}, khex[2 * NC_KEY_BYTES + 1] = {0};
-        player was = h.pl;
-        was.pos.x += 2.0;
-        was.yaw = 1.25f;
-        inventory kept = {0};
-        inv_init(&kept);
-        inv_add(&kept, I_COAL, 7);
-        uint8_t rec[PLAYER_FILE_SIZE] = {0};
-        size_t rn = survival_encode_player(&was, &kept, 0.5, rec, sizeof rec);
-        nc_key_hex(kp[0].pk, khex);
-        snprintf(name, sizeof name, "player:%s", khex);
-        CHECK(rn && save_db_put_blob(db, name, rec, rn) == 0);
-        nc_key_hex(kp[1].pk, khex);
-        snprintf(name, sizeof name, "player:%s", khex);
-        CHECK(save_db_put_blob(db, name, "junk", 4) == 0);
-
-        net *on = net_offline_host(&kh, "Host");
-        const char *names[3] = {"A", "B", "C"};
-        for (int i = 0; i < 3; i++) net_test_add_player(on, i + 1, names[i], kp[i].pk);
-        mp_world sw = {&h.t.w, &h.t.ph, h.th, h.fx, &h.pl, h.hl, &h.inv, 1, NULL, NULL, NULL, db};
-        mp *sm = mp_create(on, &sw);
-        mp_poll(sm, 0.0);
-        mp_avatar sa[NET_MAX_PLAYERS];
-        int na = mp_avatars(sm, 0.0, 1.0, sa, NET_MAX_PLAYERS), placed = 0;
-        for (int i = 0; i < na; i++)
-            placed |= sa[i].id == 1 && fabs(sa[i].pos.x - was.pos.x) < 1e-9 && sa[i].yaw == 1.25f;
-        CHECK(placed);
-        CHECK(save_db_begin(db) == 0 && mp_save_players(sm) == 0 && save_db_commit(db) == 0);
-        mp_destroy(sm);
-        player back = {0};
-        inventory got[3] = {0};
-        for (int i = 0; i < 3; i++) {
-            nc_key_hex(kp[i].pk, khex);
-            snprintf(name, sizeof name, "player:%s", khex);
-            uint8_t b[PLAYER_FILE_SIZE + 1] = {0};
-            long bn = save_db_get_blob(db, name, b, sizeof b);
-            CHECK(bn > 0 && survival_decode_player(&back, &got[i], NULL, b, (size_t)bn) == 0);
-        }
-        CHECK(inv_count(&got[0], I_COAL) == 7);
-        CHECK(inv_count(&got[1], I_COAL) == 0 && inv_count(&got[2], I_COAL) == 0);
-        int kit1 = 0, kit2 = 0;
-        for (int i = 0; i < INV_SLOTS; i++) {
-            kit1 += got[1].slot[i].count;
-            kit2 += got[2].slot[i].count;
-        }
-        CHECK(kit1 > 0 && kit1 == kit2); /* both got the starting kit */
-        save_db_close(db);
-        char wdb[320] = {0};
-        snprintf(wdb, sizeof wdb, "%s/world.db", wdir);
-        tmp_remove(wdb);
-        tmp_remove(wdir);
-    }
+    check_saved_players(&h, &kh, dir);
 
     mp_destroy(h.m);
     thermo_destroy(c.th);
