@@ -69,5 +69,6 @@ void test_worlds_all(void);
 void test_discord_all(void);
 void test_netcrypto_all(void);
 void test_wire_all(void);
+void test_net_all(void);
 
 #endif
