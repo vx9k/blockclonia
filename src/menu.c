@@ -219,12 +219,17 @@ static void title_screen(ctx *c)
 
     float by = y0 + 96;
     if (button(c, x0, by, 150, "Play")) {
+        m->host_pick = 0;
         menu_open(m, SCREEN_WORLDS);
         c->action = MENU_WORLDS;
     }
-    if (button(c, x0, by + 22, 150, "Settings")) menu_open(m, SCREEN_SETTINGS);
-    if (button(c, x0, by + 44, 150, "Controls")) menu_open(m, SCREEN_CONTROLS);
-    if (button(c, x0, by + 66, 150, "Quit")) c->action = MENU_QUIT;
+    if (button(c, x0, by + 22, 150, "Multiplayer")) {
+        menu_open(m, SCREEN_MULTIPLAYER);
+        c->action = MENU_MP;
+    }
+    if (button(c, x0, by + 44, 150, "Settings")) menu_open(m, SCREEN_SETTINGS);
+    if (button(c, x0, by + 66, 150, "Controls")) menu_open(m, SCREEN_CONTROLS);
+    if (button(c, x0, by + 88, 150, "Quit")) c->action = MENU_QUIT;
 
     ui_text_shadow(u, 6, u->h - 12, 1, ui_alpha(C_DIM, fade), m->footer);
     const char *keys = "Arrows + Enter or mouse   F2: screenshot";
@@ -254,11 +259,15 @@ static void pause_screen(ctx *c)
     menu *m = c->m;
     ui_rect(u, 0, 0, u->w, u->h, ui_rgba(0, 0, 0, (int)(150.0f * ease_out_cubic(m->age / 0.25f))));
     float x = 0.0f, y = 0.0f;
-    const float w = 200, h = 162;
+    const float w = 200, h = m->can_open ? 184.0f : 162.0f;
     panel(u, m->age, w, h, &x, &y, "PAUSED");
     if (m->status[0]) ui_text_wrap(u, x + 8, y + 22, w - 16, 2, 1, C_DIM, m->status);
     float by = y + 46, bw = w - 16;
     if (button(c, x + 8, by, bw, "Resume")) c->action = MENU_RESUME;
+    if (m->can_open) {
+        by += 22;
+        if (button(c, x + 8, by, bw, "Open to other players")) c->action = MENU_MP_OPEN;
+    }
     if (button(c, x + 8, by + 22, bw, "Settings")) menu_open(m, SCREEN_SETTINGS);
     if (button(c, x + 8, by + 44, bw, "Controls")) menu_open(m, SCREEN_CONTROLS);
     if (button(c, x + 8, by + 66, bw, "Save and quit to title")) c->action = MENU_TO_TITLE;
@@ -499,7 +508,7 @@ static void worlds_screen(ctx *c)
     backdrop(c);
     float x = 0.0f, y = 0.0f;
     const float w = 340, h = 244;
-    panel(u, m->age, w, h, &x, &y, "WORLDS");
+    panel(u, m->age, w, h, &x, &y, m->host_pick ? "HOST A WORLD" : "WORLDS");
     int n = m->world_count;
     if (m->world_sel >= n) m->world_sel = n - 1;
     if (m->world_sel < 0) m->world_sel = 0;
@@ -550,8 +559,32 @@ static void worlds_screen(ctx *c)
         menu_open(m, SCREEN_RENAME_WORLD);
     }
     if (button(c, x + 8 + 3 * (bw + 4), by, bw, "Delete") && have) menu_open(m, SCREEN_DELETE_WORLD);
-    if (button(c, x + 8 + 4 * (bw + 4), by, bw, "Back")) menu_open(m, SCREEN_TITLE);
+    if (button(c, x + 8 + 4 * (bw + 4), by, bw, "Back")) menu_open(m, m->host_pick ? SCREEN_MULTIPLAYER : SCREEN_TITLE);
     if (m->note[0]) ui_text(u, x + 8, by - 12, 1, C_ART, m->note);
+}
+
+static void multiplayer_screen(ctx *c)
+{
+    static const char *const CONNECT[] = {"to each other", "to me only"};
+    ui *u = c->u;
+    menu *m = c->m;
+    backdrop(c);
+    float x = 0.0f, y = 0.0f;
+    const float w = 320, h = 150;
+    panel(u, m->age, w, h, &x, &y, "MULTIPLAYER");
+    int join = text_field(c, x + 8, y + 24, w - 16, "Name", m->text_player, sizeof m->text_player, "your name");
+    join |= text_field(c, x + 8, y + 46, w - 16, "Address", m->text_addr, sizeof m->text_addr, "192.168.1.20 or host:port");
+    cycle(c, x + 8, y + 68, w - 16, "Hosting: players connect", &m->client_server, CONNECT, 2);
+    if (m->note[0]) ui_text_wrap(u, x + 8, y + 92, w - 16, 2, 1, C_ART, m->note);
+    float by = y + h - 8 - ROW_H, bw = (w - 16 - 2 * 4) / 3;
+    join |= button(c, x + 8, by, bw, "Join");
+    if (button(c, x + 8 + bw + 4, by, bw, "Host a world")) {
+        m->host_pick = 1;
+        menu_open(m, SCREEN_WORLDS);
+        c->action = MENU_WORLDS;
+    }
+    if (button(c, x + 8 + 2 * (bw + 4), by, bw, "Back")) menu_open(m, SCREEN_TITLE);
+    if (join && m->screen == SCREEN_MULTIPLAYER) c->action = MENU_MP_JOIN;
 }
 
 static void create_world_screen(ctx *c)
@@ -643,6 +676,7 @@ menu_action menu_frame(menu *m, ui *u, const menu_input *in, settings *s)
     case SCREEN_CREATE_WORLD: create_world_screen(&c); break;
     case SCREEN_RENAME_WORLD: rename_world_screen(&c); break;
     case SCREEN_DELETE_WORLD: delete_world_screen(&c); break;
+    case SCREEN_MULTIPLAYER: multiplayer_screen(&c); break;
     default: break;
     }
     m->text_focus = c.text_focus;
@@ -654,7 +688,8 @@ menu_action menu_frame(menu *m, ui *u, const menu_input *in, settings *s)
     if (in->back && c.action == MENU_NONE && m->screen == screen) {
         if (screen == SCREEN_PAUSE || screen == SCREEN_DEBUG_HEALTH) c.action = MENU_RESUME;
         else if (screen == SCREEN_SETTINGS || screen == SCREEN_CONTROLS) menu_open(m, m->back_to);
-        else if (screen == SCREEN_WORLDS) menu_open(m, SCREEN_TITLE);
+        else if (screen == SCREEN_WORLDS) menu_open(m, m->host_pick ? SCREEN_MULTIPLAYER : SCREEN_TITLE);
+        else if (screen == SCREEN_MULTIPLAYER) menu_open(m, SCREEN_TITLE);
         else if (screen >= SCREEN_CREATE_WORLD && screen <= SCREEN_DELETE_WORLD) menu_open(m, SCREEN_WORLDS);
     }
     m->hovered = m->focus != focus0 && m->screen == screen0 && m->items > 0;

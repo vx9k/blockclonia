@@ -383,7 +383,7 @@ cmake --preset native && cmake --build --preset native
 blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
             [--threads N] [--pool-mb N] [--gpu N] [--world DIR | --no-save]
             [--config FILE] [--validate] [--no-sound]
-            [--play] [--screen title|worlds|create|pause|settings|controls|debug-health|inventory]
+            [--play] [--screen title|worlds|create|multiplayer|pause|settings|controls|debug-health|inventory]
             [--debug] [--time HH] [--give LIST] [--hurt LIST]
             [--frames N] [--screenshot F] [--look YAW,PITCH] [--spawn X,Z]
             [--demo] [--health-panel] [--bench] [--mem-stats]
@@ -420,6 +420,11 @@ xvfb-run -a env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
 ## Multiplayer
 
 One player hosts and the others join; there is no separate server.
+From the title screen, **Multiplayer** asks for your name and the host's
+address to join, or lets you pick a world to host (and whether players
+connect to each other or only to you). A world you are already playing
+opens to others from the pause menu (**Open to other players**). From the
+command line:
 
 ```sh
 blockclonia --play --host --name Alice          # UDP port 27450, or --port N

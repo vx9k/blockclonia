@@ -125,6 +125,7 @@ typedef struct {
 
 static input_state g_in;
 static paths g_paths; /* where files go unless --config or --world say otherwise */
+static char g_mp_name[NET_NAME_MAX + 1]; /* the name typed in the multiplayer screen; o.name points here */
 
 /* ---------------------------------------------------------- arguments */
 
@@ -210,8 +211,8 @@ static void usage(void)
            "  --spawn X,Z       spawn position (default: nearest dry land)\n"
            USAGE_CONFIG
            "  --play            skip the menus and play the default world (or --world)\n"
-           "  --screen NAME     open title, worlds, create, pause, settings, controls or\n"
-           "                    debug-health at start\n"
+           "  --screen NAME     open title, worlds, create, multiplayer, pause, settings,\n"
+           "                    controls or debug-health at start\n"
            "  --debug           start with the F3 overlay on\n"
            "  --give LIST       start with items, e.g. log:8,sand:4 (names as shown in game)\n"
            "  --time HH         start at this hour of the day (0-23)\n"
@@ -299,7 +300,7 @@ static int parse_int_option(options *o, const char *a, const char *v, int *ok)
 static int valid_screen(const char *v)
 {
     static const char *const NAMES[] = {"title", "pause",     "settings", "controls", "debug-health",
-                                        "game",  "inventory", "worlds",   "create"};
+                                        "game",  "inventory", "worlds",   "create", "multiplayer"};
     for (size_t i = 0; i < sizeof NAMES / sizeof NAMES[0]; i++)
         if (strcmp(v, NAMES[i]) == 0) return 1;
     return 0;
@@ -1056,6 +1057,7 @@ static void open_start_screen(game *g)
         else if (!strcmp(o->screen, "debug-health")) g_in.screen = SCREEN_DEBUG_HEALTH;
         else if (!strcmp(o->screen, "worlds")) g_in.screen = SCREEN_WORLDS;
         else if (!strcmp(o->screen, "create")) g_in.screen = SCREEN_CREATE_WORLD;
+        else if (!strcmp(o->screen, "multiplayer")) g_in.screen = SCREEN_MULTIPLAYER;
         else g_in.screen = SCREEN_NONE;
         g_in.inv_open = !strcmp(o->screen, "inventory");
     }
@@ -2154,6 +2156,48 @@ static void world_action(game *g, menu_action a)
     }
 }
 
+/* The name from the multiplayer screen becomes this player's name. 0 if
+ * it is not one other players may see. */
+static int take_mp_name(game *g)
+{
+    if (!net_name_valid(g->mn.text_player)) {
+        snprintf(g->mn.note, sizeof g->mn.note, "Names are 1-16 letters, digits, spaces, '-', '_' or '.'.");
+        return 0;
+    }
+    snprintf(g_mp_name, sizeof g_mp_name, "%s", g->mn.text_player);
+    g->o.name = g_mp_name;
+    return 1;
+}
+
+/* Opens the world being played to others, from the menus. */
+static void menu_host(game *g)
+{
+    g->o.client_server = g->mn.client_server;
+    start_host(g);
+    g->mn.host_pick = 0;
+}
+
+static void menu_join(game *g)
+{
+    menu *m = &g->mn;
+    if (!take_mp_name(g)) return;
+    if (!m->text_addr[0]) {
+        snprintf(m->note, sizeof m->note, "Type the host's address first.");
+        return;
+    }
+    g->note[0] = '\0';
+    start_join(g, m->text_addr);
+    if (g->mp) {
+        set_captured(g->win, 1);
+        return;
+    }
+    /* Back where the player was, with the reason. */
+    menu_open(m, SCREEN_MULTIPLAYER);
+    snprintf(m->note, sizeof m->note, "%.95s", g->note);
+    g->note[0] = '\0';
+    g_in.screen = SCREEN_MULTIPLAYER;
+}
+
 /* Menus take the mouse: returns the action, applied here. */
 static void run_menu(game *g, ui *u, float mx, float my, double dt)
 {
@@ -2175,6 +2219,7 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     int mins = (int)(g->hl.t / 60.0);
     snprintf(g->mn.status, sizeof g->mn.status, "Alive %d:%02d   core %.1f" UI_CH_DEGREE "C   %s", mins / 60, mins % 60,
              (double)g->hl.temp, g->hl.dead ? "dead" : "");
+    g->mn.can_open = !g->backdrop && !g->mp && !g->client;
     menu_action act = menu_frame(&g->mn, u, &mi, &g->st);
     switch (act) {
     case MENU_RESUME:
@@ -2194,7 +2239,30 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     case MENU_WORLD_PLAY:
     case MENU_WORLD_CREATE:
     case MENU_WORLD_RENAME:
-    case MENU_WORLD_DELETE: world_action(g, act); break;
+    case MENU_WORLD_DELETE:
+        if ((act == MENU_WORLD_PLAY || act == MENU_WORLD_CREATE) && g->mn.host_pick && !take_mp_name(g)) {
+            menu_open(&g->mn, SCREEN_MULTIPLAYER);
+            break;
+        }
+        world_action(g, act);
+        if (g->mn.host_pick && !g->backdrop && !g->mp) menu_host(g);
+        break;
+    case MENU_MP: {
+        if (!g->mn.text_player[0]) {
+            nc_keypair id = {0};
+            my_identity(g, &id, g->mn.text_player, sizeof g->mn.text_player);
+            nc_wipe(&id, sizeof id);
+        }
+    } break;
+    case MENU_MP_JOIN: menu_join(g); break;
+    case MENU_MP_OPEN:
+        if (g->mn.text_player[0] && !take_mp_name(g)) break;
+        menu_host(g);
+        if (g->mp) {
+            g_in.screen = SCREEN_NONE;
+            set_captured(g->win, 1);
+        }
+        break;
     case MENU_QUIT: glfwSetWindowShouldClose(g->win, GLFW_TRUE); break;
     case MENU_SETTINGS:
         if (g->o.no_vsync && g->st.vsync) g->o.no_vsync = 0; /* turned back on in the menu: a real choice */

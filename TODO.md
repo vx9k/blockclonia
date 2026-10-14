@@ -118,8 +118,10 @@ authoritative on one peer.
       prediction and reconciliation (`mp.c`)
 - [x] remote players drawn (entity list), chat UI (T), `--host`/`--join`,
       README and controls
-- [ ] host/join from the menus (a Multiplayer screen with an address
-      field); until then only the command line starts a session
+- [x] host/join from the menus: a Multiplayer screen (name, address,
+      how players connect, host a world) and "Open to other players" in
+      the pause menu. The name and address are not remembered between
+      runs yet (settings hold numbers only).
 
 **Known limits of the first version** (each also a reason for the
 headless server below): the authority's world streams around its own

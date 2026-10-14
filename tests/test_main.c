@@ -1604,6 +1604,41 @@ static void test_menu_worlds(void)
     menu_run(&m, &u, mem, &s, &idle, 20);
     menu_run(&m, &u, mem, &s, &up, 1);
     CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_WORLD_DELETE && m.world_sel == 3);
+
+    /* Multiplayer: the address is typed in its own field and Enter there
+     * joins; "Host a world" opens the list for hosting, and backing out
+     * of it returns here. */
+    menu_open(&m, SCREEN_MULTIPLAYER);
+    m.text_player[0] = m.text_addr[0] = '\0';
+    menu_run(&m, &u, mem, &s, &idle, 20);
+    menu_run(&m, &u, mem, &s, &down, 1);
+    snprintf(type.text, sizeof type.text, "10.0.0.2:5");
+    type.text_len = 10;
+    type.down = 0;
+    menu_run(&m, &u, mem, &s, &type, 1);
+    CHECK(strcmp(m.text_addr, "10.0.0.2:5") == 0 && m.text_player[0] == '\0');
+    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_MP_JOIN);
+    menu_run(&m, &u, mem, &s, &down, 1);
+    menu_input right = idle;
+    right.right = 1;
+    menu_run(&m, &u, mem, &s, &right, 1);
+    CHECK(m.client_server == 1);
+    menu_run(&m, &u, mem, &s, &down, 1);
+    menu_run(&m, &u, mem, &s, &down, 1);
+    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_WORLDS && m.screen == SCREEN_WORLDS && m.host_pick);
+    menu_run(&m, &u, mem, &s, &esc, 1);
+    CHECK(m.screen == SCREEN_MULTIPLAYER);
+    menu_run(&m, &u, mem, &s, &esc, 1);
+    CHECK(m.screen == SCREEN_TITLE);
+    /* The pause menu offers to open the world only when main.c allows it. */
+    menu_open(&m, SCREEN_PAUSE);
+    m.can_open = 1;
+    menu_run(&m, &u, mem, &s, &idle, 20);
+    menu_run(&m, &u, mem, &s, &down, 1);
+    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_MP_OPEN);
+    m.can_open = 0;
+    menu_run(&m, &u, mem, &s, &idle, 2);
+    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) != MENU_MP_OPEN);
     mem_free(mem);
 }
 
@@ -1628,9 +1663,11 @@ static void test_menu(void)
     menu_run(&m, &u, mem, &s, &esc, 1);
     CHECK(m.screen == SCREEN_TITLE);
     menu_run(&m, &u, mem, &s, &idle, 30);
-    /* Down, Enter: Settings. Esc goes back to the title. */
+    /* Down twice (past Multiplayer), Enter: Settings. Esc goes back to the
+     * title. */
     menu_input down = idle;
     down.down = 1;
+    menu_run(&m, &u, mem, &s, &down, 1);
     menu_run(&m, &u, mem, &s, &down, 1);
     CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_NONE && m.screen == SCREEN_SETTINGS);
     menu_run(&m, &u, mem, &s, &idle, 30);
