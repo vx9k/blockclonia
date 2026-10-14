@@ -75,7 +75,11 @@ void inv_use_held(inventory *inv, int n)
 }
 
 void inv_set_held(inventory *inv, int id, int count)
-{ *inv_held(inv) = count > 0 && item_valid(id) ? (item_stack){(uint8_t)id, (uint8_t)count, 0} : (item_stack){0, 0, 0}; }
+{
+    item_stack s = {0, 0, 0};
+    if (count > 0 && item_valid(id)) s = (item_stack){(uint8_t)id, (uint8_t)count, 0};
+    *inv_held(inv) = s;
+}
 
 /* Moves a whole stack into [lo, hi): merging first, then an empty slot. */
 static void move_stack(inventory *inv, int from, int lo, int hi)
