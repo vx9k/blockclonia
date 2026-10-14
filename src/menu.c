@@ -401,7 +401,7 @@ static void controls_screen(ctx *c)
         {"E / R", "Eat / drink"},
         {"F2 / F11", "Screenshot / fullscreen"},
         {"F3", "Debug overlay (K: injury menu)"},
-        {"Esc", "Pause"},
+        {"T / Esc", "Chat (multiplayer) / pause"},
     };
     const int n = (int)(sizeof KEYS / sizeof KEYS[0]);
     for (int i = 0; i < n; i++) {

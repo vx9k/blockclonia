@@ -48,8 +48,10 @@ authoritative on one peer.
   health from the inputs the others send, and saves the world. The
   others send inputs, predict their own movement and reconcile against
   the authority's snapshots.
-- Terrain is never sent: every peer generates it from the shared seed and
-  receives only the edits (the column deltas the save already stores).
+- Terrain comes from the authority in the save format, then edits as
+  they happen. (Generating it from the seed on every peer was dropped:
+  float contraction differs between compilers and CPUs, so terrain could
+  differ at noise thresholds.)
 - Crypto per connection: static X25519 identity keys (TOFU-pinned like
   SSH's known_hosts), an ephemeral `crypto_kx` exchange for session keys,
   then `crypto_aead_chacha20poly1305_ietf` on every payload with a
@@ -63,13 +65,19 @@ authoritative on one peer.
 
 - [x] libsodium and ENet in `cmake/Dependencies.cmake`, CI, BUILDING.md
 - [x] `netcrypto.c`: keys, handshake, AEAD seal/open, replay window, tests
-- [ ] `netmsg.c`: message codec, validated decoders, fuzz target
-- [ ] `net.c`: ENet mesh, handshake, peers joining and leaving
-- [ ] physics and health for more than one player
-- [ ] authority loop: inputs in, snapshots and edits out; client
-      prediction and reconciliation
+- [x] message codecs (`wire.c`, `mp.c`), validated decoders, fuzz target
+- [x] `net.c`: ENet mesh, handshake, peers joining and leaving
+- [x] physics and health for more than one player
+- [x] authority loop: inputs in, snapshots and edits out; client
+      prediction and reconciliation (`mp.c`)
 - [ ] remote players drawn (entity list), chat UI (T), host/join menus,
       `--host`/`--join`, README and controls
+
+**Known limits of the first version** (each also a reason for the
+headless server below): the authority's world streams around its own
+player, so others must stay within its view distance; remote players'
+bodies and inventories are not saved with the world; when the host
+leaves, the session ends (no handing the authority over).
 
 **Later** (deferred, in this order):
 

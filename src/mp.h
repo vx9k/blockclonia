@@ -86,9 +86,10 @@ typedef struct mp mp;
 mp *mp_create(net *n, const mp_world *ctx);
 /* Client: 1 once the host has welcomed this player, with the world seed. */
 int mp_welcome(const mp *m, uint32_t *seed);
-/* Client: the world, physics and thermo in ctx are initialised; columns
- * are requested from the host from now on. */
-void mp_attach(mp *m);
+/* Client: the world is set up (from the welcome's seed); ctx replaces the
+ * one given at creation, and columns are requested from the host from now
+ * on. */
+void mp_attach(mp *m, const mp_world *ctx);
 void mp_destroy(mp *m);
 int mp_is_host(const mp *m);
 

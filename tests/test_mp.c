@@ -128,7 +128,7 @@ void test_mp_all(void)
     world_init(&c.w, seed, 2, c.js, NULL);
     c.w.generator = test_flat_gen; /* only if a column from the host fails to decode */
     physics_init(&c.ph, &c.w);
-    mp_attach(c.m);
+    mp_attach(c.m, &cw);
     for (int i = 0; i < 5000 && !(mp_ready(c.m) && world_column(&c.w, 0, 0)); i++) frame(&h, &c, NULL);
     CHECK(mp_ready(c.m) && world_column(&c.w, 0, 0) != NULL);
     CHECK(world_get(&c.w, 3, GROUND, 3) == B_PLANKS);

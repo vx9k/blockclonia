@@ -16,6 +16,9 @@
 #include "mem.h"
 #include "menu.h"
 #include "mesher.h"
+#include "mp.h"
+#include "net.h"
+#include "netkeys.h"
 #include "os.h"
 #include "paths.h"
 #include "physics.h"
@@ -73,6 +76,10 @@ typedef struct {
     int no_sound;
     int have_time;       /* --time */
     double time_of_day;  /* 0..1 */
+    int host;            /* --host: open the world to other players */
+    const char *join;    /* --join ADDR[:PORT]: play in someone else's world */
+    int port;            /* --port: where to host (0: NET_PORT) */
+    const char *name;    /* --name: shown to other players */
 } options;
 
 typedef struct {
@@ -107,6 +114,11 @@ typedef struct {
     int ui_backspace;
     char text[16];      /* printable ASCII typed this frame, for text fields */
     int text_len;
+    /* Multiplayer chat line being typed (T). */
+    int mp_active;      /* in a multiplayer session: T opens the chat */
+    int chat_open, chat_send;
+    char chat[NET_CHAT_MAX + 1];
+    int chat_len;
 } input_state;
 
 static input_state g_in;
@@ -207,7 +219,11 @@ static void usage(void)
            "                    pads (defibrillator pads on the chest)\n"
            "  --bench           run CPU benchmarks and exit (no window)\n"
            "  --mem-stats       print mimalloc statistics at exit\n"
-           "  --no-sound        do not open an audio device\n",
+           "  --no-sound        do not open an audio device\n"
+           "  --host            let others join this world (UDP port 27450, or --port)\n"
+           "  --join ADDR[:P]   play in the world another player hosts\n"
+           "  --port N          UDP port to host on\n"
+           "  --name NAME       name other players see (1-16 letters, digits, ' ', -, _, .)\n",
            hurt_names());
     /* clang-format on */
 }
@@ -227,6 +243,7 @@ static int parse_flag(options *o, const char *a)
         {"--bench", &o->bench},
         {"--mem-stats", &o->mem_stats},
         {"--no-sound", &o->no_sound},
+        {"--host", &o->host},
     };
     for (size_t i = 0; i < sizeof flags / sizeof flags[0]; i++)
         if (strcmp(a, flags[i].name) == 0) {
@@ -259,6 +276,7 @@ static int parse_int_option(options *o, const char *a, const char *v, int *ok)
         {"--threads", &o->threads, 0, 64, NULL},
         {"--gpu", &o->gpu, 0, 64, NULL},
         {"--frames", &o->frames, 1, INT_MAX, NULL},
+        {"--port", &o->port, 1, 65535, NULL},
     };
     for (size_t i = 0; i < sizeof ints / sizeof ints[0]; i++) {
         if (strcmp(a, ints[i].name) != 0) continue;
@@ -327,6 +345,12 @@ static int parse_value_option(options *o, const char *a, const char *v, int *ok)
         o->give = v;
     } else if (strcmp(a, "--hurt") == 0) {
         o->hurt = v;
+    } else if (strcmp(a, "--join") == 0) {
+        *ok = strlen(v) > 0 && strlen(v) < 200;
+        o->join = v;
+    } else if (strcmp(a, "--name") == 0) {
+        *ok = net_name_valid(v);
+        o->name = v;
     } else {
         return parse_int_option(o, a, v, ok);
     }
@@ -430,6 +454,17 @@ static void key_cb(GLFWwindow *win, int key, int sc, int action, int mods)
         menu_key(key, action);
         return;
     }
+    if (g_in.chat_open) {
+        /* Typing: the game sees none of these keys. */
+        g_in.keys[key] = 0;
+        if (action == GLFW_RELEASE) return;
+        if (key == GLFW_KEY_ESCAPE) g_in.chat_open = 0;
+        else if (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER) g_in.chat_send = 1;
+        else if (key == GLFW_KEY_BACKSPACE)
+            while (g_in.chat_len > 0 && ((unsigned char)g_in.chat[--g_in.chat_len] & 0xC0) == 0x80) {}
+        g_in.chat[g_in.chat_len] = '\0';
+        return;
+    }
     if (action != GLFW_PRESS) return;
     if (key == GLFW_KEY_W) {
         double t = glfwGetTime();
@@ -470,6 +505,11 @@ static void key_cb(GLFWwindow *win, int key, int sc, int action, int mods)
         else if (key == GLFW_KEY_A) g_in.treat = TREAT_ANTIBIOTIC;
         else if (key == GLFW_KEY_C) g_in.treat = TREAT_COOL;
         else if (key == GLFW_KEY_X) g_in.treat = TREAT_REDUCE;
+    } else if (key == GLFW_KEY_T && g_in.mp_active) {
+        g_in.chat_open = 2; /* 2: the T itself must not be typed */
+        g_in.chat_len = 0;
+        g_in.chat[0] = '\0';
+        memset(g_in.keys, 0, sizeof g_in.keys);
     } else if (key == GLFW_KEY_F) {
         g_in.toggle_fly = 1;
     } else if (key == GLFW_KEY_Q) {
@@ -523,6 +563,36 @@ static void scroll_cb(GLFWwindow *win, double dx, double dy)
 static void char_cb(GLFWwindow *win, unsigned int cp)
 {
     (void)win;
+    if (g_in.chat_open && g_in.screen == SCREEN_NONE) {
+        if (g_in.chat_open == 2) { /* the T that opened it */
+            g_in.chat_open = 1;
+            return;
+        }
+        /* UTF-8, shortest form; the font draws ASCII and shows the rest
+         * as it can. Surrogates and controls are not text. */
+        char u8[4] = {0};
+        int n = 0;
+        if (cp < 0x20 || cp == 0x7f || (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF) return;
+        if (cp < 0x80) u8[n++] = (char)cp;
+        else if (cp < 0x800) {
+            u8[n++] = (char)(0xC0 | cp >> 6);
+            u8[n++] = (char)(0x80 | (cp & 0x3F));
+        } else if (cp < 0x10000) {
+            u8[n++] = (char)(0xE0 | cp >> 12);
+            u8[n++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+            u8[n++] = (char)(0x80 | (cp & 0x3F));
+        } else {
+            u8[n++] = (char)(0xF0 | cp >> 18);
+            u8[n++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+            u8[n++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+            u8[n++] = (char)(0x80 | (cp & 0x3F));
+        }
+        if (g_in.chat_len + n > NET_CHAT_MAX) return;
+        memcpy(g_in.chat + g_in.chat_len, u8, (size_t)n);
+        g_in.chat_len += n;
+        g_in.chat[g_in.chat_len] = '\0';
+        return;
+    }
     if (g_in.screen == SCREEN_NONE || cp < 0x20 || cp > 0x7e) return;
     if (g_in.text_len < (int)sizeof g_in.text) g_in.text[g_in.text_len++] = (char)cp;
 }
@@ -651,13 +721,31 @@ typedef struct {
     physics *ph;
     thermo *th;
     const world *w;
+    mp *mp;         /* the session, when there is one */
+    int client;     /* the world is someone else's: edits arrive from the host */
+    sound *snd;
+    fx_state *fx;
 } world_hooks;
 
 static void on_block_changed(void *user, int x, int y, int z, uint8_t old_id, uint8_t new_id)
 {
     world_hooks *h = user;
-    physics_on_block_changed(h->ph, x, y, z, old_id, new_id);
+    if (h->client) {
+        /* The host simulates; physics here only predicts the player, so
+         * nothing may wake its structure or water queues. What changed is
+         * heard and seen as if done here. */
+        dvec3 at = dv3(x + 0.5, y + 0.5, z + 0.5);
+        if (new_id == B_AIR && old_id != B_AIR && old_id != B_WATER) {
+            sound_play(h->snd, SND_BREAK, &at, old_id, 0.8f);
+            fx_break(h->fx, old_id, x, y, z, 12);
+        } else if (old_id == B_AIR && block_solid(new_id)) {
+            sound_play(h->snd, SND_PLACE, &at, new_id, 0.8f);
+        }
+    } else {
+        physics_on_block_changed(h->ph, x, y, z, old_id, new_id);
+    }
     thermo_on_block_changed(h->th, h->w, x, y, z, old_id, new_id);
+    if (h->mp) mp_on_block_changed(h->mp, x, y, z);
 }
 
 static void on_column_unload(void *user, const column *c)
@@ -794,6 +882,9 @@ typedef struct {
     discord *dc;              /* NULL: the Discord status is off or this build has no application */
     char world_name[SAVE_NAME_MAX + 1]; /* the name the world was given, "" for none */
     int64_t session_start, play_start; /* Unix seconds: the game started, the world was opened */
+    mp *mp;                   /* multiplayer session, NULL in single player */
+    int client;               /* playing in someone else's world */
+    char note[512];           /* why the last session ended, for the title */
 
     /* This frame. */
     int in_menu, frozen;
@@ -1104,7 +1195,7 @@ static void open_world(game *g, const char *dir, int backdrop)
     world_init(&g->w, g->seed, o->radius, g->js, g->db);
     physics_init(&g->ph, &g->w);
     g->th = thermo_create(g->seed);
-    g->hooks = (world_hooks){&g->ph, g->th, &g->w};
+    g->hooks = (world_hooks){&g->ph, g->th, &g->w, NULL, 0, g->snd, g->fx};
     g->w.edit_user = &g->hooks;
     g->w.on_block_changed = on_block_changed;
     g->w.on_column_unload = on_column_unload;
@@ -1175,6 +1266,14 @@ static void open_world(game *g, const char *dir, int backdrop)
  * frees everything open_world made. */
 static void close_world(game *g)
 {
+    /* Leaving ends the session: a host's players are told, a client's
+     * world was never saved here. */
+    mp_destroy(g->mp);
+    g->mp = NULL;
+    g->hooks.mp = NULL;
+    g_in.mp_active = g_in.chat_open = 0;
+    if (g->client) g->w.on_save = NULL;
+    g->client = 0;
     log_set_fatal_hook(NULL, NULL);
     physics_settle_bodies(&g->ph, NULL);
     if (g->hl.dead) g->w.on_save = NULL; /* quitting dead keeps the last saved player */
@@ -1185,6 +1284,169 @@ static void close_world(game *g)
     physics_destroy(&g->ph);
     thermo_destroy(g->th);
     g->th = NULL;
+}
+
+/* ---------------------------------------------------------- multiplayer */
+
+/* Next to the settings file: this player's identity key and the keys of
+ * hosts joined before. */
+static void key_path(const game *g, const char *file, char *out, size_t cap)
+{
+    char dir[PATHS_MAX] = {0};
+    if (paths_parent(g->o.config, dir, sizeof dir) != 0) snprintf(dir, sizeof dir, ".");
+    snprintf(out, cap, "%s/%s", dir, file);
+}
+
+static void my_identity(const game *g, nc_keypair *id, char *name, size_t cap)
+{
+    char path[PATHS_MAX + 32] = {0};
+    key_path(g, "identity.key", path, sizeof path);
+    nc_init();
+    netkeys_identity(path, id);
+    if (g->o.name) {
+        snprintf(name, cap, "%s", g->o.name);
+    } else {
+        char hex[2 * NC_KEY_BYTES + 1] = {0};
+        nc_key_hex(id->pk, hex);
+        snprintf(name, cap, "Player-%.4s", hex);
+    }
+}
+
+static mp_world mp_ctx(game *g) { return (mp_world){&g->w, &g->ph, g->th, g->fx, &g->pl, &g->hl, &g->inv, g->seed}; }
+
+/* Opens the world being played to other players. */
+static void start_host(game *g)
+{
+    nc_keypair id = {0};
+    char name[NET_NAME_MAX + 1] = {0};
+    my_identity(g, &id, name, sizeof name);
+    net *n = net_host(&id, name, (uint16_t)g->o.port);
+    nc_wipe(&id, sizeof id);
+    if (!n) {
+        snprintf(g->hs.msg, sizeof g->hs.msg, "Could not host (port in use?)");
+        g->hs.msg_age = 0.0f;
+        return;
+    }
+    mp_world ctx = mp_ctx(g);
+    g->mp = mp_create(n, &ctx);
+    g->hooks.mp = g->mp;
+    g_in.mp_active = 1;
+}
+
+/* Someone else's world: empty until the host sends it, never saved. */
+static void open_remote_world(game *g, uint32_t seed)
+{
+    options *o = &g->o;
+    g->backdrop = 0;
+    g->db = NULL;
+    o->world_dir = NULL;
+    g->seed = seed;
+    world_init(&g->w, seed, o->radius, g->js, NULL);
+    physics_init(&g->ph, &g->w);
+    g->th = thermo_create(seed);
+    g->hooks = (world_hooks){&g->ph, g->th, &g->w, g->mp, 1, g->snd, g->fx};
+    g->w.edit_user = &g->hooks;
+    g->w.on_block_changed = on_block_changed;
+    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, NULL};
+    renderer_bind_world(g->rd, &g->w);
+    memset(&g->pl, 0, sizeof g->pl);
+    inv_init(&g->inv);
+    health_init(&g->hl, seed);
+    fx_init(g->fx, seed);
+    interact_init(&g->ia, seed);
+    viewmodel_init(&g->vm);
+    camera_init(&g->cam);
+    g->hs.alert_count = 0;
+    g->world_name[0] = '\0';
+    g->play_start = (int64_t)time(NULL);
+    g->client = 1;
+}
+
+/* Polls the session until done() holds, it ends, the time runs out or the
+ * window closes; the window stays responsive meanwhile. */
+static int wait_session(game *g, int (*done)(const game *g), double seconds)
+{
+    double end = glfwGetTime() + seconds;
+    while (!mp_ended(g->mp, NULL) && !glfwWindowShouldClose(g->win) && glfwGetTime() < end) {
+        glfwPollEvents();
+        double now = glfwGetTime();
+        mp_poll(g->mp, now);
+        if (done(g)) return 1;
+        if (g->w.grid) {
+            world_update(&g->w, g->pl.pos.x, g->pl.pos.y + PLAYER_EYE, g->pl.pos.z);
+            jobs_poll(g->js, MESH_UPLOADS_PER_FRAME);
+        }
+        mp_flush(g->mp, now);
+        os_sleep(0.005);
+    }
+    return 0;
+}
+
+static int welcomed(const game *g)
+{
+    uint32_t seed = 0;
+    return mp_welcome(g->mp, &seed);
+}
+
+static int ready(const game *g) { return mp_ready(g->mp); }
+
+/* --join: the host's world replaces the one loaded at start. On failure
+ * the menus come back, saying why. */
+static void start_join(game *g, const char *where)
+{
+    char addr[200] = {0}, host_id[NETKEYS_HOST_MAX + 1] = {0};
+    snprintf(addr, sizeof addr, "%s", where);
+    long long port = NET_PORT;
+    char *colon = strrchr(addr, ':');
+    if (colon && parse_int(colon + 1, 1, 65535, &port)) *colon = '\0';
+    snprintf(host_id, sizeof host_id, "%s:%lld", addr, port);
+    char known[PATHS_MAX + 32] = {0};
+    key_path(g, "known_hosts", known, sizeof known);
+    uint8_t pinned[NC_KEY_BYTES] = {0};
+    int have_pin = netkeys_known(known, host_id, pinned);
+
+    nc_keypair id = {0};
+    char name[NET_NAME_MAX + 1] = {0};
+    my_identity(g, &id, name, sizeof name);
+    net *n = net_join(&id, name, addr, (uint16_t)port, 0, have_pin ? pinned : NULL);
+    nc_wipe(&id, sizeof id);
+    if (!n) {
+        snprintf(g->note, sizeof g->note, "Cannot reach %s", host_id);
+        return;
+    }
+    close_world(g);
+    mp_world ctx = mp_ctx(g);
+    g->mp = mp_create(n, &ctx);
+    log_info("joining %s as %s", host_id, name);
+    uint32_t seed = 0;
+    if (wait_session(g, welcomed, 15.0) && mp_welcome(g->mp, &seed)) {
+        open_remote_world(g, seed);
+        ctx = mp_ctx(g);
+        mp_attach(g->mp, &ctx);
+        if (wait_session(g, ready, 15.0)) {
+            /* First visit: remember the host's key, so an impostor at
+             * this address is caught next time. */
+            const uint8_t *key = net_host_key(n);
+            if (!have_pin && key && netkeys_pin(known, host_id, key) == 0)
+                log_info("pinned the identity key of %s", host_id);
+            g_in.mp_active = 1;
+            g_in.screen = SCREEN_NONE;
+            return;
+        }
+    }
+    const char *why = "the host did not answer";
+    mp_ended(g->mp, &why);
+    snprintf(g->note, sizeof g->note, "Could not join %s: %s", host_id, why);
+    log_error("%s", g->note);
+    if (g->w.grid) {
+        close_world(g);
+    } else {
+        mp_destroy(g->mp);
+        g->mp = NULL;
+        g->client = 0;
+    }
+    open_world(g, NULL, 1);
+    g_in.screen = SCREEN_TITLE;
 }
 
 /* What lives across worlds: the job threads and the renderer. */
@@ -1249,6 +1511,8 @@ static void game_init(game *g)
     g_in.debug = g->o.debug;
     open_start_screen(g);
     refresh_worlds(g); /* --screen worlds opens the list without asking for it */
+    if (g->o.join) start_join(g, g->o.join);
+    else if (g->o.host && !g->backdrop) start_host(g);
     snprintf(g->mn.footer, sizeof g->mn.footer, "%s", g->versions);
 }
 
@@ -1297,12 +1561,18 @@ static void frame_menus(game *g, double dt)
     if (g_in.screen != SCREEN_NONE && g->mn.screen != g_in.screen) menu_open(&g->mn, g_in.screen);
     g->in_menu = g_in.screen != SCREEN_NONE;
     set_captured(g->win, !g->in_menu && g_in.captured);
-    if (g->in_menu) {
+    if (g->in_menu && !g->mp) {
         g->acc = 0.0; /* the simulation stands still */
         memset(g_in.keys, 0, sizeof g_in.keys); /* no keys stuck down on return */
         g_in.click_break = g_in.click_place = g_in.click_pick = 0;
         g_in.attack = 0;
     } else {
+        /* Other players keep playing behind the menus. */
+        if (g->in_menu) {
+            memset(g_in.keys, 0, sizeof g_in.keys);
+            g_in.click_break = g_in.click_place = g_in.click_pick = 0;
+            g_in.attack = 0;
+        }
         g->acc += dt;
     }
     /* The inventory screen frees the cursor; closing it takes it back. */
@@ -1310,13 +1580,19 @@ static void frame_menus(game *g, double dt)
         set_captured(g->win, 0);
         g->iu.open_t = 0.0f;
     } else if (!g_in.inv_open && g->inv_was_open) {
-        survival_toss(&g->ph, &g->inv, &g->pl, inv_return_cursor(&g->inv));
+        if (g->client) {
+            inv_return_cursor(&g->inv);
+            mp_client_op(g->mp, (mp_op){MP_OP_RETURN_CURSOR, 0, 0, 0});
+        } else {
+            survival_toss(&g->ph, &g->inv, &g->pl, inv_return_cursor(&g->inv));
+        }
         if (!g->in_menu) set_captured(g->win, 1);
     }
     g->inv_was_open = g_in.inv_open;
     if (g->hl.dead) g_in.inv_open = 0;
     /* The panel, death and unconsciousness freeze the player's input. */
-    g->frozen = g->in_menu || g_in.panel || g_in.inv_open || g->hl.dead || g->hl.conscious == CONS_UNCONSCIOUS;
+    g->frozen = g->in_menu || g_in.panel || g_in.inv_open || g_in.chat_open || g->hl.dead ||
+                g->hl.conscious == CONS_UNCONSCIOUS;
     if (g->frozen) g_in.mouse_dx = g_in.mouse_dy = 0;
 }
 
@@ -1359,20 +1635,39 @@ static player_input frame_input(game *g)
     if (!st->sprint_toggle) g_in.sprint_latch = 0;
     in.sprint = (st->sprint_toggle ? g_in.sprint_latch : g_in.keys[GLFW_KEY_LEFT_CONTROL]) || g_in.sprint_tap;
     if (g->frozen) memset(&in, 0, sizeof in);
-    survival_limit_input(&g->hl, pl, &in);
     return in;
 }
 
 /* Fixed 60 Hz steps: physics, what it did to the body, and the body. */
-static void frame_simulate(game *g, const player_input *in, double dt)
+static void frame_simulate(game *g, const player_input *raw, double dt)
 {
     g->ph.contact[0].magnet = !g->hl.dead && !g->in_menu;
     int steps = 0;
     float landing = 0.0f; /* hardest landing this frame, for the camera */
     double t0 = glfwGetTime();
+    if (g->client) {
+        /* The host simulates; this side predicts its own movement. */
+        while (g->acc >= PHYS_DT && steps < MAX_STEPS_PER_FRAME) {
+            mp_client_step(g->mp, raw, g_in.attack && !g->frozen);
+            if ((float)g->pl.fall_speed > landing) landing = (float)g->pl.fall_speed;
+            g->acc -= PHYS_DT;
+            steps++;
+        }
+        if (steps == MAX_STEPS_PER_FRAME) g->acc = 0.0;
+        g->landing = landing;
+        fx_step(g->fx, &g->w, dt);
+        g->phys_ms = anim_approach(g->phys_ms, (float)((glfwGetTime() - t0) * 1000.0), 5.0f, (float)dt);
+        g->pose = camera_update(&g->cam, &g->pl, landing, g->hl.hurt_flash, g->st.view_bob, g->st.fov_effects,
+                                g->in_menu ? 0.0f : (float)dt);
+        return;
+    }
+    player_input lim = *raw;
+    survival_limit_input(&g->hl, &g->pl, &lim);
+    const player_input *in = &lim;
     while (g->acc >= PHYS_DT && steps < MAX_STEPS_PER_FRAME) {
         survival_before sb = survival_capture(&g->pl);
-        physics_step(&g->ph, &g->pl, in);
+        if (g->mp) mp_host_step(g->mp, in);
+        else physics_step(&g->ph, &g->pl, in);
         if ((float)g->pl.fall_speed > landing) landing = (float)g->pl.fall_speed;
         health_env env = {0};
         survival_env(&g->w, &g->pl, &sb, g->actions, &env);
@@ -1393,13 +1688,50 @@ static void frame_simulate(game *g, const player_input *in, double dt)
     if (steps == MAX_STEPS_PER_FRAME) g->acc = 0.0; /* too slow to keep up: slow down time instead */
     g->landing = landing;
     if (steps && physics_pickup(&g->ph, 0, inv_accept, &g->inv)) sound_play(g->snd, SND_PICKUP, NULL, 0, 0.7f);
-    if (!g->in_menu) {
+    if (!g->in_menu || g->mp) {
         thermo_step(g->th, &g->w, dt, g->pl.pos);
         fx_step(g->fx, &g->w, dt);
     }
     g->phys_ms = anim_approach(g->phys_ms, (float)((glfwGetTime() - t0) * 1000.0), 5.0f, (float)dt);
     g->pose = camera_update(&g->cam, &g->pl, landing, g->hl.hurt_flash, g->st.view_bob, g->st.fov_effects,
                             g->in_menu ? 0.0f : (float)dt);
+}
+
+/* A client's hands: clicks, treatments and respawning go to the host,
+ * which sends back what happened. The arm swings here at once. */
+static void client_hands(game *g, double dt)
+{
+    if (!g->frozen) {
+        if (g_in.click_break) mp_client_click(g->mp, MP_CLICK_BREAK);
+        if (g_in.click_place) mp_client_click(g->mp, MP_CLICK_PLACE);
+        if (g_in.click_pick) mp_client_click(g->mp, MP_CLICK_PICK);
+        if (g_in.drop) mp_client_click(g->mp, g_in.drop == 2 ? MP_CLICK_DROP_ALL : MP_CLICK_DROP);
+        if (g_in.click_break || g_in.click_place) g->ia.swing = 1.0f;
+    }
+    g->ia.swing = fmaxf(0.0f, g->ia.swing - (float)dt * 3.0f);
+    g->ia.swinging = g_in.attack && g->hit.hit && !g->frozen;
+    ipos at = {0, 0, 0};
+    float progress = 0.0f;
+    int cracking = mp_client_crack(g->mp, &at, &progress);
+    g->crack = (fx_crack){cracking && !g->pl.flying, at.x, at.y, at.z, progress};
+    g_in.click_break = g_in.click_place = g_in.click_pick = g_in.drop = 0;
+    if (g_in.treat >= 0) {
+        if (!g->hl.dead) {
+            mp_client_op(g->mp, (mp_op){MP_OP_TREAT, (uint8_t)g_in.sel_part, (uint8_t)g_in.treat, 0});
+            if (g_in.treat == TREAT_EAT || g_in.treat == TREAT_DRINK) g->eat_anim = 1.0f;
+        }
+        g_in.treat = -1;
+    }
+    if (g_in.respawn) {
+        if (g->hl.dead) mp_client_op(g->mp, (mp_op){MP_OP_RESPAWN, 0, 0, 0});
+        g_in.respawn = 0;
+    }
+    const char *msg = mp_take_message(g->mp);
+    if (msg) {
+        snprintf(g->hs.msg, sizeof g->hs.msg, "%s", msg);
+        g->hs.msg_age = 0.0f;
+    }
+    g->hs.msg_age += (float)dt;
 }
 
 /* The hands: breaking, placing, using; then treatments and respawning. */
@@ -1409,6 +1741,10 @@ static void frame_interact(game *g, double dt)
     g->eye = dv3(pl->pos.x, pl->pos.y + PLAYER_EYE - (double)g->cam.crouch, pl->pos.z);
     g->look = look_dir(pl->yaw, pl->pitch);
     g->hit = physics_raycast(&g->w, g->eye, g->look, REACH);
+    if (g->client) {
+        client_hands(g, dt);
+        return;
+    }
     health_limits lim = health_get_limits(&g->hl);
     int hands = !g->frozen && (pl->flying || (lim.has_control && lim.can_act));
     interact_input ii = {.attack = g_in.attack && !g->frozen,
@@ -1468,6 +1804,23 @@ static void frame_interact(game *g, double dt)
     g->hs.msg_age += (float)dt;
 }
 
+/* The other players as figures, among the opaque entities (which come
+ * before the translucent ones). */
+static void add_players(game *g, dvec3 eye, double alpha, double now, float light, int *n_op, int n_tr)
+{
+    mp_avatar av[NET_MAX_PLAYERS];
+    int count = mp_avatars(g->mp, now, alpha, av, NET_MAX_PLAYERS);
+    for (int i = 0; i < count; i++) {
+        int room = RENDER_MAX_ENTS - *n_op - n_tr;
+        if (room < VIEWMODEL_FIGURE) return;
+        memmove(g->ents + *n_op + VIEWMODEL_FIGURE, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
+        const float feet[3] = {(float)(av[i].pos.x - eye.x), (float)(av[i].pos.y - eye.y),
+                               (float)(av[i].pos.z - eye.z)};
+        *n_op += viewmodel_figure(feet, av[i].yaw, av[i].pitch, av[i].sneaking, av[i].dead, light, g->ents + *n_op,
+                                  VIEWMODEL_FIGURE);
+    }
+}
+
 /* Camera, sky, entities and the first-person arm for the renderer. */
 static render_view build_view(game *g, double now, double dt, double alpha)
 {
@@ -1522,6 +1875,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     }
     int n_op = 0, n_tr = 0;
     fx_build_entities(g->fx, &g->ph, &g->crack, v.eye, alpha, v.time, g->ents, RENDER_MAX_ENTS, &n_op, &n_tr);
+    if (g->mp) add_players(g, v.eye, alpha, now, v.daylight, &n_op, n_tr);
     v.ents = g->ents;
     v.ent_opaque = n_op;
     v.ent_trans = n_tr;
@@ -1643,6 +1997,7 @@ static void play_world(game *g, const char *dir)
     snprintf(path, sizeof path, "%s", dir); /* dir may point into the list close_world outlives */
     close_world(g);
     open_world(g, path, 0);
+    g->note[0] = '\0';
     g_in.inv_open = 0;
     g_in.panel = 0;
     g_in.screen = SCREEN_NONE;
@@ -1782,6 +2137,33 @@ static void cursor_ui(const game *g, const ui *u, int fb_w, int fb_h, float *mx,
     }
 }
 
+/* Chat: the last lines above the hotbar, fading after ten seconds unless
+ * the chat is open, and the line being typed. */
+static void draw_chat(const game *g, ui *u, int fb_h)
+{
+    const mp_chat_line *lines = NULL;
+    int n = mp_chat(g->mp, &lines);
+    double now = glfwGetTime();
+    float y = (float)fb_h / u->scale - 64.0f;
+    if (g_in.chat_open) {
+        char line[NET_CHAT_MAX + 8] = {0};
+        snprintf(line, sizeof line, "> %s_", g_in.chat);
+        ui_rect(u, 4, y - 2, 330, 12, ui_rgba(0, 0, 0, 160));
+        ui_text(u, 8, y, 1, ui_rgba(255, 255, 255, 255), line);
+    }
+    for (int i = n - 1; i >= 0; i--) {
+        y -= 11.0f;
+        double age = now - lines[i].at;
+        float a = g_in.chat_open ? 1.0f : (float)fmin(1.0, fmax(0.0, (12.0 - age) / 2.0));
+        if (a <= 0.0f) continue;
+        char line[NET_NAME_MAX + NET_CHAT_MAX + 8] = {0};
+        if (lines[i].who[0]) snprintf(line, sizeof line, "<%s> %s", lines[i].who, lines[i].text);
+        else snprintf(line, sizeof line, "* %s", lines[i].text);
+        ui_rect(u, 4, y - 2, 330, 11, ui_rgba(0, 0, 0, (int)(110.0f * a)));
+        ui_text(u, 8, y, 1, ui_rgba(255, 255, lines[i].who[0] ? 255 : 160, (int)(255.0f * a)), line);
+    }
+}
+
 /* The 2D overlay: HUD, hotbar, inventory, F3 and menus. Returns the quads. */
 static int draw_overlay(game *g, double dt, double alpha)
 {
@@ -1799,6 +2181,7 @@ static int draw_overlay(game *g, double dt, double alpha)
     hs->debug = g_in.debug;
     hs->inv = &g->inv;
     hs->hide_hints = !g->st.show_hints;
+    hs->chat = g->mp != NULL;
     hud_update(hs, &g->hl, g->in_menu ? 0.0f : (float)dt);
     if (!on_title) hud_draw(&u, &g->hl, hs);
     if (!on_title && !g->hl.dead && !g_in.panel && !g_in.inv_open) invui_hotbar(&u, &g->iu, &g->inv, (float)dt);
@@ -1813,10 +2196,23 @@ static int draw_overlay(game *g, double dt, double alpha)
                           thermo_near_fire(g->th, &g->w, g->pl.pos, 3.0),
                           (float)dt};
         invui_result ir = invui_screen(&u, &g->iu, &g->inv, &in);
-        survival_toss(&g->ph, &g->inv, &g->pl, ir.drop);
+        if (g->client) {
+            /* Shown at once; the host repeats each and has the last word. */
+            if (ir.click_slot >= 0)
+                mp_client_op(g->mp, (mp_op){MP_OP_CLICK, (uint8_t)ir.click_slot, (uint8_t)ir.click_button,
+                                            (uint8_t)ir.click_shift});
+            if (ir.crafted >= 0)
+                mp_client_op(g->mp, (mp_op){MP_OP_CRAFT, (uint8_t)ir.crafted, (uint8_t)ir.craft_all, 0});
+            if (ir.drop.count) mp_client_op(g->mp, (mp_op){MP_OP_DROP_CURSOR, 0, 0, 0});
+        } else {
+            survival_toss(&g->ph, &g->inv, &g->pl, ir.drop);
+        }
         if (ir.crafted >= 0) sound_play(g->snd, SND_CRAFT, NULL, 0, 0.8f);
         else if (ir.changed) sound_play(g->snd, SND_UI_CLICK, NULL, 0, 0.5f);
     }
+    if (g->mp && !on_title) draw_chat(g, &u, fb_h);
+    if (on_title && g->note[0] && g->in_menu)
+        ui_text_shadow(&u, 32, (float)fb_h / u.scale - 24.0f, 1, ui_rgba(255, 140, 120, 255), g->note);
     if (g_in.debug && !on_title) draw_debug(g, &u, fb_w, fb_h, alpha);
     if (g->in_menu) run_menu(g, &u, mx, my, dt);
     return u.quads;
@@ -1950,6 +2346,24 @@ int main(int argc, char **argv)
             renderer_on_resize(g->rd);
             g_in.resized = 0;
         }
+        if (g->mp) {
+            mp_poll(g->mp, now);
+            const char *why = NULL;
+            if (mp_ended(g->mp, &why)) {
+                /* The host left or dropped us: back to the menus, saying why. */
+                snprintf(g->note, sizeof g->note, "Session ended: %s", why);
+                close_world(g);
+                open_world(g, NULL, 1);
+                g_in.inv_open = g_in.panel = 0;
+                menu_open(&g->mn, SCREEN_TITLE);
+                g_in.screen = SCREEN_TITLE;
+            }
+        }
+        if (g_in.chat_send) {
+            if (g->mp && g_in.chat_len) mp_say(g->mp, g_in.chat);
+            g_in.chat_open = g_in.chat_send = g_in.chat_len = 0;
+            g_in.chat[0] = '\0';
+        }
         frame_menus(g, dt);
         player_input in = frame_input(g);
         frame_simulate(g, &in, dt);
@@ -1957,6 +2371,7 @@ int main(int argc, char **argv)
         if (g->o.demo) demo_step(&g->w, &g->ph, g->fx, &g->pl, &g->demo, g->frame);
         world_update(&g->w, g->pl.pos.x, g->pl.pos.y + PLAYER_EYE, g->pl.pos.z);
         frame_render(g, now, dt);
+        if (g->mp) mp_flush(g->mp, now);
         g_in.ui_click = g_in.ui_rclick = g_in.ui_up = g_in.ui_dn = g_in.ui_left = g_in.ui_right = g_in.ui_enter =
             g_in.ui_back = g_in.ui_letter = g_in.ui_backspace = g_in.text_len = 0;
         frame_bookkeeping(g, now);

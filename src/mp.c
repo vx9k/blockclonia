@@ -192,9 +192,10 @@ mp *mp_create(net *n, const mp_world *ctx)
 
 static void column_request(void *user, int cx, int cz);
 
-void mp_attach(mp *m)
+void mp_attach(mp *m, const mp_world *ctx)
 {
     if (m->host || m->c.attached) return;
+    m->ctx = *ctx;
     m->ctx.w->remote_user = m;
     m->ctx.w->on_column_request = column_request;
     m->c.attached = 1;
@@ -243,7 +244,7 @@ static void host_join(mp *m, int id)
     interact_init(&r->ia, r->rng);
     /* Next to the host, inside the terrain its world has loaded. */
     const player *h = m->ctx.pl;
-    player_spawn(&r->pl, m->ctx.w, floor(h->pos.x) + 0.5 + (double)(id % 3) - 1.0, floor(h->pos.z) + 1.5);
+    player_spawn(&r->pl, m->ctx.w, floor(h->pos.x) + 0.5 + (double)(id % 3) - 1.0, floor(h->pos.z) + 3.5);
     r->cur.selected = 0;
 
     uint8_t buf[32] = {0};
@@ -286,7 +287,7 @@ static void host_input(remote *r, wire_r *rd)
     }
 }
 
-static void host_treat(mp *m, remote *r, int part, int what)
+static void host_treat(const mp *m, remote *r, int part, int what)
 {
     if (r->hl->dead) return;
     vec3 look = look_dir(r->pl.yaw, r->pl.pitch);
