@@ -103,6 +103,7 @@ typedef struct {
     float crack_p;
     int cracking;
     char msg[96], taken[96];
+    mobs mobs;           /* the creatures near this player, as last sent */
 } client;
 
 struct mp {
@@ -123,6 +124,11 @@ struct mp {
     uint32_t gone_age;
     uint32_t step;
     double now;
+    /* This step's bodies that blows, bites and bullets can reach: index 0
+     * is the host's player, then the remotes in the order stepped. */
+    player *tpl[PHYS_MAX_PLAYERS];
+    health *thl[PHYS_MAX_PLAYERS];
+    int tn;
     uint8_t *buf;
     size_t buf_cap;
 };
@@ -482,6 +488,23 @@ static void host_snapshot(mp *m, int id)
         wire_u8(&w, it->count);
         n++;
     }
+    if (!w.bad) buf[at] = (uint8_t)n;
+    /* Creatures near this player, for drawing; the host keeps the rest. */
+    at = w.len;
+    n = 0;
+    wire_u8(&w, 0);
+    for (int i = 0; m->ctx.mobs && i < m->ctx.mobs->count && n < MOB_MAX; i++) {
+        const mob *mb = &m->ctx.mobs->m[i];
+        if (fabs(mb->body.pos.x - me.x) > VIEW_RANGE || fabs(mb->body.pos.z - me.z) > VIEW_RANGE) continue;
+        wire_f64(&w, mb->body.pos.x);
+        wire_f64(&w, mb->body.pos.y);
+        wire_f64(&w, mb->body.pos.z);
+        wire_f32(&w, mb->body.yaw);
+        wire_f32(&w, mb->stride);
+        wire_u8(&w, mb->kind);
+        wire_u8(&w, (uint8_t)(mb->hurt_t > 0.0f));
+        n++;
+    }
     if (!w.bad) {
         buf[at] = (uint8_t)n;
         net_send(m->n, id, NET_CH_STATE, buf, w.len);
@@ -490,7 +513,7 @@ static void host_snapshot(mp *m, int id)
 
 /* A remote player's hands for one step, from its intent: as frame_interact
  * does for the local player, at the physics rate. */
-static void host_hands(mp *m, remote *r)
+static void host_hands(mp *m, remote *r, int who)
 {
     const intent *in = &r->cur;
     int click[CLICKS] = {0};
@@ -512,6 +535,21 @@ static void host_hands(mp *m, remote *r)
                          .can_act = pl->flying || (lim.has_control && lim.can_act),
                          .speed = pl->flying ? 1.0f : 0.4f + 0.6f * lim.move_scale,
                          .dt = (float)PHYS_DT};
+    if (m->ctx.mobs && m->ctx.cb) {
+        /* A creature or player in reach takes the blow instead of the block
+         * behind it. */
+        combat_targets t = {m->tpl, m->thl, m->tn};
+        double block_d = hit.hit ? dv3_len(dv3(hit.block.x + 0.5 - eye.x, hit.block.y + 0.5 - eye.y,
+                                               hit.block.z + 0.5 - eye.z))
+                                 : 5.0;
+        if (combat_aim(m->ctx.mobs, &t, who, eye, look, block_d)) ii.attack = 0;
+        if (ii.can_act) {
+            combat_out co = combat_frame(m->ctx.cb, m->ctx.mobs, m->ctx.ph, &t, who, &r->inv, eye, look, block_d,
+                                         ii.attack_click, ii.use_click, (float)PHYS_DT);
+            if (co.msg) snprintf(r->msg, sizeof r->msg, "%s", co.msg);
+            if (co.struck || co.fired) ii.attack_click = 0;
+        }
+    }
     interact_out io = interact_frame(&r->ia, m->ctx.w, m->ctx.ph, m->ctx.th, pl, &r->inv, m->ctx.fx, eye, look, hit,
                                      &ii);
     r->actions += io.actions;
@@ -525,6 +563,10 @@ static void host_hands(mp *m, remote *r)
     if (r->hl->defib.phase != DEFIB_OFF && !inv_count(&r->inv, I_DEFIBRILLATOR) && r->inv.cursor.id != I_DEFIBRILLATOR)
         health_pads(r->hl, 0);
 }
+
+const mobs *mp_client_mobs(const mp *m) { return &m->c.mobs; }
+
+combat_targets mp_targets(mp *m) { return (combat_targets){m->tpl, m->thl, m->tn}; }
 
 void mp_host_step(mp *m, const player_input *local_in)
 {
@@ -560,6 +602,16 @@ void mp_host_step(mp *m, const player_input *local_in)
         who[n++] = id;
     }
     physics_step_players(m->ctx.ph, ps, ins, n);
+    m->tn = n;
+    for (int k = 0; k < n; k++) {
+        health *h = k ? m->r[who[k]].hl : m->ctx.hl;
+        m->tpl[k] = h->dead ? NULL : ps[k];
+        m->thl[k] = h->dead ? NULL : h;
+    }
+    if (m->ctx.mobs && m->ctx.cb) {
+        combat_targets t = {m->tpl, m->thl, m->tn};
+        combat_creatures(m->ctx.cb, m->ctx.mobs, m->ctx.ph, &t, thermo_daylight(m->ctx.th));
+    }
     for (int k = 1; k < n; k++) {
         remote *r = &m->r[who[k]];
         health_env env = {0};
@@ -569,7 +621,7 @@ void mp_host_step(mp *m, const player_input *local_in)
         survival_impacts(r->hl, m->ctx.w, &m->ctx.ph->contact[k], &r->pl, &sb[k]);
         health_step(r->hl, &env, PHYS_DT);
         physics_pickup(m->ctx.ph, k, inv_accept, &r->inv);
-        if (!r->hl->dead) host_hands(m, r);
+        if (!r->hl->dead) host_hands(m, r, k);
     }
     m->step++;
     for (int k = 1; k < n; k++) {
@@ -803,7 +855,24 @@ static void client_snapshot(mp *m, wire_r *rd)
             fabs(it->pos.y) > 1e5)
             rd->bad = 1;
     }
+    int nm = wire_get_u8(rd);
+    mob near[MOB_MAX] = {0};
+    if (nm > MOB_MAX) rd->bad = 1;
+    for (int i = 0; i < nm && !rd->bad; i++) {
+        mob *mb = &near[i];
+        mb->body.pos = dv3(wire_get_f64(rd), wire_get_f64(rd), wire_get_f64(rd));
+        mb->body.yaw = wire_get_f32(rd);
+        mb->stride = wire_get_f32(rd);
+        mb->kind = wire_get_u8(rd);
+        mb->hurt_t = wire_get_u8(rd) ? 0.1f : 0.0f;
+        mb->body.prev_pos = mb->body.pos;
+        if (mb->kind >= MOB_KINDS || fabs(mb->body.pos.x) >= WORLD_LIMIT || fabs(mb->body.pos.z) >= WORLD_LIMIT ||
+            fabs(mb->body.pos.y) > 1e5 || !(fabsf(mb->body.yaw) < 1e4f) || !(fabsf(mb->stride) < 1e7f))
+            rd->bad = 1;
+    }
     if (rd->bad || rd->pos != rd->len || day < 0.0 || day > 1.0) return;
+    memcpy(c->mobs.m, near, sizeof near[0] * (size_t)nm);
+    c->mobs.count = nm;
 
     if (c->attached) {
         thermo_set_day_time(m->ctx.th, day);

@@ -190,8 +190,10 @@ void physics_destroy(physics *ph)
 aabb player_box(const player *p)
 {
     aabb b = {0};
-    b.min = dv3(p->pos.x - PLAYER_HALF_W, p->pos.y, p->pos.z - PLAYER_HALF_W);
-    b.max = dv3(p->pos.x + PLAYER_HALF_W, p->pos.y + PLAYER_HEIGHT, p->pos.z + PLAYER_HALF_W);
+    double hw = p->half_w > 0.0f ? (double)p->half_w : PLAYER_HALF_W;
+    double ht = p->height > 0.0f ? (double)p->height : PLAYER_HEIGHT;
+    b.min = dv3(p->pos.x - hw, p->pos.y, p->pos.z - hw);
+    b.max = dv3(p->pos.x + hw, p->pos.y + ht, p->pos.z + hw);
     return b;
 }
 

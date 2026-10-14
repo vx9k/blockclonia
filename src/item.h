@@ -27,6 +27,11 @@ enum {
     I_IRON_INGOT,
     I_RAW_COPPER,
     I_RAW_IRON,
+    I_RAW_MEAT,
+    I_COOKED_MEAT,
+    I_GUNPOWDER,
+    I_CARTRIDGE,
+    I_RIFLE,
     I_TOOL_FIRST,                                   /* TOOL_KINDS x TIER_COUNT tools, kind-major */
     ITEM_END = I_TOOL_FIRST + 5 * 4
 };
@@ -73,6 +78,9 @@ int item_valid(int id);
 /* Never NULL: unknown ids get a placeholder. */
 const item_def *item_get(int id);
 static inline int item_is_block(int id) { return id > 0 && id < ITEM_FIRST; }
+
+/* Food energy (kcal) and water (litres) of one, 0 kcal if it is not food. */
+float item_food(int id, float *water);
 
 /* Uses before an item wears out (tools and blades), 0 for items that do
  * not wear. */

@@ -25,6 +25,7 @@
 #ifndef MC_MP_H
 #define MC_MP_H
 
+#include "combat.h"
 #include "health.h"
 #include "interact.h"
 #include "inventory.h"
@@ -50,6 +51,10 @@ typedef struct {
      * vouches for every key, so this is how a player notices a host that
      * swaps one (to read chat in the middle). */
     const char *known_players;
+    /* The creatures and bullets the host simulates for everyone (NULL on a
+     * client, which draws the mobs it is sent). */
+    mobs *mobs;
+    combat *cb;
 } mp_world;
 
 /* Inventory operations a client sends; the host applies the same call. */
@@ -111,6 +116,12 @@ int mp_ended(const mp *m, const char **why);
  * with its next input, then runs the remote players' bodies and hands.
  * The caller handles its own player's body as in single player. */
 void mp_host_step(mp *m, const player_input *local_in);
+/* The bodies the host's last step could hit, for the host player's own
+ * blows (index 0 is the host's player). */
+combat_targets mp_targets(mp *m);
+/* On a client, the creatures near this player as the host last sent them
+ * (positions, headings and kinds only, for drawing). */
+const mobs *mp_client_mobs(const mp *m);
 /* Host: a block changed (the world's edit hook): sent at the next flush. */
 void mp_on_block_changed(mp *m, int x, int y, int z);
 

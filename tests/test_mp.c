@@ -91,7 +91,7 @@ static int client_join(host_side *h, client_side *c, const nc_keypair *kc, uint1
     memset(&c->pl, 0, sizeof c->pl);
     net *cn = net_join(kc, "Client", "127.0.0.1", port, 0, NULL);
     if (!cn) return 0;
-    mp_world cw = {&c->w, &c->ph, c->th, NULL, &c->pl, c->hl, &c->inv, 0, NULL};
+    mp_world cw = {&c->w, &c->ph, c->th, NULL, &c->pl, c->hl, &c->inv, 0, NULL, NULL, NULL};
     c->m = mp_create(cn, &cw);
     uint32_t seed = 0;
     for (int i = 0; i < 3000 && !mp_welcome(c->m, &seed); i++) frame(h, c, NULL);
@@ -152,7 +152,12 @@ void test_mp_all(void)
     nc_keypair other = {0};
     nc_keypair_new(&other);
     CHECK(netkeys_pin(known, "player:Client", other.pk) == 0);
-    mp_world hw = {&h.t.w, &h.t.ph, h.th, h.fx, &h.pl, h.hl, &h.inv, 1, known};
+    mobs hm = {0};
+    combat hc = {0};
+    mobs_init(&hm, 1);
+    hm.spawn_t = 1e9f; /* only the mob placed below */
+    combat_init(&hc, 1);
+    mp_world hw = {&h.t.w, &h.t.ph, h.th, h.fx, &h.pl, h.hl, &h.inv, 1, known, &hm, &hc};
     h.m = mp_create(hn, &hw);
     h.t.w.edit_user = &h;
     h.t.w.on_block_changed = host_edit;
@@ -163,6 +168,11 @@ void test_mp_all(void)
 
     CHECK(client_join(&h, &c, &kc, port));
     CHECK(world_get(&c.w, 3, GROUND, 3) == B_PLANKS);
+    /* A creature near the client is drawn there, from the host's snapshot. */
+    mobs_add(&hm, MOB_BOAR, dv3(c.pl.pos.x + 3.0, c.pl.pos.y, c.pl.pos.z));
+    for (int i = 0; i < 300 && mp_client_mobs(c.m)->count == 0; i++) frame(&h, &c, NULL);
+    CHECK(mp_client_mobs(c.m)->count == 1 && mp_client_mobs(c.m)->m[0].kind == MOB_BOAR);
+    hm.count = 0;
     /* Joined, with the fingerprint, and a warning that the key changed. */
     const mp_chat_line *lines = NULL;
     int nl = mp_chat(h.m, &lines), joined = 0, warned = 0;

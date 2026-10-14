@@ -128,10 +128,10 @@ static void use_item(interact *s, world *w, const physics *ph, thermo *th, const
         return;
     }
     if (!hit.hit || !held->count) {
-        if (held->id == I_APPLE && held->count) o->eat = 1;
+        if (held->count && item_food(held->id, NULL) > 0.0f) o->eat = 1;
         return;
     }
-    if (held->id == I_APPLE) {
+    if (item_food(held->id, NULL) > 0.0f) {
         o->eat = 1;
         return;
     }

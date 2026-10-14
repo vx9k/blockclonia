@@ -55,8 +55,8 @@ Every texture and sound is generated at start-up, and all memory comes from
 | Left Shift | Sneak: slower, and you won't walk off edges (in fly mode: down) |
 | Space | Jump / swim up (in fly mode: up) |
 | F | Toggle fly mode (no injuries while flying) |
-| Left click (hold) | Break the block; takes the material's hardness in seconds |
-| Right click | Place the held block, use the held item (fill or empty a bucket, eat an apple, feed a campfire, put a defibrillator's pads on or take them off) |
+| Left click (hold) | Break the block; takes the material's hardness in seconds, less with the right tool. Strikes a creature or player in reach instead |
+| Right click | Place the held block, use the held item (fill or empty a bucket, eat food, feed a campfire, put a defibrillator's pads on or take them off, fire a rifle) |
 | Middle click | Pick the targeted block into the hand |
 | 1–9 or scroll | Select a hotbar slot |
 | Q / Ctrl+Q | Drop one item / the whole stack |
@@ -195,6 +195,26 @@ or burns.
 | 1 shovel | 1 of the material, 2 sticks | |
 | 1 knife | 1 of the material, 1 stick | |
 | 1 sword | 2 of the material, 1 stick | |
+| 1 cooked meat | 1 raw meat | a burning campfire nearby |
+| 2 gunpowder | 2 coal, 1 ash | |
+| 4 cartridges | 1 copper ingot, 1 gunpowder | |
+| 1 rifle | 4 iron ingots, 2 planks | a furnace nearby |
+
+**Creatures.** Boars graze on grass by day and run when hurt; killed,
+they leave 2 to 3 raw meat (200 kcal each, or 350 cooked over a fire).
+Wolves come out at night, at most two near you, stalking at a walk and
+charging the last 8 m; their bites cut arms and legs and are dirty, so
+clean them. A wolf you hurt hunts you by day too. Creatures spawn out
+of sight, 24 to 44 m from a player, and are not saved.
+
+**Weapons.** A blow does 1 with a fist, 3 to 5 with a knife, 5 to 9
+with a sword and 3 to 6 with an axe; a boar has 20, a wolf 16. A
+creature or player in reach takes the blow instead of the block behind
+it. The rifle fires a bullet at 400 m/s that drops under gravity, wounds
+the first creature or player in its path (cuts, deep enough to bleed
+hard) and stops at a block, shattering glass and ice. It uses a
+cartridge a shot (1 copper ingot and 1 gunpowder make 4; 2 coal and 1
+ash make 2 gunpowder) and takes 1.2 s to work the action.
 
 Tools and blades come in four materials: planks (wooden), stone, copper
 ingots and iron ingots. The right tool breaks a block 2 (wood), 4
@@ -529,6 +549,7 @@ src/thermo.c      day clock, air temperature, heat field, fire, melting
 src/health.c      the body: circulation, breathing, injuries, treatment
 src/survival.c    turns physics and heat into injuries, limits movement
 src/interact.c    breaking, placing, buckets, dropping
+src/mob.c         boars and wolves     src/combat.c    blows and bullets
 src/inventory.c   slots, stacks, crafting      src/item.c   items and drops
 src/sound.c       mixer and voices     src/sound_synth.c   the synthesized bank
 src/audio_device.c  miniaudio output   (audio_null.c for silent builds)

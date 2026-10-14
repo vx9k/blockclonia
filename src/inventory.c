@@ -163,6 +163,10 @@ const recipe g_recipes[] = {
     {{B_GLASS, 1}, {{B_SAND, 2}}, STATION_FIRE},
     {{B_BRICK, 1}, {{B_DIRT, 2}, {B_SAND, 1}}, STATION_FIRE},
     {{B_CAMPFIRE, 1}, {{I_STICK, 4}, {B_LOG, 1}}, 0},
+    {{I_COOKED_MEAT, 1}, {{I_RAW_MEAT, 1}}, STATION_FIRE},
+    {{I_GUNPOWDER, 2}, {{I_COAL, 2}, {B_ASH, 1}}, 0},
+    {{I_CARTRIDGE, 4}, {{I_COPPER_INGOT, 1}, {I_GUNPOWDER, 1}}, 0},
+    {{I_RIFLE, 1}, {{I_IRON_INGOT, 4}, {B_PLANKS, 2}}, STATION_FURNACE},
     {{B_FURNACE, 1}, {{B_STONE, 8}}, 0},
     /* A campfire cannot reach the 1085-1540 C these metals need; a
      * furnace burning the coal can. */

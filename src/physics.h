@@ -70,6 +70,8 @@ typedef struct {
     int sneaking;
     int hit_wall;        /* horizontal movement was blocked last step */
     double fall_speed;   /* downward speed lost on the last landing, m/s */
+    float height;        /* body height in metres; 0 means PLAYER_HEIGHT (animals are shorter) */
+    float half_w;        /* half the body's width; 0 means PLAYER_HALF_W */
 } player;
 
 typedef struct {

@@ -99,6 +99,36 @@ static const item_def ITEMS[I_TOOL_FIRST - ITEM_FIRST] = {
                                  .tex = T_ITEM_RAW_IRON,
                                  .desc = "Iron ore. Smelt with coal in a furnace.",
                                  .density = 5000.0f},
+    [I_RAW_MEAT - ITEM_FIRST] = {.name = "Raw meat",
+                                 .stack = 16,
+                                 .block = B_AIR,
+                                 .tex = T_ITEM_RAW_MEAT,
+                                 .desc = "Better cooked over a fire. E to eat.",
+                                 .density = 1050.0f},
+    [I_COOKED_MEAT - ITEM_FIRST] = {.name = "Cooked meat",
+                                    .stack = 16,
+                                    .block = B_AIR,
+                                    .tex = T_ITEM_COOKED_MEAT,
+                                    .desc = "350 kcal. E to eat.",
+                                    .density = 1000.0f},
+    [I_GUNPOWDER - ITEM_FIRST] = {.name = "Gunpowder",
+                                  .stack = 64,
+                                  .block = B_AIR,
+                                  .tex = T_ITEM_GUNPOWDER,
+                                  .desc = "Coal and the potash in ash. For cartridges.",
+                                  .density = 1700.0f},
+    [I_CARTRIDGE - ITEM_FIRST] = {.name = "Cartridge",
+                                  .stack = 32,
+                                  .block = B_AIR,
+                                  .tex = T_ITEM_CARTRIDGE,
+                                  .desc = "Rifle ammunition.",
+                                  .density = 5000.0f},
+    [I_RIFLE - ITEM_FIRST] = {.name = "Rifle",
+                              .stack = 1,
+                              .block = B_AIR,
+                              .tex = T_ITEM_RIFLE,
+                              .desc = "Right-click to fire. Uses cartridges.",
+                              .density = 900.0f},
 };
 
 static const item_def UNKNOWN = {
@@ -136,9 +166,34 @@ static void build_tools(void)
         }
 }
 
+float item_food(int id, float *water)
+{
+    /* A 180 g apple, and about 150 g of pork: cooking drives off water
+     * but makes more of the energy digestible. */
+    float kcal = 0.0f, w = 0.0f;
+    switch (id) {
+    case I_APPLE:
+        kcal = 95.0f;
+        w = 0.085f;
+        break;
+    case I_RAW_MEAT:
+        kcal = 200.0f;
+        w = 0.09f;
+        break;
+    case I_COOKED_MEAT:
+        kcal = 350.0f;
+        w = 0.05f;
+        break;
+    default: break;
+    }
+    if (water) *water = w;
+    return kcal;
+}
+
 int item_durability(int id)
 {
     int kind = 0, tier = 0;
+    if (id == I_RIFLE) return 250; /* shots before the barrel is shot out (wear is a byte) */
     return item_tool(id, &kind, &tier) ? TIER_USES[tier] : 0;
 }
 
@@ -232,7 +287,7 @@ const item_def *item_get(int id)
     }
     if (item_is_block(id) && id < B_COUNT) return &blocks[id];
     if (id >= I_TOOL_FIRST && id < ITEM_END) return &g_tools[id - I_TOOL_FIRST];
-    if (id >= ITEM_FIRST && id < ITEM_END) return &ITEMS[id - ITEM_FIRST];
+    if (id >= ITEM_FIRST && id < I_TOOL_FIRST) return &ITEMS[id - ITEM_FIRST];
     return &UNKNOWN;
 }
 

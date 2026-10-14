@@ -47,6 +47,8 @@ typedef enum {
     SND_UI_OPEN,
     SND_UI_CLOSE,
     SND_CRAFT,
+    SND_SHOT,        /* a rifle firing */
+    SND_HIT,         /* a blow landing on a body */
     SND_COUNT
 } sound_id;
 

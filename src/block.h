@@ -104,6 +104,13 @@ typedef enum {
     T_ITEM_IRON_INGOT,
     T_ITEM_RAW_COPPER,
     T_ITEM_RAW_IRON,
+    T_ITEM_RAW_MEAT,
+    T_ITEM_COOKED_MEAT,
+    T_FUR_BOAR,
+    T_FUR_WOLF,
+    T_ITEM_GUNPOWDER,
+    T_ITEM_CARTRIDGE,
+    T_ITEM_RIFLE,
     T_TOOL_FIRST, /* one per tool kind and tier, in item order */
     T_COUNT = T_TOOL_FIRST + 5 * 4
 } tex_id;
