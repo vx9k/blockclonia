@@ -345,7 +345,8 @@ void test_mp_all(void)
         mp_poll(sm, 0.0);
         mp_avatar sa[NET_MAX_PLAYERS];
         int na = mp_avatars(sm, 0.0, 1.0, sa, NET_MAX_PLAYERS), placed = 0;
-        for (int i = 0; i < na; i++) placed |= sa[i].id == 1 && fabs(sa[i].pos.x - was.pos.x) < 1e-9 && sa[i].yaw == 1.25f;
+        for (int i = 0; i < na; i++)
+            placed |= sa[i].id == 1 && fabs(sa[i].pos.x - was.pos.x) < 1e-9 && sa[i].yaw == 1.25f;
         CHECK(placed);
         CHECK(save_db_begin(db) == 0 && mp_save_players(sm) == 0 && save_db_commit(db) == 0);
         mp_destroy(sm);
