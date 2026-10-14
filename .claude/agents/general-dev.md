@@ -1,7 +1,7 @@
 ---
 name: general-dev
 description: Default tier for everyday engineering. Use for implementing a contained feature, refactoring within one or a few modules, debugging a bug that reproduces (a failing test, a crash with a clear stack, wrong behaviour in one system), adding or fixing tests, and reviewing a diff for correctness and style. Route here when the change is well understood and its effects stay local. Escalate to deep-reasoning instead for architecture decisions, bugs that cross many files or resist reproduction, changes to save/settings file formats, file access or dependency fetching, the Vulkan 1.0 baseline or synchronization, threading, and anything security-sensitive. Use docs-writer for prose-only edits.
-model: opus
+model: sonnet
 effort: medium
 tools: Read, Edit, Write, Bash
 ---
@@ -44,7 +44,9 @@ How to work:
 Stop and recommend the deep-reasoning agent if the task turns out to need
 an architectural decision, touches many modules, changes a file format or
 anything security-sensitive, or if two honest attempts at a bug have not
-found the cause.
+found the cause. Also stop and hand off when the work touches Vulkan
+synchronization, the `mem.h` allocator, chunk meshing or the rendering
+pipeline design.
 
 Reply with: what you changed and why, how you verified it (commands and
 results), and anything left open.
