@@ -231,7 +231,14 @@ if(MC_BUILD_TESTS)
                           tests/test_discord.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)
-  set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT 120)
+  # Under qemu user emulation (cross builds) the suite runs several times
+  # slower than on the hardware.
+  if(CMAKE_CROSSCOMPILING_EMULATOR)
+    set(_mc_unit_timeout 600)
+  else()
+    set(_mc_unit_timeout 120)
+  endif()
+  set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT ${_mc_unit_timeout})
 
   if(MC_BUILD_GAME)
     add_test(NAME bench COMMAND blockclonia --bench)
