@@ -64,6 +64,7 @@ struct net {
     nc_keypair id;
     char name[NET_NAME_MAX + 1];
     int host, me, ended, no_mesh;
+    int enet_ref; /* counted in g_enet_users (not an offline host) */
     uint16_t port;
     member m[NET_MAX_PLAYERS];
     net_link links[MAX_LINKS];
@@ -742,6 +743,7 @@ static net *net_new(const nc_keypair *id, const char *name, uint16_t port)
     }
     g_enet_users++;
     net *n = mem_calloc(1, sizeof *n);
+    n->enet_ref = 1;
     n->id = *id;
     snprintf(n->name, sizeof n->name, "%s", name);
     n->me = -1;
@@ -808,9 +810,10 @@ void net_destroy(net *n)
     }
     mem_free(n->rx);
     mem_free(n->tx);
+    int ref = n->enet_ref;
     nc_wipe(n, sizeof *n);
     mem_free(n);
-    if (--g_enet_users == 0) enet_deinitialize();
+    if (ref && --g_enet_users == 0) enet_deinitialize();
 }
 
 /* ---------------------------------------------------------------- sending */
@@ -855,6 +858,23 @@ int net_is_host(const net *n) { return n->host; }
 int net_me(const net *n) { return n->me; }
 uint16_t net_port(const net *n) { return n->port; }
 void net_test_no_mesh(net *n) { n->no_mesh = 1; }
+
+net *net_offline_host(const nc_keypair *id, const char *name)
+{
+    net *n = mem_calloc(1, sizeof *n);
+    n->id = *id;
+    snprintf(n->name, sizeof n->name, "%s", name);
+    n->host = 1;
+    member_set(n, 0, name, id->pk, 0, 0);
+    return n;
+}
+
+void net_test_add_player(net *n, int player, const char *name, const uint8_t *pk)
+{
+    if (!n->host || player <= 0 || player >= NET_MAX_PLAYERS) return;
+    member_set(n, player, name, pk, 0, 0);
+    push(n, NET_EV_JOINED, player);
+}
 
 int net_player_present(const net *n, int player)
 { return player >= 0 && player < NET_MAX_PLAYERS && n->m[player].present; }

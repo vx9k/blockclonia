@@ -115,5 +115,9 @@ uint16_t net_port(const net *n);
 
 /* For the tests: never dial other players, so chat goes through the host. */
 void net_test_no_mesh(net *n);
+/* For fuzzing: a host with no socket, whose players are added by hand
+ * (each arrives as NET_EV_JOINED). Messages to them go nowhere. */
+net *net_offline_host(const nc_keypair *id, const char *name);
+void net_test_add_player(net *n, int player, const char *name, const uint8_t *pk);
 
 #endif
