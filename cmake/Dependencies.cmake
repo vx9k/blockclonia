@@ -136,7 +136,10 @@ set(MC_SQLITE_MIN 3.31 CACHE STRING "Oldest system SQLite used")
 add_library(mc_sqlite INTERFACE)
 add_library(mc::sqlite ALIAS mc_sqlite)
 set(MC_SQLITE_SYSTEM OFF)
-if(NOT MC_DEPS STREQUAL "FETCH")
+# macOS's own libsqlite3 is Apple's modified build: its read-only
+# connections fail where stock SQLite's work (save_db_peek), so AUTO builds
+# the pinned release there.
+if(MC_DEPS STREQUAL "SYSTEM" OR (MC_DEPS STREQUAL "AUTO" AND NOT APPLE))
   find_package(SQLite3 ${MC_SQLITE_MIN} QUIET)
 endif()
 if(SQLite3_FOUND)

@@ -135,7 +135,9 @@ Options you can add when configuring, with `-D`:
 `MC_DEPS` decides where GLFW, mimalloc, miniaudio and SQLite come from:
 
 - `AUTO` (the default) uses the system's copy when it is new enough and
-  downloads the pinned release otherwise.
+  downloads the pinned release otherwise. On macOS it always builds the
+  pinned SQLite: Apple's own libsqlite3 is a modified build that cannot
+  read worlds the way the game needs.
 - `SYSTEM` never downloads. It also accepts GLFW 3.3 and mimalloc 2.1,
   for distribution packages, and builds a silent game when miniaudio is
   missing.
