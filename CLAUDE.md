@@ -36,10 +36,12 @@
   footer: put it last, after a blank line following the body, with no
   other text below it. Before committing, check the header against the
   allowed types and the 72-column limit.
-- Subagents live in `.claude/agents/` (see its `README.md`), in three
-  tiers: `docs-writer` (Haiku 5.5, medium effort) for prose-only work,
-  `general-dev` (Opus 5.5, medium effort) for everyday development, and
-  `deep-reasoning` (Opus 5.5, high effort) as the default for complex or
-  high-stakes work: design decisions, cross-module bugs, file formats,
-  the Vulkan 1.0 path and anything security-sensitive. Pick the cheapest
+- Subagents live in `.claude/agents/` (see its `README.md`), in four
+  tiers: `scout` (Haiku 5.5, low effort) for read-only lookups,
+  `docs-writer` (Haiku 5.5, medium effort) for prose-only work,
+  `general-dev` (Sonnet, medium effort) for everyday development, and
+  `deep-reasoning` (Opus, high effort) for the hard and high-stakes
+  work: design decisions, cross-module bugs, file formats, the Vulkan
+  1.0 path, Vulkan synchronization, mem.h, chunk meshing, rendering
+  pipeline design and anything security-sensitive. Pick the cheapest
   tier that fits, and delegate when the user asks for it.

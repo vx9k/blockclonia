@@ -8,6 +8,5 @@
     "enabled": true
   },
   "maxEffortLevel": "high",
-  "advisorModel": "opus",
   "showThinkingSummaries": true
 }

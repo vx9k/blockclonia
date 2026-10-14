@@ -1,6 +1,6 @@
 # Subagents
 
-Claude Code subagents for this project, in three tiers by how much
+Claude Code subagents for this project, in four tiers by how much
 reasoning a task needs. Each `.md` file here is one agent: YAML
 frontmatter (name, description, model, effort, tools) and a system prompt.
 This README has no frontmatter, so Claude Code does not load it as an
@@ -10,15 +10,20 @@ rules through `CLAUDE.md`.)
 
 | Agent | Model | Effort | Tools | Use it for |
 |---|---|---|---|---|
+| `scout` | `claude-haiku-5-5` (Haiku 5.5, pinned) | `low` | Read, Bash | Read-only lookups: where something is defined or used, file summaries, callers, the real error in build or validation output |
 | `docs-writer` | `claude-haiku-5-5` (Haiku 5.5, pinned) | `medium` | Read, Edit, Write, Bash | Prose only: README and docs pages, comments, changelogs, templates, formatting |
-| `general-dev` | `opus` (Opus 5.5) | `medium` | Read, Edit, Write, Bash | Everyday features, contained refactors, reproducible bugs, tests, code review |
-| `deep-reasoning` | `opus` (Opus 5.5) | `high` | Read, Edit, Write, Bash | Architecture, hard cross-module bugs, wide blast radius, security-sensitive changes |
+| `general-dev` | `sonnet` (Sonnet) | `medium` | Read, Edit, Write, Bash | Everyday features, contained refactors, reproducible bugs, tests, code review |
+| `deep-reasoning` | `opus` (Opus 5.5) | `high` | Read, Edit, Write, Bash | Architecture, hard cross-module bugs, wide blast radius, security-sensitive changes, Vulkan synchronization, mem.h, chunk meshing, rendering pipeline design |
 
 ## What sends a task to each tier
 
 Claude chooses an agent by matching the task against each agent's
 `description`, so the descriptions are written as routing rules:
 
+- **scout**: the task is a lookup that changes nothing: where a symbol is
+  defined or used, what calls a function, a summary of a file, or the
+  real error in build, test or validation output. It never edits and
+  never makes a design decision; it reports what it found.
 - **docs-writer**: the task is writing or editing text, and the facts it
   needs are already in the code or the request. It edits only comments
   in code files, and stops if a real code change turns out to be needed.
@@ -27,7 +32,8 @@ Claude chooses an agent by matching the task against each agent's
   a review. It hands off to deep-reasoning when a task turns out bigger.
 - **deep-reasoning**: a mistake would be expensive. That covers design
   decisions, bugs that cross modules or won't reproduce, races and GPU
-  synchronization, shared formats and headers, and anything that parses
+  synchronization, shared formats and headers, the `mem.h` allocator,
+  chunk meshing and rendering pipeline design, and anything that parses
   untrusted files or touches the file system or dependency downloads.
 
 Delegation is up to the main session. It uses subagents when it judges
@@ -62,11 +68,13 @@ start a new session.
 The `effort` field in the frontmatter controls how much each tier
 reasons. It accepts `low`, `medium`, `high`, `xhigh`, `max` or an integer.
 deep-reasoning runs Opus at `high` rather than `max`, which Claude Code
-documents as "use sparingly for the hardest tasks", and general-dev runs
-the same model at `medium`, so the two differ only in effort. docs-writer
-runs Haiku 5.5 at `medium`: documentation needs the facts read carefully
-from the code, but not the depth of the engineering tiers. It is pinned
-to the full model ID so it stays on Haiku 5.5 when newer models ship.
+documents as "use sparingly for the hardest tasks". general-dev runs
+Sonnet at `medium`, and scout runs Haiku 5.5 at `low`, since a lookup
+needs the facts found, not a long chain of reasoning. docs-writer runs
+Haiku 5.5 at `medium`: documentation needs the facts read carefully
+from the code, but not the depth of the engineering tiers. scout and
+docs-writer are pinned to the full model ID so they stay on Haiku 5.5
+when newer models ship.
 Don't pass a `model` when spawning it: the call's `model` overrides the
 frontmatter.
 
@@ -85,13 +93,19 @@ wording.
 ## Notes
 
 - `model` accepts `haiku`, `sonnet`, `opus`, `fable`, `inherit` or a full
-  model ID. The engineering tiers use the `opus` alias, which resolves to the
-  newest Opus (Opus 5.5 at the time of writing), so a new release needs
-  no edit here; docs-writer pins `claude-haiku-5-5`. Pin a full model ID instead if a tier must stay on one version. If your organisation restricts models, a disallowed model
-  falls back to the session's model.
+  model ID. deep-reasoning uses the `opus` alias and general-dev uses
+  `sonnet`; each resolves to the newest model in its family (Opus 5.5 at
+  the time of writing), so a new release needs no edit here. scout and
+  docs-writer pin `claude-haiku-5-5`. Pin a full model ID instead if a
+  tier must stay on one version. If your organisation restricts models,
+  a disallowed model falls back to the session's model.
+- The advisor is off. `.claude/settings.json` has no `advisorModel`, and
+  Claude Code treats an unset key as off. Caveat: running
+  `/advisor <model>` saves the choice to the user settings, which turns
+  it back on.
 - This Claude Code build has no Grep or Glob tools, so every tier gets
-  Bash for searching (`grep` here is ugrep). docs-writer's prompt limits
-  it to read-only commands.
+  Bash for searching (`grep` here is ugrep). docs-writer's and scout's
+  prompts limit it to read-only commands.
 - No tier includes the `Agent` tool, so subagents don't spawn subagents
   of their own.
 - These files are checked into git so everyone working on the project
