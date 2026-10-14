@@ -426,6 +426,14 @@ blockclonia --play --host --name Alice          # UDP port 27450, or --port N
 blockclonia --join 192.168.1.20 --name Bob      # or ADDR:PORT
 ```
 
+To try it on one computer, give the second copy its own settings folder,
+so it has its own identity key (two copies sharing a key cannot connect):
+
+```sh
+blockclonia --play --host --name Alice
+mkdir -p /tmp/bob && blockclonia --config /tmp/bob/blockclonia.cfg --join 127.0.0.1 --name Bob
+```
+
 - **The host is the authority.** It simulates the world and every
   player's body, health, inventory and hands from what each player does,
   and saves the world. Joining players predict their own movement so it
