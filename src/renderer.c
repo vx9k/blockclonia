@@ -2062,7 +2062,7 @@ static int layer_has_alpha(uint32_t tex)
 {
     uint32_t l = tex & 255u;
     return l == T_GLASS || l == T_ICE || l == T_WATER || (l >= T_ITEM_STICK && l <= T_ITEM_WATER_BUCKET) ||
-           l == T_ITEM_DEFIBRILLATOR || (l >= T_CRACK0 && l <= T_FIRE3);
+           l == T_ITEM_DEFIBRILLATOR || (l >= T_ITEM_COAL && l <= T_ITEM_RAW_IRON) || (l >= T_CRACK0 && l <= T_FIRE3);
 }
 
 /* The terrain draws of a frame. With multi-draw indirect, consecutive draws
