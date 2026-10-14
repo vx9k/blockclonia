@@ -2,6 +2,7 @@
 #include "log.h"
 #include "mem.h"
 #include "os.h"
+#include "upnp.h"
 #include "wire.h"
 
 #include <enet/enet.h>
@@ -82,6 +83,7 @@ struct net {
     ENetAddress punch_to;
     double punch_until, punch_t;
     ENetAddress host_addr;        /* a joiner's dial target */
+    upnp *upnp;                   /* the router forward, when hosting */
     double dial_until;            /* < 0: set at the first poll */
     net_event q[QUEUE_LEN];
     int qh, qn;
@@ -847,6 +849,13 @@ int net_public_addr(const net *n, char *out, size_t cap)
     return 1;
 }
 
+void net_upnp(net *n)
+{
+    if (n->host && n->h && !n->upnp) n->upnp = upnp_open(n->port);
+}
+
+int net_upnp_state(const net *n, char *out, size_t cap) { return n->upnp ? upnp_state(n->upnp, out, cap) : 0; }
+
 int net_punch(net *n, const char *addr)
 {
     char host[64] = {0};
@@ -946,6 +955,7 @@ net *net_join(const nc_keypair *id, const char *name, const char *addr, uint16_t
 void net_destroy(net *n)
 {
     if (!n) return;
+    upnp_close(n->upnp);
     for (int i = 0; i < NETS_MAX; i++)
         if (g_nets[i].n == n) {
             g_nets[i].h = NULL;

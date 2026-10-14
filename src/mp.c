@@ -1107,16 +1107,34 @@ static void announce(mp *m, int id)
     }
 }
 
+/* Once, in the chat: where the internet reaches this game. A host whose
+ * router opened the port (UPnP) needs nothing more; otherwise friends get
+ * in by hole punching. */
+static void tell_reach(mp *m)
+{
+    char pub[96] = {0}, why[96] = {0}, line[NET_CHAT_MAX + 1] = {0};
+    int up = net_upnp_state(m->n, m->host ? pub : why, sizeof pub);
+    if (m->told_pub || (m->host && up == 0)) return;
+    if (up == 1) {
+        snprintf(line, sizeof line, "friends join you at %.60s (your router opened the port)", pub);
+    } else {
+        if (!net_public_addr(m->n, pub, sizeof pub)) return;
+        if (m->host && up < 0) net_upnp_state(m->n, why, sizeof why);
+        if (m->host)
+            snprintf(line, sizeof line,
+                     "friends join you at %.40s; %.80s, so they send you their address and you type "
+                     "/punch it",
+                     pub, why);
+        else snprintf(line, sizeof line, "the internet sees this game at %s", pub);
+    }
+    chat_add(m, "", line);
+    m->told_pub = 1;
+}
+
 void mp_poll(mp *m, double now)
 {
     m->now = now;
-    char pub[32] = {0};
-    if (!m->told_pub && net_public_addr(m->n, pub, sizeof pub)) {
-        char line[NET_CHAT_MAX + 1] = {0};
-        snprintf(line, sizeof line, "the internet sees this game at %s", pub);
-        chat_add(m, "", line);
-        m->told_pub = 1;
-    }
+    tell_reach(m);
     net_event e;
     while (net_poll(m->n, now, &e)) {
         char line[NET_CHAT_MAX + 1] = {0};

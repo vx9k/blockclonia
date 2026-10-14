@@ -128,6 +128,12 @@ uint16_t net_port(const net *n);
 void net_stun(net *n);
 /* That address as "a.b.c.d:port" in out; 1 once known, else 0. */
 int net_public_addr(const net *n, char *out, size_t cap);
+/* Host: asks the home router (UPnP) to forward this side's UDP port, so
+ * friends can join by address alone; runs in the background. */
+void net_upnp(net *n);
+/* Host: 0 while asking, 1 once the router forwards the port (out: the
+ * address friends join), -1 if not (out: why). Also 0 if never asked. */
+int net_upnp_state(const net *n, char *out, size_t cap);
 /* Sends small packets to addr ("a.b.c.d:port") for 30 s from this side's
  * socket, so this side's router lets that address in. 0, or -1 if addr
  * does not parse. */

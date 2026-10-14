@@ -150,12 +150,14 @@ fixed on the branch):
 - *Headless server* (`--server`): runs the authority without a window,
   GPU or audio. Needs world streaming around every player instead of one
   camera, and a console for chat and admin.
-- [x] *NAT traversal* (first version): STUN (stun.l.google.com) tells
-  each game its public address, the joiner redials for a minute, and the
-  host's `/punch ADDR:PORT` opens its router to the joiner. Left: a
-  rendezvous server so nobody swaps addresses by hand, the joiner's
-  address shown on screen while it waits (only the log has it), and a
-  relay for symmetric NATs.
+- [x] *NAT traversal*: the host's router forwards the game's port by
+  UPnP (miniupnpc), so friends join by address alone; where UPnP is off,
+  STUN (stun.l.google.com) tells each game its public address, the
+  joiner redials for a minute, and the host's `/punch ADDR:PORT` opens
+  its router to the joiner. Left: NAT-PMP/PCP for routers that do those
+  but not UPnP, a rendezvous server so nobody swaps addresses by hand
+  when UPnP is off, the joiner's address on screen while it waits (only
+  the log has it), and a relay for symmetric NATs.
 - *Headless server* (`--server`): started on `feat/headless-server`
   (local work, 2026-10-14): `mp_set_dedicated` (the server's stand-in
   player is never seen or hit), `mp_kick`/`net_kick`,

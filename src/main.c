@@ -1357,6 +1357,7 @@ static void start_host(game *g)
     }
     if (g->o.client_server) net_no_mesh(n);
     net_stun(n);
+    net_upnp(n);
     mp_world ctx = mp_ctx(g);
     g->mp = mp_create(n, &ctx);
     g->hooks.mp = g->mp;

@@ -479,21 +479,21 @@ mkdir -p /tmp/bob && blockclonia --config /tmp/bob/blockclonia.cfg --join 127.0.
   inventory with the world, by their identity key, so they get them back
   when they next join, in this session or a later one (health is not
   saved, the host's own included).
-- **Playing across the internet (hole punching).** Each game asks a
-  public STUN server which address the internet sees it at and shows it
-  in the chat and the log ("the internet sees this game at
-  203.0.113.5:27450"). To let a friend in without forwarding a port:
-  1. The friend joins your shown address (`--join 203.0.113.5:27450` or
-     the Multiplayer screen). Their game keeps trying for a minute and
-     prints its own address in its log ("the world sees this game at
-     198.51.100.7:41234").
-  2. They send you that address (any chat app), and you type
-     `/punch 198.51.100.7:41234` in the game's chat (T) within that
-     minute. Your router opens to them and they get in.
+- **Playing across the internet.** When you host, the game asks your
+  home router (UPnP) to open its port and shows in the chat where friends
+  join: "friends join you at 203.0.113.5:27450 (your router opened the
+  port)". Your friend types that address in Multiplayer and presses
+  Join; nothing else is needed. The port is closed again when you stop
+  hosting.
 
-  This works across most home routers. It does not work when either side
-  is behind a symmetric NAT (some mobile and corporate networks); then
-  forward UDP port 27450 on the host's router, or use a VPN.
+  If your router has UPnP off (the chat says so), hole punching still
+  gets friends in: they join your shown address, their game keeps trying
+  for a minute and prints its own address in its log ("the world sees
+  this game at 198.51.100.7:41234"), they send it to you, and you type
+  `/punch 198.51.100.7:41234` in the chat (T) within that minute. That
+  works across most home routers, not when either side is behind a
+  symmetric NAT (some mobile and corporate networks); then forward UDP
+  port 27450 on the host's router by hand, or use a VPN.
 - **Limits.** When the host leaves, the session ends. Players need an address the others can reach: the same network,
   a forwarded UDP port or a VPN.
 
