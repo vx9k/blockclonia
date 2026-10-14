@@ -677,7 +677,10 @@ static int advice(const health *h, int part, char *buf, size_t n)
 }
 
 static int in_rect(const hud_state *s, float x, float y, float w, float h)
-{ return s->mx >= x && s->mx < x + w && s->my >= y && s->my < y + h; }
+{
+    int across = s->mx >= x && s->mx < x + w;
+    return across && s->my >= y && s->my < y + h;
+}
 
 /* The treatment buttons along the bottom of the panel, with their keys and
  * what each risks when it is the wrong thing to do. */
@@ -840,7 +843,7 @@ static void panel(ui *u, const health *h, hud_state *s)
     const int nb = (int)(sizeof BUTTONS / sizeof BUTTONS[0]), per_row = (nb + 1) / 2;
     const float bw = (pw - 16 - (float)(per_row - 1) * 2) / (float)per_row;
     for (int i = 0; i < nb; i++) {
-        float bx = x0 + 8 + (float)(i % per_row) * (bw + 2), by2 = y0 + ph - 23 + (float)(i / per_row) * 11;
+        float bx = x0 + 8 + (float)(i % per_row) * (bw + 2), by2 = y0 + ph - 23 + (i >= per_row ? 11.0f : 0.0f);
         int hot = in_rect(s, bx, by2, bw, 10);
         int risky = BUTTONS[i].treat == TREAT_SHOCK || BUTTONS[i].treat == TREAT_ADRENALINE;
         ui_rect(u, bx, by2, bw, 10, hot ? ui_rgba(60, 70, 84, 255) : ui_rgba(28, 32, 40, 255));
