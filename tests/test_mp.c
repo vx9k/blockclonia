@@ -82,6 +82,41 @@ static int avatar(const mp *m, int id, mp_avatar *out)
     return 0;
 }
 
+/* The client joins (again): until it is welcomed, has its world and the
+ * column at the origin. Returns 1 when it got that far. */
+static int client_join(host_side *h, client_side *c, const nc_keypair *kc, uint16_t port)
+{
+    c->js = jobs_create(0);
+    inv_init(&c->inv);
+    memset(&c->pl, 0, sizeof c->pl);
+    net *cn = net_join(kc, "Client", "127.0.0.1", port, 0, NULL);
+    if (!cn) return 0;
+    mp_world cw = {&c->w, &c->ph, c->th, NULL, &c->pl, c->hl, &c->inv, 0, NULL};
+    c->m = mp_create(cn, &cw);
+    uint32_t seed = 0;
+    for (int i = 0; i < 3000 && !mp_welcome(c->m, &seed); i++) frame(h, c, NULL);
+    if (!mp_welcome(c->m, &seed) || seed != 1) return 0;
+    world_init(&c->w, seed, 2, c->js, NULL);
+    c->w.generator = test_flat_gen; /* only if a column from the host fails to decode */
+    physics_init(&c->ph, &c->w);
+    mp_attach(c->m, &cw);
+    for (int i = 0; i < 5000 && !(mp_ready(c->m) && world_column(&c->w, 0, 0)); i++) frame(h, c, NULL);
+    return mp_ready(c->m) && world_column(&c->w, 0, 0) != NULL;
+}
+
+static void client_leave(host_side *h, client_side *c)
+{
+    mp_destroy(c->m);
+    physics_destroy(&c->ph);
+    world_destroy(&c->w);
+    jobs_destroy(c->js);
+    mp_avatar me = {0};
+    for (int i = 0; i < 2000 && avatar(h->m, 1, &me); i++) {
+        mp_poll(h->m, os_now());
+        os_sleep(0.001);
+    }
+}
+
 void test_mp_all(void)
 {
     CHECK(nc_init() == 0);
@@ -98,6 +133,8 @@ void test_mp_all(void)
     h.hl = new_body(1);
     inv_init(&h.inv);
     nc_keypair kh = {0}, kc = {0};
+    c.th = thermo_create(1);
+    c.hl = new_body(2);
     nc_keypair_new(&kh);
     nc_keypair_new(&kc);
     net *hn = NULL;
@@ -124,23 +161,7 @@ void test_mp_all(void)
     /* A block placed before the client arrives comes with the terrain. */
     CHECK(world_set(&h.t.w, 3, GROUND, 3, B_PLANKS, 0));
 
-    c.js = jobs_create(0);
-    c.th = thermo_create(1);
-    c.hl = new_body(2);
-    inv_init(&c.inv);
-    net *cn = net_join(&kc, "Client", "127.0.0.1", port, 0, NULL);
-    CHECK(cn != NULL);
-    mp_world cw = {&c.w, &c.ph, c.th, NULL, &c.pl, c.hl, &c.inv, 0, NULL};
-    c.m = mp_create(cn, &cw);
-    uint32_t seed = 0;
-    for (int i = 0; i < 3000 && !mp_welcome(c.m, &seed); i++) frame(&h, &c, NULL);
-    CHECK(mp_welcome(c.m, &seed) && seed == 1);
-    world_init(&c.w, seed, 2, c.js, NULL);
-    c.w.generator = test_flat_gen; /* only if a column from the host fails to decode */
-    physics_init(&c.ph, &c.w);
-    mp_attach(c.m, &cw);
-    for (int i = 0; i < 5000 && !(mp_ready(c.m) && world_column(&c.w, 0, 0)); i++) frame(&h, &c, NULL);
-    CHECK(mp_ready(c.m) && world_column(&c.w, 0, 0) != NULL);
+    CHECK(client_join(&h, &c, &kc, port));
     CHECK(world_get(&c.w, 3, GROUND, 3) == B_PLANKS);
     /* Joined, with the fingerprint, and a warning that the key changed. */
     const mp_chat_line *lines = NULL;
@@ -215,17 +236,23 @@ void test_mp_all(void)
     CHECK(!mp_ended(c.m, NULL) && avatar(h.m, 1, &me));
     CHECK(fabs(c.pl.pos.x) < WORLD_LIMIT && fabs(c.pl.pos.z) < WORLD_LIMIT);
 
-    /* The client leaves. */
-    mp_destroy(c.m);
-    physics_destroy(&c.ph);
-    world_destroy(&c.w);
-    jobs_destroy(c.js);
-    for (int i = 0; i < 2000 && avatar(h.m, 1, &me); i++) {
-        mp_poll(h.m, os_now());
-        os_sleep(0.001);
-    }
+    /* The client leaves: what it carried does not fall out (rejoining
+     * would otherwise make a fresh kit every time), and joining again
+     * gives it back. */
+    for (int i = 0; i < 60; i++) frame(&h, &c, NULL);
+    inventory had = c.inv;
+    int items = h.t.ph.item_count;
+    client_leave(&h, &c);
     CHECK(!avatar(h.m, 1, &me));
     CHECK(strstr(last_chat(h.m)->text, "Client left") != NULL);
+    CHECK(h.t.ph.item_count == items);
+    CHECK(client_join(&h, &c, &kc, port));
+    for (int i = 0; i < 60; i++) frame(&h, &c, NULL);
+    int same = c.inv.cursor.id == had.cursor.id && c.inv.cursor.count == had.cursor.count;
+    for (int i = 0; i < INV_SLOTS; i++)
+        same &= c.inv.slot[i].id == had.slot[i].id && c.inv.slot[i].count == had.slot[i].count;
+    CHECK(same && had.cursor.count > 0);
+    client_leave(&h, &c);
 
     mp_destroy(h.m);
     thermo_destroy(c.th);

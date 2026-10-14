@@ -26,6 +26,10 @@
 #define VIEW_RANGE 48.0
 #define INTERP_DELAY 0.1    /* s a client draws others in the past */
 #define CLICKS 5
+#define GONE_MAX 16          /* departed players remembered for a rejoin */
+#define COLUMN_RATE 64.0     /* columns per second a player may be sent ... */
+#define COLUMN_BURST 160.0   /* ... after a burst of this many (joining at radius 8) */
+_Static_assert(SAVE_MAX_FILE + 9 <= NET_MAX_MESSAGE, "a column message must fit ENet's packet cap");
 
 enum { C_INPUT = 1, C_OP, C_COLUMN };
 enum { H_WELCOME = 16, H_COLUMN, H_EDITS, H_SNAP, H_HEALTH, H_INV, H_MSG };
@@ -64,7 +68,19 @@ typedef struct {
     ipos crack;
     float crack_p;
     int cracking;
+    double col_tokens, col_t; /* column send budget */
 } remote;
+
+/* A player who left, by identity key: rejoining gives them back what they
+ * had instead of a fresh kit, so leaving and joining again makes nothing. */
+typedef struct {
+    int used;
+    uint32_t age;
+    uint8_t pk[NC_KEY_BYTES];
+    health *hl;
+    inventory inv;
+    uint32_t rng;
+} gone;
 
 typedef struct {
     int present;
@@ -99,9 +115,12 @@ struct mp {
     mp_chat_line chat[MP_CHAT_LINES];
     int chat_n;
     char names[NET_MAX_PLAYERS][NET_NAME_MAX + 1]; /* kept past a player leaving, for the notice */
+    uint8_t keys[NET_MAX_PLAYERS][NC_KEY_BYTES];   /* ... and their keys, to remember what they had */
     ipos edits[EDITS_MAX];
     int edit_n;
     uint16_t edit_set[EDIT_SET]; /* index + 1 into edits, 0 empty */
+    gone gone[GONE_MAX];
+    uint32_t gone_age;
     uint32_t step;
     double now;
     uint8_t *buf;
@@ -209,6 +228,7 @@ void mp_destroy(mp *m)
 {
     if (!m) return;
     for (int i = 0; i < NET_MAX_PLAYERS; i++) mem_free(m->r[i].hl);
+    for (int i = 0; i < GONE_MAX; i++) mem_free(m->gone[i].hl);
     if (m->c.attached) m->ctx.w->on_column_request = NULL;
     net_destroy(m->n);
     mem_free(m->buf);
@@ -240,11 +260,26 @@ static void host_join(mp *m, int id)
     mem_free(r->hl);
     memset(r, 0, sizeof *r);
     r->active = 1;
-    r->rng = m->ctx.seed ^ (uint32_t)id * 2654435761u;
-    r->hl = mem_alloc(sizeof *r->hl);
-    health_init_varied(r->hl, r->rng);
-    inv_init(&r->inv);
-    inv_starting_kit(&r->inv);
+    r->col_tokens = COLUMN_BURST;
+    r->col_t = m->now;
+    const uint8_t *key = net_player_key(m->n, id);
+    gone *back = NULL;
+    for (int i = 0; i < GONE_MAX && key; i++)
+        if (m->gone[i].used && memcmp(m->gone[i].pk, key, NC_KEY_BYTES) == 0) back = &m->gone[i];
+    if (back) {
+        r->hl = back->hl;
+        r->inv = back->inv;
+        r->rng = back->rng;
+        back->hl = NULL;
+        back->used = 0;
+    } else {
+        r->rng = m->ctx.seed ^ (uint32_t)id * 2654435761u ^
+                 (key ? (uint32_t)key[0] << 24 | (uint32_t)key[1] << 16 : 0u);
+        r->hl = mem_alloc(sizeof *r->hl);
+        health_init_varied(r->hl, r->rng);
+        inv_init(&r->inv);
+        inv_starting_kit(&r->inv);
+    }
     interact_init(&r->ia, r->rng);
     /* Next to the host, inside the terrain its world has loaded. */
     const player *h = m->ctx.pl;
@@ -259,12 +294,29 @@ static void host_join(mp *m, int id)
     net_send(m->n, id, NET_CH_GAME, buf, w.len);
 }
 
-static void host_leave(mp *m, int id)
+/* Keeps what a leaving player had, by key, for the rest of the session. */
+static void host_leave(mp *m, int id, const uint8_t *key)
 {
     remote *r = &m->r[id];
     if (!r->active) return;
-    /* What they carried stays in the world rather than vanishing. */
-    survival_drop_all(m->ctx.ph, &r->inv, &r->pl, &r->rng);
+    if (key) {
+        gone *g = &m->gone[0];
+        for (int i = 0; i < GONE_MAX; i++) {
+            if (m->gone[i].used && memcmp(m->gone[i].pk, key, NC_KEY_BYTES) == 0) {
+                g = &m->gone[i];
+                break;
+            }
+            if (!m->gone[i].used || m->gone[i].age < g->age) g = &m->gone[i];
+        }
+        mem_free(g->hl);
+        g->used = 1;
+        g->age = ++m->gone_age;
+        memcpy(g->pk, key, NC_KEY_BYTES);
+        g->hl = r->hl;
+        g->inv = r->inv;
+        g->rng = r->rng;
+        r->hl = NULL;
+    }
     mem_free(r->hl);
     memset(r, 0, sizeof *r);
 }
@@ -342,7 +394,7 @@ static void host_column(remote *r, wire_r *rd)
     int cx = wire_get_i32(rd), cz = wire_get_i32(rd);
     if (rd->bad || rd->pos != rd->len || r->col_n == COLUMN_QUEUE) return;
     int pcx = chunk_of((int)floor(r->pl.pos.x)), pcz = chunk_of((int)floor(r->pl.pos.z));
-    if (abs(cx - pcx) > COLUMN_REACH || abs(cz - pcz) > COLUMN_REACH) return;
+    if (llabs((long long)cx - pcx) > COLUMN_REACH || llabs((long long)cz - pcz) > COLUMN_REACH) return;
     int at = (r->col_h + r->col_n++) % COLUMN_QUEUE;
     r->col[at][0] = cx;
     r->col[at][1] = cz;
@@ -558,7 +610,10 @@ static void host_flush(mp *m)
     for (int id = 1; id < NET_MAX_PLAYERS; id++) {
         remote *r = &m->r[id];
         if (!r->active) continue;
-        for (int k = 0; k < COLUMNS_PER_FRAME && r->col_n; k++) {
+        r->col_tokens = fmin(COLUMN_BURST, r->col_tokens + (m->now - r->col_t) * COLUMN_RATE);
+        r->col_t = m->now;
+        for (int k = 0; k < COLUMNS_PER_FRAME && r->col_n && r->col_tokens >= 1.0; k++) {
+            r->col_tokens -= 1.0;
             int cx = r->col[r->col_h][0], cz = r->col[r->col_h][1];
             r->col_h = (r->col_h + 1) % COLUMN_QUEUE;
             r->col_n--;
@@ -675,7 +730,8 @@ static void client_edits(mp *m, wire_r *rd)
     for (int i = 0; i < count && !rd->bad; i++) {
         int x = wire_get_i32(rd), y = wire_get_u8(rd), z = wire_get_i32(rd);
         uint8_t id = wire_get_u8(rd), meta = wire_get_u8(rd);
-        if (rd->bad || id >= B_COUNT || meta > 7 || y >= WORLD_H || abs(x) >= WORLD_LIMIT || abs(z) >= WORLD_LIMIT) {
+        if (rd->bad || id >= B_COUNT || meta > 7 || y >= WORLD_H || llabs((long long)x) >= WORLD_LIMIT ||
+            llabs((long long)z) >= WORLD_LIMIT) {
             rd->bad = 1;
             return;
         }
@@ -697,7 +753,7 @@ static void client_snapshot(mp *m, wire_r *rd)
     if (rd->bad || player_decode(&auth, pb, pn) != 0) return;
     int cracking = wire_get_u8(rd);
     ipos crack = {wire_get_i32(rd), wire_get_u8(rd), wire_get_i32(rd)};
-    float crack_p = wire_get_f32(rd);
+    float crack_p = fminf(fmaxf(wire_get_f32(rd), 0.0f), 1.0f);
 
     struct {
         dvec3 pos;
@@ -894,12 +950,13 @@ void mp_poll(mp *m, double now)
         switch (e.type) {
         case NET_EV_JOINED:
             snprintf(m->names[e.player], sizeof m->names[0], "%s", net_player_name(m->n, e.player));
+            if (net_player_key(m->n, e.player)) memcpy(m->keys[e.player], net_player_key(m->n, e.player), NC_KEY_BYTES);
             if (m->host) host_join(m, e.player);
             if (e.player != net_me(m->n)) announce(m, e.player);
             break;
         case NET_EV_LEFT:
             snprintf(line, sizeof line, "%s left", m->names[e.player]);
-            if (m->host) host_leave(m, e.player);
+            if (m->host) host_leave(m, e.player, m->keys[e.player]);
             else m->c.g[e.player].present = 0;
             chat_add(m, "", line);
             break;

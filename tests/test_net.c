@@ -7,8 +7,8 @@
 #include "save.h"
 #include "wire.h"
 
-#include <enet/enet.h>
 #include "test_util.h"
+#include <enet/enet.h>
 
 #include <stdio.h>
 #include <string.h>
