@@ -14,10 +14,9 @@ One branch and pull request per item, in this order:
    #29): tool tiers, wear (INV2), knife and sword, a rifle with
    bullets and cartridges, boars and wolves. Left for later: creatures
    are not saved (they respawn around players); no visible bullet
-   tracer or muzzle flash; no armour; the host's player is the only one
-   who can hit remote players on a client's screen before the next
-   snapshot (blows are judged on the host, so a client sees its hit
-   land up to 50 ms late); more creatures (deer, bears, fish).
+   tracer or muzzle flash; no armour; a client's blows and shots are
+   judged on the host, so they land one round trip late; more creatures
+   (deer, bears, fish).
 3. **Inventory screen redesign**: recipes grouped in collapsible
    categories with scrolling, richer tooltips (ingredients, station,
    durability, stats), hover and selection states. After item 2, so it
