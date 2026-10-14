@@ -47,4 +47,10 @@ void hud_update(hud_state *s, const health *h, float dt);
 /* The HUD, plus the H panel or the death screen when they are showing. */
 void hud_draw(ui *u, const health *h, const hud_state *s);
 
+/* How the body is doing in one line, from the same alerts the HUD shows:
+ * "Healthy", "Hurt", "Badly hurt", "Almost dead" or "Dead man walking",
+ * followed by the most urgent alert in brackets, or how they died. For
+ * places outside the game that show it in a word (Discord's status). */
+void hud_condition(const health *h, char *buf, size_t n);
+
 #endif

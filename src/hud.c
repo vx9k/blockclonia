@@ -288,6 +288,28 @@ static int collect_alerts(const health *h, alert *a, int max)
     return l.n;
 }
 
+void hud_condition(const health *h, char *buf, size_t n)
+{
+    if (h->dead) {
+        snprintf(buf, n, "%s", health_death_text(h->cause));
+        return;
+    }
+    alert a[HUD_ALERTS] = {0};
+    int count = collect_alerts(h, a, HUD_ALERTS), top = -1;
+    for (int i = 0; i < count; i++)
+        if (top < 0 || a[i].sev > a[top].sev) top = i;
+    int sev = top >= 0 ? a[top].sev : 0;
+    /* No circulation, or past the ~3 minutes of starved tissue after which
+     * shock no longer turns around (health.h): alive, but not for long. */
+    const char *word = "Healthy";
+    if (!health_rhythm_perfusing(h->rhythm) || h->shock_debt >= 3.0f) word = "Dead man walking";
+    else if (sev >= 3 || h->conscious == CONS_UNCONSCIOUS) word = "Almost dead";
+    else if (sev == 2) word = "Badly hurt";
+    else if (sev == 1) word = "Hurt";
+    if (sev > 0) snprintf(buf, n, "%s (%s)", word, a[top].text);
+    else snprintf(buf, n, "%s", word);
+}
+
 static float approach(float cur, float target, float dt, float tau)
 { return cur + (target - cur) * (1.0f - expf(-dt / tau)); }
 

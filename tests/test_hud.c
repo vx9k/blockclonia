@@ -2,7 +2,8 @@
  * that sit at a fixed distance from the right edge of their box, and the
  * H panel fitting the screen at every GUI scale. Drawing only reads the
  * body, so these set it to the widest readouts directly rather than
- * playing out a scenario. */
+ * playing out a scenario. Also the one-line condition (hud_condition)
+ * read from the same alerts. */
 #include "debug.h"
 #include "hud.h"
 #include "mem.h"
@@ -186,10 +187,39 @@ static void test_ui_fit(void)
     CHECK(u.scale == 1.0f && u.w == 500.0f);
 }
 
+/* The one-line condition shown outside the game (Discord's status). */
+static void test_condition(void)
+{
+    char buf[128] = {0};
+    health *h = new_body(7);
+    hud_condition(h, buf, sizeof buf);
+    CHECK(strcmp(buf, "Healthy") == 0);
+
+    health_arrest(h, RHYTHM_VF);
+    hud_condition(h, buf, sizeof buf);
+    CHECK(strncmp(buf, "Dead man walking (CARDIAC ARREST", 32) == 0);
+
+    h->dead = 1;
+    h->cause = DEATH_BLOOD_LOSS;
+    hud_condition(h, buf, sizeof buf);
+    CHECK(strcmp(buf, health_death_text(DEATH_BLOOD_LOSS)) == 0);
+    mem_free(h);
+
+    /* A bleeding arm reads as hurt, naming the bleeding. */
+    h = new_body(7);
+    health_env e = calm_env();
+    health_cut(h, BP_LARM, 0.6f, 0, 0.0f);
+    live(h, &e, 2.0);
+    hud_condition(h, buf, sizeof buf);
+    CHECK(strncmp(buf, "Healthy", 7) != 0 && strstr(buf, "Bleeding") != NULL);
+    mem_free(h);
+}
+
 void test_hud_all(void)
 {
     test_ui_fit();
     test_debug_left_bottom();
     test_vitals_fits();
     test_monitor_bp_fits();
+    test_condition();
 }
