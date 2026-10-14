@@ -260,8 +260,8 @@ static int item_facts(const item_stack *st, char lines[4][48])
 
 /* The card under the slots: a big icon, the description and the facts of
  * the hovered slot or recipe (or the item in hand). */
-static void detail_card(ui *u, float x, float y, float w, float h, const inventory *inv, const item_stack *st,
-                        int rec, int stations, float a)
+static void detail_card(ui *u, float x, float y, float w, float h, const inventory *inv, const item_stack *st, int rec,
+                        int stations, float a)
 {
     ui_rect(u, x, y, w, h, ui_alpha(ui_rgba(20, 24, 30, 220), a));
     ui_frame(u, x, y, w, h, 1, ui_alpha(C_BORDER, a));
@@ -296,7 +296,8 @@ static void detail_card(ui *u, float x, float y, float w, float h, const invento
     }
     char lines[4][48] = {{0}};
     int n = item_facts(st, lines);
-    for (int i = 0; i < n && ly < y + h - 8; i++, ly += 11) ui_text(u, x + 6, ly, 1, ui_alpha(C_TEXT, a), lines[i]);
+    for (int i = 0; i < n && ly + 11.0f * (float)i < y + h - 8; i++)
+        ui_text(u, x + 6, ly + 11.0f * (float)i, 1, ui_alpha(C_TEXT, a), lines[i]);
     int dur = item_durability(st->id);
     if (dur) {
         float left = 1.0f - (float)st->wear / (float)dur;
@@ -409,7 +410,8 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
         float st = ease_out_cubic((s->open_t - 0.02f * (float)(k - s->recipe_top)) / 0.25f) * fade;
         if (cr->recipe < 0) {
             /* A category header: its name, how many can be made, a toggle. */
-            int open = (s->cat_open >> cr->cat) & 1u, can = 0, total = cat_counts(inv, cr->cat, in->stations, &can);
+            int open = (s->cat_open & (1u << cr->cat)) != 0, can = 0;
+            int total = cat_counts(inv, cr->cat, in->stations, &can);
             ui_rect(u, cx, ry, cw, row_h, ui_alpha(hot ? ui_rgba(36, 42, 52, 240) : ui_rgba(28, 32, 40, 230), st));
             ui_rect(u, cx, ry + row_h - 1, cw, 1, ui_alpha(C_BORDER, st));
             ui_textf(u, cx + 4, ry + 5, 1, ui_alpha(C_HEAD, st), "%s %s", open ? "-" : "+", CAT_NAME[cr->cat]);
@@ -422,7 +424,8 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
         const recipe *rc = &g_recipes[cr->recipe];
         int ok = inv_can_craft(inv, cr->recipe, in->stations);
         if (hot) hover_recipe = cr->recipe;
-        ui_rect(u, cx + 6, ry, cw - 6, row_h, ui_alpha(hot && ok ? ui_rgba(40, 52, 50, 235) : ui_rgba(22, 26, 32, 220), st));
+        ui_rect(u, cx + 6, ry, cw - 6, row_h,
+                ui_alpha(hot && ok ? ui_rgba(40, 52, 50, 235) : ui_rgba(22, 26, 32, 220), st));
         ui_frame(u, cx + 6, ry, cw - 6, row_h, 1, ui_alpha(hot && ok ? C_ECG : (hot ? C_DIM : C_BORDER), st));
         float a = st * (ok ? 1.0f : 0.45f);
         invui_icon(u, rc->out.id, cx + 9, ry + 1, 16, a);
@@ -441,7 +444,9 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
             ui_text_shadow(u, ix + 12, ry + 9, 1, ui_alpha(have >= rc->in[m].count ? C_HEAD : C_ART, st), b);
         }
         /* A stripe on the left for a station: yellow when near, red if not. */
-        if (rc->station) ui_rect(u, cx + 6, ry + 2, 2, row_h - 4, ui_alpha((in->stations & rc->station) == rc->station ? C_CO2 : C_ART, st));
+        if (rc->station)
+            ui_rect(u, cx + 6, ry + 2, 2, row_h - 4,
+                    ui_alpha((in->stations & rc->station) == rc->station ? C_CO2 : C_ART, st));
         if (hot && in->click && ok) {
             int n = 0;
             while (inv_craft(inv, cr->recipe, in->stations) && ++n < (in->shift ? 64 : 1)) {}
