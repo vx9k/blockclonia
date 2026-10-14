@@ -1255,9 +1255,7 @@ static void open_world(game *g, const char *dir, int backdrop)
     camera_init(&g->cam);
     g->death_rng = g->seed;
     g->hs.alert_count = 0;
-    if (g->db) {
-        save_db_set_meta(g->db, "last_played", (int64_t)time(NULL));
-    }
+    if (g->db) save_db_set_meta(g->db, "last_played", (int64_t)time(NULL));
     /* The name goes out to Discord, and world files are shared: only a
      * valid one is used. */
     g->world_name[0] = '\0';
