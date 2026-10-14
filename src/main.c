@@ -300,7 +300,7 @@ static int parse_int_option(options *o, const char *a, const char *v, int *ok)
 static int valid_screen(const char *v)
 {
     static const char *const NAMES[] = {"title", "pause",     "settings", "controls", "debug-health",
-                                        "game",  "inventory", "worlds",   "create", "multiplayer"};
+                                        "game",  "inventory", "worlds",   "create",   "multiplayer"};
     for (size_t i = 0; i < sizeof NAMES / sizeof NAMES[0]; i++)
         if (strcmp(v, NAMES[i]) == 0) return 1;
     return 0;

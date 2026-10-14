@@ -573,7 +573,8 @@ static void multiplayer_screen(ctx *c)
     const float w = 320, h = 150;
     panel(u, m->age, w, h, &x, &y, "MULTIPLAYER");
     int join = text_field(c, x + 8, y + 24, w - 16, "Name", m->text_player, sizeof m->text_player, "your name");
-    join |= text_field(c, x + 8, y + 46, w - 16, "Address", m->text_addr, sizeof m->text_addr, "192.168.1.20 or host:port");
+    join |= text_field(c, x + 8, y + 46, w - 16, "Address", m->text_addr, sizeof m->text_addr,
+                       "192.168.1.20 or host:port");
     cycle(c, x + 8, y + 68, w - 16, "Hosting: players connect", &m->client_server, CONNECT, 2);
     if (m->note[0]) ui_text_wrap(u, x + 8, y + 92, w - 16, 2, 1, C_ART, m->note);
     float by = y + h - 8 - ROW_H, bw = (w - 16 - 2 * 4) / 3;
