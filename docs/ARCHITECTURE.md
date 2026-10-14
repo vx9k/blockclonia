@@ -66,7 +66,7 @@ accumulator stays at zero, so the world stands still.
 | Thread | Runs | Touches |
 |---|---|---|
 | Main | everything in the frame above | all game state |
-| Workers (`jobs.c`, cores − 1, at most 8) | terrain generation (decoding a saved column first), meshing | only the job's own data: a column being generated, or a snapshot of a section and its neighbours |
+| Workers (`jobs.c`, cores − 1 while memory allows; `sys_plan`) | terrain generation (decoding a saved column first), meshing | only the job's own data: a column being generated, or a snapshot of a section and its neighbours |
 | Audio (miniaudio's device thread) | `sound_render`: mixing voices | the mixer's own voices, fed by a lock-free single-producer ring |
 | Driver threads | whatever the Vulkan driver does | nothing of ours |
 

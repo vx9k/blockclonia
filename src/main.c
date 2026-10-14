@@ -4,6 +4,7 @@
 #include "bench.h"
 #include "camera.h"
 #include "debug.h"
+#include "discord.h"
 #include "fx.h"
 #include "health.h"
 #include "hud.h"
@@ -15,6 +16,7 @@
 #include "mem.h"
 #include "menu.h"
 #include "mesher.h"
+#include "os.h"
 #include "paths.h"
 #include "physics.h"
 #include "renderer.h"
@@ -23,10 +25,12 @@
 #include "settings.h"
 #include "sound.h"
 #include "survival.h"
+#include "sysinfo.h"
 #include "thermo.h"
 #include "ui.h"
 #include "viewmodel.h"
 #include "world.h"
+#include "worlds.h"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -62,6 +66,7 @@ typedef struct {
     int have_radius, no_vsync;
     const char *config;  /* settings file */
     int play;            /* skip the title screen */
+    int world_given;     /* --world or --no-save: play that, never the backdrop */
     const char *screen;  /* open this screen at start (screenshots) */
     int debug;           /* start with F3 on */
     const char *give;    /* items to start with: "stone:32,apple:3" */
@@ -89,12 +94,19 @@ typedef struct {
     int screen;         /* menu screen, SCREEN_NONE while playing */
     int debug;          /* F3 overlay */
     int lost_focus;     /* the window lost focus: pause */
+    int focused;        /* the window has the keyboard (for mute in background) */
+    int focus_changed;
+    int toggle_fullscreen; /* F11 */
     int sprint_latch;   /* toggle-sprint mode: Ctrl flips this */
     int sprint_tap;     /* W double-tapped: sprint until W is released */
     double last_w;      /* time of the last W press */
     int sprint_toggle;  /* copy of the setting, for the key callback */
     /* Menu input, gathered by the callbacks and consumed once per frame. */
     int ui_click, ui_down, ui_up, ui_dn, ui_left, ui_right, ui_enter, ui_back;
+    int ui_letter;      /* the navigation key this frame was W/A/S/D/Space */
+    int ui_backspace;
+    char text[16];      /* printable ASCII typed this frame, for text fields */
+    int text_len;
 } input_state;
 
 static input_state g_in;
@@ -105,7 +117,7 @@ static paths g_paths; /* where files go unless --config or --world say otherwise
 /* long long: `long` is 32-bit on 32-bit ARM, where (long)UINT32_MAX is -1. */
 static int parse_int(const char *s, long long lo, long long hi, long long *out)
 {
-    char *end;
+    char *end = NULL;
     errno = 0;
     long long v = strtoll(s, &end, 10);
     if (errno || end == s || *end || v < lo || v > hi) return 0;
@@ -116,7 +128,7 @@ static int parse_int(const char *s, long long lo, long long hi, long long *out)
 /* "<a><sep><b>" with both integers in [lo, hi], e.g. 1280x720 or -40,12. */
 static int parse_int_pair(const char *s, char sep, long long lo, long long hi, long long *a, long long *b)
 {
-    char *end;
+    char *end = NULL;
     errno = 0;
     long long x = strtoll(s, &end, 10);
     if (errno || end == s || *end != sep || x < lo || x > hi) return 0;
@@ -131,7 +143,7 @@ static int parse_int_pair(const char *s, char sep, long long lo, long long hi, l
 /* "<a>,<b>" with both finite floats of magnitude at most `lim`. */
 static int parse_float_pair(const char *s, float lim, float *a, float *b)
 {
-    char *end;
+    char *end = NULL;
     errno = 0;
     float x = strtof(s, &end);
     if (errno || end == s || *end != ',' || !(fabsf(x) <= lim)) return 0;
@@ -172,7 +184,7 @@ static void usage(void)
            "  --radius N        render distance in chunks, 2-32 (default 8)\n"
            "  --size WxH        window size (default 1280x720)\n"
            "  --no-vsync        uncapped frame rate\n"
-           "  --threads N       worker threads (default: cores - 1)\n"
+           "  --threads N       worker threads (default: cores - 1, fewer on low memory)\n"
            "  --pool-mb N       GPU vertex pool size (default: from radius)\n"
            "  --gpu N           Vulkan device index\n"
            USAGE_WORLD
@@ -183,8 +195,9 @@ static void usage(void)
            "  --look YAW,PITCH  initial view angles in degrees\n"
            "  --spawn X,Z       spawn position (default: nearest dry land)\n"
            USAGE_CONFIG
-           "  --play            skip the title screen\n"
-           "  --screen NAME     open title, pause, settings, controls or debug-health at start\n"
+           "  --play            skip the menus and play the default world (or --world)\n"
+           "  --screen NAME     open title, worlds, create, pause, settings, controls or\n"
+           "                    debug-health at start\n"
            "  --debug           start with the F3 overlay on\n"
            "  --give LIST       start with items, e.g. log:8,sand:4 (names as shown in game)\n"
            "  --time HH         start at this hour of the day (0-23)\n"
@@ -227,6 +240,7 @@ static int parse_flag(options *o, const char *a)
     }
     if (strcmp(a, "--no-save") == 0) {
         o->world_dir = NULL;
+        o->world_given = 1;
         return 1;
     }
     return 0;
@@ -248,7 +262,7 @@ static int parse_int_option(options *o, const char *a, const char *v, int *ok)
     };
     for (size_t i = 0; i < sizeof ints / sizeof ints[0]; i++) {
         if (strcmp(a, ints[i].name) != 0) continue;
-        long long n;
+        long long n = 0;
         *ok = parse_int(v, ints[i].lo, ints[i].hi, &n);
         if (*ok) {
             *ints[i].field = (int)n;
@@ -261,7 +275,8 @@ static int parse_int_option(options *o, const char *a, const char *v, int *ok)
 
 static int valid_screen(const char *v)
 {
-    static const char *const NAMES[] = {"title", "pause", "settings", "controls", "debug-health", "game", "inventory"};
+    static const char *const NAMES[] = {"title", "pause",     "settings", "controls", "debug-health",
+                                        "game",  "inventory", "worlds",   "create"};
     for (size_t i = 0; i < sizeof NAMES / sizeof NAMES[0]; i++)
         if (strcmp(v, NAMES[i]) == 0) return 1;
     return 0;
@@ -302,6 +317,7 @@ static int parse_value_option(options *o, const char *a, const char *v, int *ok)
     } else if (strcmp(a, "--world") == 0) {
         *ok = strlen(v) < 200;
         o->world_dir = v;
+        o->world_given = 1;
     } else if (strcmp(a, "--screen") == 0) {
         *ok = valid_screen(v);
         o->screen = v;
@@ -386,6 +402,16 @@ static void menu_key(int key, int action)
     case GLFW_KEY_KP_ENTER:
     case GLFW_KEY_SPACE: g_in.ui_enter = 1; break;
     case GLFW_KEY_ESCAPE: g_in.ui_back = 1; break;
+    case GLFW_KEY_BACKSPACE: g_in.ui_backspace = 1; break;
+    default: break;
+    }
+    /* A text field types these letters rather than moving with them. */
+    switch (key) {
+    case GLFW_KEY_W:
+    case GLFW_KEY_A:
+    case GLFW_KEY_S:
+    case GLFW_KEY_D:
+    case GLFW_KEY_SPACE: g_in.ui_letter = 1; break;
     default: break;
     }
 }
@@ -398,6 +424,7 @@ static void key_cb(GLFWwindow *win, int key, int sc, int action, int mods)
     if (action == GLFW_PRESS) g_in.keys[key] = 1;
     else if (action == GLFW_RELEASE) g_in.keys[key] = 0;
     if (action == GLFW_PRESS && key == GLFW_KEY_F2) g_in.want_shot = 1;
+    if (action == GLFW_PRESS && key == GLFW_KEY_F11) g_in.toggle_fullscreen = 1;
     if (action == GLFW_PRESS && key == GLFW_KEY_F3 && g_in.screen != SCREEN_TITLE) g_in.debug = !g_in.debug;
     if (g_in.screen != SCREEN_NONE) {
         menu_key(key, action);
@@ -491,6 +518,15 @@ static void scroll_cb(GLFWwindow *win, double dx, double dy)
     g_in.scroll += dy;
 }
 
+/* Typed text for the menus' text fields: printable ASCII only, which is
+ * what the font draws and what world names allow. */
+static void char_cb(GLFWwindow *win, unsigned int cp)
+{
+    (void)win;
+    if (g_in.screen == SCREEN_NONE || cp < 0x20 || cp > 0x7e) return;
+    if (g_in.text_len < (int)sizeof g_in.text) g_in.text[g_in.text_len++] = (char)cp;
+}
+
 static void resize_cb(GLFWwindow *win, int w, int h)
 {
     (void)win; (void)w; (void)h;
@@ -501,6 +537,8 @@ static void focus_cb(GLFWwindow *win, int focused)
 {
     (void)win;
     if (!focused) g_in.lost_focus = 1;
+    g_in.focused = focused != 0;
+    g_in.focus_changed = 1;
 }
 
 /* --------------------------------------------------------------- game */
@@ -521,7 +559,7 @@ typedef struct {
 static int save_player(void *user)
 {
     const save_ctx *sc = user;
-    uint8_t buf[PLAYER_FILE_SIZE];
+    uint8_t buf[PLAYER_FILE_SIZE] = {0};
     size_t n = survival_encode_player(sc->pl, sc->inv, thermo_day_time(sc->th), buf, sizeof buf);
     if (n && save_db_put_blob(sc->db, "player", buf, n) == 0) return 0;
     log_warn("could not save the player");
@@ -533,7 +571,7 @@ static int save_player(void *user)
 static int load_player(save_db *db, player *pl, inventory *inv, double *day)
 {
     if (!db) return 0;
-    uint8_t buf[PLAYER_FILE_SIZE + 1];
+    uint8_t buf[PLAYER_FILE_SIZE + 1] = {0};
     long n = save_db_get_blob(db, "player", buf, sizeof buf);
     if (n < 0) return n == -2 ? -1 : 0;
     if (survival_decode_player(pl, inv, day, buf, (size_t)n) != 0) {
@@ -556,7 +594,7 @@ static void save_on_fatal(void *user)
  * underscores ("plant_fibre:4"). */
 static void give_items(inventory *inv, const char *list)
 {
-    char buf[256];
+    char buf[256] = {0};
     snprintf(buf, sizeof buf, "%s", list);
     char *save = NULL;
     for (char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
@@ -666,7 +704,7 @@ static void thermal_env(const thermo *th, const world *w, const player *p, healt
  * debug menu (K) uses, so the two can't drift apart. */
 static void apply_hurt(health *h, const char *list)
 {
-    char buf[256];
+    char buf[256] = {0};
     snprintf(buf, sizeof buf, "%s", list);
     char *save = NULL;
     for (const char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
@@ -731,9 +769,20 @@ typedef struct {
     int cfg_vsync;            /* vsync as the settings file has it (--no-vsync is not saved) */
     int cfg_keep;             /* the settings file could not be used: never written over */
     uint32_t seed;
+    sys_info sys;
+    sys_budget plan;          /* budgets for this machine (sysinfo.h) */
     GLFWwindow *win;
+    world_entry *world_list;  /* WORLDS_MAX, refreshed when the list opens */
+    menu_world *world_rows;
     jobs *js;
     renderer *rd;
+    int backdrop;             /* the menus' fixed, unsaved world is loaded, not a player's */
+    int world_count;
+    int fullscreen;           /* what the window is now */
+    int win_x, win_y, win_w, win_h; /* the windowed frame, restored on leaving fullscreen */
+    int snd_inv_open;
+    char world_path[WORLDS_PATH_MAX]; /* the world being played (o.world_dir points here) */
+    char worlds_root[WORLDS_PATH_MAX];
     world w;
     physics ph;
     thermo *th;
@@ -772,7 +821,9 @@ typedef struct {
     float landing;            /* hardest landing this frame, m/s */
     float swim_t, prev_hurt, prev_breath;
     double last_beat;         /* health.last_r of the last heartbeat heard */
-    int snd_inv_open;
+    discord *dc;              /* NULL: the Discord status is off or this build has no application */
+    char world_name[SAVE_NAME_MAX + 1]; /* the name the world was given, "" for none */
+    int64_t session_start, play_start; /* Unix seconds: the game started, the world was opened */
 
     /* This frame. */
     int in_menu, frozen;
@@ -831,8 +882,10 @@ static float water_level(const world *w, const player *p, dvec3 eye)
 
 static void apply_volumes(game *g)
 {
-    sound_set_volumes(g->snd, (float)g->st.volume_master / 100.0f, (float)g->st.volume_effects / 100.0f,
-                      (float)g->st.volume_ambient / 100.0f);
+    /* Muted while the window is in the background, if the player asked. */
+    float master = g->st.mute_unfocused && !g_in.focused ? 0.0f : (float)g->st.volume_master / 100.0f;
+    sound_set_volumes(g->snd, master, (float)g->st.volume_effects / 100.0f, (float)g->st.volume_ambient / 100.0f,
+                      (float)g->st.volume_ui / 100.0f, (float)g->st.volume_body / 100.0f);
 }
 
 /* Per-step physics events worth hearing (they are cleared by the next step). */
@@ -901,10 +954,10 @@ static void sound_body(game *g, double dt)
 static void frame_sound(game *g, double dt, const render_view *v)
 {
     sound_listener(g->snd, v->eye, v->yaw, v->pitch, v->underwater);
-    int on_title = g_in.screen == SCREEN_TITLE;
+    int on_title = g->backdrop;
     float wind = wind_level(&g->w, &g->pl, v->eye), water = water_level(&g->w, &g->pl, v->eye);
     sound_ambience(g->snd, wind * (on_title ? 0.6f : 1.0f), water);
-    dvec3 fires[SOUND_MAX_FIRES];
+    dvec3 fires[SOUND_MAX_FIRES] = {0};
     int nf = thermo_fires_near(g->th, &g->w, v->eye, 24.0, fires, SOUND_MAX_FIRES);
     sound_fires(g->snd, fires, nf);
     if (!g->in_menu && !on_title) sound_body(g, dt);
@@ -942,11 +995,15 @@ static void open_start_screen(game *g)
         else if (!strcmp(o->screen, "settings")) g_in.screen = SCREEN_SETTINGS;
         else if (!strcmp(o->screen, "controls")) g_in.screen = SCREEN_CONTROLS;
         else if (!strcmp(o->screen, "debug-health")) g_in.screen = SCREEN_DEBUG_HEALTH;
+        else if (!strcmp(o->screen, "worlds")) g_in.screen = SCREEN_WORLDS;
+        else if (!strcmp(o->screen, "create")) g_in.screen = SCREEN_CREATE_WORLD;
         else g_in.screen = SCREEN_NONE;
         g_in.inv_open = !strcmp(o->screen, "inventory");
     }
     if (g_in.screen != SCREEN_NONE) {
-        if (g_in.screen != SCREEN_TITLE) g->mn.screen = SCREEN_PAUSE; /* settings/controls return to pause */
+        /* Settings and controls return to the pause menu in a world, to
+         * the title over the backdrop. */
+        if (g_in.screen != SCREEN_TITLE) g->mn.screen = g->backdrop ? SCREEN_TITLE : SCREEN_PAUSE;
         menu_open(&g->mn, g_in.screen);
     }
 }
@@ -956,7 +1013,7 @@ static void open_start_screen(game *g)
  * and never overwrite, so running an old build again still finds its own. */
 static void use_xdg_paths(const options *o)
 {
-    char dir[PATHS_MAX];
+    char dir[PATHS_MAX] = {0};
     if (o->config == g_paths.config && g_paths.xdg_config && paths_parent(o->config, dir, sizeof dir) == 0) {
         if (paths_make_dirs(dir) != 0) log_warn("cannot create %s", dir);
         int r = save_copy_file("blockclonia.cfg", o->config, SETTINGS_MAX_FILE);
@@ -995,7 +1052,7 @@ static uint32_t choose_seed(options *o, save_db **db)
         return seed;
     }
     if (n > 0) log_info("imported %d world files into %s/world.db; they stay but are no longer read", n, o->world_dir);
-    uint32_t saved;
+    uint32_t saved = 0;
     int got = save_db_get_seed(*db, &saved);
     if (got == 0) {
         if (o->have_seed && saved != o->seed) log_warn("--seed ignored: world '%s' uses seed %u", o->world_dir, saved);
@@ -1021,6 +1078,7 @@ static GLFWwindow *open_window(const options *o)
     GLFWwindow *win = glfwCreateWindow(o->width, o->height, "blockclonia", NULL, NULL);
     if (!win) log_fatal("could not create window");
     glfwSetKeyCallback(win, key_cb);
+    glfwSetCharCallback(win, char_cb);
     glfwSetMouseButtonCallback(win, mouse_button_cb);
     glfwSetCursorPosCallback(win, cursor_cb);
     glfwSetScrollCallback(win, scroll_cb);
@@ -1030,24 +1088,60 @@ static GLFWwindow *open_window(const options *o)
     return win;
 }
 
-/* The world, physics, heat, the player and their things. */
-static void game_init_world(game *g)
+/* Borderless fullscreen on the monitor the window is on (the primary one
+ * if GLFW cannot tell), at that monitor's current mode, so no mode switch
+ * flickers the screen; leaving restores the windowed frame. */
+static void set_fullscreen(game *g, int on)
 {
-    const options *o = &g->o;
-    int workers = o->threads >= 0 ? o->threads : cpu_count() - 1;
-    if (workers < 1 && o->threads < 0) workers = 1;
-    if (workers > 8 && o->threads < 0) workers = 8;
-    g->js = jobs_create(workers);
+    if (on == g->fullscreen) return;
+    if (on) {
+        glfwGetWindowPos(g->win, &g->win_x, &g->win_y);
+        glfwGetWindowSize(g->win, &g->win_w, &g->win_h);
+        GLFWmonitor *mon = glfwGetPrimaryMonitor();
+        int count = 0;
+        GLFWmonitor **mons = glfwGetMonitors(&count);
+        for (int i = 0; i < count; i++) {
+            int mx = 0, my = 0;
+            const GLFWvidmode *vm = glfwGetVideoMode(mons[i]);
+            glfwGetMonitorPos(mons[i], &mx, &my);
+            int cx = g->win_x + g->win_w / 2, cy = g->win_y + g->win_h / 2;
+            if (vm && cx >= mx && cx < mx + vm->width && cy >= my && cy < my + vm->height) mon = mons[i];
+        }
+        const GLFWvidmode *mode = mon ? glfwGetVideoMode(mon) : NULL;
+        if (!mode) return;
+        glfwSetWindowMonitor(g->win, mon, 0, 0, mode->width, mode->height, mode->refreshRate);
+    } else {
+        glfwSetWindowMonitor(g->win, NULL, g->win_x, g->win_y, g->win_w > 0 ? g->win_w : g->o.width,
+                             g->win_h > 0 ? g->win_h : g->o.height, 0);
+    }
+    g->fullscreen = on;
+    g_in.resized = 1;
+}
 
-    render_opts ro = {.vsync = o->vsync,
-                      .validate = o->validate,
-                      .render_radius = o->radius,
-                      .gpu_index = o->gpu,
-                      .pool_mb = o->pool_mb,
-                      .screenshots = o->screenshot != NULL,
-                      .filtering = g->st.filtering,
-                      .pipeline_cache = g_paths.pipelines};
-    g->rd = renderer_create(g->win, &ro);
+/* The world, physics, heat, the player and their things. */
+/* The menus' world: a fixed seed, place and hour, never saved, so the
+ * title looks the same every time and no world of the player's is open
+ * (or locked) while they choose, rename or delete one. */
+#define BACKDROP_SEED 20231012u
+
+/* Loads a world: the player's in dir (NULL: --no-save, nothing kept), or
+ * the menus' backdrop. The renderer and job threads stay up across
+ * worlds; everything that belongs to one world is made here and undone by
+ * close_world. */
+static void open_world(game *g, const char *dir, int backdrop)
+{
+    options *o = &g->o;
+    g->backdrop = backdrop;
+    g->db = NULL;
+    if (backdrop) {
+        o->world_dir = NULL;
+        g->seed = BACKDROP_SEED;
+    } else {
+        if (dir && dir != g->world_path) snprintf(g->world_path, sizeof g->world_path, "%s", dir);
+        o->world_dir = dir ? g->world_path : NULL;
+        g->seed = choose_seed(o, &g->db);
+    }
+    log_info("%s, seed %u", backdrop ? "menu backdrop" : (o->world_dir ? o->world_dir : "unsaved world"), g->seed);
 
     world_init(&g->w, g->seed, o->radius, g->js, g->db);
     physics_init(&g->ph, &g->w);
@@ -1060,7 +1154,7 @@ static void game_init_world(game *g)
     log_set_fatal_hook(save_on_fatal, &g->sc);
     renderer_bind_world(g->rd, &g->w);
 
-    if (o->have_spawn) {
+    if (o->have_spawn && !backdrop) {
         g->sx = o->spawn_x + 0.5;
         g->sz = o->spawn_z + 0.5;
     } else {
@@ -1068,13 +1162,14 @@ static void game_init_world(game *g)
     }
     world_load_blocking(&g->w, g->sx, g->sz, 1);
     player_spawn(&g->pl, &g->w, g->sx, g->sz);
-    if (o->have_look) {
+    if (o->have_look && !backdrop) {
         g->pl.yaw = o->look_yaw * (float)(MC_PI / 180.0);
         g->pl.pitch = clampf(o->look_pitch, -89.0f, 89.0f) * (float)(MC_PI / 180.0);
     }
     inv_starting_kit(&g->inv);
     double day = THERMO_DAY_START;
     int loaded = !o->have_spawn && !o->demo ? load_player(g->db, &g->pl, &g->inv, &day) : 0;
+    if (backdrop) thermo_set_day_time(g->th, THERMO_DAY_START);
     if (loaded < 0) {
         /* Playing on is fine; saving would write a fresh player over it. */
         log_error("cannot read the saved player in '%s'; saving disabled", o->world_dir);
@@ -1090,30 +1185,101 @@ static void game_init_world(game *g)
      * over the saved one. */
     g->w.save_user = &g->sc;
     g->w.on_save = save_player;
-    if (o->give) give_items(&g->inv, o->give);
-    if (o->have_time) thermo_set_day_time(g->th, o->time_of_day);
+    if (o->give && !backdrop) give_items(&g->inv, o->give);
+    if (o->have_time && !backdrop) thermo_set_day_time(g->th, o->time_of_day);
     log_info("spawn at %.1f %.1f %.1f with %d worker threads", g->pl.pos.x, g->pl.pos.y, g->pl.pos.z,
              jobs_worker_count(g->js));
 
     health_init_varied(&g->hl, g->seed ^ 0x9E3779B9u);
-    if (o->hurt) apply_hurt(&g->hl, o->hurt);
-}
+    if (o->hurt && !backdrop) apply_hurt(&g->hl, o->hurt);
 
-static void game_init(game *g)
-{
-    g->seed = choose_seed(&g->o, &g->db);
-    log_info("seed %u", g->seed);
-    g->win = open_window(&g->o);
-    game_init_world(g);
-
-    g->fx = mem_alloc(sizeof *g->fx);
     fx_init(g->fx, g->seed);
     interact_init(&g->ia, g->seed ^ 0xA5A5u);
-    invui_init(&g->iu);
-    g->ents = mem_alloc(sizeof(entity_instance) * RENDER_MAX_ENTS);
     viewmodel_init(&g->vm);
     camera_init(&g->cam);
     g->death_rng = g->seed;
+    g->hs.alert_count = 0;
+    if (g->db) {
+        save_db_set_meta(g->db, "last_played", (int64_t)time(NULL));
+        int64_t gen = 0;
+        if (save_db_get_meta(g->db, "generator", &gen) == -1) save_db_set_meta(g->db, "generator", WORLDGEN_VERSION);
+    }
+    /* The name goes out to Discord, and world files are shared: only a
+     * valid one is used. */
+    g->world_name[0] = '\0';
+    char name[SAVE_NAME_MAX + 1] = {0};
+    long len = g->db ? save_db_get_blob(g->db, "name", name, SAVE_NAME_MAX) : -1;
+    if (len > 0 && save_name_valid(name, (size_t)len)) memcpy(g->world_name, name, (size_t)len + 1);
+    g->play_start = (int64_t)time(NULL);
+}
+
+/* Saves the world being played (the backdrop has nothing to save) and
+ * frees everything open_world made. */
+static void close_world(game *g)
+{
+    log_set_fatal_hook(NULL, NULL);
+    physics_settle_bodies(&g->ph, NULL);
+    if (g->hl.dead) g->w.on_save = NULL; /* quitting dead keeps the last saved player */
+    world_save_all(&g->w);
+    world_destroy(&g->w); /* waits for the jobs and hands the meshes back to the renderer */
+    save_db_close(g->db);
+    g->db = NULL;
+    physics_destroy(&g->ph);
+    thermo_destroy(g->th);
+    g->th = NULL;
+}
+
+/* What lives across worlds: the job threads and the renderer. */
+static void game_init_world(game *g)
+{
+    const options *o = &g->o;
+    int workers = o->threads >= 0 ? o->threads : g->plan.workers;
+    g->js = jobs_create(workers);
+
+    render_opts ro = {.vsync = o->vsync,
+                      .validate = o->validate,
+                      .render_radius = o->radius,
+                      .gpu_index = o->gpu,
+                      .pool_mb = o->pool_mb,
+                      .screenshots = o->screenshot != NULL,
+                      .filtering = g->st.filtering,
+                      .pipeline_cache = g_paths.pipelines};
+    g->rd = renderer_create(g->win, &ro);
+}
+
+/* Whether the game starts in a world rather than over the backdrop: asked
+ * to play, to show something only a world has, or given one by name. */
+static int starts_in_world(const options *o)
+{
+    if (o->play || o->demo || o->open_panel || o->hurt || o->world_given) return 1;
+    return o->screen && (!strcmp(o->screen, "game") || !strcmp(o->screen, "pause") || !strcmp(o->screen, "inventory") ||
+                         !strcmp(o->screen, "debug-health"));
+}
+
+static void refresh_worlds(game *g);
+
+static void game_init(game *g)
+{
+    g->win = open_window(&g->o);
+    g_in.focused = glfwGetWindowAttrib(g->win, GLFW_FOCUSED) != 0;
+    game_init_world(g);
+
+    char mi[48] = {0};
+    mem_version_string(mi, sizeof mi);
+    int gmaj = 0, gmin = 0, grev = 0;
+    glfwGetVersion(&gmaj, &gmin, &grev);
+    /* The Vulkan version and features get their own lines in F3. */
+    snprintf(g->versions, sizeof g->versions, "%s  GLFW %d.%d.%d", mi, gmaj, gmin, grev);
+
+    g->fx = mem_alloc(sizeof *g->fx);
+    invui_init(&g->iu);
+    g->ents = mem_alloc(sizeof(entity_instance) * RENDER_MAX_ENTS);
+    g->world_list = mem_alloc(sizeof(world_entry) * WORLDS_MAX);
+    g->world_rows = mem_alloc(sizeof(menu_world) * WORLDS_MAX);
+    if (paths_parent(g_paths.world, g->worlds_root, sizeof g->worlds_root) != 0)
+        snprintf(g->worlds_root, sizeof g->worlds_root, "worlds");
+    if (starts_in_world(&g->o)) open_world(g, g->o.world_dir, 0);
+    else open_world(g, NULL, 1);
     g->snd = sound_create(g->seed, SOUND_RATE, SOUND_CHANNELS);
     apply_volumes(g);
     g->audio = g->o.no_sound ? NULL : audio_device_open(sound_render, g->snd, SOUND_RATE, SOUND_CHANNELS);
@@ -1124,14 +1290,39 @@ static void game_init(game *g)
     g_in.panel = g->o.open_panel;
     g_in.debug = g->o.debug;
     open_start_screen(g);
+    refresh_worlds(g); /* --screen worlds opens the list without asking for it */
+    snprintf(g->mn.footer, sizeof g->mn.footer, "%s", g->versions);
+}
 
-    char mi[48];
-    mem_version_string(mi, sizeof mi);
-    int gmaj, gmin, grev;
-    glfwGetVersion(&gmaj, &gmin, &grev);
-    /* The Vulkan version and features get their own lines in F3. */
-    snprintf(g->versions, sizeof g->versions, "%s  GLFW %d.%d.%d", mi, gmaj, gmin, grev);
-    snprintf(g->mn.footer, sizeof g->mn.footer, "seed %u   %s   GLFW %d.%d.%d", g->seed, mi, gmaj, gmin, grev);
+#ifndef MC_DISCORD_APP_ID
+#define MC_DISCORD_APP_ID "" /* CMake sets it from -DMC_DISCORD_APP_ID */
+#endif
+
+/* Starts or stops the Discord status to match the setting. Builds without
+ * an application ID never connect. */
+static void apply_discord(game *g)
+{
+    if (g->st.discord && !g->dc) g->dc = discord_create(MC_DISCORD_APP_ID);
+    else if (!g->st.discord && g->dc) {
+        discord_destroy(g->dc);
+        g->dc = NULL;
+    }
+}
+
+/* What the status shows: the menus, or how the body is doing in which
+ * world, with the time since it was opened. Sent only when it changes,
+ * and discord.c limits how often. */
+static void update_discord(game *g)
+{
+    if (!g->dc) return;
+    if (g->backdrop) {
+        discord_set(g->dc, "In the menus", NULL, g->session_start);
+        return;
+    }
+    char cond[128] = {0}, where[64] = {0};
+    hud_condition(&g->hl, cond, sizeof cond);
+    if (g->world_name[0]) snprintf(where, sizeof where, "In %s", g->world_name);
+    discord_set(g->dc, cond, where[0] ? where : NULL, g->play_start);
 }
 
 /* Menus, focus, the inventory screen opening and closing, and what that
@@ -1225,7 +1416,7 @@ static void frame_simulate(game *g, const player_input *in, double dt)
         survival_before sb = survival_capture(&g->pl);
         physics_step(&g->ph, &g->pl, in);
         if ((float)g->pl.fall_speed > landing) landing = (float)g->pl.fall_speed;
-        health_env env;
+        health_env env = {0};
         survival_env(&g->w, &g->pl, &sb, g->actions, &env);
         thermal_env(g->th, &g->w, &g->pl, &env);
         g->actions = 0;
@@ -1330,7 +1521,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
                      .fov = (float)g->st.fov * (float)(MC_PI / 180.0),
                      .has_selection = g->hit.hit && !g->in_menu,
                      .selection = g->hit.block};
-    int on_title = g_in.screen == SCREEN_TITLE;
+    int on_title = g->backdrop;
     v.eye.x += (double)g->pose.dx;
     v.eye.y += (double)g->pose.dy;
     v.eye.z += (double)g->pose.dz;
@@ -1350,7 +1541,8 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     }
     v.underwater = world_get(&g->w, (int)floor(v.eye.x), (int)floor(v.eye.y), (int)floor(v.eye.z)) == B_WATER;
     v.time = (float)fmod(now, 3600.0);
-    v.daylight = thermo_daylight(g->th);
+    /* Brightness lifts the darkest light toward dusk; days are unchanged. */
+    v.daylight = fmaxf(thermo_daylight(g->th), 0.006f * (float)g->st.brightness);
     thermo_sky(g->th, v.sky);
 
     g->eat_anim = fmaxf(0.0f, g->eat_anim - (float)dt / 1.6f);
@@ -1384,7 +1576,7 @@ static void draw_debug(game *g, ui *u, int fb_w, int fb_h, double alpha)
     const player *pl = &g->pl;
     dvec3 ip = dv3_lerp(pl->prev_pos, pl->pos, alpha);
     render_stats rs = renderer_stats(g->rd);
-    debug_info di;
+    debug_info di = {0};
     memset(&di, 0, sizeof di);
     di.frames = &g->dframes;
     di.phys_ms = g->phys_ms;
@@ -1445,6 +1637,111 @@ static void draw_debug(game *g, ui *u, int fb_w, int fb_h, double alpha)
     debug_draw(u, &di);
 }
 
+/* ---------------------------------------------------------- worlds menu */
+
+/* Fills the world screen's rows from the worlds folder. */
+static void refresh_worlds(game *g)
+{
+    g->world_count = worlds_list(g->worlds_root, g->world_list, WORLDS_MAX);
+    for (int i = 0; i < g->world_count; i++) {
+        const world_entry *e = &g->world_list[i];
+        menu_world *r = &g->world_rows[i];
+        snprintf(r->name, sizeof r->name, "%.32s", e->info.name[0] ? e->info.name : e->folder);
+        r->playable = 1;
+        char when[32] = "never played";
+        if (e->info.last_played > 0) {
+            time_t t = (time_t)e->info.last_played;
+            struct tm tmv = {0};
+            if (localtime_r(&t, &tmv)) strftime(when, sizeof when, "played %Y-%m-%d %H:%M", &tmv);
+        }
+        switch (e->info.status) {
+        case SAVE_PEEK_OK:
+            if (e->info.generator > WORLDGEN_VERSION) {
+                snprintf(r->detail, sizeof r->detail, "made by a newer version of the game");
+                r->playable = 0;
+            } else {
+                snprintf(r->detail, sizeof r->detail, "seed %u   %s", e->info.seed, when);
+            }
+            break;
+        case SAVE_PEEK_LEGACY: snprintf(r->detail, sizeof r->detail, "older format: converted when played"); break;
+        case SAVE_PEEK_IN_USE:
+            snprintf(r->detail, sizeof r->detail, "open in another game");
+            r->playable = 0;
+            break;
+        default:
+            snprintf(r->detail, sizeof r->detail, "cannot be read (damaged, or not a world)");
+            r->playable = 0;
+            break;
+        }
+    }
+    g->mn.worlds = g->world_rows;
+    g->mn.world_count = g->world_count;
+}
+
+/* Leaves whatever world is loaded and plays the one in dir. */
+static void play_world(game *g, const char *dir)
+{
+    char path[WORLDS_PATH_MAX] = {0};
+    snprintf(path, sizeof path, "%s", dir); /* dir may point into the list close_world outlives */
+    close_world(g);
+    open_world(g, path, 0);
+    g_in.inv_open = 0;
+    g_in.panel = 0;
+    g_in.screen = SCREEN_NONE;
+    set_captured(g->win, 1);
+}
+
+/* The world screens' requests. Problems go to the menu's note line. */
+static void world_action(game *g, menu_action a)
+{
+    menu *m = &g->mn;
+    const world_entry *sel = m->world_sel >= 0 && m->world_sel < g->world_count ? &g->world_list[m->world_sel] : NULL;
+    switch (a) {
+    case MENU_WORLDS: refresh_worlds(g); break;
+    case MENU_WORLD_PLAY:
+        if (sel) play_world(g, sel->dir);
+        break;
+    case MENU_WORLD_CREATE: {
+        const char *name = m->text_name[0] ? m->text_name : "New world";
+        if (!save_name_valid(name, strlen(name))) {
+            snprintf(m->note, sizeof m->note, "Names are 1-32 letters, digits or signs, no edge spaces.");
+            break;
+        }
+        uint32_t seed = worlds_seed_from_text(m->text_seed, (uint32_t)time(NULL) * 2654435761u);
+        char dir[WORLDS_PATH_MAX] = {0};
+        if (worlds_create(g->worlds_root, name, seed, dir, sizeof dir) != 0) {
+            snprintf(m->note, sizeof m->note, "Could not create the world (see the log).");
+            break;
+        }
+        play_world(g, dir);
+        break;
+    }
+    case MENU_WORLD_RENAME:
+        if (!sel) break;
+        if (!save_name_valid(m->text_name, strlen(m->text_name))) {
+            snprintf(m->note, sizeof m->note, "Names are 1-32 letters, digits or signs, no edge spaces.");
+            break;
+        }
+        if (worlds_rename(sel->dir, m->text_name) != 0) {
+            snprintf(m->note, sizeof m->note, "Could not rename it (open in another game?).");
+            break;
+        }
+        menu_open(m, SCREEN_WORLDS);
+        refresh_worlds(g);
+        break;
+    case MENU_WORLD_DELETE:
+        if (!sel) break;
+        if (worlds_delete(sel->dir) < 0) {
+            snprintf(m->note, sizeof m->note, "Could not delete it (open in another game?).");
+            break;
+        }
+        menu_open(m, SCREEN_WORLDS);
+        refresh_worlds(g);
+        break;
+    default: break;
+    }
+}
+
 /* Menus take the mouse: returns the action, applied here. */
 static void run_menu(game *g, ui *u, float mx, float my, double dt)
 {
@@ -1456,32 +1753,45 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
                      .right = g_in.ui_right,
                      .enter = g_in.ui_enter,
                      .back = g_in.ui_back,
+                     .letter_nav = g_in.ui_letter,
+                     .text_len = g_in.text_len,
+                     .backspace = g_in.ui_backspace,
                      .dt = (float)dt};
+    memcpy(mi.text, g_in.text, sizeof mi.text);
     mi.mx = mx;
     mi.my = my;
     int mins = (int)(g->hl.t / 60.0);
     snprintf(g->mn.status, sizeof g->mn.status, "Alive %d:%02d   core %.1f" UI_CH_DEGREE "C   %s", mins / 60, mins % 60,
              (double)g->hl.temp, g->hl.dead ? "dead" : "");
-    switch (menu_frame(&g->mn, u, &mi, &g->st)) {
-    case MENU_PLAY:
+    menu_action act = menu_frame(&g->mn, u, &mi, &g->st);
+    switch (act) {
     case MENU_RESUME:
         g_in.screen = SCREEN_NONE;
         set_captured(g->win, 1);
         break;
     case MENU_TO_TITLE:
-        physics_settle_bodies(&g->ph, NULL);
-        world_save_all(&g->w);
+        /* Saves and closes the world; the menus get their backdrop back. */
+        close_world(g);
+        open_world(g, NULL, 1);
         g_in.inv_open = 0;
         g_in.panel = 0;
         menu_open(&g->mn, SCREEN_TITLE); /* the menu's own screen too, or the copy below undoes it */
         g_in.screen = SCREEN_TITLE;
         break;
+    case MENU_WORLDS:
+    case MENU_WORLD_PLAY:
+    case MENU_WORLD_CREATE:
+    case MENU_WORLD_RENAME:
+    case MENU_WORLD_DELETE: world_action(g, act); break;
     case MENU_QUIT: glfwSetWindowShouldClose(g->win, GLFW_TRUE); break;
     case MENU_SETTINGS:
         if (g->o.no_vsync && g->st.vsync) g->o.no_vsync = 0; /* turned back on in the menu: a real choice */
         renderer_set_vsync(g->rd, g->st.vsync);
         renderer_set_filtering(g->rd, g->st.filtering);
+        set_fullscreen(g, g->st.fullscreen);
         apply_volumes(g);
+        apply_discord(g);
+        update_discord(g);
         g->settings_dirty = 1;
         break;
     case MENU_DEBUG_INJURE: health_injure(&g->hl, g->mn.debug_kind, g->mn.debug_part); break;
@@ -1503,8 +1813,8 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
 /* The mouse in UI pixels, or -1 when unknown. */
 static void cursor_ui(const game *g, const ui *u, int fb_w, int fb_h, float *mx, float *my)
 {
-    double wx, wy;
-    int ww, wh;
+    double wx = 0.0, wy = 0.0;
+    int ww = 0, wh = 0;
     glfwGetCursorPos(g->win, &wx, &wy);
     glfwGetWindowSize(g->win, &ww, &wh);
     *mx = *my = -1.0f;
@@ -1517,12 +1827,12 @@ static void cursor_ui(const game *g, const ui *u, int fb_w, int fb_h, float *mx,
 /* The 2D overlay: HUD, hotbar, inventory, F3 and menus. Returns the quads. */
 static int draw_overlay(game *g, double dt, double alpha)
 {
-    int max_quads, fb_w, fb_h;
+    int max_quads = 0, fb_w = 0, fb_h = 0;
     ui_vertex *uv = renderer_ui_buffer(g->rd, &max_quads, &fb_w, &fb_h);
-    ui u;
+    ui u = {0};
     ui_begin(&u, uv, max_quads, fb_w, fb_h);
     ui_set_scale(&u, g->st.gui_scale, fb_w, fb_h);
-    int on_title = g_in.screen == SCREEN_TITLE;
+    int on_title = g->backdrop;
     hud_state *hs = &g->hs;
     hs->panel = g_in.panel;
     hs->sel = g_in.sel_part;
@@ -1534,7 +1844,7 @@ static int draw_overlay(game *g, double dt, double alpha)
     hud_update(hs, &g->hl, g->in_menu ? 0.0f : (float)dt);
     if (!on_title) hud_draw(&u, &g->hl, hs);
     if (!on_title && !g->hl.dead && !g_in.panel && !g_in.inv_open) invui_hotbar(&u, &g->iu, &g->inv, (float)dt);
-    float mx, my;
+    float mx = 0.0f, my = 0.0f;
     cursor_ui(g, &u, fb_w, fb_h, &mx, &my);
     if (g_in.inv_open && !g->in_menu && !g->hl.dead) {
         invui_input in = {mx,
@@ -1588,13 +1898,14 @@ static void frame_bookkeeping(game *g, double now)
         g->title_t = now;
         render_stats rs = renderer_stats(g->rd);
         const item_stack *held = &g->inv.slot[g->inv.selected];
-        char title[256];
+        char title[256] = {0};
         snprintf(title, sizeof title,
                  "blockclonia | %.0f fps | %.1f %.1f %.1f | %s%s | draws %d | bodies %d | mesh %u/%u MB", fps,
                  g->pl.pos.x, g->pl.pos.y, g->pl.pos.z, held->count ? item_get(held->id)->name : "empty hand",
                  g->pl.flying ? " | fly" : "", rs.draw_calls, g->ph.body_count, rs.pool_used_kb / 1024,
                  rs.pool_total_kb / 1024);
         glfwSetWindowTitle(g->win, title);
+        update_discord(g);
     }
     if (now - g->save_t >= AUTOSAVE_SECONDS) {
         g->save_t = now;
@@ -1607,19 +1918,15 @@ static void game_shutdown(game *g)
     if (g->settings_dirty && save_settings(g) != 0)
         log_warn("could not save settings to %s", g->o.config);
     log_info("saving and shutting down");
-    log_set_fatal_hook(NULL, NULL);
-    physics_settle_bodies(&g->ph, NULL);
-    if (g->hl.dead) g->w.on_save = NULL; /* quitting dead keeps the last saved player */
-    world_save_all(&g->w);
-    jobs_wait_idle(g->js);
+    discord_destroy(g->dc); /* closing the connection clears the status */
+    g->dc = NULL;
+    close_world(g);
     audio_device_close(g->audio); /* stops the callback before the mixer goes */
     sound_destroy(g->snd);
     mem_free(g->ents);
     mem_free(g->fx);
-    world_destroy(&g->w);
-    save_db_close(g->db);
-    physics_destroy(&g->ph);
-    thermo_destroy(g->th);
+    mem_free(g->world_list);
+    mem_free(g->world_rows);
     jobs_destroy(g->js);
     renderer_destroy(g->rd);
     glfwDestroyWindow(g->win);
@@ -1630,13 +1937,19 @@ int main(int argc, char **argv)
 {
     game *g = &g_game;
     if (!parse_args(argc, argv, &g->o)) return 2;
-    mem_init();
+    sys_detect(&g->sys); /* before the allocator, which it sizes */
+    sys_plan(&g->sys, &g->plan);
+    mem_init(g->plan.arena_mb);
+    sys_log(&g->sys, &g->plan);
+    save_db_set_cache_kb(g->plan.sqlite_cache_kb);
     mesher_init();
     use_xdg_paths(&g->o);
 
     settings_default(&g->st);
     int got = settings_load(&g->st, g->o.config);
     if (got >= 0) log_info("settings from %s", g->o.config);
+    /* A first run: pick the view distance for this machine. */
+    if (got == SETTINGS_MISSING) g->st.render_distance = g->plan.render_distance;
     g->cfg_keep = got == SETTINGS_UNUSABLE;
     if (g->cfg_keep) log_warn("cannot use %s; playing with default settings and not saving over it", g->o.config);
     if (!g->o.have_radius) g->o.radius = g->st.render_distance;
@@ -1650,7 +1963,12 @@ int main(int argc, char **argv)
         return r;
     }
 
+    g->session_start = (int64_t)time(NULL);
     game_init(g);
+    set_fullscreen(g, g->st.fullscreen);
+    g->mn.discord_ok = MC_DISCORD_APP_ID[0] != '\0';
+    apply_discord(g);
+    update_discord(g);
     double prev = glfwGetTime();
     g->title_t = g->save_t = prev;
     while (!glfwWindowShouldClose(g->win)) {
@@ -1660,6 +1978,16 @@ int main(int argc, char **argv)
         prev = now;
         debug_frames_push(&g->dframes, (float)(dt * 1000.0));
         if (dt > 0.25) dt = 0.25;
+        if (g_in.toggle_fullscreen) {
+            g->st.fullscreen = !g->fullscreen;
+            set_fullscreen(g, g->st.fullscreen);
+            g->settings_dirty = 1;
+            g_in.toggle_fullscreen = 0;
+        }
+        if (g_in.focus_changed) {
+            apply_volumes(g);
+            g_in.focus_changed = 0;
+        }
         if (g_in.resized) {
             renderer_on_resize(g->rd);
             g_in.resized = 0;
@@ -1672,9 +2000,16 @@ int main(int argc, char **argv)
         world_update(&g->w, g->pl.pos.x, g->pl.pos.y + PLAYER_EYE, g->pl.pos.z);
         frame_render(g, now, dt);
         g_in.ui_click = g_in.ui_rclick = g_in.ui_up = g_in.ui_dn = g_in.ui_left = g_in.ui_right = g_in.ui_enter =
-            g_in.ui_back = 0;
+            g_in.ui_back = g_in.ui_letter = g_in.ui_backspace = g_in.text_len = 0;
         frame_bookkeeping(g, now);
+        discord_poll(g->dc, now);
         if (g->o.frames && g->frame >= g->o.frames) break;
+        /* Frame limit with VSync off: sleep out the rest of the frame. The
+         * physics accumulator reads the clock, so it is unaffected. */
+        if (!g->st.vsync && g->st.max_fps > 0) {
+            int fps = g->st.max_fps < SETTINGS_FPS_MIN ? SETTINGS_FPS_MIN : g->st.max_fps;
+            os_sleep(now + 1.0 / fps - glfwGetTime());
+        }
     }
     game_shutdown(g);
     if (g->o.mem_stats) mem_print_stats();

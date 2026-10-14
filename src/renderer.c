@@ -284,7 +284,7 @@ static int buffer_try_create(renderer *r, gbuf *b, VkDeviceSize size, VkBufferUs
         b->buf = VK_NULL_HANDLE;
         return 0;
     }
-    VkMemoryRequirements req;
+    VkMemoryRequirements req = {0};
     vkGetBufferMemoryRequirements(r->dev, b->buf, &req);
     uint32_t type = find_memtype(r, req.memoryTypeBits, need, want);
     VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -312,7 +312,7 @@ static VkCommandBuffer one_shot_begin(renderer *r)
     VkCommandBufferAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
                                       .commandPool = r->cmdpool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
                                       .commandBufferCount = 1};
-    VkCommandBuffer cmd;
+    VkCommandBuffer cmd = NULL;
     VK_CHECK(vkAllocateCommandBuffers(r->dev, &ai, &cmd));
     VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
@@ -508,7 +508,7 @@ static void create_instance(renderer *r, int validate)
     const char **glfw_ext = glfwGetRequiredInstanceExtensions(&glfw_count);
     if (!glfw_ext) log_fatal("GLFW could not find Vulkan surface extensions");
 
-    const char *exts[16];
+    const char *exts[16] = {0};
     uint32_t n = 0;
     for (uint32_t i = 0; i < glfw_count && n < 13; i++) exts[n++] = glfw_ext[i];
     /* macOS: the loader lists MoltenVK, a layer over Metal that is not a
@@ -522,7 +522,7 @@ static void create_instance(renderer *r, int validate)
         if (has_instance_ext("VK_KHR_get_physical_device_properties2"))
             exts[n++] = "VK_KHR_get_physical_device_properties2";
     }
-    const char *layers[1];
+    const char *layers[1] = {0};
     uint32_t nl = 0;
     if (validate) {
         if (has_layer("VK_LAYER_KHRONOS_validation")) {
@@ -631,7 +631,7 @@ static void query_offer(const renderer *r, const render_opts *o, gpu_offer *off)
     off->device_api = r->props.apiVersion;
     uint32_t api = gpucaps_device_api(r->props.apiVersion, r->instance_api);
 
-    VkPhysicalDeviceFeatures f;
+    VkPhysicalDeviceFeatures f = {0};
     vkGetPhysicalDeviceFeatures(r->pd, &f);
     const VkPhysicalDeviceLimits *lim = &r->props.limits;
     off->multi_draw_indirect = f.multiDrawIndirect == VK_TRUE;
@@ -714,9 +714,9 @@ static void pick_device(renderer *r, const render_opts *o)
     VK_CHECK(vkEnumeratePhysicalDevices(r->inst, &n, pds));
     int best = -1, best_score = -1;
     for (uint32_t i = 0; i < n; i++) {
-        VkPhysicalDeviceProperties p;
+        VkPhysicalDeviceProperties p = {0};
         vkGetPhysicalDeviceProperties(pds[i], &p);
-        uint32_t fam;
+        uint32_t fam = 0;
         if (!find_queue(r, pds[i], &fam) || !has_device_ext(pds[i], VK_KHR_SWAPCHAIN_EXTENSION_NAME)) continue;
         int score = device_score(p.deviceType);
         if (o->gpu_index >= 0) score = (int)i == o->gpu_index ? 100 : -1;
@@ -728,9 +728,9 @@ static void pick_device(renderer *r, const render_opts *o)
     find_queue(r, r->pd, &r->qfam);
     vkGetPhysicalDeviceProperties(r->pd, &r->props);
     vkGetPhysicalDeviceMemoryProperties(r->pd, &r->memprops);
-    gpu_offer offer;
+    gpu_offer offer = {0};
     query_offer(r, o, &offer);
-    char unknown[64];
+    char unknown[64] = {0};
     uint32_t disable = gpucaps_parse_disable(getenv("MC_VK_DISABLE"), unknown, sizeof unknown);
     if (unknown[0]) log_warn("MC_VK_DISABLE: unknown feature names ignored: %s", unknown);
     gpucaps_choose(&offer, disable, &r->caps);
@@ -754,7 +754,7 @@ static void create_device(renderer *r)
     float prio = 1.0f;
     VkDeviceQueueCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = r->qfam,
                                   .queueCount = 1, .pQueuePriorities = &prio};
-    const char *exts[5];
+    const char *exts[5] = {0};
     uint32_t n = 0;
     exts[n++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
     /* MoltenVK: the spec requires it enabled wherever it is offered. */
@@ -855,7 +855,7 @@ static VkFormat pick_depth_format(renderer *r)
     const VkFormat cands[] = {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT,
                               VK_FORMAT_X8_D24_UNORM_PACK32, VK_FORMAT_D16_UNORM};
     for (size_t i = 0; i < sizeof cands / sizeof cands[0]; i++) {
-        VkFormatProperties p;
+        VkFormatProperties p = {0};
         vkGetPhysicalDeviceFormatProperties(r->pd, cands[i], &p);
         if (p.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) return cands[i];
     }
@@ -948,7 +948,7 @@ static void create_depth(renderer *r)
                                      VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
                             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
     VK_CHECK(vkCreateImage(r->dev, &ii, r->ac, &r->depth));
-    VkMemoryRequirements req;
+    VkMemoryRequirements req = {0};
     vkGetImageMemoryRequirements(r->dev, r->depth, &req);
     /* Depth is cleared and never stored, so on tile-based GPUs it can live
      * on chip: lazily allocated memory, where offered, is never backed. */
@@ -966,11 +966,11 @@ static void create_depth(renderer *r)
 
 static int create_swapchain(renderer *r)
 {
-    VkSurfaceCapabilitiesKHR caps;
+    VkSurfaceCapabilitiesKHR caps = {.currentTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR};
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(r->pd, r->surf, &caps));
     VkExtent2D ext = caps.currentExtent;
     if (ext.width == UINT32_MAX) {
-        int w, h;
+        int w = 0, h = 0;
         glfwGetFramebufferSize(r->win, &w, &h);
         ext.width = (uint32_t)(w > 0 ? w : 1);
         ext.height = (uint32_t)(h > 0 ? h : 1);
@@ -1112,7 +1112,7 @@ static void save_pipeline_cache(renderer *r, const void *loaded, size_t loaded_s
     void *data = mem_alloc(n);
     if (vkGetPipelineCacheData(r->dev, r->pcache, &n, data) == VK_SUCCESS &&
         !(n == loaded_size && loaded && memcmp(data, loaded, n) == 0)) {
-        char dir[PATHS_MAX];
+        char dir[PATHS_MAX] = {0};
         if (paths_parent(r->pcache_path, dir, sizeof dir) == 0) (void)paths_make_dirs(dir);
         if (save_write_file(r->pcache_path, data, n) != 0)
             log_warn("could not write pipeline cache %s", r->pcache_path);
@@ -1124,7 +1124,7 @@ static VkShaderModule make_module(renderer *r, const uint32_t *code, size_t byte
 {
     VkShaderModuleCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = bytes,
                                    .pCode = code};
-    VkShaderModule m;
+    VkShaderModule m = NULL;
     VK_CHECK(vkCreateShaderModule(r->dev, &ci, r->ac, &m));
     return m;
 }
@@ -1201,7 +1201,7 @@ static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
                                        .layout = d->layout ? d->layout : r->layout,
                                        .renderPass = r->pass,
                                        .subpass = 0};
-    VkPipeline p;
+    VkPipeline p = NULL;
     VK_CHECK(vkCreateGraphicsPipelines(r->dev, r->pcache, 1, &ci, r->ac, &p));
     return p;
 }
@@ -1381,7 +1381,7 @@ static void upload_image(renderer *r, VkImage img, int host, uint32_t mips, uint
                                              .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                              .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, mips, 0, layers}};
         VK_CHECK(r->transition_layout(r->dev, 1, &t));
-        VkMemoryToImageCopy c[TEX_MIPS];
+        VkMemoryToImageCopy c[TEX_MIPS] = {0};
         if (n > TEX_MIPS) log_fatal("upload_image: %u regions", n);
         for (uint32_t i = 0; i < n; i++)
             c[i] = (VkMemoryToImageCopy){.sType = VK_STRUCTURE_TYPE_MEMORY_TO_IMAGE_COPY,
@@ -1398,7 +1398,7 @@ static void upload_image(renderer *r, VkImage img, int host, uint32_t mips, uint
     }
 #endif
     (void)host;
-    gbuf st;
+    gbuf st = {0};
     buffer_create(r, &st, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
     memcpy(st.map, data, bytes);
@@ -1429,7 +1429,7 @@ static void create_font(renderer *r)
                             .usage = upload_usage(host) | VK_IMAGE_USAGE_SAMPLED_BIT,
                             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
     VK_CHECK(vkCreateImage(r->dev, &ii, r->ac, &r->font));
-    VkMemoryRequirements req;
+    VkMemoryRequirements req = {0};
     vkGetImageMemoryRequirements(r->dev, r->font, &req);
     VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
                                .allocationSize = req.size,
@@ -1489,7 +1489,7 @@ static void create_texture(renderer *r)
                             .usage = upload_usage(host) | VK_IMAGE_USAGE_SAMPLED_BIT,
                             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
     VK_CHECK(vkCreateImage(r->dev, &ii, r->ac, &r->tex));
-    VkMemoryRequirements req;
+    VkMemoryRequirements req = {0};
     vkGetImageMemoryRequirements(r->dev, r->tex, &req);
     VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size,
                                .memoryTypeIndex = find_memtype(r, req.memoryTypeBits,
@@ -1500,7 +1500,7 @@ static void create_texture(renderer *r)
     uint32_t bytes = texgen_total_bytes();
     uint8_t *texels = mem_alloc(bytes);
     texgen_build(texels);
-    VkBufferImageCopy regions[TEX_MIPS];
+    VkBufferImageCopy regions[TEX_MIPS] = {0};
     for (int m = 0; m < TEX_MIPS; m++) {
         uint32_t s = TEX_SIZE >> m;
         regions[m] = (VkBufferImageCopy){.bufferOffset = texgen_offset(0, m),
@@ -1547,7 +1547,7 @@ static void create_texture(renderer *r)
     VK_CHECK(vkAllocateDescriptorSets(r->dev, &dai, r->dsets));
     VkDescriptorImageInfo dii[2] = {{r->sampler, r->tex_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                                     {r->sampler_filtered, r->tex_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
-    VkWriteDescriptorSet w[2];
+    VkWriteDescriptorSet w[2] = {0};
     for (int i = 0; i < 2; i++)
         w[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                       .dstSet = r->dsets[i],
@@ -1571,7 +1571,7 @@ static void create_static_buffers(renderer *r)
      * vertex offset carries the base, so larger sections split in two. */
     VkDeviceSize ibytes = (VkDeviceSize)QUADS_PER_DRAW * 6 * sizeof(uint16_t);
     VkDeviceSize cbytes = 24 * sizeof(uint32_t);
-    gbuf st;
+    gbuf st = {0};
     buffer_create(r, &st, ibytes + cbytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
     uint16_t *idx = st.map;
@@ -1592,7 +1592,7 @@ static void create_static_buffers(renderer *r)
         int order[4] = {0, 1, 2, 3};
         if (sgn < 0) { order[1] = 3; order[3] = 1; }
         for (int k = 0; k < 4; k++) {
-            int p[3];
+            int p[3] = {0};
             p[d] = sgn > 0;
             p[u] = CU[order[k]];
             p[w] = CV[order[k]];
@@ -1639,7 +1639,7 @@ static int pool_add_block(renderer *r, VkDeviceSize bytes)
          * shared-memory device (the Pi) squeeze the rest of the system:
          * keep the old meshes instead. Without the budget the driver's
          * refusal is the only limit. */
-        VkDeviceSize used, budget;
+        VkDeviceSize used = 0, budget = 0;
         query_budget(r, &used, &budget);
         if (budget && used + bytes > budget) return 0;
     }
@@ -1735,7 +1735,7 @@ static void read_gpu_time(renderer *r, frame *f)
 {
     uint32_t q = (uint32_t)(f - r->frames) * 2;
     if (f->timed) {
-        uint64_t t[2];
+        uint64_t t[2] = {0};
         if (vkGetQueryPoolResults(r->dev, r->queries, q, 2, sizeof t, t, sizeof t[0], VK_QUERY_RESULT_64_BIT) ==
             VK_SUCCESS)
             r->gpu_ms = (float)((double)((t[1] - t[0]) & r->caps.timestamp_mask) * r->caps.timestamp_ms_per_tick);
@@ -1875,7 +1875,7 @@ renderer *renderer_create(GLFWwindow *win, const render_opts *o)
     r->depth_fmt = pick_depth_format(r);
     if (!r->begin_rendering) create_render_pass(r);
     if (!create_swapchain(r)) log_fatal("window has zero size at startup");
-    size_t cache_size;
+    size_t cache_size = 0;
     void *cache = create_pipeline_cache(r, o, &cache_size);
     double t0 = glfwGetTime();
     create_pipelines(r);
@@ -2288,7 +2288,7 @@ static void finish_stats(renderer *r, render_stats *st)
 {
     st->gpu_ms = r->gpu_ms;
     if (r->memprops2 && r->submitted % 30 == 1) { /* twice a second at 60 fps is plenty for F3 */
-        VkDeviceSize used, budget;
+        VkDeviceSize used = 0, budget = 0;
         query_budget(r, &used, &budget);
         r->vram_used_mb = (uint32_t)(used >> 20);
         r->vram_budget_mb = (uint32_t)(budget >> 20);
@@ -2342,7 +2342,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     const float *fogc = v->underwater ? water_fog : sky;
     float fog_end = v->underwater ? 24.0f : (float)(r->radius * CHUNK_W) - 8.0f;
     float fog_start = v->underwater ? 0.0f : fog_end * 0.55f;
-    push_vert pv;
+    push_vert pv = {0};
     memcpy(pv.view_proj, vp.m, sizeof pv.view_proj);
     /* Blocks: the camera position (wrapped to a 256 m tile, a multiple of
      * every wave length) so animations are anchored to the world. */
@@ -2354,11 +2354,11 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     pv.fog[1] = 1.0f / (fog_end - fog_start);
     pv.fog[2] = (float)fmod((double)v->time, 3600.0);
     pv.fog[3] = daylight;
-    push_frag pf;
+    push_frag pf = {0};
     for (int i = 0; i < 3; i++) pf.color[i] = r->swap_srgb ? srgb_to_linear(fogc[i]) : fogc[i];
     pf.color[3] = r->filtering ? 1.0f : 0.0f; /* block.frag: the filtered set is bound */
 
-    VkClearValue clears[2];
+    VkClearValue clears[2] = {0};
     clears[0].color = (VkClearColorValue){{pf.color[0], pf.color[1], pf.color[2], 1.0f}};
     clears[1].depthStencil = (VkClearDepthStencilValue){0.0f, 0}; /* reversed Z */
     begin_pass(r, cmd, clears);
@@ -2541,7 +2541,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buf, &line_off); /* the crosshair's vertices */
     }
     if (!v->hide_crosshair) {
-        push_vert cp;
+        push_vert cp = {0};
         memset(&cp, 0, sizeof cp);
         mat4 id = m4_identity();
         memcpy(cp.view_proj, id.m, sizeof cp.view_proj);

@@ -31,6 +31,11 @@ option(MC_NATIVE      "Deprecated alias for MC_CPU=native" OFF)
 set(MC_CPU "" CACHE STRING
   "CPU to optimise for: empty = compiler default, native, pi4, pi5, x86-64-v2, x86-64-v3")
 set_property(CACHE MC_CPU PROPERTY STRINGS "" native pi4 pi5 x86-64-v2 x86-64-v3)
+set(MC_DISCORD_APP_ID "" CACHE STRING
+  "Discord application ID for the status the player can turn on (empty: no Discord status)")
+if(NOT MC_DISCORD_APP_ID MATCHES "^[0-9]*$")
+  message(FATAL_ERROR "MC_DISCORD_APP_ID must be digits only, got '${MC_DISCORD_APP_ID}'")
+endif()
 set(MC_DEPS AUTO CACHE STRING
   "Where GLFW and mimalloc come from: AUTO (system, else pinned download), SYSTEM, FETCH")
 set_property(CACHE MC_DEPS PROPERTY STRINGS AUTO SYSTEM FETCH)
@@ -130,6 +135,7 @@ set(MC_CORE_SOURCES
   src/block.c
   src/camera.c
   src/debug.c
+  src/discord.c
   src/fx.c
   src/gpucaps.c
   src/gpupool.c
@@ -154,12 +160,14 @@ set(MC_CORE_SOURCES
   src/sound.c
   src/sound_synth.c
   src/survival.c
+  src/sysinfo.c
   src/texgen.c
   src/thermo.c
   src/ui.c
   src/viewmodel.c
   src/world.c
   src/worldgen.c
+  src/worlds.c
 )
 
 # ASan cannot see mi_* allocations, and the static mimalloc's malloc
@@ -201,6 +209,7 @@ if(MC_BUILD_GAME)
     add_executable(blockclonia src/main.c src/renderer.c src/audio_null.c)
   endif()
   target_link_libraries(blockclonia PRIVATE mccore Vulkan::Vulkan mc::glfw mc_warnings)
+  target_compile_definitions(blockclonia PRIVATE MC_DISCORD_APP_ID="${MC_DISCORD_APP_ID}")
   if(MC_VK_MIMALLOC AND NOT MC_MEM_LIBC)
     # renderer.c's VkAllocationCallbacks; libc builds (sanitizer, fuzz) lack the aligned mem_* calls.
     target_compile_definitions(blockclonia PRIVATE MC_VK_MIMALLOC)
@@ -218,7 +227,8 @@ if(MC_BUILD_TESTS)
   add_executable(mc_tests tests/test_main.c tests/test_util.c tests/test_thermo.c tests/test_health2.c
                           tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_gpucaps.c
                           tests/test_health_debug.c tests/test_defib.c tests/test_paths.c
-                          tests/test_save_db.c)
+                          tests/test_save_db.c tests/test_worlds.c tests/test_hud.c tests/test_cardio.c
+                          tests/test_discord.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)
   set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT 120)

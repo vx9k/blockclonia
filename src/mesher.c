@@ -22,7 +22,7 @@ static uint8_t g_class[256];
 void mesher_init(void)
 {
     for (int i = 0; i < 256; i++) {
-        uint8_t c;
+        uint8_t c = 0;
         if (i == B_AIR) c = C_AIR;
         else if (i == B_WATER) c = C_WATER;
         else if (i >= B_COUNT || (g_blocks[i].flags & BF_OPAQUE)) c = C_OPAQUE; /* unknown/unloaded: hide faces */
@@ -111,6 +111,8 @@ static inline uint32_t face_key(const mesh_input *in, const uint8_t *cls, int pi
 uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *mc)
 {
     uint32_t nopq = 0, ntr = 0;
+    /* Left uninitialised on purpose: cls is filled just below and mask row
+     * by row before any read, and zeroing both cost 12% of meshing time. */
     uint32_t mask[16][16];
     uint8_t cls[MESH_PAD_VOL];
     for (int i = 0; i < MESH_PAD_VOL; i++) cls[i] = g_class[in->blocks[i]];
@@ -158,7 +160,7 @@ uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *m
                      * visible crease: rotate the quad by one vertex. */
                     int start = (ao[order[0]] + ao[order[2]] < ao[order[1]] + ao[order[3]]) ? 1 : 0;
 
-                    uint32_t *dst;
+                    uint32_t *dst = NULL;
                     if (k & K_TRANS) {
                         ntr++;
                         dst = out + 4u * (MESH_MAX_QUADS - ntr);
@@ -169,7 +171,7 @@ uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *m
                     int plane = slice + (sgn > 0);
                     for (int n = 0; n < 4; n++) {
                         int c = order[(n + start) & 3];
-                        int p[3];
+                        int p[3] = {0};
                         p[d] = plane;
                         p[u] = i + CU[c] * w;
                         p[v] = j + CV[c] * h;
@@ -205,7 +207,7 @@ uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *m
 
 uint32_t mesh_section(const mesh_input *in, uint32_t *out, uint32_t *opaque_quads, uint32_t *trans_quads)
 {
-    mesh_counts mc;
+    mesh_counts mc = {0};
     uint32_t n = mesh_section_counts(in, out, &mc);
     *opaque_quads = mc.opaque;
     *trans_quads = mc.trans;

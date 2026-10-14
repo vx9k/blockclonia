@@ -19,9 +19,16 @@
 
 double os_now(void)
 {
-    struct timespec ts;
+    struct timespec ts = {0};
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
+
+void os_sleep(double seconds)
+{
+    if (!(seconds > 0.0)) return;
+    struct timespec ts = {(time_t)seconds, (long)((seconds - (double)(time_t)seconds) * 1e9)};
+    while (nanosleep(&ts, &ts) != 0 && errno == EINTR) {}
 }
 
 int os_cpu_count(void)
@@ -62,7 +69,12 @@ int os_thread_start(os_thread *t, void (*fn)(void *arg), void *arg)
     thread_start *s = mem_alloc(sizeof *s);
     s->fn = fn;
     s->arg = arg;
-    if (pthread_create(t, NULL, thread_main, s) != 0) {
+    pthread_attr_t attr = {0};
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, OS_THREAD_STACK);
+    int rc = pthread_create(t, &attr, thread_main, s);
+    pthread_attr_destroy(&attr);
+    if (rc != 0) {
         mem_free(s);
         return -1;
     }
@@ -81,7 +93,7 @@ void os_thread_lower_priority(void)
 
 int os_path_kind(const char *path)
 {
-    struct stat st;
+    struct stat st = {0};
     if (lstat(path, &st) != 0) return errno == ENOENT ? OS_MISSING : OS_ERROR;
     if (S_ISREG(st.st_mode)) return OS_FILE;
     return S_ISDIR(st.st_mode) ? OS_DIR : OS_OTHER;
@@ -89,7 +101,7 @@ int os_path_kind(const char *path)
 
 int os_is_dir(const char *path)
 {
-    struct stat st;
+    struct stat st = {0};
     return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
@@ -97,7 +109,7 @@ long os_read_regular(const char *path, uint8_t *buf, size_t cap)
 {
     int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
     if (fd < 0) return errno == ENOENT ? -2 : -1;
-    struct stat st;
+    struct stat st = {0};
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
         close(fd);
         return -1;
@@ -125,7 +137,7 @@ long os_read_regular(const char *path, uint8_t *buf, size_t cap)
  * file is already in place, and only the folder entry could be lost. */
 static void sync_parent(const char *path)
 {
-    char dir[PATH_MAX];
+    char dir[PATH_MAX] = {0};
     const char *slash = strrchr(path, '/');
     size_t n = slash ? (size_t)(slash - path) : 0;
     if (slash == path) n = 1; /* "/name" lives in "/" */
@@ -168,7 +180,7 @@ int os_mkdir(const char *dir, unsigned mode) { return mkdir(dir, (mode_t)mode); 
 
 int os_full_path(const char *dir, char *out, size_t cap)
 {
-    char real[PATH_MAX];
+    char real[PATH_MAX] = {0};
     if (!realpath(dir, real)) return -1;
     size_t n = strlen(real);
     if (n >= cap) return -1;

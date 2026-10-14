@@ -57,8 +57,10 @@ typedef struct sound sound;
 sound *sound_create(uint32_t seed, uint32_t rate, int channels);
 void sound_destroy(sound *s);
 
-/* 0..1 each; effective volume is master * effects (or * ambient). */
-void sound_set_volumes(sound *s, float master, float effects, float ambient);
+/* 0..1 each; effective volume is master * effects (or * ambient). The
+ * interface (SND_UI_*) and body (heartbeat, breathing) sounds are effects
+ * scaled once more by ui or body, so each can be turned down alone. */
+void sound_set_volumes(sound *s, float master, float effects, float ambient, float ui, float body);
 
 /* Where the ears are. yaw/pitch as the camera; underwater muffles. */
 void sound_listener(sound *s, dvec3 pos, float yaw, float pitch, int underwater);

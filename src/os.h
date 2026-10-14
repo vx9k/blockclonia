@@ -11,10 +11,18 @@
 #include <pthread.h>
 
 #define OS_THREAD_LOCAL _Thread_local
+/* Stack for the threads os_thread_start makes: the same on every OS
+ * (Linux gives 8 MB by default, macOS 512 KB), with room for the 64 KB
+ * frames -Wframe-larger-than allows. */
+#define OS_THREAD_STACK (4u * 1024u * 1024u)
 
 /* Seconds on a monotonic clock with an arbitrary start. Lock-free and
  * allocation-free, so the audio callback may call it. */
 double os_now(void);
+
+/* Sleeps for about `seconds` (nothing if it is not positive), resuming
+ * after signals. */
+void os_sleep(double seconds);
 
 /* Online CPU cores, at least 1. */
 int os_cpu_count(void);

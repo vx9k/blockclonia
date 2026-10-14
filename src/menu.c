@@ -5,6 +5,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define ROW_H 18.0f
@@ -19,6 +20,8 @@ typedef struct {
     int activate;      /* item activated by the keyboard this frame, -1 none */
     int adjust;        /* -1/+1 for the focused item (Left/Right) */
     int mouse_moved;
+    int text_focus;    /* the focused item is a text field (set while laying out) */
+    int focus0;        /* the focus before this frame's arrow keys */
     menu_action action;
 } ctx;
 
@@ -38,7 +41,9 @@ void menu_open(menu *m, int screen)
     }
     m->screen = screen;
     m->age = 0.0f;
-    m->focus = screen == SCREEN_SETTINGS ? 3 : 0; /* past the three tabs, on the first setting */
+    m->focus = screen == SCREEN_SETTINGS ? SETTINGS_TABS : 0; /* past the tabs, on the first setting */
+    if (screen == SCREEN_DELETE_WORLD) m->focus = 1; /* Cancel: a stray Enter keeps the world */
+    m->note[0] = '\0';
     m->drag = -1;
     for (int i = 0; i < MENU_MAX_ITEMS; i++) m->hover[i] = 0.0f;
 }
@@ -78,9 +83,9 @@ static void cell(ui *u, float x, float y, float w, float h, float hv, float a)
 
 static int button(ctx *c, float x, float y, float w, const char *label)
 {
-    int hot;
+    int hot = 0;
     int i = item(c, x, y, w, ROW_H, &hot);
-    float dx, a = entry(c, i, &dx);
+    float dx = 0.0f, a = entry(c, i, &dx);
     float hv = hover_of(c, i);
     cell(c->u, x + dx, y, w, ROW_H, hv, a);
     ui_text(c->u, x + dx + 8 + 3.0f * hv, y + 6, 1, ui_alpha(pal_mix(C_TEXT, C_HEAD, hv), a), label);
@@ -92,9 +97,9 @@ static int button(ctx *c, float x, float y, float w, const char *label)
 static int slider(ctx *c, float x, float y, float w, const char *label, int *v, int lo, int hi, int step,
                   const char *unit)
 {
-    int hot;
+    int hot = 0;
     int i = item(c, x, y, w, ROW_H, &hot);
-    float dx, a = entry(c, i, &dx);
+    float dx = 0.0f, a = entry(c, i, &dx);
     float hv = hover_of(c, i);
     int old = *v;
     const float tx = x + 8, tw = w - 16;
@@ -117,7 +122,7 @@ static int slider(ctx *c, float x, float y, float w, const char *label, int *v, 
     }
     cell(c->u, x + dx, y, w, ROW_H, hv, a);
     ui_text(c->u, x + dx + 8 + 3.0f * hv, y + 4, 1, ui_alpha(pal_mix(C_TEXT, C_HEAD, hv), a), label);
-    char b[32];
+    char b[32] = {0};
     snprintf(b, sizeof b, "%d%s", *v, unit);
     ui_text(c->u, x + dx + w - 8 - ui_text_width(b, 1), y + 4, 1, ui_alpha(C_ECG, a), b);
     float t = (float)(*v - lo) / (float)(hi - lo);
@@ -129,9 +134,9 @@ static int slider(ctx *c, float x, float y, float w, const char *label, int *v, 
 
 static int cycle(ctx *c, float x, float y, float w, const char *label, int *v, const char *const *names, int count)
 {
-    int hot;
+    int hot = 0;
     int i = item(c, x, y, w, ROW_H, &hot);
-    float dx, a = entry(c, i, &dx);
+    float dx = 0.0f, a = entry(c, i, &dx);
     float hv = hover_of(c, i);
     int old = *v;
     if ((hot && c->in->click) || c->activate == i) {
@@ -142,7 +147,7 @@ static int cycle(ctx *c, float x, float y, float w, const char *label, int *v, c
     cell(c->u, x + dx, y, w, ROW_H, hv, a);
     ui_text(c->u, x + dx + 8 + 3.0f * hv, y + 6, 1, ui_alpha(pal_mix(C_TEXT, C_HEAD, hv), a), label);
     const char *name = names[*v < 0 || *v >= count ? 0 : *v];
-    char b[48];
+    char b[48] = {0};
     snprintf(b, sizeof b, hv > 0.5f ? "< %s >" : "%s", name);
     ui_text(c->u, x + dx + w - 8 - ui_text_width(b, 1), y + 6, 1, ui_alpha(C_ECG, a), b);
     return *v != old;
@@ -213,7 +218,10 @@ static void title_screen(ctx *c)
     ui_text_shadow(u, x0, y0 + 70, 1, ui_alpha(C_DIM, fade), "Real physics. A body that works like one.");
 
     float by = y0 + 96;
-    if (button(c, x0, by, 150, "Play")) c->action = MENU_PLAY;
+    if (button(c, x0, by, 150, "Play")) {
+        menu_open(m, SCREEN_WORLDS);
+        c->action = MENU_WORLDS;
+    }
     if (button(c, x0, by + 22, 150, "Settings")) menu_open(m, SCREEN_SETTINGS);
     if (button(c, x0, by + 44, 150, "Controls")) menu_open(m, SCREEN_CONTROLS);
     if (button(c, x0, by + 66, 150, "Quit")) c->action = MENU_QUIT;
@@ -245,7 +253,7 @@ static void pause_screen(ctx *c)
     ui *u = c->u;
     menu *m = c->m;
     ui_rect(u, 0, 0, u->w, u->h, ui_rgba(0, 0, 0, (int)(150.0f * ease_out_cubic(m->age / 0.25f))));
-    float x, y;
+    float x = 0.0f, y = 0.0f;
     const float w = 200, h = 162;
     panel(u, m->age, w, h, &x, &y, "PAUSED");
     if (m->status[0]) ui_text_wrap(u, x + 8, y + 22, w - 16, 2, 1, C_DIM, m->status);
@@ -270,31 +278,53 @@ static void backdrop(ctx *c)
 /* A tab heading: highlighted when it is the open one. */
 static int tab_button(ctx *c, float x, float y, float w, const char *label, int active)
 {
-    int hot;
+    int hot = 0;
     int i = item(c, x, y, w, ROW_H, &hot);
-    float dx, a = entry(c, i, &dx);
+    float dx = 0.0f, a = entry(c, i, &dx);
     float hv = hover_of(c, i);
     ui *u = c->u;
     ui_rect(u, x, y, w, ROW_H, ui_alpha(active ? ui_rgba(30, 44, 40, 240) : ui_rgba(14, 16, 20, 200), a));
     ui_frame(u, x, y, w, ROW_H, 1, ui_alpha(pal_mix(C_BORDER, C_ECG, active ? 1.0f : hv * 0.7f), a));
     ui_text(u, x + (w - ui_text_width(label, 1)) * 0.5f, y + 6, 1, ui_alpha(active ? C_HEAD : C_TEXT, a), label);
-    if (c->m->focus == i && c->adjust) c->m->tab = (c->m->tab + c->adjust + 3) % 3;
+    if (c->m->focus == i && c->adjust) c->m->tab = (c->m->tab + c->adjust + SETTINGS_TABS) % SETTINGS_TABS;
     return (hot && c->in->click) || c->activate == i;
 }
 
 static int settings_video(ctx *c, settings *s, float rx, float ry, float rw)
 {
     static const char *const ONOFF[] = {"Off", "On"};
-    static const char *const GUI[] = {"Auto", "1x", "2x", "3x", "4x"};
     int changed = 0;
     changed |= slider(c, rx, ry, rw, "Field of view", &s->fov, SETTINGS_FOV_MIN, SETTINGS_FOV_MAX, 1, UI_CH_DEGREE);
     changed |= cycle(c, rx, ry + 20, rw, "View bobbing", &s->view_bob, ONOFF, 2);
     changed |= cycle(c, rx, ry + 40, rw, "Sprint FOV effect", &s->fov_effects, ONOFF, 2);
     changed |= slider(c, rx, ry + 60, rw, "Render distance (restart)", &s->render_distance, SETTINGS_RD_MIN,
                       SETTINGS_RD_MAX, 1, "");
-    changed |= cycle(c, rx, ry + 80, rw, "VSync", &s->vsync, ONOFF, 2);
-    changed |= cycle(c, rx, ry + 100, rw, "Texture filtering (distance)", &s->filtering, ONOFF, 2);
-    changed |= cycle(c, rx, ry + 120, rw, "GUI scale", &s->gui_scale, GUI, SETTINGS_GUI_MAX + 1);
+    changed |= cycle(c, rx, ry + 80, rw, "Texture filtering (distance)", &s->filtering, ONOFF, 2);
+    changed |= slider(c, rx, ry + 100, rw, "Brightness (nights)", &s->brightness, 0, 100, 5, "%");
+    return changed;
+}
+
+/* The frame-rate limits offered; any value in range loads, and the cycle
+ * starts from the nearest one. */
+static const int FPS_STEPS[] = {0, 30, 60, 90, 120, 144, 165, 240};
+#define FPS_COUNT ((int)(sizeof FPS_STEPS / sizeof FPS_STEPS[0]))
+
+static int settings_display(ctx *c, settings *s, float rx, float ry, float rw)
+{
+    static const char *const ONOFF[] = {"Off", "On"};
+    static const char *const GUI[] = {"Auto", "1x", "2x", "3x", "4x"};
+    static const char *const FPS[FPS_COUNT] = {"Unlimited", "30", "60", "90", "120", "144", "165", "240"};
+    int changed = 0;
+    changed |= cycle(c, rx, ry, rw, "Fullscreen", &s->fullscreen, ONOFF, 2);
+    changed |= cycle(c, rx, ry + 20, rw, "VSync", &s->vsync, ONOFF, 2);
+    int k = 0;
+    for (int i = 1; i < FPS_COUNT; i++)
+        if (abs(FPS_STEPS[i] - s->max_fps) < abs(FPS_STEPS[k] - s->max_fps)) k = i;
+    if (cycle(c, rx, ry + 40, rw, s->vsync ? "Frame limit (VSync off)" : "Frame limit", &k, FPS, FPS_COUNT)) {
+        s->max_fps = FPS_STEPS[k];
+        changed = 1;
+    }
+    changed |= cycle(c, rx, ry + 60, rw, "GUI scale", &s->gui_scale, GUI, SETTINGS_GUI_MAX + 1);
     return changed;
 }
 
@@ -308,15 +338,20 @@ static int settings_controls(ctx *c, settings *s, float rx, float ry, float rw)
     changed |= cycle(c, rx, ry + 20, rw, "Invert mouse", &s->invert_y, ONOFF, 2);
     changed |= cycle(c, rx, ry + 40, rw, "Sprint", &s->sprint_toggle, SPRINT, 2);
     changed |= cycle(c, rx, ry + 60, rw, "Key hints", &s->show_hints, ONOFF, 2);
+    if (c->m->discord_ok) changed |= cycle(c, rx, ry + 80, rw, "Discord status", &s->discord, ONOFF, 2);
     return changed;
 }
 
 static int settings_audio(ctx *c, settings *s, float rx, float ry, float rw)
 {
+    static const char *const ONOFF[] = {"Off", "On"};
     int changed = 0;
     changed |= slider(c, rx, ry, rw, "Master volume", &s->volume_master, 0, 100, 5, "%");
     changed |= slider(c, rx, ry + 20, rw, "Effects", &s->volume_effects, 0, 100, 5, "%");
     changed |= slider(c, rx, ry + 40, rw, "Ambience (wind, water, fire)", &s->volume_ambient, 0, 100, 5, "%");
+    changed |= slider(c, rx, ry + 60, rw, "Interface", &s->volume_ui, 0, 100, 5, "%");
+    changed |= slider(c, rx, ry + 80, rw, "Body (heartbeat, breathing)", &s->volume_body, 0, 100, 5, "%");
+    changed |= cycle(c, rx, ry + 100, rw, "Mute in background", &s->mute_unfocused, ONOFF, 2);
     return changed;
 }
 
@@ -325,17 +360,18 @@ static void settings_screen(ctx *c, settings *s)
     ui *u = c->u;
     menu *m = c->m;
     backdrop(c);
-    float x, y;
+    float x = 0.0f, y = 0.0f;
     const float w = 300, h = 222;
     panel(u, m->age, w, h, &x, &y, "SETTINGS");
-    static const char *const TABS[3] = {"Video", "Controls", "Audio"};
-    float tw = (w - 16 - 8) / 3.0f;
-    for (int t = 0; t < 3; t++)
+    static const char *const TABS[SETTINGS_TABS] = {"Video", "Display", "Controls", "Audio"};
+    float tw = (w - 16 - 4.0f * (SETTINGS_TABS - 1)) / (float)SETTINGS_TABS;
+    for (int t = 0; t < SETTINGS_TABS; t++)
         if (tab_button(c, x + 8 + (float)t * (tw + 4), y + 22, tw, TABS[t], m->tab == t)) m->tab = t;
     float rx = x + 8, rw = w - 16, ry = y + 48;
-    int changed;
+    int changed = 0;
     if (m->tab == 0) changed = settings_video(c, s, rx, ry, rw);
-    else if (m->tab == 1) changed = settings_controls(c, s, rx, ry, rw);
+    else if (m->tab == 1) changed = settings_display(c, s, rx, ry, rw);
+    else if (m->tab == 2) changed = settings_controls(c, s, rx, ry, rw);
     else changed = settings_audio(c, s, rx, ry, rw);
     if (button(c, x + w - 8 - 90, y + h - 8 - ROW_H, 90, "Done")) menu_open(m, m->back_to);
     if (changed) c->action = MENU_SETTINGS;
@@ -346,7 +382,7 @@ static void controls_screen(ctx *c)
     ui *u = c->u;
     menu *m = c->m;
     backdrop(c);
-    float x, y;
+    float x = 0.0f, y = 0.0f;
     const float w = 420, h = 262;
     panel(u, m->age, w, h, &x, &y, "CONTROLS");
     static const char *const KEYS[][2] = {
@@ -363,7 +399,7 @@ static void controls_screen(ctx *c)
         {"Tab / I", "Inventory and crafting"},
         {"H", "Health panel"},
         {"E / R", "Eat / drink"},
-        {"F2", "Screenshot"},
+        {"F2 / F11", "Screenshot / fullscreen"},
         {"F3", "Debug overlay (K: injury menu)"},
         {"Esc", "Pause"},
     };
@@ -393,7 +429,7 @@ static void debug_health_screen(ctx *c)
     ui *u = c->u;
     menu *m = c->m;
     ui_rect(u, 0, 0, u->w, u->h, ui_rgba(0, 0, 0, (int)(150.0f * ease_out_cubic(m->age / 0.25f))));
-    float x, y;
+    float x = 0.0f, y = 0.0f;
     /* Three columns keep every entry on a 640x360 screen. */
     const int cols = 3, rows = (HEALTH_DEBUG_COUNT + cols - 1) / cols;
     const float w = 620, h = 44 + (float)rows * ROW_H + 6 + ROW_H + 8;
@@ -417,9 +453,169 @@ static void debug_health_screen(ctx *c)
     if (button(c, rx + bw + 6, by, bw, "Back")) c->action = MENU_RESUME;
 }
 
+/* ------------------------------------------------------------ worlds */
+
+#define WORLD_ROWS 7
+
+/* A one-line text field: typing goes to the focused one. Only printable
+ * ASCII up to cap - 1 bytes is taken, which is what the font draws and
+ * what world names allow. Returns 1 when Enter is pressed on it. */
+static int text_field(ctx *c, float x, float y, float w, const char *label, char *buf, size_t cap, const char *hint)
+{
+    int hot = 0;
+    int i = item(c, x, y, w, ROW_H, &hot);
+    float dx = 0.0f, a = entry(c, i, &dx);
+    float hv = hover_of(c, i);
+    int focused = c->m->focus == i;
+    if (hot && c->in->click) c->m->focus = i;
+    cell(c->u, x + dx, y, w, ROW_H, hv, a);
+    ui_text(c->u, x + dx + 8, y + 6, 1, ui_alpha(C_DIM, a), label);
+    size_t len = strlen(buf);
+    if (focused) {
+        c->text_focus = 1;
+        for (int k = 0; k < c->in->text_len; k++) {
+            char ch = c->in->text[k];
+            if (ch >= 0x20 && ch <= 0x7e && len + 1 < cap) {
+                buf[len++] = ch;
+                buf[len] = '\0';
+            }
+        }
+        if (c->in->backspace && len > 0) buf[--len] = '\0';
+    }
+    float tx = x + dx + 64;
+    if (len) ui_text(c->u, tx, y + 6, 1, ui_alpha(C_TEXT, a), buf);
+    else if (!focused) ui_text(c->u, tx, y + 6, 1, ui_alpha(C_DIM, a * 0.6f), hint);
+    if (focused && fmod(c->m->time, 1.0) < 0.6) {
+        float cx = tx + ui_text_width(buf, 1) + 1;
+        ui_rect(c->u, cx, y + 4, 1, 10, ui_alpha(C_ECG, a));
+    }
+    return c->activate == i;
+}
+
+static void worlds_screen(ctx *c)
+{
+    ui *u = c->u;
+    menu *m = c->m;
+    backdrop(c);
+    float x = 0.0f, y = 0.0f;
+    const float w = 340, h = 244;
+    panel(u, m->age, w, h, &x, &y, "WORLDS");
+    int n = m->world_count;
+    if (m->world_sel >= n) m->world_sel = n - 1;
+    if (m->world_sel < 0) m->world_sel = 0;
+    /* Keep the selection in view; the keyboard moves it past the edges. */
+    if (m->world_sel < m->world_scroll) m->world_scroll = m->world_sel;
+    if (m->world_sel >= m->world_scroll + WORLD_ROWS) m->world_scroll = m->world_sel - WORLD_ROWS + 1;
+    int shown = n - m->world_scroll < WORLD_ROWS ? n - m->world_scroll : WORLD_ROWS;
+    if (n == 0) ui_text(u, x + 8, y + 28, 1, C_DIM, "No worlds yet. Create one to start.");
+    for (int r = 0; r < shown; r++) {
+        int k = m->world_scroll + r;
+        const menu_world *wd = &m->worlds[k];
+        float ry = y + 22 + (float)r * 22;
+        int hot = 0;
+        int i = item(c, x + 8, ry, w - 16, 20, &hot);
+        float dx = 0.0f, a = entry(c, i, &dx);
+        int sel = k == m->world_sel;
+        float hv = fmaxf(hover_of(c, i), sel ? 0.6f : 0.0f);
+        cell(u, x + 8 + dx, ry, w - 16, 20, hv, a);
+        uint32_t col = wd->playable ? pal_mix(C_TEXT, C_HEAD, hv) : C_DIM;
+        ui_text(u, x + 16 + dx, ry + 3, 1, ui_alpha(col, a), wd->name);
+        ui_text(u, x + 16 + dx, ry + 11, 1, ui_alpha(C_DIM, a), wd->detail);
+        if (m->focus == i) m->world_sel = k;
+        if (hot && c->in->click) {
+            /* A second click on the selected row plays it. */
+            if (sel && wd->playable) c->action = MENU_WORLD_PLAY;
+            m->world_sel = k;
+        }
+        if (c->activate == i && wd->playable) c->action = MENU_WORLD_PLAY;
+    }
+    /* Arrowing off the first or last shown row scrolls the list instead
+     * of leaving it; the focus stays on the edge row. */
+    if (c->in->down && c->focus0 == shown - 1 && m->world_sel + 1 < n) {
+        m->world_sel++;
+        m->focus = shown - 1;
+    } else if (c->in->up && c->focus0 == 0 && m->world_scroll > 0) {
+        m->world_sel--;
+        m->focus = 0;
+    }
+    float by = y + h - 8 - ROW_H, bw = (w - 16 - 4 * 4) / 5;
+    int have = n > 0 && m->world_sel < n;
+    if (button(c, x + 8, by, bw, "Play") && have && m->worlds[m->world_sel].playable) c->action = MENU_WORLD_PLAY;
+    if (button(c, x + 8 + (bw + 4), by, bw, "Create")) {
+        m->text_name[0] = m->text_seed[0] = '\0';
+        menu_open(m, SCREEN_CREATE_WORLD);
+    }
+    if (button(c, x + 8 + 2 * (bw + 4), by, bw, "Rename") && have) {
+        snprintf(m->text_name, sizeof m->text_name, "%s", m->worlds[m->world_sel].name);
+        menu_open(m, SCREEN_RENAME_WORLD);
+    }
+    if (button(c, x + 8 + 3 * (bw + 4), by, bw, "Delete") && have) menu_open(m, SCREEN_DELETE_WORLD);
+    if (button(c, x + 8 + 4 * (bw + 4), by, bw, "Back")) menu_open(m, SCREEN_TITLE);
+    if (m->note[0]) ui_text(u, x + 8, by - 12, 1, C_ART, m->note);
+}
+
+static void create_world_screen(ctx *c)
+{
+    ui *u = c->u;
+    menu *m = c->m;
+    backdrop(c);
+    float x = 0.0f, y = 0.0f;
+    const float w = 300, h = 124;
+    panel(u, m->age, w, h, &x, &y, "CREATE WORLD");
+    int go = text_field(c, x + 8, y + 24, w - 16, "Name", m->text_name, sizeof m->text_name, "New world");
+    go |= text_field(c, x + 8, y + 46, w - 16, "Seed", m->text_seed, sizeof m->text_seed, "random");
+    if (m->note[0]) ui_text(u, x + 8, y + 70, 1, C_ART, m->note);
+    float by = y + h - 8 - ROW_H, bw = (w - 16 - 4) / 2;
+    go |= button(c, x + 8, by, bw, "Create");
+    if (button(c, x + 8 + bw + 4, by, bw, "Cancel")) menu_open(m, SCREEN_WORLDS);
+    if (go && m->screen == SCREEN_CREATE_WORLD) c->action = MENU_WORLD_CREATE;
+}
+
+static void rename_world_screen(ctx *c)
+{
+    ui *u = c->u;
+    menu *m = c->m;
+    backdrop(c);
+    float x = 0.0f, y = 0.0f;
+    const float w = 300, h = 102;
+    panel(u, m->age, w, h, &x, &y, "RENAME WORLD");
+    int go = text_field(c, x + 8, y + 24, w - 16, "Name", m->text_name, sizeof m->text_name, "");
+    if (m->note[0]) ui_text(u, x + 8, y + 48, 1, C_ART, m->note);
+    float by = y + h - 8 - ROW_H, bw = (w - 16 - 4) / 2;
+    go |= button(c, x + 8, by, bw, "Rename");
+    if (button(c, x + 8 + bw + 4, by, bw, "Cancel")) menu_open(m, SCREEN_WORLDS);
+    if (go && m->screen == SCREEN_RENAME_WORLD) c->action = MENU_WORLD_RENAME;
+}
+
+static void delete_world_screen(ctx *c)
+{
+    ui *u = c->u;
+    menu *m = c->m;
+    backdrop(c);
+    float x = 0.0f, y = 0.0f;
+    const float w = 300, h = 96;
+    panel(u, m->age, w, h, &x, &y, "DELETE WORLD");
+    char line[128] = {0};
+    const char *name = m->world_sel < m->world_count ? m->worlds[m->world_sel].name : "";
+    snprintf(line, sizeof line, "Delete \"%s\"? This cannot be undone.", name);
+    ui_text_wrap(u, x + 8, y + 24, w - 16, 2, 1, C_TEXT, line);
+    if (m->note[0]) ui_text(u, x + 8, y + 46, 1, C_ART, m->note);
+    float by = y + h - 8 - ROW_H, bw = (w - 16 - 4) / 2;
+    if (button(c, x + 8, by, bw, "Delete")) c->action = MENU_WORLD_DELETE;
+    if (button(c, x + 8 + bw + 4, by, bw, "Cancel")) menu_open(m, SCREEN_WORLDS);
+}
+
 menu_action menu_frame(menu *m, ui *u, const menu_input *in, settings *s)
 {
-    ctx c = {m, u, in, 0, -1, 0, 0, MENU_NONE};
+    /* A text field types W/A/S/D and Space; only the arrows, Tab and
+     * Enter move or act while one has the focus. */
+    menu_input typed = {0};
+    if (m->text_focus && in->letter_nav) {
+        typed = *in;
+        typed.up = typed.down = typed.left = typed.right = typed.enter = 0;
+        in = &typed;
+    }
+    ctx c = {m, u, in, 0, -1, 0, 0, 0, m->focus, MENU_NONE};
     int focus0 = m->focus, screen0 = m->screen, tab0 = m->tab;
     m->clicked = m->hovered = 0;
     m->age += in->dt;
@@ -443,8 +639,13 @@ menu_action menu_frame(menu *m, ui *u, const menu_input *in, settings *s)
     case SCREEN_SETTINGS: settings_screen(&c, s); break;
     case SCREEN_CONTROLS: controls_screen(&c); break;
     case SCREEN_DEBUG_HEALTH: debug_health_screen(&c); break;
+    case SCREEN_WORLDS: worlds_screen(&c); break;
+    case SCREEN_CREATE_WORLD: create_world_screen(&c); break;
+    case SCREEN_RENAME_WORLD: rename_world_screen(&c); break;
+    case SCREEN_DELETE_WORLD: delete_world_screen(&c); break;
     default: break;
     }
+    m->text_focus = c.text_focus;
     /* The screen functions can switch screens through c.m. */
     /* cppcheck-suppress knownConditionTrueFalse */
     if (m->screen == screen) m->items = c.n;
@@ -453,6 +654,8 @@ menu_action menu_frame(menu *m, ui *u, const menu_input *in, settings *s)
     if (in->back && c.action == MENU_NONE && m->screen == screen) {
         if (screen == SCREEN_PAUSE || screen == SCREEN_DEBUG_HEALTH) c.action = MENU_RESUME;
         else if (screen == SCREEN_SETTINGS || screen == SCREEN_CONTROLS) menu_open(m, m->back_to);
+        else if (screen == SCREEN_WORLDS) menu_open(m, SCREEN_TITLE);
+        else if (screen >= SCREEN_CREATE_WORLD && screen <= SCREEN_DELETE_WORLD) menu_open(m, SCREEN_WORLDS);
     }
     m->hovered = m->focus != focus0 && m->screen == screen0 && m->items > 0;
     m->clicked |= m->screen != screen0 || m->tab != tab0;

@@ -20,7 +20,7 @@ set(MC_WARNINGS
   -Wundef
   -Wvla
   -Wimplicit-fallthrough
-  -Wframe-larger-than=16384        # largest frame today is 7.2 KB (mesher, on worker threads)
+  -Wframe-larger-than=65536        # threads get OS_THREAD_STACK (4 MB); keep bigger buffers on the heap
 )
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU")

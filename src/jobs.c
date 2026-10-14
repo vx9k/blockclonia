@@ -160,5 +160,3 @@ void jobs_wait_idle(jobs *js)
 }
 
 int jobs_worker_count(const jobs *js) { return js->worker_count; }
-
-int cpu_count(void) { return os_cpu_count(); }

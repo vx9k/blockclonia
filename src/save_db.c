@@ -88,7 +88,7 @@ static int schema_is_ours(sqlite3 *h, int *empty)
         return -1;
     }
     unsigned seen = 0;
-    int rows = 0, ours = 1, rc;
+    int rows = 0, ours = 1, rc = 0;
     while ((rc = sqlite3_step(s)) == SQLITE_ROW) {
         rows++;
         int k = -1;
@@ -149,7 +149,7 @@ static int check_or_create(sqlite3 *h, const char *path)
         return -1;
     }
     if (empty && app == 0 && version == 0) {
-        char sql[512];
+        char sql[512] = {0};
         int n = snprintf(sql, sizeof sql,
                          "BEGIN; %s; %s; %s; PRAGMA application_id = %d; PRAGMA user_version = %d; COMMIT",
                          TABLE_SQL[0], TABLE_SQL[1], TABLE_SQL[2], APP_ID, FORMAT);
@@ -171,7 +171,7 @@ static int side_files_ok(const char *path)
 {
     static const char *const SUFFIX[] = {"", "-journal", "-wal", "-shm"};
     for (size_t i = 0; i < sizeof SUFFIX / sizeof SUFFIX[0]; i++) {
-        char p[DB_PATH_MAX + 32];
+        char p[DB_PATH_MAX + 32] = {0};
         int n = snprintf(p, sizeof p, "%s%s", path, SUFFIX[i]);
         if (n < 0 || (size_t)n >= sizeof p) return 0;
         int kind = os_path_kind(p);
@@ -183,6 +183,10 @@ static int side_files_ok(const char *path)
     return 1;
 }
 
+static int g_cache_kb;
+
+void save_db_set_cache_kb(int kb) { g_cache_kb = kb > 0 ? kb : 0; }
+
 save_db *save_db_open(const char *dir)
 {
     if (sqlite3_libversion_number() < 3031000) {
@@ -192,7 +196,7 @@ save_db *save_db_open(const char *dir)
     /* SQLITE_OPEN_NOFOLLOW refuses a symlink anywhere in the path, and
      * homes are often reached through one (/home -> /var/home). Resolving
      * the folder first leaves only world.db itself to be refused. */
-    char real[DB_PATH_MAX], path[DB_PATH_MAX + 16];
+    char real[DB_PATH_MAX] = {0}, path[DB_PATH_MAX + 16] = {0};
     errno = 0;
     if (os_full_path(dir, real, sizeof real) != 0) {
         log_error("world folder %s: %s", dir, errno ? strerror(errno) : "cannot resolve it");
@@ -223,6 +227,11 @@ save_db *save_db_open(const char *dir)
     int persist_wal = 0;
     sqlite3_file_control(h, "main", SQLITE_FCNTL_PERSIST_WAL, &persist_wal);
     exec(h, "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL");
+    if (g_cache_kb) {
+        char pragma[64] = {0};
+        snprintf(pragma, sizeof pragma, "PRAGMA cache_size = -%d", g_cache_kb); /* negative: KiB */
+        exec(h, pragma);
+    }
     if (exec(h, "BEGIN IMMEDIATE; COMMIT") != 0) {
         log_error("%s: %s", path,
                   sqlite3_errcode(h) == SQLITE_BUSY ? "the world is open in another game" : sqlite3_errmsg(h));
@@ -297,33 +306,121 @@ static long read_blob(sqlite3_stmt *s, void *buf, size_t cap)
     return r;
 }
 
-int save_db_get_seed(save_db *db, uint32_t *seed)
+int save_db_get_meta(save_db *db, const char *key, int64_t *v)
 {
     sqlite3_stmt *s = db->st[S_GET_META];
     int r = -1;
-    sqlite3_bind_text(s, 1, "seed", -1, SQLITE_STATIC);
+    sqlite3_bind_text(s, 1, key, -1, SQLITE_STATIC);
     int rc = sqlite3_step(s);
     if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
-        log_error("cannot read the world seed: %s", sqlite3_errmsg(db->h));
+        log_error("cannot read the world's %s: %s", key, sqlite3_errmsg(db->h));
         r = -2;
     } else if (rc == SQLITE_ROW && sqlite3_column_type(s, 0) == SQLITE_INTEGER) {
-        sqlite3_int64 v = sqlite3_column_int64(s, 0);
-        if (v >= 0 && v <= (sqlite3_int64)UINT32_MAX) {
-            *seed = (uint32_t)v;
-            r = 0;
-        }
+        *v = (int64_t)sqlite3_column_int64(s, 0);
+        r = 0;
     }
     sqlite3_reset(s);
     sqlite3_clear_bindings(s);
     return r;
 }
 
-int save_db_set_seed(save_db *db, uint32_t seed)
+int save_db_set_meta(save_db *db, const char *key, int64_t v)
 {
     sqlite3_stmt *s = db->st[S_PUT_META];
-    sqlite3_bind_text(s, 1, "seed", -1, SQLITE_STATIC);
-    sqlite3_bind_int64(s, 2, (sqlite3_int64)seed);
+    sqlite3_bind_text(s, 1, key, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(s, 2, (sqlite3_int64)v);
     return step_write(db, s);
+}
+
+int save_db_get_seed(save_db *db, uint32_t *seed)
+{
+    int64_t v = 0;
+    int r = save_db_get_meta(db, "seed", &v);
+    if (r != 0) return r;
+    if (v < 0 || v > (int64_t)UINT32_MAX) return -1;
+    *seed = (uint32_t)v;
+    return 0;
+}
+
+int save_db_set_seed(save_db *db, uint32_t seed) { return save_db_set_meta(db, "seed", (int64_t)seed); }
+
+/* One integer from meta on a bare connection (the peek has no prepared
+ * statements); -1 missing or not an integer, -2 on an error. */
+static int peek_meta(sqlite3 *h, const char *key, int64_t *v)
+{
+    sqlite3_stmt *s = NULL;
+    if (sqlite3_prepare_v2(h, STMT_SQL[S_GET_META], -1, &s, NULL) != SQLITE_OK) return -2;
+    sqlite3_bind_text(s, 1, key, -1, SQLITE_STATIC);
+    int rc = sqlite3_step(s), r = -1;
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE) r = -2;
+    else if (rc == SQLITE_ROW && sqlite3_column_type(s, 0) == SQLITE_INTEGER) {
+        *v = (int64_t)sqlite3_column_int64(s, 0);
+        r = 0;
+    }
+    sqlite3_finalize(s);
+    return r;
+}
+
+void save_db_peek(const char *dir, save_peek *p)
+{
+    memset(p, 0, sizeof *p);
+    p->generator = 1;
+    p->status = SAVE_PEEK_BAD;
+    char real[DB_PATH_MAX] = {0}, path[DB_PATH_MAX + 16] = {0};
+    if (os_full_path(dir, real, sizeof real) != 0) return;
+    int n = snprintf(path, sizeof path, "%s/world.db", real);
+    if (n < 0 || (size_t)n >= sizeof path) return;
+    int kind = os_path_kind(path);
+    if (kind == OS_MISSING) {
+        char old[DB_PATH_MAX + 16] = {0};
+        n = snprintf(old, sizeof old, "%s/level.dat", real);
+        p->status = n > 0 && (size_t)n < sizeof old && os_path_kind(old) == OS_FILE ? SAVE_PEEK_LEGACY : SAVE_PEEK_NONE;
+        return;
+    }
+    if (kind != OS_FILE || !side_files_ok(path)) return;
+
+    /* Read-only: the list never writes, creates or recovers anything. The
+     * lock goes back to normal after harden: a read-only connection in
+     * exclusive mode cannot read a WAL database (SQLite answers with an
+     * I/O error). A world a game holds still answers busy, from that
+     * game's own exclusive lock, instead of being read mid-write. */
+    sqlite3 *h = NULL;
+    int rc = sqlite3_open_v2(path, &h, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOFOLLOW, NULL);
+    sqlite3_int64 app = 0, version = 0;
+    int empty = 0, ours = -1;
+    if (rc == SQLITE_OK && harden(h) == 0 && exec(h, "PRAGMA locking_mode = NORMAL") == 0 &&
+        pragma_int(h, "PRAGMA application_id", &app) == 0 && pragma_int(h, "PRAGMA user_version", &version) == 0)
+        ours = schema_is_ours(h, &empty);
+    if (ours < 0) {
+        int busy = h && (sqlite3_errcode(h) == SQLITE_BUSY || sqlite3_errcode(h) == SQLITE_LOCKED);
+        p->status = busy ? SAVE_PEEK_IN_USE : SAVE_PEEK_BAD;
+        sqlite3_close(h);
+        return;
+    }
+    if (app != APP_ID || version != FORMAT || !ours) {
+        sqlite3_close(h);
+        return;
+    }
+    int64_t v = 0;
+    if (peek_meta(h, "seed", &v) == 0 && v >= 0 && v <= (int64_t)UINT32_MAX) {
+        p->seed = (uint32_t)v;
+        p->has_seed = 1;
+    }
+    if (peek_meta(h, "generator", &v) == 0 && v >= 1 && v <= 1000000) p->generator = (int)v;
+    if (peek_meta(h, "last_played", &v) == 0 && v > 0) p->last_played = v;
+    sqlite3_stmt *s = NULL;
+    if (sqlite3_prepare_v2(h, STMT_SQL[S_GET_BLOB], -1, &s, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(s, 1, "name", -1, SQLITE_STATIC);
+        char name[SAVE_NAME_MAX + 1] = {0};
+        long len = read_blob(s, name, SAVE_NAME_MAX);
+        if (len > 0 && save_name_valid(name, (size_t)len)) {
+            memcpy(p->name, name, (size_t)len);
+            p->name[len] = '\0';
+        }
+        sqlite3_finalize(s);
+    }
+    sqlite3_close(h);
+    p->status = SAVE_PEEK_OK;
 }
 
 long save_db_get_column(save_db *db, int cx, int cz, uint8_t **out)
@@ -389,7 +486,7 @@ static int import_file(save_db *db, const char *dir, const char *name, int *fail
 {
     int cx = 0, cz = 0, player = strcmp(name, "player.dat") == 0;
     if (!player && !save_column_name(name, &cx, &cz)) return 0;
-    char path[512];
+    char path[512] = {0};
     int n = snprintf(path, sizeof path, "%s/%s", dir, name);
     if (n < 0 || (size_t)n >= sizeof path) return 0;
     /* Symlinks, FIFOs and oversized files stay behind: loading them from
@@ -404,7 +501,7 @@ static int import_file(save_db *db, const char *dir, const char *name, int *fail
 
 int save_db_import(save_db *db, const char *dir)
 {
-    uint32_t seed, have;
+    uint32_t seed = 0, have = 0;
     /* A seed that is there but could not be read must not let the old
      * files, which stay in the folder, be imported over the newer world. */
     int got = save_db_get_seed(db, &have);
@@ -417,7 +514,7 @@ int save_db_import(save_db *db, const char *dir)
         return -1;
     }
     int files = 1, failed = 0; /* level.dat */
-    const char *name;
+    const char *name = NULL;
     while (!failed && (name = os_dir_next(d)) != NULL) files += import_file(db, dir, name, &failed);
     os_dir_close(d);
     if (!failed && save_db_set_seed(db, seed) == 0 && save_db_commit(db) == 0) return files;

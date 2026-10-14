@@ -186,7 +186,7 @@ static void alerts_vital(const health *h, alert_list *l)
     else if (h->rhythm == RHYTHM_AVB3) add_alert(l, KEY, 3, "Slow heartbeat (heart block)");
     else if (h->rhythm == RHYTHM_AF) add_alert(l, KEY, 2, "Irregular heartbeat (AF)");
     if (h->defib.phase != DEFIB_OFF) {
-        char t[64];
+        char t[64] = {0};
         int sev = defib_prompt(h, t, sizeof t);
         add_alert(l, KEY, sev, "%s", t);
     }
@@ -288,14 +288,36 @@ static int collect_alerts(const health *h, alert *a, int max)
     return l.n;
 }
 
+void hud_condition(const health *h, char *buf, size_t n)
+{
+    if (h->dead) {
+        snprintf(buf, n, "%s", health_death_text(h->cause));
+        return;
+    }
+    alert a[HUD_ALERTS] = {0};
+    int count = collect_alerts(h, a, HUD_ALERTS), top = -1;
+    for (int i = 0; i < count; i++)
+        if (top < 0 || a[i].sev > a[top].sev) top = i;
+    int sev = top >= 0 ? a[top].sev : 0;
+    /* No circulation, or past the ~3 minutes of starved tissue after which
+     * shock no longer turns around (health.h): alive, but not for long. */
+    const char *word = "Healthy";
+    if (!health_rhythm_perfusing(h->rhythm) || h->shock_debt >= 3.0f) word = "Dead man walking";
+    else if (sev >= 3 || h->conscious == CONS_UNCONSCIOUS) word = "Almost dead";
+    else if (sev == 2) word = "Badly hurt";
+    else if (sev == 1) word = "Hurt";
+    if (sev > 0) snprintf(buf, n, "%s (%s)", word, a[top].text);
+    else snprintf(buf, n, "%s", word);
+}
+
 static float approach(float cur, float target, float dt, float tau)
 { return cur + (target - cur) * (1.0f - expf(-dt / tau)); }
 
 void hud_update(hud_state *s, const health *h, float dt)
 {
-    alert cur[HUD_ALERTS];
+    alert cur[HUD_ALERTS] = {0};
     int n = h->dead ? 0 : collect_alerts(h, cur, s->debug ? 3 : 6);
-    hud_alert next[HUD_ALERTS];
+    hud_alert next[HUD_ALERTS] = {0};
     int m = 0;
     /* Current conditions in order, carrying over the state of ones already
      * shown; a new one starts off-screen at its row. */
@@ -345,7 +367,7 @@ static void vitals(ui *u, const health *h, float x, float y)
     ui_textf(u, x + 11, y + 3, 1, hrc, "%3.0f", arrest ? 0.0 : (double)h->hr);
     ui_textf(u, x + 34, y + 3, 1, h->sbp < 90.0f ? C_ART : C_TEXT, "BP %3.0f/%-3.0f", (double)h->sbp, (double)h->dbp);
     /* The right-hand readouts end at the box's edge whatever their width. */
-    char b[24];
+    char b[24] = {0};
     int sp = health_spo2_reading(h);
     if (sp < 0) snprintf(b, sizeof b, "SpO2 --");
     else snprintf(b, sizeof b, "SpO2 %d%%", sp);
@@ -409,7 +431,7 @@ static void hud(ui *u, const health *h, const hud_state *s)
         }
         ay += floorf(rows * 10.0f + 0.5f);
     } else {
-        alert al[8];
+        alert al[8] = {0};
         int n = collect_alerts(h, al, s->debug ? 3 : 6);
         for (int i = 0; i < n; i++) {
             alert_line(u, x, ay, al[i].text, al[i].sev, 1.0f, h);
@@ -467,7 +489,7 @@ static rectf part_rect(int part, float bx, float by)
 
 static void body_diagram(ui *u, const health *h, int sel, float bx, float by)
 {
-    char buf[160];
+    char buf[160] = {0};
     for (int p = 0; p < BP_COUNT; p++) {
         rectf r = part_rect(p, bx, by);
         int sev = health_part_status(h, p, buf, sizeof buf);
@@ -556,7 +578,7 @@ static void monitor(ui *u, const health *h, float x, float y, float w)
     ui_rect(u, x, y, w, row * 4 + 4, ui_rgba(0, 0, 0, 255));
     ui_frame(u, x, y, w, row * 4 + 4, 1, C_BORDER);
     int arrest = !health_rhythm_perfusing(h->rhythm);
-    char b[48];
+    char b[48] = {0};
 
     /* ECG, lead II. */
     float ry = y + 2;
@@ -663,7 +685,7 @@ static void panel(ui *u, const health *h, const hud_state *s)
     const float x0 = floorf((u->w - pw) * 0.5f), y0 = floorf((u->h - ph) * 0.5f);
     ui_rect(u, x0, y0, pw, ph, C_PANEL);
     ui_frame(u, x0, y0, pw, ph, 1, C_BORDER);
-    char buf[200];
+    char buf[200] = {0};
 
     ui_text(u, x0 + 8, y0 + 6, 1, C_HEAD, "HEALTH");
     int mins = (int)(h->t / 60.0);
@@ -793,7 +815,7 @@ static void death_screen(ui *u, const health *h)
     ui_text(u, (u->w - ui_text_width(t, 4)) * 0.5f, u->h * 0.3f, 4, ui_rgba(255, 220, 220, 255), t);
     const char *c = health_death_text(h->cause);
     ui_text(u, (u->w - ui_text_width(c, 2)) * 0.5f, u->h * 0.3f + 44, 2, C_TEXT, c);
-    char b[96];
+    char b[96] = {0};
     int secs = (int)h->t;
     snprintf(b, sizeof b, "Survived %d min %02d s", secs / 60, secs % 60);
     ui_text(u, (u->w - ui_text_width(b, 1)) * 0.5f, u->h * 0.3f + 72, 1, C_DIM, b);

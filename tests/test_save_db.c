@@ -33,7 +33,7 @@ static long file_bytes(const char *path, uint8_t *buf, size_t cap) { return save
  * would be made. */
 static int raw_sql(const char *dir, const char *sql)
 {
-    char p[512];
+    char p[512] = {0};
     path_in(p, sizeof p, dir, "world.db");
     sqlite3 *h = NULL;
     int ok = sqlite3_open(p, &h) == SQLITE_OK && sqlite3_exec(h, sql, NULL, NULL, NULL) == SQLITE_OK;
@@ -135,7 +135,7 @@ static column *edited_column(int cx, int cz)
 
 static void test_roundtrip(void)
 {
-    char dir[400], p[512];
+    char dir[400] = {0}, p[512] = {0};
     sub_dir(dir, sizeof dir, "rt");
     save_db *db = save_db_open(dir);
     CHECK(db != NULL);
@@ -167,7 +167,7 @@ static void test_roundtrip(void)
     mem_free(bytes);
     bytes = NULL;
     CHECK(save_db_get_column(db, 7, -2, &bytes) == -1 && bytes == NULL);
-    char buf[8];
+    char buf[8] = {0};
     CHECK(save_db_get_blob(db, "player", buf, sizeof buf) == 3 && memcmp(buf, "pos", 3) == 0);
     CHECK(save_db_get_blob(db, "player", buf, 2) == -1); /* larger than the caller takes */
     CHECK(save_db_get_blob(db, "other", buf, sizeof buf) == -1);
@@ -179,7 +179,7 @@ static void test_roundtrip(void)
 /* open refuses the file and leaves it byte for byte as it was. */
 static void check_refused(const char *dir)
 {
-    char p[512];
+    char p[512] = {0};
     path_in(p, sizeof p, dir, "world.db");
     uint8_t *before = mem_alloc(1 << 16), *after = mem_alloc(1 << 16);
     long a = file_bytes(p, before, 1 << 16);
@@ -204,11 +204,11 @@ static void make_world(char *dir, size_t cap, const char *name, const char *sql)
 
 static void test_refused(void)
 {
-    char dir[400], p[512];
+    char dir[400] = {0}, p[512] = {0};
 
     sub_dir(dir, sizeof dir, "garbage");
     path_in(p, sizeof p, dir, "world.db");
-    uint8_t junk[4096];
+    uint8_t junk[4096] = {0};
     for (size_t i = 0; i < sizeof junk; i++) junk[i] = (uint8_t)(i * 131u + 7u);
     CHECK(save_write_file(p, junk, sizeof junk) == 0);
     check_refused(dir);
@@ -233,12 +233,12 @@ static void test_refused(void)
     check_refused(dir);
 
     /* Symlinks as the database or a file SQLite keeps beside it. */
-    char victim[400];
+    char victim[400] = {0};
     path_in(victim, sizeof victim, g_root, "victim.txt");
     CHECK(save_write_file(victim, "precious", 8) == 0);
     const char *names[] = {"world.db", "world.db-journal", "world.db-wal"};
     for (size_t i = 0; i < 3; i++) {
-        char name[32];
+        char name[32] = {0};
         snprintf(name, sizeof name, "link%zu", i);
         if (i == 0) sub_dir(dir, sizeof dir, name);
         else make_world(dir, sizeof dir, name, NULL);
@@ -246,15 +246,15 @@ static void test_refused(void)
         int linked = tmp_symlink(victim, p);
         CHECK(linked != 0);
         if (linked == 1) CHECK(save_db_open(dir) == NULL);
-        char buf[16];
+        char buf[16] = {0};
         CHECK(save_read_file(victim, buf, sizeof buf) == 8 && memcmp(buf, "precious", 8) == 0);
     }
 }
 
 static void test_bad_rows(void)
 {
-    char dir[400];
-    char sql[256];
+    char dir[400] = {0};
+    char sql[256] = {0};
     snprintf(sql, sizeof sql,
              "INSERT INTO columns VALUES (0, 0, 'text'), (1, 0, x'00'), (2, 0, zeroblob(%d));"
              "INSERT OR REPLACE INTO meta VALUES ('seed', -5);"
@@ -265,7 +265,7 @@ static void test_bad_rows(void)
     CHECK(db != NULL);
     if (!db) return;
     uint8_t *b = NULL;
-    uint32_t seed;
+    uint32_t seed = 0;
     CHECK(save_db_get_column(db, 0, 0, &b) == -2 && b == NULL); /* not a blob */
     CHECK(save_db_get_column(db, 2, 0, &b) == -2 && b == NULL); /* too big */
     long n = save_db_get_column(db, 1, 0, &b);                   /* a blob, but no column */
@@ -275,7 +275,7 @@ static void test_bad_rows(void)
     column_free(c);
     CHECK(save_db_get_seed(db, &seed) == -1);
     CHECK(save_db_set_seed(db, 5) == 0 && save_db_get_seed(db, &seed) == 0 && seed == 5);
-    char buf[16];
+    char buf[16] = {0};
     CHECK(save_db_get_blob(db, "player", buf, sizeof buf) == -1);
     save_db_close(db);
 
@@ -291,7 +291,7 @@ static void test_bad_rows(void)
  * report the error. */
 static void test_read_fails(void)
 {
-    char dir[400];
+    char dir[400] = {0};
     sub_dir(dir, sizeof dir, "unreadable");
     fault_vfs_install();
     save_db *db = save_db_open(dir);
@@ -307,15 +307,15 @@ static void test_read_fails(void)
         return;
     }
     g_fail_reads = 1;
-    uint32_t seed;
-    char buf[4];
+    uint32_t seed = 0;
+    char buf[4] = {0};
     uint8_t *b = NULL;
     CHECK(save_db_get_seed(db, &seed) == -2);
     CHECK(save_db_get_blob(db, "player", buf, sizeof buf) == -2);
     CHECK(save_db_get_column(db, 0, 0, &b) == -3 && b == NULL);
     CHECK(save_db_import(db, dir) == -1);
     jobs *js = jobs_create(1);
-    world w;
+    world w = {0};
     world_init(&w, 1, 2, js, db);
     w.generator = test_flat_gen;
     world_load_blocking(&w, 0.5, 0.5, 1);
@@ -338,7 +338,7 @@ static void test_read_fails(void)
 
 static void test_import(void)
 {
-    char dir[400], p[512], victim[400];
+    char dir[400] = {0}, p[512] = {0}, victim[400] = {0};
     sub_dir(dir, sizeof dir, "old");
     path_in(p, sizeof p, dir, "level.dat");
     CHECK(save_write_file(p, "seed 99\n", 8) == 0);
@@ -370,7 +370,7 @@ static void test_import(void)
     mem_free(b);
     b = NULL;
     CHECK(save_db_get_column(db, 1, 0, &b) == -1 && save_db_get_column(db, 3, 3, &b) == -1);
-    char buf[16];
+    char buf[16] = {0};
     CHECK(save_db_get_blob(db, "player", buf, sizeof buf) == 6 && memcmp(buf, "PLAYER", 6) == 0);
     CHECK(save_db_import(db, dir) == 0); /* once only */
     save_db_close(db);
@@ -392,7 +392,7 @@ static int save_test_player(void *user) { return g_player_fails ? -1 : save_db_p
 
 static int player_is(save_db *db, const char *want)
 {
-    char buf[8];
+    char buf[8] = {0};
     long n = save_db_get_blob(db, "player", buf, sizeof buf);
     return n == (long)strlen(want) && memcmp(buf, want, (size_t)n) == 0;
 }
@@ -402,14 +402,14 @@ static int player_is(save_db *db, const char *want)
  * than the player's inventory, or the other way round. */
 static void test_save_with_player(void)
 {
-    char dir[400];
+    char dir[400] = {0};
     sub_dir(dir, sizeof dir, "together");
     save_db *db = save_db_open(dir);
     CHECK(db != NULL);
     if (!db) return;
     CHECK(save_db_put_blob(db, "player", "old", 3) == 0);
     jobs *js = jobs_create(1);
-    world w;
+    world w = {0};
     world_init(&w, 1, 2, js, db);
     w.generator = test_flat_gen;
     w.save_user = db;
@@ -440,13 +440,13 @@ static void test_save_with_player(void)
 /* The world fetches rows on the main thread and decodes them in a job. */
 static void test_world_db(void)
 {
-    char dir[400];
+    char dir[400] = {0};
     sub_dir(dir, sizeof dir, "world");
     save_db *db = save_db_open(dir);
     CHECK(db != NULL);
     if (!db) return;
     jobs *js = jobs_create(1);
-    world w;
+    world w = {0};
     world_init(&w, 1, 2, js, db);
     w.generator = test_flat_gen;
     world_load_blocking(&w, 0.5, 0.5, 1);
@@ -470,7 +470,7 @@ static void test_world_db(void)
  * over that slot leaves it alone instead of waiting for it. */
 static void test_unload_save_fails(void)
 {
-    char dir[400];
+    char dir[400] = {0};
     sub_dir(dir, sizeof dir, "full");
     fault_vfs_install();
     save_db *db = save_db_open(dir);
@@ -480,7 +480,7 @@ static void test_unload_save_fails(void)
         return;
     }
     jobs *js = jobs_create(1);
-    world w;
+    world w = {0};
     world_init(&w, 1, 2, js, db);
     w.generator = test_flat_gen;
     world_load_blocking(&w, 0.5, 0.5, 1);
@@ -523,7 +523,7 @@ static void clean_up(void)
                           "none",  "world",   "full",    "unreadable", "together"};
     const char *files[] = {"world.db",   "world.db-wal", "world.db-shm", "world.db-journal", "level.dat",
                            "player.dat", "c.0.-1.bin",   "c.01.0.bin",   "c.3.3.bin"};
-    char d[400], p[512];
+    char d[400] = {0}, p[512] = {0};
     for (size_t i = 0; i < sizeof subs / sizeof subs[0]; i++) {
         path_in(d, sizeof d, g_root, subs[i]);
         for (size_t k = 0; k < sizeof files / sizeof files[0]; k++) {

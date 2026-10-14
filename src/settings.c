@@ -29,8 +29,16 @@ static const field FIELDS[] = {
     {"volume_master", 0, 100},
     {"volume_effects", 0, 100},
     {"volume_ambient", 0, 100},
+    {"fullscreen", 0, 1},
+    {"max_fps", 0, SETTINGS_FPS_MAX},
+    {"brightness", 0, 100},
+    {"volume_ui", 0, 100},
+    {"volume_body", 0, 100},
+    {"mute_unfocused", 0, 1},
+    {"discord", 0, 1},
 };
 #define NFIELDS ((int)(sizeof FIELDS / sizeof FIELDS[0]))
+_Static_assert(sizeof FIELDS / sizeof FIELDS[0] * sizeof(int) == sizeof(settings), "every setting needs a FIELDS row");
 
 void settings_default(settings *s)
 {
@@ -48,6 +56,13 @@ void settings_default(settings *s)
     s->volume_master = 80;
     s->volume_effects = 100;
     s->volume_ambient = 70;
+    s->fullscreen = 0;
+    s->max_fps = 0;
+    s->brightness = 0;
+    s->volume_ui = 80;
+    s->volume_body = 100;
+    s->mute_unfocused = 1;
+    s->discord = 0; /* opt-in: nothing leaves the machine unasked */
 }
 
 static int *field_ptr(settings *s, int i)
@@ -66,7 +81,14 @@ static int *field_ptr(settings *s, int i)
     case 10: return &s->filtering;
     case 11: return &s->volume_master;
     case 12: return &s->volume_effects;
-    default: return &s->volume_ambient;
+    case 13: return &s->volume_ambient;
+    case 14: return &s->fullscreen;
+    case 15: return &s->max_fps;
+    case 16: return &s->brightness;
+    case 17: return &s->volume_ui;
+    case 18: return &s->volume_body;
+    case 19: return &s->mute_unfocused;
+    default: return &s->discord;
     }
 }
 
@@ -84,7 +106,7 @@ static int apply_line(settings *s, const char *line)
     size_t klen = (size_t)(sp - line);
     const char *v = sp + 1;
     if (!((*v >= '0' && *v <= '9') || (*v == '-' && v[1] >= '0' && v[1] <= '9'))) return 0;
-    char *end;
+    char *end = NULL;
     errno = 0;
     long n = strtol(v, &end, 10);
     if (errno || (*end != '\0' && *end != '\r')) return 0;
@@ -104,7 +126,7 @@ int settings_parse(settings *s, const char *text)
     while (*p) {
         const char *eol = strchr(p, '\n');
         size_t len = eol ? (size_t)(eol - p) : strlen(p);
-        char line[96];
+        char line[96] = {0};
         if (len < sizeof line) {
             memcpy(line, p, len);
             line[len] = '\0';
@@ -131,7 +153,7 @@ int settings_load(settings *s, const char *path)
 {
     char *buf = mem_alloc(SETTINGS_MAX_FILE + 1);
     long n = save_read_file(path, buf, SETTINGS_MAX_FILE);
-    int r;
+    int r = 0;
     if (n < 0) {
         r = os_path_kind(path) == OS_MISSING ? SETTINGS_MISSING : SETTINGS_UNUSABLE;
     } else {
@@ -145,7 +167,7 @@ int settings_load(settings *s, const char *path)
 
 int settings_save(const settings *s, const char *path)
 {
-    char buf[4096]; /* the file is ~300 bytes; room for comments a player adds */
+    char buf[4096] = {0}; /* the file is ~300 bytes; room for comments a player adds */
     int n = settings_format(s, buf, (int)sizeof buf);
     return save_write_file(path, buf, (size_t)n);
 }

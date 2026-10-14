@@ -82,8 +82,8 @@ static void vadd(float out[3], const float a[3], const float b[3])
 static entity_instance part(quat lag, const float base[3], quat arm, const float local[3], quat own, float sx, float sy,
                             float sz, uint32_t tex, float light)
 {
-    entity_instance e;
-    float r[3], p[3];
+    entity_instance e = {0};
+    float r[3] = {0}, p[3] = {0};
     quat_apply(arm, local, r);
     vadd(p, base, r);
     quat_apply(lag, p, e.pos);
@@ -182,7 +182,7 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
     /* The pivot. Walking traces a figure-eight (a 1:2 Lissajous: one sway
      * per stride, two dips, one per foot); sprinting pulls the arm down,
      * out and back. */
-    float base[3];
+    float base[3] = {0};
     base[0] = PIVOT[0] + 0.045f * bob * ss + 0.002f * rest * breath_x + 0.03f * sprint - 0.02f * eat - 0.08f * a;
     base[1] = PIVOT[1] + 0.026f * bob * s2 + 0.004f * rest * breath - 0.05f * sprint + (0.012f * chew - 0.03f) * eat -
               0.04f * a;
@@ -207,7 +207,7 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
      * the right, so the view-space angle is its negative). */
     quat lag = quat_mul(quat_axis(0.0f, 1.0f, 0.0f, -vm->lag_x), quat_axis(1.0f, 0.0f, 0.0f, vm->lag_y));
 
-    entity_instance parts[VIEWMODEL_MAX];
+    entity_instance parts[VIEWMODEL_MAX] = {0};
     int n = 0;
     const float sleeve_at[3] = {0.0f, 0.0f, -SLEEVE_LEN * 0.5f};
     const float hand_at[3] = {0.0f, 0.0f, HAND_Z};

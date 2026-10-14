@@ -23,7 +23,7 @@ int interact_box_hits_cell(aabb b, int x, int y, int z)
 
 static void spill_drops(interact *s, physics *ph, uint8_t block, ipos at)
 {
-    item_stack drops[3];
+    item_stack drops[3] = {0};
     int n = item_drops(block, &s->rng, drops);
     for (int k = 0; k < n; k++) {
         dvec3 p = dv3(at.x + 0.5, at.y + 0.4, at.z + 0.5);
@@ -99,7 +99,7 @@ static void use_item(interact *s, world *w, const physics *ph, thermo *th, const
         return;
     }
     if (held->id == I_BUCKET && held->count) {
-        ipos c;
+        ipos c = {0};
         if (!survival_find_water(w, eye, dir, REACH, &c)) {
             o->msg = "No water in reach";
             return;
@@ -178,7 +178,7 @@ static void pick(inventory *inv, const player *pl, uint8_t id)
 interact_out interact_frame(interact *s, world *w, physics *ph, thermo *th, const player *pl, inventory *inv,
                             fx_state *fx, dvec3 eye, vec3 dir, ray_hit hit, const interact_input *in)
 {
-    interact_out o;
+    interact_out o = {0};
     memset(&o, 0, sizeof o);
     s->swing = s->swing > 0.0f ? fmaxf(0.0f, s->swing - in->dt * 3.5f) : 0.0f;
     s->swinging = 0;

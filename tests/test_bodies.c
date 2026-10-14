@@ -29,9 +29,9 @@ static void spawn_away(test_world *t, player *p) { player_spawn(p, &t->w, 20.5, 
  * whole. */
 static void test_shatter(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
-    player p;
+    player p = {0};
     spawn_away(&t, &p);
     player_input idle = {0};
     drop(&t, 2, GROUND + 5, 2, B_GLASS);
@@ -71,9 +71,9 @@ static void test_shatter(void)
  * 1.2 m/s hop; the third is too soft, and the block sets in the grid. */
 static void test_bounce(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
-    player p;
+    player p = {0};
     spawn_away(&t, &p);
     player_input idle = {0};
     drop(&t, 2, GROUND + 5, 2, B_PLANKS);
@@ -121,7 +121,7 @@ static float spin_rate(const body *b)
  * drawn orientation stays a unit quaternion while it turns. */
 static void test_tumble(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
     physics *ph = &t.ph;
     int top = GROUND + 5;
@@ -145,7 +145,7 @@ static void test_tumble(void)
     CHECK(all_spin && outward);
     CHECK(near_w >= 1.0f && far_w > near_w + 1.0f);
 
-    player p;
+    player p = {0};
     spawn_away(&t, &p);
     player_input idle = {0};
     float worst = 0.0f, min_w = 1.0f;
@@ -170,9 +170,9 @@ static void test_tumble(void)
  * into the ground, then lies there too. Stepping out from under frees it. */
 static void test_pinned(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
-    player p;
+    player p = {0};
     player_spawn(&p, &t.w, 5.5, 5.5);
     CHECK(!p.flying);
     player_input idle = {0};
@@ -224,9 +224,9 @@ static double slide_to(test_world *t, player *p, double x0, int z, double v)
  * (mu 0.03). */
 static void test_slide(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
-    player p;
+    player p = {0};
     spawn_away(&t, &p);
     player_input idle_input = {0};
     double grass = slide_to(&t, &p, 0.0, 2, 2.0);
@@ -262,10 +262,10 @@ static void make_pool(test_world *t)
  * none. The player jumping in from 3 m (7.7 m/s) splashes too. */
 static void test_splash(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
     make_pool(&t);
-    player p;
+    player p = {0};
     spawn_away(&t, &p);
     player_input idle = {0};
     drop(&t, 0, GROUND + 4, 0, B_STONE);
@@ -321,15 +321,15 @@ static void test_splash(void)
  * capped at 5 m/s, which grass (mu 0.6) brakes over v^2 / 2 mu g = 2.1 m. */
 static void test_knockback(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
-    player p;
+    player p = {0};
     player_spawn(&p, &t.w, 5.5, 5.5);
     player_input idle = {0};
     body *b = drop(&t, 3.5, GROUND + 0.5, 5, B_LEAVES);
     b->vel.x = 3.0;
     double rel = 0.0;
-    int i;
+    int i = 0;
     for (i = 0; i < 60 && !t.ph.hit_count; i++) physics_step(&t.ph, &p, &idle);
     CHECK(t.ph.hit_count == 1);
     if (t.ph.hit_count) rel = (double)t.ph.hits[0].speed;

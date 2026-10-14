@@ -191,7 +191,7 @@ static rgba flame(int frame, int x, int y)
 static rgba texel(int layer, int x, int y)
 {
     int n = px_noise(layer, x, y, 12);
-    rgba sp;
+    rgba sp = {0};
     if (sprite_texel(layer, x, y, &sp)) return sp;
     if (layer >= T_CRACK0 && layer <= T_CRACK3) return crack(layer - T_CRACK0, x, y);
     if (layer >= T_FIRE0 && layer <= T_FIRE3) return flame(layer - T_FIRE0, x, y);

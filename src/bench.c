@@ -29,7 +29,7 @@ int bench_run(uint32_t seed)
 
     /* Meshing, via a real world so gather/mesh paths are exercised. */
     jobs *js = jobs_create(0);
-    world w;
+    world w = {0};
     world_init(&w, seed, 8, js, NULL);
     world_load_blocking(&w, 8.0, 8.0, 5);
     mesh_input *in = mem_alloc(sizeof *in);
@@ -50,7 +50,7 @@ int bench_run(uint32_t seed)
                             in->blocks[mesh_pidx(x, y, z)] = world_get(&w, wx, wy, wz);
                             in->meta[mesh_pidx(x, y, z)] = world_get_meta(&w, wx, wy, wz);
                         }
-                uint32_t o, t;
+                uint32_t o = 0, t = 0;
                 quads += mesh_section(in, out, &o, &t);
                 sections++;
             }
@@ -60,7 +60,7 @@ int bench_run(uint32_t seed)
            mesh * 1000.0 / sections, (double)quads / sections, (unsigned)sizeof(uint32_t));
 
     /* Physics: structural check and a collapse. */
-    physics ph;
+    physics ph = {0};
     physics_init(&ph, &w);
     w.edit_user = &ph;
     w.on_block_changed = physics_on_block_changed;
@@ -74,7 +74,7 @@ int bench_run(uint32_t seed)
     printf("  structural check (25^3 region): %.3f ms\n", sc * 1000.0 / iters);
     world_set(&w, 8, gy + 2, 8, B_AIR, 0);
     int fell = physics_check_structure(&ph, 8, gy + 2, 8);
-    player pl;
+    player pl = {0};
     player_spawn(&pl, &w, 0.5, 0.5);
     player_input pin = {0};
     t0 = os_now();

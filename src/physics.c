@@ -188,7 +188,7 @@ void physics_destroy(physics *ph)
 
 aabb player_box(const player *p)
 {
-    aabb b;
+    aabb b = {0};
     b.min = dv3(p->pos.x - PLAYER_HALF_W, p->pos.y, p->pos.z - PLAYER_HALF_W);
     b.max = dv3(p->pos.x + PLAYER_HALF_W, p->pos.y + PLAYER_HEIGHT, p->pos.z + PLAYER_HALF_W);
     return b;
@@ -219,7 +219,7 @@ static double sweep(const physics *ph, aabb box, int axis, double delta, int fla
      * the block scan bounded even if a velocity explodes. */
     delta = clampd(delta, -8.0, 8.0);
 
-    int lo[3], hi[3];
+    int lo[3] = {0}, hi[3] = {0};
     for (int a = 0; a < 3; a++) {
         if (a == axis) continue;
         lo[a] = (int)floor(getc3(box.min, a) + EPS);
@@ -240,7 +240,7 @@ static double sweep(const physics *ph, aabb box, int axis, double delta, int fla
         for (int t = 0; t < n; t++) {
             int c = delta > 0 ? lo[axis] + t : hi[axis] - t;
             int found = 0;
-            int p[3];
+            int p[3] = {0};
             p[axis] = c;
             int a1 = (axis + 1) % 3, a2 = (axis + 2) % 3;
             for (p[a1] = lo[a1]; p[a1] <= hi[a1] && !found; p[a1]++)
@@ -433,7 +433,7 @@ static void player_step(const physics *ph, player *p, const player_input *in)
 
     /* Locomotion: feet can only push as hard as friction allows. */
     double target = p->sprinting ? SPRINT_SPEED : (p->sneaking ? SNEAK_SPEED : WALK_SPEED);
-    double amax;
+    double amax = 0.0;
     if (sub > 0.5) {
         target = p->sprinting ? SWIM_SPRINT_SPEED : SWIM_SPEED;
         amax = 3.0;
@@ -1071,7 +1071,7 @@ int physics_check_structure(physics *ph, int x, int y, int z)
                 int nidx = RIDX(ni, nj, nk);
                 if (s[nidx] < -1) continue;
                 uint8_t nid = ids[nidx];
-                int sp = span_of(nid), cand;
+                int sp = span_of(nid), cand = 0;
                 int capped = sp < lvl ? sp : lvl;
                 if (d == 2) cand = lvl == GROUNDED ? GROUNDED : capped;   /* resting on us */
                 else if (nid < B_COUNT && (g_blocks[nid].flags & BF_GRANULAR)) continue;
@@ -1205,7 +1205,7 @@ static void fluid_cell(physics *ph, ipos p)
         const int *d = D[(start + (uint32_t)k) & 3];
         int nx = p.x + d[0], nz = p.z + d[1];
         uint8_t nb = world_get(w, nx, p.y, nz);
-        int ln;
+        int ln = 0;
         if (nb == B_AIR) ln = 0;
         else if (nb == B_WATER) ln = world_water_level(w, nx, p.y, nz);
         else continue;

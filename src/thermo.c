@@ -349,7 +349,7 @@ static int ensure(thermo *t, const world *w, int x, int y, int z)
     c->z = z;
     c->mat = id;
     c->kind = (uint8_t)kind_of(id);
-    int shelter;
+    int shelter = 0;
     c->amb = cell_ambient(t, w, x, y, z, &shelter);
     c->shelter = (uint8_t)shelter;
     c->dev = initial_dev(id, c->amb);
@@ -832,14 +832,14 @@ int thermo_near_fire(const thermo *t, const world *w, dvec3 p, double r)
 int thermo_fires_near(const thermo *t, const world *w, dvec3 p, double r, dvec3 *out, int max)
 {
     /* Insertion into a short sorted list: the nearest `max` fires. */
-    double dist[64];
+    double dist[64] = {0};
     if (max > 64) max = 64;
     int n = 0;
     for (int i = 0; i < t->fire_count; i++) {
         const fire *f = &t->fires[i];
         double d = flame_dist(f, p);
         if (d > r || world_get(w, f->x, f->y, f->z) != B_CAMPFIRE) continue;
-        int k;
+        int k = 0;
         if (n < max) {
             k = n++;
         } else {

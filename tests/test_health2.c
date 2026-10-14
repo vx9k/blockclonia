@@ -71,7 +71,7 @@ static void test_cold(void)
     CHECK(d_hand > 2.0f * d_trunk && d_foot > 2.0f * d_trunk);
     CHECK(h->part[BP_RARM].skin < h->part[BP_HEAD].skin);
     CHECK(any_frost(h) == 0); /* not yet */
-    char buf[160];
+    char buf[160] = {0};
     health_part_status(h, BP_RARM, buf, sizeof buf);
     CHECK(strstr(buf, "numb with cold") != NULL);
     live(h, &e, 1500.0);
@@ -116,7 +116,7 @@ static void burn_times(double flux, double t[4])
 
 static void test_burns(void)
 {
-    double a[4], b[4];
+    double a[4] = {0}, b[4] = {0};
     burn_times(20000.0, a);
     burn_times(10000.0, b);
     CHECK(a[1] > 0.0 && a[1] <= a[2] && a[2] < a[3]);
@@ -143,7 +143,7 @@ static void test_burns(void)
     CHECK(h->part[BP_LLEG].burn == 2);
     health_burn(h, BP_LLEG, 2e4);
     CHECK(h->part[BP_LLEG].burn == 3 && h->wound_count == 1 && h->part[BP_LLEG].integrity < 0.7f);
-    char buf[160];
+    char buf[160] = {0};
     CHECK(health_part_status(h, BP_LLEG, buf, sizeof buf) == 3);
     CHECK(strstr(buf, "3rd-degree burn, 9% of body") != NULL); /* half of the leg's 18% */
     mem_free(h);
@@ -183,9 +183,9 @@ static void test_cool_burn(void)
     live(a, &e, 5.2);
     live(b, &e, 5.2);
     CHECK(a->part[BP_HEAD].burn == 2);
-    inventory inv;
+    inventory inv = {0};
     inv_init(&inv);
-    char msg[128];
+    char msg[128] = {0};
     e.radiant = 0.0;
     CHECK(health_treat(a, &inv, BP_HEAD, TREAT_COOL, 0, msg, sizeof msg) == 0); /* no water */
     health *c = new_body(30);
@@ -195,7 +195,7 @@ static void test_cool_burn(void)
     live(a, &e, 300.0);
     live(b, &e, 300.0);
     CHECK(a->part[BP_HEAD].burn_omega * 5.0f < b->part[BP_HEAD].burn_omega);
-    char buf[160];
+    char buf[160] = {0};
     health_part_status(a, BP_HEAD, buf, sizeof buf);
     CHECK(strstr(buf, "2nd-degree burn") != NULL && strstr(buf, "of body") != NULL);
     /* Dressing a burn: a bandage covers it. */
@@ -224,9 +224,9 @@ static void test_dislocation(void)
             health_env e = calm_env();
             live(h, &e, 2.0);
             CHECK(h->part[arm].pain >= 7.0f);
-            inventory inv;
+            inventory inv = {0};
             inv_init(&inv);
-            char msg[128];
+            char msg[128] = {0};
             if (h->part[arm].fracture) {
                 CHECK(health_treat(h, &inv, arm, TREAT_REDUCE, 0, msg, sizeof msg) == 0);
             } else {
@@ -255,15 +255,15 @@ static void test_dislocation(void)
     health_dislocate(g, BP_RARM);
     l = health_get_limits(g);
     CHECK(!l.can_act);
-    char buf[160];
+    char buf[160] = {0};
     CHECK(health_part_status(g, BP_RARM, buf, sizeof buf) >= 2 && strstr(buf, "dislocated shoulder") != NULL);
     health_dislocate(g, BP_LLEG); /* arms only */
     CHECK(!g->part[BP_LLEG].dislocated);
     /* Broken as well: splint it, don't reduce it. */
     health_break_bone(g, BP_RARM, 0);
-    inventory inv;
+    inventory inv = {0};
     inv_init(&inv);
-    char msg[128];
+    char msg[128] = {0};
     CHECK(health_treat(g, &inv, BP_RARM, TREAT_REDUCE, 0, msg, sizeof msg) == 0);
     CHECK(g->part[BP_RARM].dislocated);
     mem_free(g);
@@ -274,9 +274,9 @@ static void test_dislocation(void)
  * speed does nothing. */
 static void test_abrasion(void)
 {
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
-    player p;
+    player p = {0};
     player_input idle = {0};
     health *h = new_body(31);
     for (int trial = 0; trial < 2; trial++) {
@@ -300,7 +300,7 @@ static void test_abrasion(void)
         legs += w->part == BP_LLEG || w->part == BP_RLEG;
     }
     CHECK(legs == 2 && h->wound_count >= 3);
-    char buf[160];
+    char buf[160] = {0};
     health_part_status(h, BP_LLEG, buf, sizeof buf);
     CHECK(strstr(buf, "abrasion") != NULL);
     /* Ooze clots within minutes; the grit makes it infect if not cleaned. */
@@ -331,7 +331,7 @@ static void test_crush(void)
     }
     CHECK(a->part[BP_LLEG].crush > 0.9f && b->part[BP_LLEG].crush < 0.15f);
     CHECK(a->part[BP_LLEG].crush_load > 399.0f && b->part[BP_LLEG].crush_load == 0.0f);
-    char buf[160];
+    char buf[160] = {0};
     CHECK(health_part_status(a, BP_LLEG, buf, sizeof buf) >= 2 && strstr(buf, "pinned under 400 kg") != NULL);
     CHECK(a->organ[ORG_KIDNEYS] > 0.99f); /* nothing reaches the kidneys while it is still trapped */
     float kmax = 0.0f, myo = 0.0f;
@@ -363,9 +363,9 @@ static void test_crush(void)
     mem_free(c);
 
     /* The physics' pinned weight reaches the legs through survival_impacts. */
-    test_world t;
+    test_world t = {0};
     tw_init(&t);
-    player p;
+    player p = {0};
     player_spawn(&p, &t.w, 4.5, 4.5);
     health *h = new_body(35);
     survival_before sb = survival_capture(&p);
@@ -381,7 +381,7 @@ static void test_crush(void)
 
     /* The environment: mild air until thermo says otherwise, and standing
      * on a burning campfire is standing in flames. */
-    health_env env;
+    health_env env = {0};
     survival_env(&t.w, &p, &sb, 0, &env);
     CHECK(env.air_temp == SURVIVAL_AIR_TEMP && env.radiant == 0.0 && !env.in_fire);
     survival_env_thermal(&env, -4.0, 1200.0, -2.0, 0);
@@ -433,7 +433,7 @@ static void test_hud(void)
 {
     enum { MAXQ = 8192 };
     ui_vertex *mem = mem_alloc(sizeof(ui_vertex) * 4 * MAXQ);
-    ui u;
+    ui u = {0};
     health *h = new_body(37);
     health_env e = calm_env();
     health_burn(h, BP_HEAD, 3.0);
@@ -444,7 +444,7 @@ static void test_hud(void)
         health_crush(h, BP_RARM, 120.0, 1.0 / 60.0);
         health_step(h, &e, 1.0 / 60.0);
     }
-    hud_state s;
+    hud_state s = {0};
     memset(&s, 0, sizeof s);
     s.held = "stone";
     hud_update(&s, h, 1.0f / 60.0f);
@@ -474,7 +474,7 @@ static void test_hud(void)
         hud_draw(&u, h, &s);
         CHECK(u.overflow == 0 && u.quads > 1000);
     }
-    char buf[160];
+    char buf[160] = {0};
     health_part_status(h, BP_RLEG, buf, sizeof buf);
     CHECK(strstr(buf, "frostbite") != NULL);
     health_part_status(h, BP_RARM, buf, sizeof buf);
@@ -489,7 +489,7 @@ static void test_hud(void)
     cold.air_temp = cold.contact_temp = 2.0;
     w->part[BP_LLEG].crush = 0.5f;
     live(w, &cold, 1.0);
-    hud_state s2;
+    hud_state s2 = {0};
     memset(&s2, 0, sizeof s2);
     hud_update(&s2, w, 0.1f);
     CHECK(has_alert(&s2, "Soaked and freezing") && has_alert(&s2, "Crushed Left leg"));

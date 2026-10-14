@@ -212,7 +212,7 @@ int inv_decode(inventory *inv, const uint8_t *in, size_t len)
      * layout this build does not know. */
     if (len != INV_ENCODED_SIZE || memcmp(in, "INV1", 4) != 0 || in[4] >= INV_HOTBAR || in[5] || in[6] || in[7])
         return -1;
-    inventory t;
+    inventory t = {0};
     inv_init(&t);
     t.selected = in[4];
     const uint8_t *p = in + 8;

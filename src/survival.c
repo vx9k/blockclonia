@@ -178,7 +178,7 @@ int survival_find_water(const world *w, dvec3 eye, vec3 dir, double reach, ipos 
 /* Little-endian doubles and floats by their bit patterns. */
 static void put64(uint8_t *p, double v)
 {
-    uint64_t u;
+    uint64_t u = 0;
     memcpy(&u, &v, 8);
     for (int i = 0; i < 8; i++) p[i] = (uint8_t)(u >> (8 * i));
 }
@@ -187,14 +187,14 @@ static double get64(const uint8_t *p)
 {
     uint64_t u = 0;
     for (int i = 0; i < 8; i++) u |= (uint64_t)p[i] << (8 * i);
-    double v;
+    double v = 0.0;
     memcpy(&v, &u, 8);
     return v;
 }
 
 static void put32f(uint8_t *p, float v)
 {
-    uint32_t u;
+    uint32_t u = 0;
     memcpy(&u, &v, 4);
     for (int i = 0; i < 4; i++) p[i] = (uint8_t)(u >> (8 * i));
 }
@@ -202,7 +202,7 @@ static void put32f(uint8_t *p, float v)
 static float get32f(const uint8_t *p)
 {
     uint32_t u = (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
-    float v;
+    float v = 0.0f;
     memcpy(&v, &u, 4);
     return v;
 }
@@ -243,7 +243,7 @@ int survival_decode_player(player *p, inventory *inv, double *day, const uint8_t
     if (!(fabs(x) <= WORLD_LIMIT - 64) || !(fabs(z) <= WORLD_LIMIT - 64) || !(y >= -64.0 && y <= WORLD_H + 64.0) ||
         !(fabsf(yaw) <= 100.0f) || !(fabsf(pitch) <= 1.6f))
         return -1;
-    inventory t;
+    inventory t = {0};
     if (inv_decode(&t, in + 44, INV_ENCODED_SIZE) != 0) return -1;
     *inv = t;
     memset(p, 0, sizeof *p);

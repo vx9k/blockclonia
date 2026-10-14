@@ -61,6 +61,7 @@ Every texture and sound is generated at start-up, and all memory comes from
 | H | Health panel |
 | E / R | Eat an apple / drink (standing in or facing water, or holding a water bucket) |
 | F2 | Screenshot (`screenshot.ppm`) |
+| F11 | Fullscreen on or off |
 | F3 | Debug overlay |
 | K (with F3 on) | Debug health menu: trigger any injury, or heal |
 | Esc | Close the inventory or panel; otherwise pause |
@@ -185,13 +186,27 @@ or burns.
 
 ## Saves
 
-Each world is one SQLite database, `world.db`, in the world's directory
-(named `world` unless `--world` says otherwise). A folder written by an
-older build (`level.dat`, `player.dat`, `c.X.Z.bin`) is imported into the
-database the first time it is opened; the old files are left in place but
-are no longer read. Only one running game can hold a world's database
-open at a time: pointing a second instance at the same directory disables
-saving for it instead of touching the world.
+**Play** on the title screen opens the world list: every world under the
+worlds folder (see "Where files live"), most recently played first, with
+its seed and when it was last played. From there you can play, create
+(a name, and a seed: a number, any text, which always gives the same
+world, or empty for a random one), rename or delete a world. Deleting
+asks first. The menus sit over a fixed backdrop world that is never
+saved, so no world of yours is open while you manage them. `--play`
+skips the menus and plays the default world, `worlds/world`, or the one
+`--world DIR` names.
+
+Each world is one SQLite database, `world.db`, in its own folder. The
+folder name comes from the world's first name and stays put when you
+rename it. A world records the terrain generator version it was made
+with; a build refuses a world from a newer generator instead of joining
+different terrain onto it. A folder written by an older build
+(`level.dat`, `player.dat`, `c.X.Z.bin`) is imported into the database
+the first time it is opened; the old files are left in place but are no
+longer read. Only one running game can hold a world's database open at a
+time: the list shows such a world as open in another game, and pointing a
+second instance at the same directory disables saving for it instead of
+touching the world.
 
 ## Settings
 
@@ -206,14 +221,20 @@ starts with the defaults and doesn't save changes over it.
 | Tab | Setting | Range |
 |---|---|---|
 | Video | Field of view | 50–110° (default 70) |
-| Video | GUI scale | automatic, or 1–4 |
-| Video | VSync | on/off |
 | Video | Render distance | 2–32 columns; applies on the next start |
 | Video | Texture filtering (distance) | on (default): trilinear between mipmaps, with up to 8× anisotropic filtering where the GPU supports it; off: the nearest texel of the nearest mipmap, sharper but shimmering in the distance. Up close textures stay pixel-sharp either way |
 | Video | View bobbing, FOV effects | on/off |
+| Video | Brightness (nights) | 0–100% (default 0): lifts the darkest light toward dusk; daylight is unchanged |
+| Display | Fullscreen | on/off (also F11): borderless at the monitor's own resolution |
+| Display | VSync | on/off |
+| Display | Frame limit | unlimited (default), 30, 60, 90, 120, 144, 165 or 240 fps; used while VSync is off |
+| Display | GUI scale | automatic, or 1–4 |
 | Controls | Mouse sensitivity | 10–300% |
 | Controls | Invert Y, sprint toggle, key hints | on/off |
+| Controls | Discord status | off (default)/on: shows Discord friends how the body is doing ("Badly hurt (Bleeding 40 mL/min)", "Dead man walking"), the world's name and the time played, or "In the menus". Only in builds made with `MC_DISCORD_APP_ID` (see BUILDING.md); needs the Discord app running on the same machine |
 | Audio | Master, effects, ambience volume | 0–100% |
+| Audio | Interface, body (heartbeat, breathing) volume | 0–100%, on top of effects |
+| Audio | Mute in background | on (default)/off: silent while the window is not focused |
 
 ## Sound
 
@@ -294,13 +315,13 @@ cmake --preset native && cmake --build --preset native
 blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
             [--threads N] [--pool-mb N] [--gpu N] [--world DIR | --no-save]
             [--config FILE] [--validate] [--no-sound]
-            [--play] [--screen title|pause|settings|controls|debug-health|inventory]
+            [--play] [--screen title|worlds|create|pause|settings|controls|debug-health|inventory]
             [--debug] [--time HH] [--give LIST] [--hurt LIST]
             [--frames N] [--screenshot F] [--look YAW,PITCH] [--spawn X,Z]
             [--demo] [--health-panel] [--bench] [--mem-stats]
 ```
 
-- `--play` skips the title screen; `--screen` opens a menu at start and
+- `--play` skips the menus and plays the default world; `--screen` opens a menu at start and
   `--debug` turns F3 on.
 - `--give log:8,sand:4` starts you with items (names as shown in game).
   `--time 21` starts at 21:00.
@@ -357,6 +378,16 @@ GPU driver and miniaudio (`LD_DEBUG=bindings` confirms they bind to
 available with `MC_VK_ALLOC=1` for platforms without the override. They
 are off by default because some drivers (Mesa lavapipe) free memory they
 did not allocate through the callbacks.
+
+The game sizes itself to the machine at start-up (`src/sysinfo.c`) and
+logs what it found: cores, RAM and the memory available, and the CPU's
+cache sizes (from `/proc` and `/sys` on Linux, `sysctl` on macOS). From
+those it picks the number of worker threads (every core but the main
+thread's, as long as there is memory for them), the SQLite page cache
+(1/512 of the available memory, 2–64 MB), mimalloc's reservation step,
+and, on a first run without a settings file, the render distance (6–16
+columns; the setting goes up to 32). `--threads N` and the settings file
+override them.
 
 ## Tests
 
@@ -429,7 +460,7 @@ src/debug.c       F3 overlay           src/ui.c        2D overlay batch and font
 src/camera.c      camera motion        src/viewmodel.c the first-person arm
 src/fx.c          debris, splashes and the entity list      src/anim.h   easing helpers
 src/settings.c    the settings file    src/save.c      column codec, file access
-src/save_db.c     world.db (SQLite)
+src/save_db.c     world.db (SQLite)   src/discord.c   Discord status over its local IPC socket
 src/jobs.c        thread pool          src/gpupool.c   vertex pool allocator
 src/mem.c         mimalloc wrappers    src/log.c       logging, save-on-fatal hook
 src/bench.c       --bench

@@ -41,7 +41,7 @@ static void advance(thermo *th, world *w, double seconds, double dt, dvec3 eye)
 
 static float sky_sum(const thermo *th)
 {
-    float c[3];
+    float c[3] = {0};
     thermo_sky(th, c);
     return c[0] + c[1] + c[2];
 }
@@ -52,7 +52,7 @@ static void test_sun(void)
     CHECK(fabs(thermo_day_time(th) - THERMO_DAY_START) < 1e-12);
     thermo_set_day_time(th, 0.5);
     float noon = thermo_daylight(th), sky_noon = sky_sum(th);
-    float c[3];
+    float c[3] = {0};
     thermo_sky(th, c);
     CHECK(fabsf(c[0] - 0.53f) < 0.01f && fabsf(c[1] - 0.74f) < 0.01f && fabsf(c[2] - 1.0f) < 0.01f);
     thermo_set_day_time(th, 0.25);
@@ -78,7 +78,7 @@ static void test_sun(void)
     CHECK(fabs(thermo_day_time(th) - 0.75) < 1e-12);
 
     /* One day is 20 real minutes: 600 s is half a day. */
-    test_world tw;
+    test_world tw = {0};
     tw_init(&tw);
     thermo_set_day_time(th, 0.25);
     advance(th, &tw.w, 600.0, 1.0, dv3(0.5, GROUND, 0.5));
@@ -89,7 +89,7 @@ static void test_sun(void)
 
 static void test_ambient(void)
 {
-    test_world tw;
+    test_world tw = {0};
     tw_init(&tw);
     thermo *th = thermo_create(2);
     world *w = &tw.w;
@@ -119,10 +119,10 @@ static void test_ambient(void)
 
 static void test_fire_air_and_radiation(void)
 {
-    test_world tw;
+    test_world tw = {0};
     tw_init(&tw);
     thermo *th = thermo_create(3);
-    hooks h;
+    hooks h = {0};
     attach(&tw, &h, th);
     world *w = &tw.w;
     dvec3 eye = dv3(4.5, GROUND, 0.5);
@@ -171,10 +171,10 @@ static void test_fire_air_and_radiation(void)
 
 static void test_fuel(void)
 {
-    test_world tw;
+    test_world tw = {0};
     tw_init(&tw);
     thermo *th = thermo_create(4);
-    hooks h;
+    hooks h = {0};
     attach(&tw, &h, th);
     world *w = &tw.w;
     dvec3 eye = dv3(0.5, GROUND, 0.5);
@@ -238,10 +238,10 @@ static double melt_power(const thermo *th, const world *w, int x, int fx, double
 
 static void test_melting(void)
 {
-    test_world tw;
+    test_world tw = {0};
     tw_init(&tw);
     thermo *th = thermo_create(6);
-    hooks h;
+    hooks h = {0};
     attach(&tw, &h, th);
     world *w = &tw.w;
     dvec3 eye = dv3(0.5, GROUND, 0.5);
@@ -294,7 +294,7 @@ static void test_melting(void)
 
 static void test_freezing(void)
 {
-    test_world tw;
+    test_world tw = {0};
     tw_init(&tw);
     thermo *th = thermo_create(7);
     world *w = &tw.w;
@@ -334,7 +334,7 @@ static void test_freezing(void)
 
     /* The new ice is a skin over water: a fire on it melts it back in a
      * ninth of the time a solid block takes (33 of 306 MJ). */
-    hooks h;
+    hooks h = {0};
     attach(&tw, &h, th);
     world_set(w, 0, y + 1, 0, B_CAMPFIRE, 0);
     double t_melt = -1.0;
@@ -354,10 +354,10 @@ static int finite_f(float v) { return isfinite(v); }
 
 static void test_limits(void)
 {
-    test_world tw;
+    test_world tw = {0};
     tw_init(&tw);
     thermo *th = thermo_create(8);
-    hooks h;
+    hooks h = {0};
     attach(&tw, &h, th);
     world *w = &tw.w;
     dvec3 eye = dv3(0.5, GROUND, 0.5);

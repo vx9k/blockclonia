@@ -81,6 +81,7 @@ struct sound {
     dvec3 fires[SOUND_MAX_FIRES];
     int fire_count;
     float vol[3];           /* master, effects, ambient */
+    float vol_ui, vol_body; /* applied to intensity in sound_play */
     int vol_dirty;
 
     /* Audio thread only. */
@@ -133,6 +134,7 @@ sound *sound_create(uint32_t seed, uint32_t rate, int channels)
     s->rng = seed ? seed : 0x5A17u;
     synth_build(&s->bank, seed);
     s->vol[0] = s->vol[1] = s->vol[2] = 1.0f;
+    s->vol_ui = s->vol_body = 1.0f;
     s->avol[0] = s->avol[1] = s->avol[2] = 1.0f;
     s->limit = 1.0f;
     s->lp_coef = 1.0f - expf(-6.2831853f * 700.0f / (float)s->rate); /* muffled below ~700 Hz */
@@ -154,11 +156,13 @@ void sound_destroy(sound *s)
     mem_free(s);
 }
 
-void sound_set_volumes(sound *s, float master, float effects, float ambient)
+void sound_set_volumes(sound *s, float master, float effects, float ambient, float ui, float body)
 {
     s->vol[0] = master;
     s->vol[1] = effects;
     s->vol[2] = ambient;
+    s->vol_ui = ui;
+    s->vol_body = body;
     s->vol_dirty = 1;
 }
 
@@ -174,9 +178,12 @@ void sound_listener(sound *s, dvec3 pos, float yaw, float pitch, int underwater)
 
 void sound_play(sound *s, int id, const dvec3 *pos, uint8_t material, float intensity)
 {
+    /* Scaled here, on the game thread, so the mixer needs no new bus. */
+    if (id >= SND_UI_CLICK && id <= SND_UI_CLOSE) intensity *= s->vol_ui;
+    else if (id == SND_HEARTBEAT || id == SND_BREATH) intensity *= s->vol_body;
     if (id < 0 || id >= SND_COUNT || !(intensity > 0.0f)) return;
     uint32_t r = next_rand(s);
-    cmd c;
+    cmd c = {0};
     memset(&c, 0, sizeof c);
     c.type = CMD_PLAY;
     c.id = (uint8_t)id;
@@ -210,7 +217,7 @@ void sound_fires(sound *s, const dvec3 *pos, int n)
 void sound_update(sound *s, float dt)
 {
     (void)dt;
-    cmd c;
+    cmd c = {0};
     memset(&c, 0, sizeof c);
     c.type = CMD_LISTENER;
     c.x = s->lx;
@@ -249,7 +256,7 @@ void sound_stats(const sound *s, int *voices, float *load)
 {
     *voices = atomic_load_explicit(&s->stat_voices, memory_order_relaxed);
     uint32_t bits = atomic_load_explicit(&s->stat_load, memory_order_relaxed);
-    float f;
+    float f = 0.0f;
     memcpy(&f, &bits, sizeof f);
     *load = f;
 }
@@ -365,7 +372,7 @@ static float loudness(const voice *v)
 
 static void start_voice(sound *s, const cmd *c)
 {
-    float ref, range, gl = 0.707f, gr = 0.707f, audible = 1.0f;
+    float ref = 0.0f, range = 0.0f, gl = 0.707f, gr = 0.707f, audible = 1.0f;
     reach_of(c->id, &ref, &range);
     if (c->positional) audible = spatial(s, c->x, c->y, c->z, ref, range, &gl, &gr);
     const synth_clip *clip = synth_get(&s->bank, c->id, (synth_material)c->material, c->variant);
@@ -499,7 +506,7 @@ static void mix_chunk(sound *s, float *out, int frames)
     const float gfx = 1.4f * s->avol[0] * s->avol[1], gamb = 1.4f * s->avol[0] * s->avol[2];
     float peak = 0.0f;
     for (int i = 0; i < frames; i++) {
-        float mix[2];
+        float mix[2] = {0};
         for (int ch = 0; ch < 2; ch++) {
             float x = s->fx[2 * i + ch], y = s->amb[2 * i + ch];
             s->lp[ch] += a * (x - s->lp[ch]);
@@ -545,7 +552,7 @@ void sound_render(void *user, float *out, uint32_t frames)
     /* The mixer's share of real time, smoothed. */
     float load = frames ? (float)((os_now() - t0) * (double)s->rate / (double)frames) : 0.0f;
     uint32_t bits = atomic_load_explicit(&s->stat_load, memory_order_relaxed);
-    float prev;
+    float prev = 0.0f;
     memcpy(&prev, &bits, sizeof prev);
     prev += (load - prev) * 0.05f;
     memcpy(&bits, &prev, sizeof bits);
