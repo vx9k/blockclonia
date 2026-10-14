@@ -1391,6 +1391,16 @@ static void open_remote_world(game *g, uint32_t seed)
     g->client = 1;
 }
 
+/* Streams the world around this player and, on a host, around every
+ * joined player too. */
+static void stream_world(game *g)
+{
+    int at[WORLD_ANCHORS][2] = {{0}};
+    int n = g->mp && mp_is_host(g->mp) ? mp_anchors(g->mp, at, WORLD_ANCHORS) : 0;
+    world_set_anchors(&g->w, &at[0][0], n, MP_ANCHOR_RADIUS);
+    world_update(&g->w, g->pl.pos.x, g->pl.pos.y + PLAYER_EYE, g->pl.pos.z);
+}
+
 /* Polls the session until done() holds, it ends, the time runs out or the
  * window closes; the window stays responsive meanwhile. */
 static int wait_session(game *g, int (*done)(const game *g), double seconds)
@@ -2550,7 +2560,7 @@ int main(int argc, char **argv)
         frame_simulate(g, &in, dt);
         frame_interact(g, dt);
         if (g->o.demo) demo_step(&g->w, &g->ph, g->fx, &g->pl, &g->demo, g->frame);
-        world_update(&g->w, g->pl.pos.x, g->pl.pos.y + PLAYER_EYE, g->pl.pos.z);
+        stream_world(g);
         frame_render(g, now, dt);
         if (g->mp) mp_flush(g->mp, now);
         g_in.ui_click = g_in.ui_rclick = g_in.ui_up = g_in.ui_dn = g_in.ui_left = g_in.ui_right = g_in.ui_enter =

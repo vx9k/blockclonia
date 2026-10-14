@@ -345,10 +345,10 @@ static void host_join(mp *m, int id)
         if (!have_was) inv_starting_kit(&r->inv);
     }
     interact_init(&r->ia, r->rng);
-    /* Where they were, if the host has that terrain loaded; else next to
-     * the host. */
+    /* Where they were (they wait there while the terrain loads), else
+     * next to the host. */
     const player *h = m->ctx.pl;
-    if (have_was && world_column(m->ctx.w, chunk_of((int)floor(was.pos.x)), chunk_of((int)floor(was.pos.z)))) {
+    if (have_was) {
         r->pl = was;
         r->pl.vel = dv3(0, 0, 0);
         r->pl.prev_pos = r->pl.pos;
@@ -637,6 +637,30 @@ static void host_hands(mp *m, remote *r, int who)
 
 const mobs *mp_client_mobs(const mp *m) { return &m->c.mobs; }
 
+int mp_anchors(const mp *m, int (*at)[2], int max)
+{
+    int n = 0;
+    for (int id = 1; m->host && id < NET_MAX_PLAYERS && n < max; id++) {
+        if (!m->r[id].active) continue;
+        at[n][0] = chunk_of((int)floor(m->r[id].pl.pos.x));
+        at[n][1] = chunk_of((int)floor(m->r[id].pl.pos.z));
+        n++;
+    }
+    return n;
+}
+
+/* The terrain a player could touch this step is loaded: their column and
+ * its neighbours. Until then they wait where they are (unloaded cells
+ * count as solid, and the body would be stuck inside one). */
+static int terrain_ready(const world *w, const player *p)
+{
+    int cx = chunk_of((int)floor(p->pos.x)), cz = chunk_of((int)floor(p->pos.z));
+    for (int dz = -1; dz <= 1; dz++)
+        for (int dx = -1; dx <= 1; dx++)
+            if (!world_column(w, cx + dx, cz + dz)) return 0;
+    return 1;
+}
+
 combat_targets mp_targets(mp *m) { return (combat_targets){m->tpl, m->thl, m->tn}; }
 
 void mp_host_step(mp *m, const player_input *local_in)
@@ -648,7 +672,7 @@ void mp_host_step(mp *m, const player_input *local_in)
     int n = 1;
     for (int id = 1; id < NET_MAX_PLAYERS && n < PHYS_MAX_PLAYERS; id++) {
         remote *r = &m->r[id];
-        if (!r->active) continue;
+        if (!r->active || !terrain_ready(m->ctx.w, &r->pl)) continue;
         while (r->qn > INPUT_KEEP) {
             r->qh = (r->qh + 1) % INPUT_QUEUE;
             r->qn--;
@@ -695,8 +719,10 @@ void mp_host_step(mp *m, const player_input *local_in)
         if (!r->hl->dead) host_hands(m, r, k);
     }
     m->step++;
-    for (int k = 1; k < n; k++) {
-        int id = who[k];
+    /* Players waiting for their terrain are told too, so they see where
+     * they are. */
+    for (int id = 1; id < NET_MAX_PLAYERS; id++) {
+        if (!m->r[id].active) continue;
         if (m->step % SNAP_EVERY == 0) host_snapshot(m, id);
         if (m->step % HEALTH_EVERY == 0) {
             uint8_t *buf = scratch(m, HEALTH_NET_MAX + 1);

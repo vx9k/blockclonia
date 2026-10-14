@@ -327,6 +327,63 @@ static void count_request(void *user, int cx, int cz)
     g_asked++;
 }
 
+static void stream_at(world *w, double x, double z)
+{
+    for (int i = 0; i < 400; i++) {
+        world_update(w, x, 60.0, z);
+        jobs_poll(w->jobs, -1);
+    }
+}
+
+/* A host's other players are anchors: the terrain around one far from
+ * the camera loads and takes edits, the camera arriving there takes the
+ * columns over (edits and all) and leaving hands them back, and they
+ * unload once no anchor needs them. */
+static void test_world_anchors(void)
+{
+    jobs *js = jobs_create(0);
+    world w = {0};
+    world_init(&w, 1, 2, js, NULL);
+    w.generator = test_flat_gen;
+    w.max_gen_in_flight = 64; /* no workers: one load per update otherwise */
+    stream_at(&w, 0.5, 0.5);
+    CHECK(world_column(&w, 0, 0) != NULL && w.far_count == 0);
+    const int at[2] = {100, 0};
+    world_set_anchors(&w, at, 1, 2);
+    stream_at(&w, 0.5, 0.5);
+    CHECK(w.far_count == 25);
+    CHECK(world_get(&w, 1603, GROUND - 1, 3) == B_GRASS && world_get(&w, 1603 + 3 * 16, 20, 3) == B_UNLOADED);
+    CHECK(world_set(&w, 1603, GROUND, 3, B_BRICK, 0));
+    CHECK(world_get(&w, 1603, GROUND, 3) == B_BRICK);
+    stream_at(&w, 1603.5, 3.5);
+    CHECK(world_get(&w, 1603, GROUND, 3) == B_BRICK && w.far_count == 0);
+    stream_at(&w, 0.5, 0.5);
+    CHECK(world_get(&w, 1603, GROUND, 3) == B_BRICK && w.far_count == 25);
+    CHECK(world_column(&w, 0, 0) != NULL);
+    world_set_anchors(&w, NULL, 0, 2);
+    stream_at(&w, 0.5, 0.5);
+    CHECK(w.far_count == 0 && world_get(&w, 1603, GROUND, 3) == B_UNLOADED);
+    /* Many anchors at once, crossing the table's growth. */
+    int many[2 * WORLD_ANCHORS] = {0};
+    for (int i = 0; i < WORLD_ANCHORS; i++) {
+        many[2 * i] = -200 + 20 * i;
+        many[2 * i + 1] = 50;
+    }
+    world_set_anchors(&w, many, WORLD_ANCHORS, 4);
+    stream_at(&w, 0.5, 0.5);
+    CHECK(w.far_count == WORLD_ANCHORS * 81);
+    int all = 1;
+    for (int i = 0; i < WORLD_ANCHORS; i++)
+        for (int dz = -4; dz <= 4; dz++)
+            for (int dx = -4; dx <= 4; dx++) all &= world_column(&w, many[2 * i] + dx, 50 + dz) != NULL;
+    CHECK(all);
+    world_set_anchors(&w, many, 3, 4);
+    stream_at(&w, 0.5, 0.5);
+    CHECK(w.far_count == 3 * 81 && world_column(&w, many[0], 50) && !world_column(&w, many[2 * 7], 50));
+    world_destroy(&w);
+    jobs_destroy(js);
+}
+
 /* A multiplayer client asks the host again for columns it never sent,
  * and lets go of the ones it no longer wants. */
 static void test_world_retry(void)
@@ -1752,6 +1809,7 @@ int main(void)
     test_mesher();
     test_world_basics();
     test_world_retry();
+    test_world_anchors();
     test_player_physics();
     test_friction();
     test_sprint_sneak();

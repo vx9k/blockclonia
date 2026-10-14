@@ -18,10 +18,12 @@
  * through checked decoders. What a client asks for is bounded too:
  * queued inputs, column requests per frame, slot and recipe indices.
  *
+ * Terrain: the host's world loads around every player (mp_anchors), so
+ * players roam freely; one whose terrain is still loading waits in place.
+ *
  * Not here: window, input devices, drawing (main.c), sockets and crypto
- * (net.c). Known limits: the host's world streams around the host, so
- * players far from it stand still at the edge of what it has loaded;
- * joined players' health is not saved (nor is the host's). */
+ * (net.c). Known limit: joined players' health is not saved (nor is the
+ * host's). */
 #ifndef MC_MP_H
 #define MC_MP_H
 
@@ -133,6 +135,10 @@ const mobs *mp_client_mobs(const mp *m);
  * inside the transaction that saves the world. A dead player keeps the
  * record saved before. 0, or -1 if a write failed. */
 int mp_save_players(const mp *m);
+/* Host: the column each joined player stands in, for world_set_anchors,
+ * so the world loads around them too. Returns how many (at most max). */
+#define MP_ANCHOR_RADIUS 4 /* columns around a player: creatures spawn up to 44 m out */
+int mp_anchors(const mp *m, int (*at)[2], int max);
 /* Host: a block changed (the world's edit hook): sent at the next flush. */
 void mp_on_block_changed(mp *m, int x, int y, int z);
 

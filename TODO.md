@@ -123,12 +123,12 @@ authoritative on one peer.
       the pause menu. The name and address are not remembered between
       runs yet (settings hold numbers only).
 
-**Known limits of the first version** (each also a reason for the
-headless server below): the authority's world streams around its own
-player, so others must stay within its view distance; when the host
-leaves, the session ends (no handing the authority over). Joined players'
-place and inventory are saved with the world by identity key
-(`mp_save_players`); health is saved for nobody yet.
+**Known limits** (also reasons for the headless server below): when the
+host leaves, the session ends (no handing the authority over); health is
+saved for nobody yet. Done: the authority's world loads around every
+player (anchors, `world_set_anchors`), so players roam freely; joined
+players' place and inventory are saved with the world by identity key
+(`mp_save_players`).
 
 **Security follow-ups** from the audit of 2026-10-14 (the rest were
 fixed on the branch):

@@ -1,6 +1,8 @@
 /* World storage: a ring grid of 16 x 128 x 16 block columns streamed around
- * the player. Generation and meshing run on worker threads; everything else
- * (edits, physics, streaming decisions) runs on the main thread. */
+ * the player, and on a multiplayer host the columns around the other
+ * players too (anchors), kept loaded but never meshed. Generation and
+ * meshing run on worker threads; everything else (edits, physics,
+ * streaming decisions) runs on the main thread. */
 #ifndef MC_WORLD_H
 #define MC_WORLD_H
 
@@ -65,6 +67,7 @@ struct jobs;
 struct save_db;
 
 #define WORLD_URGENT 64
+#define WORLD_ANCHORS 8
 
 struct mesh_job;
 
@@ -115,6 +118,14 @@ typedef struct world {
      * loading until world_column_arrived. Called on the main thread. */
     void *remote_user;
     void (*on_column_request)(void *user, int cx, int cz);
+    /* Places besides the camera to keep loaded (world_set_anchors), and
+     * the columns held for them outside the ring: an open-addressing
+     * table by position, at most half full. A position is in the ring or
+     * here, never both. */
+    int anchor[WORLD_ANCHORS][2];
+    int anchor_n, anchor_r;
+    column **far;
+    int far_cap, far_count;
 } world;
 
 /* An empty world: columns stream in from world_update. radius is clamped
@@ -126,11 +137,15 @@ void world_init(world *w, uint32_t seed, int radius, struct jobs *js, struct sav
  * world_save_all first. Logs how many edited columns are dropped unsaved. */
 void world_destroy(world *w);
 
+/* A loaded column held for an anchor, or NULL; world_column's slow path. */
+column *world_far_column(const world *w, int cx, int cz);
+
 /* Inline: every physics query goes through these. */
 static inline column *world_column(const world *w, int cx, int cz)
 {
     column *c = w->grid[(cz & w->grid_mask) * w->grid_w + (cx & w->grid_mask)];
-    return (c && c->cx == cx && c->cz == cz && c->state == COL_READY) ? c : 0;
+    if (c && c->cx == cx && c->cz == cz) return c->state == COL_READY ? c : 0;
+    return w->far_count ? world_far_column(w, cx, cz) : 0;
 }
 
 static inline uint8_t world_get(const world *w, int x, int y, int z)
@@ -153,9 +168,15 @@ int world_set(world *w, int x, int y, int z, uint8_t id, uint8_t meta);
 /* Same, for the player's own edits: their sections are re-meshed first. */
 int world_set_player(world *w, int x, int y, int z, uint8_t id, uint8_t meta);
 
-/* Streams columns around the camera position and schedules jobs. Call
- * once per frame. */
+/* Streams columns around the camera position and the anchors, and
+ * schedules jobs. Call once per frame. */
 void world_update(world *w, double px, double py, double pz);
+/* A host's other players: the columns within radius (a square, in
+ * columns) of each of n column positions (x, z pairs in xz) are loaded too, so physics,
+ * creatures and edits work there; they are saved like any column but not
+ * meshed. Replaces the previous set; n 0 clears it. Ignored on a client,
+ * whose world comes from the host. */
+void world_set_anchors(world *w, const int *xz, int n, int radius);
 
 /* Schedules meshing again and retries uploads the renderer deferred. Call
  * after jobs_poll() so finished work is refilled in the same frame. */
