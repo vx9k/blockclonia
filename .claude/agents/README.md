@@ -32,9 +32,9 @@ Claude chooses an agent by matching the task against each agent's
   a review. It hands off to deep-reasoning when a task turns out bigger.
 - **deep-reasoning**: a mistake would be expensive. That covers design
   decisions, bugs that cross modules or won't reproduce, races and GPU
-  synchronization, shared formats and headers, chunk meshing and
-  rendering pipeline design, and anything that parses untrusted files or
-  touches the file system or dependency downloads.
+  synchronization, shared formats and headers, the `mem.h` allocator,
+  chunk meshing and rendering pipeline design, and anything that parses
+  untrusted files or touches the file system or dependency downloads.
 
 Delegation is up to the main session. It uses subagents when it judges
 that delegating helps, or when you ask it to.
@@ -104,8 +104,8 @@ wording.
   `/advisor <model>` saves the choice to the user settings, which turns
   it back on.
 - This Claude Code build has no Grep or Glob tools, so every tier gets
-  Bash for searching (`grep` here is ugrep). docs-writer's prompt limits
-  it to read-only commands.
+  Bash for searching (`grep` here is ugrep). docs-writer's and scout's
+  prompts limit it to read-only commands.
 - No tier includes the `Agent` tool, so subagents don't spawn subagents
   of their own.
 - These files are checked into git so everyone working on the project
