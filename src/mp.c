@@ -368,7 +368,7 @@ static void host_op(mp *m, remote *r, wire_r *rd)
         break;
     case MP_OP_DROP_CURSOR: {
         item_stack st = r->inv.cursor;
-        r->inv.cursor = (item_stack){0, 0};
+        r->inv.cursor = (item_stack){0, 0, 0};
         survival_toss(m->ctx.ph, &r->inv, &r->pl, st);
     } break;
     case MP_OP_RETURN_CURSOR: survival_toss(m->ctx.ph, &r->inv, &r->pl, inv_return_cursor(&r->inv)); break;

@@ -1030,7 +1030,7 @@ static void test_ui(void)
     mem_free(mem);
 }
 
-static int test_accept(void *user, int id, int count) { return count - inv_add(user, id, count); }
+static int test_accept(void *user, item_stack s) { return s.count - inv_add(user, s.id, s.count); }
 
 /* Field by field: the struct has padding, so memcmp is not a comparison. */
 static int inv_equal(const inventory *a, const inventory *b)
@@ -1098,7 +1098,7 @@ static void test_inventory(void)
 
     /* Encoding round-trips; corrupt bytes are rejected untouched. */
     inv.selected = 4;
-    inv.cursor = (item_stack){I_STICK, 7};
+    inv.cursor = (item_stack){I_STICK, 7, 0};
     uint8_t buf[INV_ENCODED_SIZE] = {0};
     CHECK(inv_encode(&inv, buf, sizeof buf) == INV_ENCODED_SIZE);
     inventory back = {0};
@@ -1107,11 +1107,11 @@ static void test_inventory(void)
     buf[9] = 1;
     CHECK(inv_decode(&back, buf, sizeof buf) == -1);
     inv_encode(&inv, buf, sizeof buf);
-    buf[8 + 2 * 12 + 1] = 200; /* 200 bandages in a stack of 16 */
+    buf[8 + 3 * 12 + 1] = 200; /* 200 bandages in a stack of 16 */
     CHECK(inv_decode(&back, buf, sizeof buf) == -1);
     CHECK(inv_decode(&back, buf, sizeof buf - 1) == -1);
-    /* Reserved bytes are zero in every INV1 written, so anything else is a
-     * layout this build does not know. */
+    /* Reserved bytes are zero in every INV1/INV2 written, so anything else
+     * is a layout this build does not know. */
     for (int k = 5; k <= 7; k++) {
         inv_encode(&inv, buf, sizeof buf);
         buf[k] = 1;
@@ -1716,6 +1716,7 @@ int main(void)
     test_net_all();
     test_mp_all();
     test_worldgen_all();
+    test_tools_all();
     test_cardio_all();
     printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);
     return g_failed ? 1 : 0;

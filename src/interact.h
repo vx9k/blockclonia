@@ -50,6 +50,7 @@ typedef struct {
     uint8_t broken_id;
     int eat;             /* right-clicked food: eat it */
     int defib;           /* right-clicked the defibrillator: pads on or off */
+    int tool_broke;      /* the item id of a tool that just wore out, else 0 */
     const char *msg;     /* short feedback, or NULL */
     interact_event ev[INTERACT_MAX_EVENTS];
     int ev_count;

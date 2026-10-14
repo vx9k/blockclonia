@@ -70,6 +70,7 @@ int survival_find_water(const world *w, dvec3 eye, vec3 dir, double reach, ipos 
  * the inventory. decode
  * returns 0 on success and -1 (nothing changed) for malformed data. */
 #define PLAYER_FILE_SIZE (4 + 4 + 3 * 8 + 2 * 4 + 4 + INV_ENCODED_SIZE)
+#define PLAYER_FILE_SIZE_V1 (4 + 4 + 3 * 8 + 2 * 4 + 4 + INV1_ENCODED_SIZE) /* with INV1, still read */
 size_t survival_encode_player(const player *p, const inventory *inv, double day, uint8_t *out, size_t cap);
 int survival_decode_player(player *p, inventory *inv, double *day, const uint8_t *in, size_t len);
 

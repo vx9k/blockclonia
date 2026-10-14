@@ -1,6 +1,9 @@
 #include "texgen.h"
 #include "block.h"
+#include "item.h"
 #include "noise.h"
+
+#include <math.h>
 
 typedef struct { uint8_t r, g, b, a; } rgba;
 
@@ -154,8 +157,55 @@ static const sprite SPRITES[] = {
      {{'#', {70, 60, 55, 255}}, {'a', {165, 140, 120, 255}}, {'h', {215, 185, 160, 255}}, {'m', {120, 80, 65, 255}}}},
 };
 
+/* Tools and blades, drawn from geometry rather than 20 hand-made sprites:
+ * a handle along the diagonal from the bottom left, and a head that
+ * depends on the kind, coloured by the tier's material. */
+static int tool_texel(int layer, int x, int y, rgba *out)
+{
+    if (layer < T_TOOL_FIRST || layer >= T_COUNT) return 0;
+    static const rgba HEAD[TIER_COUNT] = {{150, 112, 64, 255}, {128, 128, 128, 255}, {205, 120, 70, 255},
+                                          {205, 208, 214, 255}};
+    int kind = (layer - T_TOOL_FIRST) / TIER_COUNT, tier = (layer - T_TOOL_FIRST) % TIER_COUNT;
+    float fx = (float)x + 0.5f, fy = (float)y + 0.5f;
+    float along = (fx + fy - 16.0f) * 0.70710678f; /* across the handle */
+    float up = (fx + (16.0f - fy)) * 0.70710678f; /* along it, 0 at the bottom-left corner */
+    int handle = fabsf(along) < 0.75f && up > 1.5f, head = 0;
+    switch (kind) {
+    case TOOL_PICKAXE:
+        handle = handle && up < 17.5f;
+        head = fabsf(up - 15.5f) < 1.1f && fabsf(along) < 7.0f - fabsf(along) * 0.15f;
+        break;
+    case TOOL_AXE:
+        handle = handle && up < 18.5f;
+        head = up > 12.5f && up < 18.0f && along > 0.5f && along < 5.0f - (18.0f - up) * 0.2f;
+        break;
+    case TOOL_SHOVEL:
+        handle = handle && up < 15.0f;
+        head = up >= 14.5f && up < 20.5f && fabsf(along) < 2.6f - fmaxf(0.0f, up - 19.0f);
+        break;
+    case TOOL_KNIFE:
+        handle = handle && up < 8.0f;
+        head = up >= 8.0f && up < 16.0f && along > -0.9f && along < 0.9f - (up - 8.0f) * 0.1f;
+        break;
+    default: /* sword */
+        handle = handle && up < 6.5f;
+        head = (up >= 6.5f && up < 20.0f && fabsf(along) < 1.0f) || (fabsf(up - 6.5f) < 0.75f && fabsf(along) < 3.2f);
+        break;
+    }
+    *out = (rgba){0, 0, 0, 0};
+    int n = px_noise(layer, x, y, 8);
+    if (head) {
+        rgba c = HEAD[tier];
+        *out = shade(c.r, c.g, c.b, 255, n);
+    } else if (handle) {
+        *out = shade(110, 78, 42, 255, n);
+    }
+    return 1;
+}
+
 static int sprite_texel(int layer, int x, int y, rgba *out)
 {
+    if (tool_texel(layer, x, y, out)) return 1;
     for (int i = 0; i < (int)(sizeof SPRITES / sizeof SPRITES[0]); i++) {
         const sprite *s = &SPRITES[i];
         if (s->layer != layer) continue;

@@ -213,7 +213,7 @@ static float get32f(const uint8_t *p)
     return v;
 }
 
-/* "MCPL", u8 version (1), 3 reserved, x y z (f64), yaw pitch (f32), u8
+/* "MCPL", u8 version (2; 1 held an INV1 inventory), 3 reserved, x y z (f64), yaw pitch (f32), u8
  * flying, 1 reserved, u16 time of day (1/65536 day), then the inventory
  * block. */
 size_t survival_encode_player(const player *p, const inventory *inv, double day, uint8_t *out, size_t cap)
@@ -222,7 +222,7 @@ size_t survival_encode_player(const player *p, const inventory *inv, double day,
     static const uint8_t MAGIC[4] = {'M', 'C', 'P', 'L'};
     memset(out, 0, PLAYER_FILE_SIZE);
     memcpy(out, MAGIC, sizeof MAGIC);
-    out[4] = 1;
+    out[4] = 2;
     put64(out + 8, p->pos.x);
     put64(out + 16, p->pos.y);
     put64(out + 24, p->pos.z);
@@ -239,10 +239,9 @@ size_t survival_encode_player(const player *p, const inventory *inv, double day,
 
 int survival_decode_player(player *p, inventory *inv, double *day, const uint8_t *in, size_t len)
 {
-    /* Reserved bytes are zero in every version 1 file written. */
-    if (len != PLAYER_FILE_SIZE || memcmp(in, "MCPL", 4) != 0 || in[4] != 1 || in[5] || in[6] || in[7] || in[40] > 1 ||
-        in[41])
-        return -1;
+    /* Reserved bytes are zero in every file written. */
+    int ok_len = (in && len == PLAYER_FILE_SIZE && in[4] == 2) || (in && len == PLAYER_FILE_SIZE_V1 && in[4] == 1);
+    if (!ok_len || memcmp(in, "MCPL", 4) != 0 || in[5] || in[6] || in[7] || in[40] > 1 || in[41]) return -1;
     double x = get64(in + 8), y = get64(in + 16), z = get64(in + 24);
     float yaw = get32f(in + 32), pitch = get32f(in + 36);
     /* NaN fails every comparison, so these also reject it. */
@@ -250,7 +249,7 @@ int survival_decode_player(player *p, inventory *inv, double *day, const uint8_t
         !(fabsf(yaw) <= 100.0f) || !(fabsf(pitch) <= 1.6f))
         return -1;
     inventory t = {0};
-    if (inv_decode(&t, in + 44, INV_ENCODED_SIZE) != 0) return -1;
+    if (inv_decode(&t, in + 44, len - 44) != 0) return -1;
     *inv = t;
     memset(p, 0, sizeof *p);
     p->pos = p->prev_pos = dv3(x, y, z);
@@ -287,15 +286,15 @@ void survival_thermal(const thermo *th, const world *w, const player *p, health_
 void survival_drop_all(physics *ph, inventory *inv, const player *p, uint32_t *rng)
 {
     item_stack left = inv_return_cursor(inv);
-    if (left.count) inv_add(inv, left.id, left.count);
+    if (left.count) inv_add_stack(inv, left);
     for (int i = 0; i < INV_SLOTS; i++) {
         item_stack *st = &inv->slot[i];
         if (!st->count) continue;
         *rng = *rng * 1664525u + 1013904223u;
         double a = (double)(*rng >> 8) / 16777216.0 * 2.0 * MC_PI;
-        if (physics_drop_item(ph, dv3(p->pos.x, p->pos.y + 1.0, p->pos.z), dv3(cos(a) * 2.0, 3.0, sin(a) * 2.0), st->id,
-                              st->count, 1.0f))
-            *st = (item_stack){0, 0};
+        if (physics_drop_stack(ph, dv3(p->pos.x, p->pos.y + 1.0, p->pos.z), dv3(cos(a) * 2.0, 3.0, sin(a) * 2.0), *st,
+                               1.0f))
+            *st = (item_stack){0, 0, 0};
     }
 }
 
@@ -303,9 +302,9 @@ void survival_toss(physics *ph, inventory *inv, const player *p, item_stack st)
 {
     if (!st.count) return;
     vec3 d = look_dir(p->yaw, p->pitch);
-    if (!physics_drop_item(ph, dv3(p->pos.x, p->pos.y + 1.3, p->pos.z), dv3((double)d.x * 3.0, 1.5, (double)d.z * 3.0),
-                           st.id, st.count, 1.2f)) {
-        int left = inv_add(inv, st.id, st.count);
-        if (left) inv->cursor = (item_stack){st.id, (uint8_t)left};
+    if (!physics_drop_stack(ph, dv3(p->pos.x, p->pos.y + 1.3, p->pos.z), dv3((double)d.x * 3.0, 1.5, (double)d.z * 3.0),
+                            st, 1.2f)) {
+        int left = inv_add_stack(inv, st);
+        if (left) inv->cursor = (item_stack){st.id, (uint8_t)left, st.wear};
     }
 }

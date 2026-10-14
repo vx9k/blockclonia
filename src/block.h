@@ -104,7 +104,8 @@ typedef enum {
     T_ITEM_IRON_INGOT,
     T_ITEM_RAW_COPPER,
     T_ITEM_RAW_IRON,
-    T_COUNT
+    T_TOOL_FIRST, /* one per tool kind and tier, in item order */
+    T_COUNT = T_TOOL_FIRST + 5 * 4
 } tex_id;
 
 #define T_FIRE_FRAMES 4

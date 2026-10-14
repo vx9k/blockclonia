@@ -21,6 +21,7 @@
 #define MC_PHYSICS_H
 
 #include "mathlib.h"
+#include "item.h"
 #include "world.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -132,6 +133,7 @@ typedef struct {
     float delay;                  /* s before it can be picked up */
     float spin;                   /* radians, for drawing */
     uint8_t id, count;
+    uint8_t wear;                 /* a tool keeps its wear on the ground */
     uint8_t on_ground;
     uint8_t touching;             /* reached a player this step: their index + 1 */
 } item_ent;
@@ -229,10 +231,12 @@ void physics_fluid_tick(physics *ph);
  * how long before it can be picked up (a thrown item flies clear first).
  * Returns 0 if there is no room for more items. */
 int physics_drop_item(physics *ph, dvec3 pos, dvec3 vel, int id, int count, float delay);
+/* physics_drop_item for a stack that may carry wear (a used tool). */
+int physics_drop_stack(physics *ph, dvec3 pos, dvec3 vel, item_stack s, float delay);
 /* Hands items that reached player `who` (an index into the last step's
  * players) to `accept`, which returns how many it took (the inventory may
  * be full). Returns the number of stacks picked up completely. */
-int physics_pickup(physics *ph, int who, int (*accept)(void *user, int id, int count), void *user);
+int physics_pickup(physics *ph, int who, int (*accept)(void *user, item_stack s), void *user);
 
 /* Places falling bodies back into the world (all of them, or only those in
  * one column) so they survive a save. */

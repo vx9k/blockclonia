@@ -881,6 +881,7 @@ typedef struct {
     float swim_t, prev_hurt, prev_breath;
     double last_beat;         /* health.last_r of the last heartbeat heard */
     discord *dc;              /* NULL: the Discord status is off or this build has no application */
+    float inv_wheel;   /* wheel notches for the inventory screen's recipe list */
     char world_name[SAVE_NAME_MAX + 1]; /* the name the world was given, "" for none */
     int64_t session_start, play_start; /* Unix seconds: the game started, the world was opened */
     mp *mp;                   /* multiplayer session, NULL in single player */
@@ -1624,7 +1625,9 @@ static player_input frame_input(game *g)
     pl->yaw = fmodf(pl->yaw, (float)(2 * MC_PI));
     g_in.mouse_dx = g_in.mouse_dy = 0;
     if (g_in.scroll != 0) {
-        if (!g->in_menu && !g_in.panel) {
+        if (g_in.inv_open) {
+            g->inv_wheel += (float)g_in.scroll; /* scrolls the recipe list */
+        } else if (!g->in_menu && !g_in.panel) {
             int s = g->inv.selected - (g_in.scroll > 0 ? 1 : -1);
             g->inv.selected = (s % INV_HOTBAR + INV_HOTBAR) % INV_HOTBAR;
         }
@@ -2208,7 +2211,9 @@ static int draw_overlay(game *g, double dt, double alpha)
                           g_in.ui_rclick,
                           g_in.keys[GLFW_KEY_LEFT_SHIFT] || g_in.keys[GLFW_KEY_RIGHT_SHIFT],
                           thermo_stations(g->th, &g->w, g->pl.pos),
+                          g->inv_wheel,
                           (float)dt};
+        g->inv_wheel = 0.0f;
         invui_result ir = invui_screen(&u, &g->iu, &g->inv, &in);
         if (g->client) {
             /* Shown at once; the host repeats each and has the last word. */

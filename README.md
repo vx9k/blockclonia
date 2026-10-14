@@ -191,6 +191,21 @@ or burns.
 | 1 furnace | 8 stone | |
 | 1 copper ingot | 1 raw copper, 1 coal | a furnace nearby |
 | 1 iron ingot | 1 raw iron, 2 coal | a furnace nearby |
+| 1 pickaxe or axe | 3 of the material, 2 sticks | |
+| 1 shovel | 1 of the material, 2 sticks | |
+| 1 knife | 1 of the material, 1 stick | |
+| 1 sword | 2 of the material, 1 stick | |
+
+Tools and blades come in four materials: planks (wooden), stone, copper
+ingots and iron ingots. The right tool breaks a block 2 (wood), 4
+(stone), 5 (copper) or 6.5 (iron) times faster than a bare hand: a
+pickaxe for rock, ore, stone, brick and ice, an axe for wood, a shovel
+for soil, sand, gravel and snow. Rock, ore and masonry yield nothing
+without a pickaxe (and take three times as long by hand), and copper and
+iron ore need one of stone or better. Every block broken wears the tool
+in hand by one use: wooden tools last 60, stone 130, copper 180 and iron
+250. A bar under the slot shows what is left; a worn-out tool is gone.
+The mouse wheel scrolls the recipe list while the inventory is open.
 
 Rock, the stone the world is made of, breaks into stone blocks; coal ore
 gives coal, and copper and iron ore give raw metal to smelt. A campfire
