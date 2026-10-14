@@ -28,12 +28,14 @@ lavapipe, slowly (see [No GPU](#no-gpu)).
 - a C11 compiler (gcc or clang), CMake 3.21 or newer and Ninja;
 - the Vulkan headers and loader, and `glslc` (from shaderc) to compile
   the shaders;
-- GLFW 3.5, mimalloc 3.5, miniaudio 0.11 and SQLite 3.31 or newer.
+- libsodium 1.0.18 or newer (multiplayer encryption);
+- GLFW 3.5, mimalloc 3.5, miniaudio 0.11, SQLite 3.31 and ENet 1.3 or
+  newer.
 
-You don't have to install the last four yourself: when a system copy is
+You don't have to install the last five yourself: when a system copy is
 missing or older than the build wants, the build downloads and compiles
 a pinned release (GLFW 3.5.1, mimalloc 3.5.3, miniaudio 0.11.25, SQLite
-3.53.4). See [Dependencies](#dependencies) to control that.
+3.53.4, ENet 1.3.18). See [Dependencies](#dependencies) to control that.
 
 ## Linux
 
@@ -41,7 +43,8 @@ a pinned release (GLFW 3.5.1, mimalloc 3.5.3, miniaudio 0.11.25, SQLite
 
 ```sh
 sudo apt install build-essential cmake ninja-build glslc libvulkan-dev \
-                 libglfw3-dev libmimalloc-dev libsqlite3-dev mesa-vulkan-drivers
+                 libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev \
+                 mesa-vulkan-drivers
 cmake --preset native            # tuned for this machine (use this on a Pi)
 cmake --build --preset native
 ./build/native/blockclonia
@@ -62,7 +65,7 @@ Arch packages are recent enough that nothing has to be downloaded:
 
 ```sh
 sudo pacman -S --needed base-devel cmake ninja shaderc vulkan-icd-loader \
-                        vulkan-headers glfw mimalloc sqlite miniaudio
+                        vulkan-headers glfw mimalloc sqlite miniaudio libsodium enet
 cmake --preset native
 cmake --build --preset native
 ./build/native/blockclonia
@@ -91,7 +94,7 @@ translates it to Metal, Apple's graphics API. Install the tools with
 [Homebrew](https://brew.sh):
 
 ```sh
-brew install cmake ninja mimalloc glfw vulkan-headers vulkan-loader molten-vk shaderc
+brew install cmake ninja libsodium mimalloc glfw vulkan-headers vulkan-loader molten-vk shaderc
 cmake --preset macos -DCMAKE_PREFIX_PATH="$(brew --prefix)"
 cmake --build --preset macos
 ./build/macos/blockclonia
@@ -132,7 +135,7 @@ Options you can add when configuring, with `-D`:
 
 ## Dependencies
 
-`MC_DEPS` decides where GLFW, mimalloc, miniaudio and SQLite come from:
+`MC_DEPS` decides where GLFW, mimalloc, miniaudio, SQLite and ENet come from:
 
 - `AUTO` (the default) uses the system's copy when it is new enough and
   downloads the pinned release otherwise. On macOS it always builds the
@@ -144,7 +147,7 @@ Options you can add when configuring, with `-D`:
 - `FETCH` always uses the pinned releases.
 
 For a reproducible build, set `MC_MIMALLOC_SHA256`, `MC_GLFW_SHA256`,
-`MC_MINIAUDIO_SHA256` and `MC_SQLITE_SHA256`; see
+`MC_MINIAUDIO_SHA256`, `MC_SQLITE_SHA256` and `MC_ENET_SHA256`; see
 [SECURITY.md](SECURITY.md#supply-chain). `MC_SQLITE_VERSION` and
 `MC_SQLITE_YEAR` select a different pinned SQLite release.
 

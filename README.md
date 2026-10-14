@@ -304,7 +304,8 @@ troubleshooting. In short, on Debian or Ubuntu:
 
 ```sh
 sudo apt install build-essential cmake ninja-build glslc libvulkan-dev \
-                 libglfw3-dev libmimalloc-dev libsqlite3-dev mesa-vulkan-drivers
+                 libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev \
+                 mesa-vulkan-drivers
 cmake --preset native && cmake --build --preset native
 ./build/native/blockclonia
 ```
