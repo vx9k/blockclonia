@@ -176,13 +176,16 @@ long save_read_file(const char *path, void *buf, size_t cap)
     return len >= 0 && (size_t)len <= cap ? len : -1;
 }
 
-int save_write_file(const char *path, const void *data, size_t len)
+static int write_file(const char *path, const void *data, size_t len, unsigned mode)
 {
     char tmp[512] = {0};
     int n = snprintf(tmp, sizeof tmp, "%s.tmp", path);
     if (n < 0 || (size_t)n >= sizeof tmp) return -1;
-    return os_write_atomic(path, tmp, data, len);
+    return os_write_atomic(path, tmp, data, len, mode);
 }
+
+int save_write_file(const char *path, const void *data, size_t len) { return write_file(path, data, len, 0644); }
+int save_write_private(const char *path, const void *data, size_t len) { return write_file(path, data, len, 0600); }
 
 static int exists(const char *path) { return os_path_kind(path) != OS_MISSING; }
 
