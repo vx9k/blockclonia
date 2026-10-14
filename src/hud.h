@@ -36,6 +36,11 @@ typedef struct {
     const inventory *inv;   /* supplies for the panel, and the hotbar */
     int hide_hints;         /* the key hints setting is off */
     int chat;               /* in a multiplayer game: T opens the chat */
+    /* The panel takes the mouse: where it is and a click this frame in,
+     * what was clicked out (-1 for nothing). */
+    float mx, my;
+    int click;
+    int pick_part, pick_treat;
     /* Alert animation, owned by hud_update. */
     hud_alert alerts[HUD_ALERTS];
     int alert_count;
@@ -46,7 +51,9 @@ typedef struct {
 void hud_update(hud_state *s, const health *h, float dt);
 
 /* The HUD, plus the H panel or the death screen when they are showing. */
-void hud_draw(ui *u, const health *h, const hud_state *s);
+/* Draws the HUD, or the panel when it is open; the panel reports a body
+ * part or treatment clicked in s->pick_part and s->pick_treat. */
+void hud_draw(ui *u, const health *h, hud_state *s);
 
 /* How the body is doing in one line, from the same alerts the HUD shows:
  * "Healthy", "Hurt", "Badly hurt", "Almost dead" or "Dead man walking",

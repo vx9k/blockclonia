@@ -509,6 +509,8 @@ static void key_cb(GLFWwindow *win, int key, int sc, int action, int mods)
         else if (key == GLFW_KEY_A) g_in.treat = TREAT_ANTIBIOTIC;
         else if (key == GLFW_KEY_C) g_in.treat = TREAT_COOL;
         else if (key == GLFW_KEY_X) g_in.treat = TREAT_REDUCE;
+        else if (key == GLFW_KEY_N) g_in.treat = TREAT_ADRENALINE;
+        else if (key == GLFW_KEY_J) g_in.treat = TREAT_SHOCK;
     } else if (key == GLFW_KEY_T && g_in.mp_active) {
         g_in.chat_open = 2; /* 2: the T itself must not be typed */
         g_in.chat_len = 0;
@@ -532,7 +534,7 @@ static void mouse_button_cb(GLFWwindow *win, int button, int action, int mods)
         if (action == GLFW_RELEASE) g_in.attack = 0;
     }
     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) g_in.ui_rclick = 1;
-    if (action != GLFW_PRESS || g_in.screen != SCREEN_NONE || g_in.inv_open) return;
+    if (action != GLFW_PRESS || g_in.screen != SCREEN_NONE || g_in.inv_open || g_in.panel) return;
     if (!g_in.captured) {
         set_captured(win, 1); /* this click only takes the mouse */
         return;
@@ -875,7 +877,7 @@ typedef struct {
     demo_state demo;
     double acc;               /* unsimulated time, s */
     int frame;
-    int inv_was_open;
+    int inv_was_open, panel_was_open;
     double title_t, save_t;
     int fps_frames;
     int last_step;            /* stride half-cycles, for footsteps */
@@ -1609,6 +1611,10 @@ static void frame_menus(game *g, double dt)
         if (!g->in_menu) set_captured(g->win, 1);
     }
     g->inv_was_open = g_in.inv_open;
+    /* The health panel takes the mouse too. */
+    if (g_in.panel && !g->panel_was_open) set_captured(g->win, 0);
+    else if (!g_in.panel && g->panel_was_open && !g_in.inv_open && !g->in_menu) set_captured(g->win, 1);
+    g->panel_was_open = g_in.panel;
     if (g->hl.dead) g_in.inv_open = 0;
     /* The panel, death and unconsciousness freeze the player's input. */
     g->frozen = g->in_menu || g_in.panel || g_in.inv_open || g_in.chat_open || g->hl.dead ||
@@ -1923,6 +1929,14 @@ static render_view build_view(game *g, double now, double dt, double alpha)
         v.pitch = -0.32f;
         v.roll = 0.0f;
     }
+    if (!on_title) {
+        /* A hurt brain or a concussion: the view drifts and rolls. Only the
+         * view: aiming follows the player's own look. */
+        float sway = health_get_senses(&g->hl).sway;
+        v.roll += sway * 0.07f * sinf((float)now * 0.9f);
+        v.yaw += sway * 0.03f * sinf((float)now * 0.53f);
+        v.pitch += sway * 0.02f * sinf((float)now * 0.71f + 0.5f);
+    }
     v.underwater = world_get(&g->w, (int)floor(v.eye.x), (int)floor(v.eye.y), (int)floor(v.eye.z)) == B_WATER;
     v.time = (float)fmod(now, 3600.0);
     /* Brightness lifts the darkest light toward dusk; days are unchanged. */
@@ -1945,6 +1959,12 @@ static render_view build_view(game *g, double now, double dt, double alpha)
                               (float)dt};
         v.view_model = g->vm_ents;
         v.view_model_count = viewmodel_build(&g->vm, &vi, g->vm_ents, VIEWMODEL_MAX);
+        /* Shaking hands (adrenaline, the crash after it, low sugar, cold). */
+        float tremor = health_get_senses(&g->hl).tremor;
+        for (int i = 0; i < v.view_model_count && tremor > 0.01f; i++) {
+            g->vm_ents[i].pos[0] += tremor * 0.006f * sinf((float)now * 47.0f);
+            g->vm_ents[i].pos[1] += tremor * 0.005f * sinf((float)now * 61.0f + 1.3f);
+        }
     }
     int n_op = 0, n_tr = 0;
     fx_build_entities(g->fx, &g->ph, &g->crack, v.eye, alpha, v.time, g->ents, RENDER_MAX_ENTS, &n_op, &n_tr);
@@ -2257,10 +2277,16 @@ static int draw_overlay(game *g, double dt, double alpha)
     hs->hide_hints = !g->st.show_hints;
     hs->chat = g->mp != NULL;
     hud_update(hs, &g->hl, g->in_menu ? 0.0f : (float)dt);
-    if (!on_title) hud_draw(&u, &g->hl, hs);
-    if (!on_title && !g->hl.dead && !g_in.panel && !g_in.inv_open) invui_hotbar(&u, &g->iu, &g->inv, (float)dt);
     float mx = 0.0f, my = 0.0f;
     cursor_ui(g, &u, fb_w, fb_h, &mx, &my);
+    hs->mx = mx;
+    hs->my = my;
+    hs->click = g_in.panel && g_in.ui_click && !g->in_menu;
+    hs->pick_part = hs->pick_treat = -1;
+    if (!on_title) hud_draw(&u, &g->hl, hs);
+    if (hs->pick_part >= 0) g_in.sel_part = hs->pick_part;
+    if (hs->pick_treat >= 0) g_in.treat = hs->pick_treat;
+    if (!on_title && !g->hl.dead && !g_in.panel && !g_in.inv_open) invui_hotbar(&u, &g->iu, &g->inv, (float)dt);
     if (g_in.inv_open && !g->in_menu && !g->hl.dead) {
         invui_input in = {mx,
                           my,

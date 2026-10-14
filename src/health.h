@@ -113,6 +113,8 @@ typedef enum {
     TREAT_COOL,           /* cool a burn under water (needs water nearby) */
     TREAT_REDUCE,         /* pop a dislocated joint back in */
     TREAT_DEFIB,          /* defibrillator pads on the chest, or off again */
+    TREAT_ADRENALINE,     /* adrenaline auto-injector into the thigh */
+    TREAT_SHOCK,          /* manual override: shock now, whatever the rhythm */
     TREAT_COUNT
 } treatment;
 
@@ -276,6 +278,11 @@ typedef struct health {
     float confusion;                  /* s of confusion left */
     float pain;                       /* 0..10 perceived */
     float painkiller, antibiotic;     /* game hours of effect left */
+    float pk_load; /* painkiller doses (1 g) still in the liver's daily budget */
+    float hepatotox; /* liver function still to be lost to an overdose (0..1) */
+    float gut_upset; /* game hours of diarrhoea left (antibiotics with nothing to treat) */
+    float crash; /* 0..1 owed after an adrenaline rush: shaky and tired once it wears off */
+    float pain_ref; /* slow reference a sudden jump in pain is measured against */
     float sepsis;                     /* 0..1 */
     int conscious;                    /* consciousness */
 
@@ -333,6 +340,16 @@ typedef struct {
     int can_jump, can_sprint, can_act, has_control;
 } health_limits;
 health_limits health_get_limits(const health *h);
+
+/* How the body changes what the player sees and feels, 0..1 each, for the
+ * screen and the hands: a tremor (adrenaline, the crash after it, low
+ * sugar, cold), a sway (a hurt brain, concussion, confusion), tunnel
+ * vision (an adrenaline rush) and the yellow of jaundice (a failing
+ * liver). */
+typedef struct {
+    float tremor, sway, tunnel, jaundice;
+} health_senses;
+health_senses health_get_senses(const health *h);
 
 /* ----------------------------------------------------------- injuries */
 

@@ -397,7 +397,7 @@ static void controls_screen(ctx *c)
         {"1-9 / scroll", "Hotbar slot"},
         {"Q", "Drop item (Ctrl: stack)"},
         {"Tab / I", "Inventory and crafting"},
-        {"H", "Health panel"},
+        {"H", "Health panel (click to treat)"},
         {"E / R", "Eat / drink"},
         {"F2 / F11", "Screenshot / fullscreen"},
         {"F3", "Debug overlay (K: injury menu)"},

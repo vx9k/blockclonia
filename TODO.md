@@ -23,12 +23,31 @@ One branch and pull request per item, in this order:
    density and span, ingredients against what you have) and a short
    cursor tooltip. Left for later: search by name, favourites, dragging
    a stack across slots to spread it.
-4. **Health**: adrenaline and stress hormones, harmful treatments (a
-   shock to a healthy heart, overdoses, drug interactions), organ damage
-   with effects felt in play (vision, movement, tremor, fainting), a
-   more interactive panel.
-5. **Finish multiplayer**: the items under Multiplayer below, NAT
-   traversal by UDP hole punching through a rendezvous server included.
+4. **Health** (`feat/health-interactive`, stacked on item 3): done: the
+   adrenaline rush on a sudden injury (analgesia, strength, tunnel
+   vision) and the crash after it, an adrenaline auto-injector (one in
+   the starting kit), a manual shock override, painkiller overdose
+   (delayed liver damage, vomiting), antibiotics with nothing to treat
+   (gut upset), organ damage felt in play (heart caps exertion, liver
+   tires and jaundices, kidneys raise potassium, brain makes the view
+   drift), hand tremor and a clickable panel with treatment buttons.
+   **Not done** (stopped at the token budget, 2026-10-14):
+   - drug interactions (painkiller on top of alcohol or opioids; none
+     exist yet), opioids and their respiratory depression;
+   - fainting from a vasovagal reflex (pain, blood at the sight) as its
+     own event (unconsciousness from low brain oxygen already exists);
+   - adrenaline from fear (a wolf hunting nearby), not only from pain;
+   - a blur or double-vision effect for concussion (needs a renderer
+     post-process; the view sway is the stand-in);
+   - the panel by mouse only as far as parts and treatments go: the
+     organ list and supplies are not clickable, and there is no drag of
+     an item from the inventory onto a body part.
+5. **Finish multiplayer** (**not started**): the items under Multiplayer
+   below, NAT traversal by UDP hole punching through a rendezvous
+   server included. Players chose: client-server mode, a headless
+   `--server`, host/join screens in the menus, saving joined players
+   with the world, lifting the host view-distance limit, column
+   re-requests, `fuzz_net` on host handlers, chat safety numbers.
 
 ## Native Metal renderer (macOS)
 

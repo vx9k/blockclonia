@@ -129,6 +129,12 @@ static const item_def ITEMS[I_TOOL_FIRST - ITEM_FIRST] = {
                               .tex = T_ITEM_RIFLE,
                               .desc = "Right-click to fire. Uses cartridges.",
                               .density = 900.0f},
+    [I_ADRENALINE - ITEM_FIRST] = {.name = "Adrenaline auto-injector",
+                                   .stack = 4,
+                                   .block = B_AIR,
+                                   .tex = T_ITEM_ADRENALINE,
+                                   .desc = "0.3 mg. For a stopped heart (H, then N); risky on a beating one.",
+                                   .density = 1100.0f},
 };
 
 static const item_def UNKNOWN = {

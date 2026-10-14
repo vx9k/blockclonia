@@ -116,7 +116,11 @@ static void effects(ui *u, const health *h)
     /* Failing brain oxygen narrows vision to a tunnel before a faint. */
     float dim = clamp01((0.85f - h->brain_o2) / 0.35f);
     if (h->conscious == CONS_CONFUSED) dim = dim > 0.35f ? dim : 0.35f;
+    health_senses sn = health_get_senses(h);
+    /* An adrenaline rush narrows the world to what is in front. */
+    if (sn.tunnel > dim) dim = 0.7f * sn.tunnel;
     vignette(u, dim, 0);
+    if (sn.jaundice > 0.0f) ui_rect(u, 0, 0, u->w, u->h, ui_rgba(200, 170, 20, (int)(45.0f * sn.jaundice)));
     if (h->hurt_flash > 0.0f) vignette(u, 0.6f * h->hurt_flash, ui_rgba(200, 0, 0, 0));
 }
 
@@ -672,7 +676,30 @@ static int advice(const health *h, int part, char *buf, size_t n)
     return 1;
 }
 
-static void panel(ui *u, const health *h, const hud_state *s)
+static int in_rect(const hud_state *s, float x, float y, float w, float h)
+{ return s->mx >= x && s->mx < x + w && s->my >= y && s->my < y + h; }
+
+/* The treatment buttons along the bottom of the panel, with their keys and
+ * what each risks when it is the wrong thing to do. */
+static const struct {
+    const char *name, *key, *note;
+    int treat;
+} BUTTONS[] = {
+    {"Bandage", "B", "Pressure dressing on the selected part's wounds.", TREAT_BANDAGE},
+    {"Splint", "S", "Holds a broken limb still.", TREAT_SPLINT},
+    {"Disinfect", "D", "Antiseptic (or water nearby) on the wounds. It stings.", TREAT_DISINFECT},
+    {"Cool burn", "C", "Under running water, early, so the burn stops deepening.", TREAT_COOL},
+    {"Reduce", "X", "Pull a dislocated joint back in. Very painful.", TREAT_REDUCE},
+    {"Painkiller", "P", "6 h of relief. Over 4 a day poisons the liver, a day later.", TREAT_PAINKILLER},
+    {"Antibiotics", "A", "For infection. With none to treat, they only upset the gut.", TREAT_ANTIBIOTIC},
+    {"Eat", "E", "The food in hand, else the best there is.", TREAT_EAT},
+    {"Drink", "R", "Standing in or facing water, or a full bucket.", TREAT_DRINK},
+    {"Adrenaline", "N", "For a stopped heart. On a beating one it races and can derail.", TREAT_ADRENALINE},
+    {"Pads", "", "Defibrillator pads on or off. It shocks fibrillation by itself.", TREAT_DEFIB},
+    {"Shock", "J", "Override: shock now. A shock on a beating heart can stop it.", TREAT_SHOCK},
+};
+
+static void panel(ui *u, const health *h, hud_state *s)
 {
     ui_rect(u, 0, 0, u->w, u->h, ui_rgba(0, 0, 0, 140));
     const float pw = 628, ph = 348;
@@ -683,6 +710,11 @@ static void panel(ui *u, const health *h, const hud_state *s)
     const float saved_scale = u->scale, saved_w = u->w, saved_h = u->h;
     ui_fit(u, pw + 8, ph + 8);
     const float x0 = floorf((u->w - pw) * 0.5f), y0 = floorf((u->h - ph) * 0.5f);
+    /* The mouse in the fitted panel's own pixels. */
+    const float mscale = saved_scale / u->scale;
+    const float smx = s->mx, smy = s->my;
+    s->mx *= mscale;
+    s->my *= mscale;
     ui_rect(u, x0, y0, pw, ph, C_PANEL);
     ui_frame(u, x0, y0, pw, ph, 1, C_BORDER);
     char buf[200] = {0};
@@ -703,6 +735,12 @@ static void panel(ui *u, const health *h, const hud_state *s)
     float lx = cx + 74;
     for (int p = 0; p < BP_COUNT; p++) {
         float py = cy + (float)p * 25;
+        rectf r = part_rect(p, cx + 9, cy + 6);
+        int hot = in_rect(s, r.x, r.y, r.w, r.h) || in_rect(s, lx - 3, py - 2, 154, 24);
+        if (hot) {
+            ui_rect(u, lx - 3, py - 2, 154, 24, ui_rgba(255, 255, 255, 12));
+            if (s->click) s->pick_part = p;
+        }
         int sev = health_part_status(h, p, buf, sizeof buf);
         if (p == s->sel) ui_rect(u, lx - 3, py - 2, 154, 24, ui_rgba(255, 255, 255, 22));
         ui_textf(u, lx, py, 1, p == s->sel ? C_HEAD : SEV[sev], "%d %s", p + 1, health_part_name(p));
@@ -797,10 +835,27 @@ static void panel(ui *u, const health *h, const hud_state *s)
     if (s->msg[0] && s->msg_age < 10.0f)
         ui_text_wrap(u, x0 + 8, by + 55, pw - 16, 1, 1, ui_alpha(SEV[1], clamp01(10.0f - s->msg_age)), s->msg);
     ui_rect(u, x0 + 1, y0 + ph - 26, pw - 2, 1, C_BORDER);
-    ui_text(u, x0 + 8, y0 + ph - 21, 1, C_DIM,
-            "1-7 select part   B bandage   S splint   D disinfect   C cool burn   X reduce joint");
-    ui_text(u, x0 + 8, y0 + ph - 11, 1, C_DIM,
-            "P painkiller   A antibiotics   E eat   R drink (in or facing water)   H close");
+    /* Treatments as buttons (the keys still work); the hovered one says
+     * what it does, and what it risks, where the last result shows. */
+    const int nb = (int)(sizeof BUTTONS / sizeof BUTTONS[0]), per_row = (nb + 1) / 2;
+    const float bw = (pw - 16 - (float)(per_row - 1) * 2) / (float)per_row;
+    for (int i = 0; i < nb; i++) {
+        float bx = x0 + 8 + (float)(i % per_row) * (bw + 2), by2 = y0 + ph - 23 + (float)(i / per_row) * 11;
+        int hot = in_rect(s, bx, by2, bw, 10);
+        int risky = BUTTONS[i].treat == TREAT_SHOCK || BUTTONS[i].treat == TREAT_ADRENALINE;
+        ui_rect(u, bx, by2, bw, 10, hot ? ui_rgba(60, 70, 84, 255) : ui_rgba(28, 32, 40, 255));
+        ui_frame(u, bx, by2, bw, 10, 1, risky ? ui_alpha(SEV[2], hot ? 1.0f : 0.6f) : (hot ? C_ECG : C_BORDER));
+        char lab[24] = {0};
+        snprintf(lab, sizeof lab, BUTTONS[i].key[0] ? "%s %s" : "%s%s", BUTTONS[i].key, BUTTONS[i].name);
+        ui_text(u, bx + (bw - ui_text_width(lab, 1)) * 0.5f, by2 + 2, 1, hot ? C_HEAD : C_TEXT, lab);
+        if (hot) {
+            ui_rect(u, x0 + 8, by + 54, pw - 16, 10, C_PANEL);
+            ui_text(u, x0 + 8, by + 55, 1, risky ? SEV[2] : C_HINT, BUTTONS[i].note);
+            if (s->click) s->pick_treat = BUTTONS[i].treat;
+        }
+    }
+    s->mx = smx;
+    s->my = smy;
     u->scale = saved_scale;
     u->w = saved_w;
     u->h = saved_h;
@@ -830,8 +885,9 @@ static void death_screen(ui *u, const health *h)
     }
 }
 
-void hud_draw(ui *u, const health *h, const hud_state *s)
+void hud_draw(ui *u, const health *h, hud_state *s)
 {
+    s->pick_part = s->pick_treat = -1;
     if (h->dead) {
         death_screen(u, h);
         return;
