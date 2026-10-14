@@ -460,8 +460,11 @@ static void key_cb(GLFWwindow *win, int key, int sc, int action, int mods)
         if (action == GLFW_RELEASE) return;
         if (key == GLFW_KEY_ESCAPE) g_in.chat_open = 0;
         else if (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER) g_in.chat_send = 1;
-        else if (key == GLFW_KEY_BACKSPACE)
-            while (g_in.chat_len > 0 && ((unsigned char)g_in.chat[--g_in.chat_len] & 0xC0) == 0x80) {}
+        else if (key == GLFW_KEY_BACKSPACE && g_in.chat_len > 0) {
+            /* A whole UTF-8 character: back over its continuation bytes. */
+            g_in.chat_len--;
+            while (g_in.chat_len > 0 && ((unsigned char)g_in.chat[g_in.chat_len] & 0xC0) == 0x80) g_in.chat_len--;
+        }
         g_in.chat[g_in.chat_len] = '\0';
         return;
     }
@@ -692,8 +695,6 @@ static void give_items(inventory *inv, const char *list)
         if (!found) log_warn("--give: no item called '%s'", t);
     }
 }
-
-
 
 static void find_spawn(uint32_t seed, double *sx, double *sz)
 {
@@ -1027,7 +1028,6 @@ static void frame_sound(game *g, double dt, const render_view *v)
     g->snd_inv_open = g_in.inv_open;
     sound_update(g->snd, (float)dt);
 }
-
 
 /* Drops a stack in front of the player (inventory closed with a stack on
  * the cursor, or thrown out of the window). */

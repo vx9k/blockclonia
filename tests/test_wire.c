@@ -124,7 +124,7 @@ static void test_health(void)
     for (size_t cut = 0; cut < n; cut += 7) refused &= health_decode(c, buf, cut) == -1;
     CHECK(refused);
     CHECK(health_decode(c, buf, n + 1) == -1);
-    CHECK(memcmp(c, keep, sizeof *c) == 0);
+    CHECK(memcmp(c, keep, sizeof *c) == 0); /* NOLINT: untouched means byte for byte, padding too */
     /* An out-of-range rhythm (offset: the six organs, then wound_count). */
     uint8_t *bad = mem_alloc(HEALTH_NET_MAX);
     memcpy(bad, buf, n);
@@ -136,7 +136,7 @@ static void test_health(void)
     memcpy(bad, buf, n);
     bad[24] = HEALTH_MAX_WOUNDS + 1;
     CHECK(health_decode(c, bad, n) == -1);
-    CHECK(memcmp(c, keep, sizeof *c) == 0);
+    CHECK(memcmp(c, keep, sizeof *c) == 0); /* NOLINT: untouched means byte for byte, padding too */
     mem_free(bad);
     mem_free(keep);
     mem_free(c);
@@ -161,7 +161,9 @@ static void test_player(void)
     size_t n = player_encode(&p, buf, sizeof buf);
     CHECK(n > 0);
     player q = {0};
-    CHECK(player_decode(&q, buf, n) == 0 && memcmp(&p, &q, sizeof p) == 0);
+    uint8_t again[PLAYER_NET_BYTES] = {0};
+    CHECK(player_decode(&q, buf, n) == 0 && player_encode(&q, again, sizeof again) == n && memcmp(buf, again, n) == 0);
+    CHECK(q.pos.y == p.pos.y && q.vel.y == p.vel.y && q.yaw == p.yaw && q.sprinting == 1 && q.fall_speed == 3.5);
     CHECK(player_decode(&q, buf, n - 1) == -1);
 
     /* Positions that would overflow the chunk arithmetic, or angles and

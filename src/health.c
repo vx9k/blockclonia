@@ -2732,7 +2732,7 @@ static const wire_field WOUND_FIELDS[] = {
 };
 #undef W
 
-#define NFIELDS(t) (sizeof(t) / sizeof(t[0]))
+#define NFIELDS(t) (sizeof(t) / sizeof((t)[0]))
 
 /* The newest HEALTH_NET_WAVE samples of a trace, oldest first. */
 static void put_wave(wire_w *w, const float *ring, int pos)

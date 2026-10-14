@@ -64,9 +64,9 @@ typedef struct {
 
 /* Another player as the game draws them. */
 typedef struct {
-    int id;
     const char *name;
     dvec3 pos;      /* feet, interpolated */
+    int id;
     float yaw, pitch;
     int flying, sneaking, dead;
 } mp_avatar;

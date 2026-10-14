@@ -313,8 +313,10 @@ static void on_pair_msg(net *n, int from, const uint8_t *data, size_t len)
     if (data[0] == MSG_PAIR_HELLO && len == 1 + NC_HELLO_BYTES && !m->pair_up) {
         /* Only the identity the host vouched for may set up the pair. */
         if (memcmp(data + 1 + 4, m->pk, NC_KEY_BYTES) != 0) return;
-        if (!m->pair_sent) pair_start(n, from);
-        if (!m->pair_sent) return;
+        if (!m->pair_sent) {
+            pair_start(n, from);
+            if (!m->pair_sent) return; /* no path to answer on yet */
+        }
         if (nc_session_derive(&m->pair, &n->id, &m->pair_eph, m->pair_mine, data + 1) != 0) return;
         m->pair_up = 1;
         for (int i = 0; i < m->pending_n; i++) chat_to(n, from, m->pending[i]);
@@ -475,10 +477,10 @@ static void on_welcome(net *n, wire_r *r)
     int count = wire_get_u8(r);
     struct {
         int id;
-        char name[NET_NAME_MAX + 1];
-        uint8_t pk[NC_KEY_BYTES];
         uint32_t ip;
         uint16_t port;
+        char name[NET_NAME_MAX + 1];
+        uint8_t pk[NC_KEY_BYTES];
     } e[NET_MAX_PLAYERS] = {{0}};
     if (n->me >= 0 || me <= 0 || me >= NET_MAX_PLAYERS || count >= NET_MAX_PLAYERS) r->bad = 1;
     for (int i = 0; i < count && !r->bad; i++) {

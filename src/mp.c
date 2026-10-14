@@ -167,7 +167,10 @@ static void set_flying(player *p, int on)
 }
 
 static dvec3 lerp3(dvec3 a, dvec3 b, double f)
-{ return dv3(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.z + (b.z - a.z) * f); }
+{
+    dvec3 d = dv3(b.x - a.x, b.y - a.y, b.z - a.z);
+    return dv3(a.x + d.x * f, a.y + d.y * f, a.z + d.z * f);
+}
 
 static uint8_t *scratch(mp *m, size_t need)
 {
@@ -494,7 +497,8 @@ void mp_host_step(mp *m, const player_input *local_in)
         r->pl.pitch = r->cur.pitch;
         r->inv.selected = r->cur.selected;
         set_flying(&r->pl, (r->cur.buttons & B_FLY) != 0);
-        player_input in = r->hl->dead ? (player_input){0} : movement(&r->cur);
+        player_input in = {0};
+        if (!r->hl->dead) in = movement(&r->cur);
         survival_limit_input(r->hl, &r->pl, &in);
         m->ctx.ph->contact[n].magnet = !r->hl->dead;
         sb[n] = survival_capture(&r->pl);
@@ -695,11 +699,11 @@ static void client_snapshot(mp *m, wire_r *rd)
     float crack_p = wire_get_f32(rd);
 
     struct {
-        int id;
         dvec3 pos;
+        int id;
         float yaw, pitch;
         uint8_t flags;
-    } o[NET_MAX_PLAYERS] = {{0}};
+    } o[NET_MAX_PLAYERS] = {0};
     int others = wire_get_u8(rd);
     if (others >= NET_MAX_PLAYERS) rd->bad = 1;
     for (int i = 0; i < others && !rd->bad; i++) {

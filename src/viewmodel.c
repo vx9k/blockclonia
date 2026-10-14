@@ -285,7 +285,7 @@ int viewmodel_figure(const float feet[3], float yaw, float pitch, int sneaking, 
     quat body = quat_axis(0.0f, 1.0f, 0.0f, -yaw);
     if (dead) body = quat_mul(body, quat_axis(1.0f, 0.0f, 0.0f, -0.5f * PI_F));
     float low = sneaking ? 0.15f : 0.0f;
-    const struct {
+    static const struct {
         float at[3], size[3];
         int layer;
     } PARTS[VIEWMODEL_FIGURE] = {

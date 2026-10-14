@@ -62,9 +62,10 @@ static void frame(host_side *h, client_side *c, const player_input *move)
 
 static const mp_chat_line *last_chat(const mp *m)
 {
+    static const mp_chat_line none = {{0}, {0}, 0.0};
     const mp_chat_line *l = NULL;
     int n = mp_chat(m, &l);
-    return n ? &l[n - 1] : NULL;
+    return n ? &l[n - 1] : &none;
 }
 
 static int avatar(const mp *m, int id, mp_avatar *out)
