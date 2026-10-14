@@ -151,6 +151,13 @@ static void test_session(void)
     CHECK(e && strstr(e->text, "identity key") != NULL);
     net_destroy(p[3].n);
     memset(&p[3], 0, sizeof p[3]);
+    /* A second copy of the host's own game (one settings folder, one key)
+     * is told why it cannot join, not just that the handshake failed. */
+    p[3].n = net_join(&kh, "Twin", "127.0.0.1", port, 0, NULL);
+    e = wait_for(p, 4, &p[3], NET_EV_ENDED, -1);
+    CHECK(e && strstr(e->text, "--config") != NULL);
+    net_destroy(p[3].n);
+    memset(&p[3], 0, sizeof p[3]);
 
     /* Carol cannot reach anyone directly: her chat goes through the host,
      * sealed with keys the host does not have. */

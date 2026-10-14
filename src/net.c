@@ -30,7 +30,7 @@ enum {
     MSG_IDENTITY
 };
 /* Sent as ENet's disconnect data, so the other side can say why. */
-enum { BYE_NONE, BYE_FULL, BYE_NAME, BYE_VERSION, BYE_HANDSHAKE, BYE_STRANGER, BYE_LEAVING };
+enum { BYE_NONE, BYE_FULL, BYE_NAME, BYE_VERSION, BYE_HANDSHAKE, BYE_STRANGER, BYE_LEAVING, BYE_SELF };
 
 typedef struct net_link {
     ENetPeer *ep;
@@ -154,6 +154,9 @@ static const char *bye_text(uint32_t why)
     case BYE_HANDSHAKE: return "the handshake failed";
     case BYE_STRANGER: return "the host did not vouch for this player";
     case BYE_LEAVING: return "the host left";
+    case BYE_SELF:
+        return "the host has this game's own identity key: give the second copy its own settings folder "
+               "(--config DIR/blockclonia.cfg)";
     default: return "lost the connection to the host";
     }
 }
@@ -462,6 +465,14 @@ static void on_hello(net *n, net_link *l, const uint8_t *data, size_t len)
     if (proto != NET_PROTOCOL) {
         if (l == n->up) end_session(n, bye_text(BYE_VERSION));
         link_drop(n, l, BYE_VERSION);
+        return;
+    }
+    /* Two copies of the game started from one settings folder share the
+     * identity key, and a handshake cannot tell two equal keys apart. Say
+     * so, rather than "the handshake failed". */
+    if (memcmp(theirs + 4, n->id.pk, NC_KEY_BYTES) == 0) {
+        if (l == n->up) end_session(n, bye_text(BYE_SELF));
+        link_drop(n, l, BYE_SELF);
         return;
     }
     if (nc_session_derive(&l->s, &n->id, &l->eph, l->mine, theirs) != 0) {
