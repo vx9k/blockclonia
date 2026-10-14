@@ -115,8 +115,11 @@ const uint8_t *net_my_key(const net *n);
 /* The UDP port this side listens on. */
 uint16_t net_port(const net *n);
 
-/* For the tests: never dial other players, so chat goes through the host. */
-void net_test_no_mesh(net *n);
+/* Client-server mode. On a host: players are not told each other's
+ * addresses, so they connect to the host only, never see each other's IP
+ * address, and their chat goes through the host (still sealed end to
+ * end). Call before anyone joins. On a joiner: never dial other players. */
+void net_no_mesh(net *n);
 /* For fuzzing: a host with no socket, whose players are added by hand
  * (each arrives as NET_EV_JOINED). Messages to them go nowhere. */
 net *net_offline_host(const nc_keypair *id, const char *name);

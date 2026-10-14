@@ -387,7 +387,7 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
             [--debug] [--time HH] [--give LIST] [--hurt LIST]
             [--frames N] [--screenshot F] [--look YAW,PITCH] [--spawn X,Z]
             [--demo] [--health-panel] [--bench] [--mem-stats]
-            [--host [--port N] | --join ADDR[:PORT]] [--name NAME]
+            [--host [--port N] [--client-server] | --join ADDR[:PORT]] [--name NAME]
 ```
 
 - `--play` skips the menus and plays the default world; `--screen` opens a menu at start and
@@ -443,6 +443,12 @@ mkdir -p /tmp/bob && blockclonia --config /tmp/bob/blockclonia.cfg --join 127.0.
   else is there, and players connect to each other directly (a mesh), so
   chat goes straight to each recipient. When routers keep two players
   apart, their chat travels through the host instead.
+- **Client-server.** `--host --client-server` keeps players apart: they
+  connect to the host only and are never told each other's addresses, so
+  no player learns another's IP address. Chat then always goes through
+  the host, still end-to-end encrypted. Use it for a session with people
+  you do not know, or when players' routers would refuse the direct
+  connections anyway.
 - **Encrypted.** Every connection starts with an X25519 handshake and
   seals every packet after it with ChaCha20-Poly1305 (libsodium). Chat is
   end-to-end on top of that: each pair of players has its own keys, so a

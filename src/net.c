@@ -267,8 +267,9 @@ static void put_member(wire_w *w, const net *n, int id)
     wire_u8(w, (uint8_t)id);
     wire_str(w, m->name, NET_NAME_MAX);
     wire_bytes(w, m->pk, NC_KEY_BYTES);
-    wire_u32(w, m->ip);
-    wire_u16(w, m->port);
+    /* No address in client-server mode: a port of 0 means "do not dial". */
+    wire_u32(w, n->no_mesh ? 0u : m->ip);
+    wire_u16(w, n->no_mesh ? 0 : m->port);
 }
 
 /* Reads a member entry into scratch; the caller checks r->bad. */
@@ -858,7 +859,7 @@ int net_is_host(const net *n) { return n->host; }
 int net_me(const net *n) { return n->me; }
 uint16_t net_port(const net *n) { return n->port; }
 const uint8_t *net_my_key(const net *n) { return n->id.pk; }
-void net_test_no_mesh(net *n) { n->no_mesh = 1; }
+void net_no_mesh(net *n) { n->no_mesh = 1; }
 
 net *net_offline_host(const nc_keypair *id, const char *name)
 {

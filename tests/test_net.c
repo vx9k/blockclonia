@@ -162,7 +162,7 @@ static void test_session(void)
     /* Carol cannot reach anyone directly: her chat goes through the host,
      * sealed with keys the host does not have. */
     p[3].n = net_join(&kc, "Carol", "127.0.0.1", port, 0, NULL);
-    net_test_no_mesh(p[3].n);
+    net_no_mesh(p[3].n);
     CHECK(wait_for(p, 4, &p[3], NET_EV_JOINED, 3) != NULL);
     pump(p, 4, 0.2);
     CHECK(!net_player_direct(p[3].n, 2) && !net_player_direct(p[2].n, 3) && net_player_direct(p[3].n, 0));
@@ -313,6 +313,37 @@ static void test_forged_mesh(void)
     for (int i = 2; i >= 0; i--) net_destroy(p[i].n);
 }
 
+/* Client-server mode: players connect to the host only and are not told
+ * each other's addresses, and their chat still arrives, through the host. */
+static void test_client_server(void)
+{
+    nc_keypair kh = {0}, ka = {0}, kb = {0};
+    nc_keypair_new(&kh);
+    nc_keypair_new(&ka);
+    nc_keypair_new(&kb);
+    static peer p[3];
+    memset(p, 0, sizeof p);
+    uint16_t port = 0;
+    for (int tries = 0; tries < 20 && !p[0].n; tries++) {
+        port = (uint16_t)(30000 + (getpid() * 11 + tries * 173 + 3) % 30000);
+        p[0].n = net_host(&kh, "Server", port);
+    }
+    CHECK(p[0].n != NULL);
+    if (!p[0].n) return;
+    net_no_mesh(p[0].n);
+    p[1].n = net_join(&ka, "Alice", "127.0.0.1", port, 0, NULL);
+    CHECK(wait_for(p, 2, &p[1], NET_EV_JOINED, 1) != NULL);
+    p[2].n = net_join(&kb, "Bob", "127.0.0.1", port, 0, NULL);
+    CHECK(wait_for(p, 3, &p[2], NET_EV_JOINED, 2) != NULL && wait_for(p, 3, &p[1], NET_EV_JOINED, 2) != NULL);
+    pump(p, 3, 0.3);
+    CHECK(!net_player_direct(p[1].n, 2) && !net_player_direct(p[2].n, 1));
+    CHECK(net_player_direct(p[1].n, 0) && net_player_direct(p[2].n, 0));
+    CHECK(net_chat(p[1].n, "via the server") == 2);
+    const net_event *e = wait_for(p, 3, &p[2], NET_EV_CHAT, 1);
+    CHECK(e && strcmp(e->text, "via the server") == 0);
+    for (int i = 2; i >= 0; i--) net_destroy(p[i].n);
+}
+
 void test_net_all(void)
 {
     CHECK(nc_init() == 0);
@@ -320,4 +351,5 @@ void test_net_all(void)
     test_keys();
     test_session();
     test_forged_mesh();
+    test_client_server();
 }

@@ -141,9 +141,9 @@ fixed on the branch):
 
 **Later** (deferred, in this order):
 
-- *Client-server mode*: the same authority code with the mesh switched
-  off: clients connect only to the server, and chat is relayed as
-  ciphertext sealed to each recipient's key so it stays end-to-end.
+- [x] *Client-server mode* (`--host --client-server`): the host hands
+  out no addresses, so players connect to it only, and chat is relayed
+  as ciphertext sealed to each recipient's key.
 - *Headless server* (`--server`): runs the authority without a window,
   GPU or audio. Needs world streaming around every player instead of one
   camera, and a console for chat and admin.

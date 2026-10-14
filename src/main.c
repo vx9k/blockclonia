@@ -78,6 +78,7 @@ typedef struct {
     int have_time;       /* --time */
     double time_of_day;  /* 0..1 */
     int host;            /* --host: open the world to other players */
+    int client_server;   /* --client-server: players connect to the host only */
     const char *join;    /* --join ADDR[:PORT]: play in someone else's world */
     int port;            /* --port: where to host (0: NET_PORT) */
     const char *name;    /* --name: shown to other players */
@@ -224,6 +225,8 @@ static void usage(void)
            "  --host            let others join this world (UDP port 27450, or --port)\n"
            "  --join ADDR[:P]   play in the world another player hosts\n"
            "  --port N          UDP port to host on\n"
+           "  --client-server   with --host: players connect to this game only, not to each\n"
+           "                    other (their addresses stay private; chat goes through it)\n"
            "  --name NAME       name other players see (1-16 letters, digits, ' ', -, _, .)\n",
            hurt_names());
     /* clang-format on */
@@ -245,6 +248,7 @@ static int parse_flag(options *o, const char *a)
         {"--mem-stats", &o->mem_stats},
         {"--no-sound", &o->no_sound},
         {"--host", &o->host},
+        {"--client-server", &o->client_server},
     };
     for (size_t i = 0; i < sizeof flags / sizeof flags[0]; i++)
         if (strcmp(a, flags[i].name) == 0) {
@@ -1343,6 +1347,7 @@ static void start_host(game *g)
         g->hs.msg_age = 0.0f;
         return;
     }
+    if (g->o.client_server) net_no_mesh(n);
     mp_world ctx = mp_ctx(g);
     g->mp = mp_create(n, &ctx);
     g->hooks.mp = g->mp;
