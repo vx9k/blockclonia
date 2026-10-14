@@ -97,7 +97,14 @@ column *world_far_column(const world *w, int cx, int cz)
     return c && c->state == COL_READY ? c : NULL;
 }
 
-static void far_insert(world *w, column *c);
+/* Into the first empty slot of c's probe run; the table has room. */
+static void far_put(world *w, column *c)
+{
+    uint32_t mask = (uint32_t)(w->far_cap - 1), i = far_home(w, c->cx, c->cz);
+    while (w->far[i]) i = (i + 1) & mask;
+    w->far[i] = c;
+    w->far_count++;
+}
 
 static void far_grow(world *w)
 {
@@ -107,17 +114,14 @@ static void far_grow(world *w)
     w->far = mem_calloc((size_t)w->far_cap, sizeof *w->far);
     w->far_count = 0;
     for (int i = 0; i < old_cap; i++)
-        if (old[i]) far_insert(w, old[i]);
+        if (old[i]) far_put(w, old[i]);
     mem_free(old);
 }
 
 static void far_insert(world *w, column *c)
 {
     if (2 * (w->far_count + 1) > w->far_cap) far_grow(w);
-    uint32_t mask = (uint32_t)(w->far_cap - 1), i = far_home(w, c->cx, c->cz);
-    while (w->far[i]) i = (i + 1) & mask;
-    w->far[i] = c;
-    w->far_count++;
+    far_put(w, c);
 }
 
 /* Backward-shift deletion: later entries of the probe run move up into
