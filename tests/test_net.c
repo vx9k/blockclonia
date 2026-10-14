@@ -199,6 +199,15 @@ static void test_keys(void)
     CHECK(netkeys_identity(id, &b) == -1 && memcmp(a.pk, b.pk, NC_KEY_BYTES) != 0);
     char back[64] = {0};
     CHECK(save_read_file(id, back, sizeof back) == 32);
+    /* A file that exists but cannot be read (here a directory) is not
+     * replaced either. */
+    char odd[300] = {0};
+    snprintf(odd, sizeof odd, "%s/odd", dir);
+    CHECK(os_mkdir(odd, 0700) == 0);
+    CHECK(netkeys_identity(odd, &b) == -1 && os_is_dir(odd));
+    uint8_t none[NC_KEY_BYTES] = {0};
+    CHECK(netkeys_known(odd, "a:1", none) == -1 && netkeys_pin(odd, "a:1", a.pk) == -1 && os_is_dir(odd));
+    tmp_remove(odd);
 
     /* Pinning: unknown, pinned, re-pinned, others kept; junk skipped. */
     uint8_t pk[NC_KEY_BYTES] = {0};

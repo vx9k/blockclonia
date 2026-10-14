@@ -1,6 +1,7 @@
 #include "netkeys.h"
 #include "log.h"
 #include "mem.h"
+#include "os.h"
 #include "save.h"
 
 #include <stdio.h>
@@ -35,6 +36,13 @@ int netkeys_identity(const char *path, nc_keypair *kp)
         return -1;
     }
     nc_keypair_new(kp);
+    /* Only a missing file is made: one that exists but cannot be read (a
+     * link, too big, no permission) is the player's to sort out, and
+     * replacing it would change who they are to every host they know. */
+    if (os_path_kind(path) != OS_MISSING) {
+        log_warn("cannot read the identity key %s; using a new one for this session only", path);
+        return -1;
+    }
     char hex[2 * NC_KEY_BYTES + 1] = {0};
     nc_key_hex(kp->sk, hex);
     int len = snprintf(buf, sizeof buf, "%s%s\n", ID_HEADER, hex);
@@ -99,7 +107,8 @@ int netkeys_known(const char *path, const char *host, uint8_t pk[NC_KEY_BYTES])
     char *buf = mem_alloc(HOSTS_MAX_FILE);
     long n = save_read_file(path, buf, HOSTS_MAX_FILE);
     find_ctx f = {host, pk, 0};
-    each_line(buf, n, find_host, &f);
+    if (n < 0 && os_path_kind(path) != OS_MISSING) f.found = -1;
+    else each_line(buf, n, find_host, &f);
     mem_free(buf);
     return f.found;
 }
@@ -138,9 +147,16 @@ int netkeys_pin(const char *path, const char *host, const uint8_t pk[NC_KEY_BYTE
     if (hl < 1 || hl > NETKEYS_HOST_MAX) return -1;
     for (size_t i = 0; i < hl; i++)
         if (host[i] <= ' ' || host[i] > '~') return -1;
+    size_t cap = HOSTS_MAX_FILE + NETKEYS_HOST_MAX + 2 * NC_KEY_BYTES + 3;
     char *old = mem_alloc(HOSTS_MAX_FILE);
-    char *out = mem_alloc(HOSTS_MAX_FILE + NETKEYS_HOST_MAX + 2 * NC_KEY_BYTES + 3);
+    char *out = mem_alloc(cap);
     long n = save_read_file(path, old, HOSTS_MAX_FILE);
+    if (n < 0 && os_path_kind(path) != OS_MISSING) {
+        /* Rewriting what cannot be read would drop every other pin. */
+        mem_free(old);
+        mem_free(out);
+        return -1;
+    }
     /* Every other valid line stays, this host's goes last; past HOSTS_MAX
      * the oldest are dropped. */
     keep_ctx k = {host, out, 0, 0, 0};
@@ -149,7 +165,7 @@ int netkeys_pin(const char *path, const char *host, const uint8_t pk[NC_KEY_BYTE
     each_line(old, n, keep_other, &k);
     char hex[2 * NC_KEY_BYTES + 1] = {0};
     nc_key_hex(pk, hex);
-    int w = snprintf(out + k.len, NETKEYS_HOST_MAX + 2 * NC_KEY_BYTES + 3, "%s %s\n", host, hex);
+    int w = k.len < cap ? snprintf(out + k.len, cap - k.len, "%s %s\n", host, hex) : -1;
     int r = w > 0 && k.len + (size_t)w <= HOSTS_MAX_FILE && save_write_file(path, out, k.len + (size_t)w) == 0 ? 0 : -1;
     mem_free(old);
     mem_free(out);
