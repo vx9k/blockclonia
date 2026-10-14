@@ -1312,7 +1312,12 @@ static void my_identity(const game *g, nc_keypair *id, char *name, size_t cap)
     }
 }
 
-static mp_world mp_ctx(game *g) { return (mp_world){&g->w, &g->ph, g->th, g->fx, &g->pl, &g->hl, &g->inv, g->seed}; }
+static mp_world mp_ctx(game *g)
+{
+    static char known[PATHS_MAX + 32];
+    key_path(g, "known_players", known, sizeof known);
+    return (mp_world){&g->w, &g->ph, g->th, g->fx, &g->pl, &g->hl, &g->inv, g->seed, known};
+}
 
 /* Opens the world being played to other players. */
 static void start_host(game *g)
@@ -1404,6 +1409,12 @@ static void start_join(game *g, const char *where)
     key_path(g, "known_hosts", known, sizeof known);
     uint8_t pinned[NC_KEY_BYTES] = {0};
     int have_pin = netkeys_known(known, host_id, pinned);
+    if (have_pin < 0) {
+        /* Joining without checking would quietly drop the protection. */
+        snprintf(g->note, sizeof g->note, "Cannot read %s; not joining without checking the host's key", known);
+        log_error("%s", g->note);
+        return;
+    }
 
     nc_keypair id = {0};
     char name[NET_NAME_MAX + 1] = {0};

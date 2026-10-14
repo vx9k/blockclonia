@@ -1,6 +1,7 @@
 #include "mp.h"
 #include "log.h"
 #include "mem.h"
+#include "netkeys.h"
 #include "save.h"
 #include "survival.h"
 #include "wire.h"
@@ -856,6 +857,34 @@ void mp_receive(mp *m, int from, int ch, const uint8_t *data, size_t len)
     else if (type == C_COLUMN && ch == NET_CH_GAME) host_column(r, &rd);
 }
 
+/* "Bob joined [1a2b3c4d]", with the key's fingerprint to compare out of
+ * band, and a warning when Bob's key is not the one seen before. */
+static void announce(mp *m, int id)
+{
+    const char *name = net_player_name(m->n, id);
+    const uint8_t *key = net_player_key(m->n, id);
+    char hex[2 * NC_KEY_BYTES + 1] = {0}, line[NET_CHAT_MAX + 1] = {0};
+    if (!key) return;
+    nc_key_hex(key, hex);
+    snprintf(line, sizeof line, "%s joined [%.8s]", name, hex);
+    chat_add(m, "", line);
+    if (!m->ctx.known_players) return;
+    char who[NETKEYS_HOST_MAX + 1] = {0};
+    snprintf(who, sizeof who, "player:%s", name);
+    for (char *c = who; *c; c++)
+        if (*c == ' ') *c = '_';
+    uint8_t seen[NC_KEY_BYTES] = {0};
+    int known = netkeys_known(m->ctx.known_players, who, seen);
+    if (known == 1 && memcmp(seen, key, NC_KEY_BYTES) != 0) {
+        snprintf(line, sizeof line, "WARNING: %s has a different key than before; chat with them may not be private",
+                 name);
+        chat_add(m, "", line);
+        log_warn("mp: %s", line);
+    } else if (known == 0) {
+        netkeys_pin(m->ctx.known_players, who, key);
+    }
+}
+
 void mp_poll(mp *m, double now)
 {
     m->now = now;
@@ -866,10 +895,7 @@ void mp_poll(mp *m, double now)
         case NET_EV_JOINED:
             snprintf(m->names[e.player], sizeof m->names[0], "%s", net_player_name(m->n, e.player));
             if (m->host) host_join(m, e.player);
-            if (e.player != net_me(m->n)) {
-                snprintf(line, sizeof line, "%s joined", net_player_name(m->n, e.player));
-                chat_add(m, "", line);
-            }
+            if (e.player != net_me(m->n)) announce(m, e.player);
             break;
         case NET_EV_LEFT:
             snprintf(line, sizeof line, "%s left", m->names[e.player]);

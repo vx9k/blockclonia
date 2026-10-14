@@ -101,6 +101,9 @@ int net_is_host(const net *n);
 int net_me(const net *n);                  /* this player's id, -1 until joined */
 int net_player_present(const net *n, int player);
 const char *net_player_name(const net *n, int player); /* "" if absent */
+/* The identity key the host announced for this player (the host's own
+ * from the handshake), or NULL if absent. */
+const uint8_t *net_player_key(const net *n, int player);
 /* 1 if chat with this player goes over a direct link, 0 if through the
  * host (or not at all yet). */
 int net_player_direct(const net *n, int player);

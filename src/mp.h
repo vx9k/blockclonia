@@ -46,6 +46,10 @@ typedef struct {
     health *hl;
     inventory *inv;
     uint32_t seed;
+    /* netkeys file pinning each player's key by name, or NULL. The host
+     * vouches for every key, so this is how a player notices a host that
+     * swaps one (to read chat in the middle). */
+    const char *known_players;
 } mp_world;
 
 /* Inventory operations a client sends; the host applies the same call. */

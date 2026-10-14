@@ -858,3 +858,6 @@ const uint8_t *net_host_key(const net *n)
 
 int net_player_direct(const net *n, int player)
 { return net_player_present(n, player) && n->m[player].direct && n->m[player].direct->state == LINK_UP; }
+
+const uint8_t *net_player_key(const net *n, int player)
+{ return net_player_present(n, player) ? n->m[player].pk : NULL; }

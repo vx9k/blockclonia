@@ -6,10 +6,12 @@
  * leaving takes their avatar away. */
 #include "mem.h"
 #include "mp.h"
+#include "netkeys.h"
 #include "os.h"
 #include "test_util.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -106,7 +108,14 @@ void test_mp_all(void)
     }
     CHECK(hn != NULL);
     if (!hn) return;
-    mp_world hw = {&h.t.w, &h.t.ph, h.th, h.fx, &h.pl, h.hl, &h.inv, 1};
+    /* The host has seen a "Client" with another key before. */
+    char dir[256] = {0}, known[300] = {0};
+    CHECK(tmp_dir_make(dir, sizeof dir, "mc_mp_"));
+    snprintf(known, sizeof known, "%s/known_players", dir);
+    nc_keypair other = {0};
+    nc_keypair_new(&other);
+    CHECK(netkeys_pin(known, "player:Client", other.pk) == 0);
+    mp_world hw = {&h.t.w, &h.t.ph, h.th, h.fx, &h.pl, h.hl, &h.inv, 1, known};
     h.m = mp_create(hn, &hw);
     h.t.w.edit_user = &h;
     h.t.w.on_block_changed = host_edit;
@@ -121,7 +130,7 @@ void test_mp_all(void)
     inv_init(&c.inv);
     net *cn = net_join(&kc, "Client", "127.0.0.1", port, 0, NULL);
     CHECK(cn != NULL);
-    mp_world cw = {&c.w, &c.ph, c.th, NULL, &c.pl, c.hl, &c.inv, 0};
+    mp_world cw = {&c.w, &c.ph, c.th, NULL, &c.pl, c.hl, &c.inv, 0, NULL};
     c.m = mp_create(cn, &cw);
     uint32_t seed = 0;
     for (int i = 0; i < 3000 && !mp_welcome(c.m, &seed); i++) frame(&h, &c, NULL);
@@ -133,7 +142,17 @@ void test_mp_all(void)
     for (int i = 0; i < 5000 && !(mp_ready(c.m) && world_column(&c.w, 0, 0)); i++) frame(&h, &c, NULL);
     CHECK(mp_ready(c.m) && world_column(&c.w, 0, 0) != NULL);
     CHECK(world_get(&c.w, 3, GROUND, 3) == B_PLANKS);
-    CHECK(strstr(last_chat(h.m)->text, "Client joined") != NULL);
+    /* Joined, with the fingerprint, and a warning that the key changed. */
+    const mp_chat_line *lines = NULL;
+    int nl = mp_chat(h.m, &lines), joined = 0, warned = 0;
+    char hex[2 * NC_KEY_BYTES + 1] = {0}, want[64] = {0};
+    nc_key_hex(kc.pk, hex);
+    snprintf(want, sizeof want, "Client joined [%.8s]", hex);
+    for (int i = 0; i < nl; i++) {
+        joined |= strcmp(lines[i].text, want) == 0;
+        warned |= strstr(lines[i].text, "Client has a different key") != NULL;
+    }
+    CHECK(joined && warned);
 
     /* An edit made now follows. */
     CHECK(world_set(&h.t.w, 4, GROUND, 4, B_STONE, 0));
@@ -215,4 +234,6 @@ void test_mp_all(void)
     mem_free(h.hl);
     mem_free(h.fx);
     tw_free(&h.t);
+    tmp_remove(known);
+    tmp_remove(dir);
 }
