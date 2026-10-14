@@ -2,10 +2,14 @@
  * end-to-end chat directly and through the host, game messages, names
  * and pinned host keys refused, and players and the host leaving. */
 #include "net.h"
+#include "netkeys.h"
 #include "os.h"
+#include "save.h"
 #include "test_util.h"
 
+#include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define MAXEV 64
@@ -173,9 +177,55 @@ static void test_session(void)
     net_destroy(p[3].n);
 }
 
+static void test_keys(void)
+{
+    char dir[256] = {0}, id[300] = {0}, hosts[300] = {0};
+    CHECK(tmp_dir_make(dir, sizeof dir, "mc_keys_"));
+    snprintf(id, sizeof id, "%s/identity.key", dir);
+    snprintf(hosts, sizeof hosts, "%s/known_hosts", dir);
+
+    /* Made once, readable by this user only, the same key after. */
+    nc_keypair a = {0}, b = {0};
+    CHECK(netkeys_identity(id, &a) == 1);
+    struct stat st;
+    CHECK(stat(id, &st) == 0 && (st.st_mode & 077) == 0);
+    CHECK(netkeys_identity(id, &b) == 0 && memcmp(a.pk, b.pk, NC_KEY_BYTES) == 0);
+    CHECK(memcmp(a.sk, b.sk, NC_KEY_BYTES) == 0);
+    /* A damaged file is not used, and not overwritten either. */
+    CHECK(save_write_file(id, "blockclonia identity v1\nnot hex\n", 32) == 0);
+    CHECK(netkeys_identity(id, &b) == -1 && memcmp(a.pk, b.pk, NC_KEY_BYTES) != 0);
+    char back[64] = {0};
+    CHECK(save_read_file(id, back, sizeof back) == 32);
+
+    /* Pinning: unknown, pinned, re-pinned, others kept; junk skipped. */
+    uint8_t pk[NC_KEY_BYTES] = {0};
+    CHECK(netkeys_known(hosts, "10.0.0.1:27450", pk) == 0);
+    CHECK(netkeys_pin(hosts, "10.0.0.1:27450", a.pk) == 0);
+    CHECK(netkeys_pin(hosts, "example.org:1", b.pk) == 0);
+    CHECK(netkeys_known(hosts, "10.0.0.1:27450", pk) == 1 && memcmp(pk, a.pk, NC_KEY_BYTES) == 0);
+    CHECK(netkeys_pin(hosts, "10.0.0.1:27450", b.pk) == 0);
+    CHECK(netkeys_known(hosts, "10.0.0.1:27450", pk) == 1 && memcmp(pk, b.pk, NC_KEY_BYTES) == 0);
+    CHECK(netkeys_known(hosts, "example.org:1", pk) == 1);
+    CHECK(netkeys_pin(hosts, "has space", a.pk) == -1 && netkeys_pin(hosts, "", a.pk) == -1);
+    char text[512] = {0};
+    long n = save_read_file(hosts, text, sizeof text - 64);
+    CHECK(n > 0);
+    memcpy(text + n, "junk line\nevil.host zz\n", 23);
+    CHECK(save_write_file(hosts, text, (size_t)n + 23) == 0);
+    CHECK(netkeys_known(hosts, "example.org:1", pk) == 1 && netkeys_known(hosts, "junk", pk) == 0);
+    CHECK(netkeys_pin(hosts, "new.host:2", a.pk) == 0);
+    n = save_read_file(hosts, text, sizeof text - 1);
+    text[n > 0 ? n : 0] = '\0';
+    CHECK(strstr(text, "junk") == NULL && strstr(text, "example.org:1") != NULL); /* rewritten clean */
+    tmp_remove(id);
+    tmp_remove(hosts);
+    tmp_remove(dir);
+}
+
 void test_net_all(void)
 {
     CHECK(nc_init() == 0);
     test_names();
+    test_keys();
     test_session();
 }

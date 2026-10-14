@@ -153,6 +153,7 @@ set(MC_CORE_SOURCES
   src/net.c
   src/mp.c
   src/netcrypto.c
+  src/netkeys.c
   src/noise.c
   src/os.c
   src/paths.c

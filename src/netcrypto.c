@@ -13,6 +13,12 @@ int nc_init(void) { return sodium_init() < 0 ? -1 : 0; }
 
 void nc_keypair_new(nc_keypair *kp) { crypto_kx_keypair(kp->pk, kp->sk); }
 
+void nc_keypair_from_secret(nc_keypair *kp, const uint8_t sk[NC_KEY_BYTES])
+{
+    memcpy(kp->sk, sk, NC_KEY_BYTES);
+    crypto_scalarmult_base(kp->pk, kp->sk);
+}
+
 void nc_wipe(void *p, size_t n) { sodium_memzero(p, n); }
 
 void nc_hello_make(const nc_keypair *id, nc_keypair *eph, uint8_t out[NC_HELLO_BYTES])

@@ -42,6 +42,8 @@ typedef struct {
 /* Starts libsodium; 0 on success. Safe to call more than once. */
 int nc_init(void);
 void nc_keypair_new(nc_keypair *kp);
+/* The key pair whose secret half is sk. */
+void nc_keypair_from_secret(nc_keypair *kp, const uint8_t sk[NC_KEY_BYTES]);
 
 /* The hello this side sends: identity key and a fresh ephemeral key,
  * whose secret half eph keeps for nc_session_derive. */
