@@ -711,22 +711,6 @@ static void give_items(inventory *inv, const char *list)
     }
 }
 
-static void find_spawn(uint32_t seed, double *sx, double *sz)
-{
-    /* Walk outwards until we find dry land. */
-    for (int r = 0; r < 4096; r += 16)
-        for (int a = 0; a < 16; a++) {
-            double ang = a * (2 * MC_PI / 16);
-            int x = (int)(cos(ang) * r), z = (int)(sin(ang) * r);
-            if (worldgen_height(seed, x, z) > SEA_LEVEL + 2) {
-                *sx = x + 0.5;
-                *sz = z + 0.5;
-                return;
-            }
-        }
-    *sx = *sz = 0.5;
-}
-
 /* Scripted demo: builds a stone tower with a long timber cantilever in
  * front of the player, then knocks out the tower's middle. */
 typedef struct { int bx, by, bz, built; } demo_state;
@@ -1233,7 +1217,7 @@ static void open_world(game *g, const char *dir, int backdrop)
         g->sx = o->spawn_x + 0.5;
         g->sz = o->spawn_z + 0.5;
     } else {
-        find_spawn(g->seed, &g->sx, &g->sz);
+        worldgen_find_spawn(g->seed, &g->sx, &g->sz);
     }
     world_load_blocking(&g->w, g->sx, g->sz, 1);
     player_spawn(&g->pl, &g->w, g->sx, g->sz);

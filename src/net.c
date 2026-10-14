@@ -30,7 +30,7 @@ enum {
     MSG_IDENTITY
 };
 /* Sent as ENet's disconnect data, so the other side can say why. */
-enum { BYE_NONE, BYE_FULL, BYE_NAME, BYE_VERSION, BYE_HANDSHAKE, BYE_STRANGER, BYE_LEAVING, BYE_SELF };
+enum { BYE_NONE, BYE_FULL, BYE_NAME, BYE_VERSION, BYE_HANDSHAKE, BYE_STRANGER, BYE_LEAVING, BYE_SELF, BYE_KICKED };
 
 typedef struct net_link {
     ENetPeer *ep;
@@ -155,6 +155,7 @@ static const char *bye_text(uint32_t why)
     case BYE_HANDSHAKE: return "the handshake failed";
     case BYE_STRANGER: return "the host did not vouch for this player";
     case BYE_LEAVING: return "the host left";
+    case BYE_KICKED: return "the host removed you";
     case BYE_SELF:
         return "the host has this game's own identity key: give the second copy its own settings folder "
                "(--config DIR/blockclonia.cfg)";
@@ -834,6 +835,15 @@ void net_broadcast(net *n, int ch, const uint8_t *data, size_t len)
     if (!n->host) return;
     for (int i = 1; i < NET_MAX_PLAYERS; i++)
         if (n->m[i].present) net_send(n, i, ch, data, len);
+}
+
+int net_kick(net *n, int player)
+{
+    if (!n->host || player <= 0 || player >= NET_MAX_PLAYERS || !n->m[player].present) return -1;
+    net_link *l = n->m[player].direct;
+    host_player_left(n, player);
+    if (l) link_drop(n, l, BYE_KICKED);
+    return 0;
 }
 
 int net_chat(net *n, const char *text)

@@ -220,6 +220,8 @@ void worldgen_column_v1(uint32_t seed, column *c);
 #define WORLDGEN_VERSION 2
 /* Terrain surface height before trees/water; cheap, needs nothing loaded. */
 int worldgen_height(uint32_t seed, int x, int z);
+/* Where a new player starts: the dry land nearest the origin. */
+void worldgen_find_spawn(uint32_t seed, double *sx, double *sz);
 
 /* Column lifetime. alloc returns a COL_LOADING column whose blocks are
  * not initialised yet; recount refreshes the per-section block counts that

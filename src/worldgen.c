@@ -6,6 +6,7 @@
 #include "noise.h"
 #include "mathlib.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -37,6 +38,22 @@ int worldgen_height(uint32_t seed, int x, int z)
     const float knee = 96.0f, room = (float)(WORLD_H - 12) - knee;
     if (h > knee) h = knee + room * (1.0f - expf(-(h - knee) / room));
     return clampi((int)h, 4, WORLD_H - 12);
+}
+
+void worldgen_find_spawn(uint32_t seed, double *sx, double *sz)
+{
+    /* Walk outwards until we find dry land. */
+    for (int r = 0; r < 4096; r += 16)
+        for (int a = 0; a < 16; a++) {
+            double ang = a * (2 * MC_PI / 16);
+            int x = (int)(cos(ang) * r), z = (int)(sin(ang) * r);
+            if (worldgen_height(seed, x, z) > SEA_LEVEL + 2) {
+                *sx = x + 0.5;
+                *sz = z + 0.5;
+                return;
+            }
+        }
+    *sx = *sz = 0.5;
 }
 
 static void put(column *c, int x, int y, int z, uint8_t id)

@@ -93,6 +93,9 @@ void net_flush(net *n);
 int net_send(net *n, int player, int ch, const uint8_t *data, size_t len);
 /* The host's message to every player. */
 void net_broadcast(net *n, int ch, const uint8_t *data, size_t len);
+/* Host: removes a player; they are told the host removed them. 0, or -1
+ * if there is no such player. */
+int net_kick(net *n, int player);
 /* Chat to every other player, end-to-end. Returns how many it was sent
  * to (players whose pair keys are not ready yet get it once they are). */
 int net_chat(net *n, const char *text);

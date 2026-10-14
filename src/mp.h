@@ -108,6 +108,11 @@ int mp_welcome(const mp *m, uint32_t *seed);
 void mp_attach(mp *m, const mp_world *ctx);
 void mp_destroy(mp *m);
 int mp_is_host(const mp *m);
+/* Host: a dedicated server, whose own player (ctx.pl) is only a stand-in
+ * at the spawn point: other players never see it, and nothing hits it. */
+void mp_set_dedicated(mp *m);
+/* Host: removes the player with this name. 0, or -1 if nobody has it. */
+int mp_kick(mp *m, const char *name);
 
 /* Network events: joins and leaves, chat, and on a client everything the
  * host sends. Call once a frame before simulating. */
@@ -165,6 +170,8 @@ void mp_flush(mp *m, double now);
 void mp_say(mp *m, const char *text);
 /* The newest lines, oldest first; returns how many. */
 int mp_chat(const mp *m, const mp_chat_line **lines);
+/* How many lines were ever added, to tell which of mp_chat's are new. */
+uint32_t mp_chat_count(const mp *m);
 /* A message for the HUD from the host (a treatment's result), once. */
 const char *mp_take_message(mp *m);
 

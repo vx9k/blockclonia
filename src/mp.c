@@ -113,12 +113,13 @@ typedef struct {
 struct mp {
     net *n;
     mp_world ctx;
-    int host, ended;
+    int host, ended, dedicated;
     char why[NET_CHAT_MAX + 1];
     remote r[NET_MAX_PLAYERS]; /* host: by player id, 0 unused */
     client c;
     mp_chat_line chat[MP_CHAT_LINES];
     int chat_n;
+    uint32_t chat_total;
     char names[NET_MAX_PLAYERS][NET_NAME_MAX + 1]; /* kept past a player leaving, for the notice */
     uint8_t keys[NET_MAX_PLAYERS][NC_KEY_BYTES];   /* ... and their keys, to remember what they had */
     ipos edits[EDITS_MAX];
@@ -145,6 +146,7 @@ static void chat_add(mp *m, const char *who, const char *text)
         memmove(m->chat, m->chat + 1, sizeof m->chat[0] * (MP_CHAT_LINES - 1));
         m->chat_n--;
     }
+    m->chat_total++;
     mp_chat_line *l = &m->chat[m->chat_n++];
     snprintf(l->who, sizeof l->who, "%s", who);
     snprintf(l->text, sizeof l->text, "%s", text);
@@ -246,6 +248,15 @@ void mp_destroy(mp *m)
 }
 
 int mp_is_host(const mp *m) { return m->host; }
+
+void mp_set_dedicated(mp *m) { m->dedicated = m->host; }
+
+int mp_kick(mp *m, const char *name)
+{
+    for (int id = 1; m->host && id < NET_MAX_PLAYERS; id++)
+        if (net_player_present(m->n, id) && strcmp(net_player_name(m->n, id), name) == 0) return net_kick(m->n, id);
+    return -1;
+}
 
 int mp_welcome(const mp *m, uint32_t *seed)
 {
@@ -515,10 +526,10 @@ static void host_snapshot(mp *m, int id)
     wire_f32(&w, r->crack_p);
 
     int others = 0;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) others += i != id && (i == 0 || m->r[i].active);
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) others += i != id && (i ? m->r[i].active : !m->dedicated);
     wire_u8(&w, (uint8_t)others);
     for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-        if (i == id || (i && !m->r[i].active)) continue;
+        if (i == id || !(i ? m->r[i].active : !m->dedicated)) continue;
         const player *p = i ? &m->r[i].pl : m->ctx.pl;
         int dead = i ? m->r[i].hl->dead : m->ctx.hl->dead;
         wire_u8(&w, (uint8_t)i);
@@ -700,8 +711,9 @@ void mp_host_step(mp *m, const player_input *local_in)
     m->tn = n;
     for (int k = 0; k < n; k++) {
         health *h = k ? m->r[who[k]].hl : m->ctx.hl;
-        m->tpl[k] = h->dead ? NULL : ps[k];
-        m->thl[k] = h->dead ? NULL : h;
+        int out = h->dead || (k == 0 && m->dedicated); /* a server's stand-in is never a target */
+        m->tpl[k] = out ? NULL : ps[k];
+        m->thl[k] = out ? NULL : h;
     }
     if (m->ctx.mobs && m->ctx.cb) {
         combat_targets t = {m->tpl, m->thl, m->tn};
@@ -1185,6 +1197,8 @@ int mp_chat(const mp *m, const mp_chat_line **lines)
     *lines = m->chat;
     return m->chat_n;
 }
+
+uint32_t mp_chat_count(const mp *m) { return m->chat_total; }
 
 const char *mp_take_message(mp *m)
 {
