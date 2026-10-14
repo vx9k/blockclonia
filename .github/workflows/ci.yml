@@ -46,7 +46,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev \
+            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
       - run: cmake --preset ci-${{ matrix.compiler }}
       - run: cmake --build --preset ci-${{ matrix.compiler }}
@@ -60,7 +60,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev \
+            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
       - run: cmake --preset ci-gcc
       - run: cmake --build --preset ci-gcc
@@ -76,7 +76,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build ca-certificates glslc \
-            libvulkan-dev libsqlite3-dev pkg-config \
+            libvulkan-dev libsqlite3-dev libsodium-dev pkg-config \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev libwayland-bin libxkbcommon-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
@@ -94,7 +94,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev \
+            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev libwayland-bin libxkbcommon-dev
@@ -115,7 +115,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build glslc glslang-tools libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev \
+            ninja-build glslc glslang-tools libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev \
             clang clang-tidy clang-format cppcheck \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev libwayland-bin libxkbcommon-dev # GLFW from source, as in sanitize
@@ -138,7 +138,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build ca-certificates glslc file \
-            libvulkan-dev libsqlite3-dev pkg-config \
+            libvulkan-dev libsqlite3-dev libsodium-dev pkg-config \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev libwayland-bin libxkbcommon-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
@@ -166,7 +166,7 @@ jobs:
           apt-get install -y --no-install-recommends \
             cmake ninja-build ca-certificates glslc qemu-user \
             crossbuild-essential-armhf \
-            libvulkan-dev:armhf libsqlite3-dev:armhf pkg-config libwayland-bin \
+            libvulkan-dev:armhf libsqlite3-dev:armhf libsodium-dev:armhf pkg-config libwayland-bin \
             libx11-dev:armhf libxrandr-dev:armhf libxinerama-dev:armhf \
             libxcursor-dev:armhf libxi-dev:armhf \
             libwayland-dev:armhf libxkbcommon-dev:armhf
@@ -184,7 +184,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
-      - run: brew install ninja mimalloc glfw vulkan-headers vulkan-loader molten-vk shaderc vulkan-validationlayers
+      - run: brew install ninja libsodium mimalloc glfw vulkan-headers vulkan-loader molten-vk shaderc vulkan-validationlayers
       - run: cmake --preset macos -DCMAKE_PREFIX_PATH="$(brew --prefix)"
       - run: cmake --build --preset macos
       - run: ctest --test-dir build/macos --output-on-failure

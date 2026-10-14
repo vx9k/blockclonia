@@ -1,5 +1,7 @@
 #include "health.h"
 #include "block.h"
+#include "mem.h"
+#include "wire.h"
 
 #include <math.h>
 #include <stdarg.h>
@@ -2558,4 +2560,226 @@ int health_organ_status(const health *h, int organ, char *buf, size_t n)
     }
     snprintf(buf, n, "%3.0f%%  %s", (double)(f * 100.0f), s);
     return sev;
+}
+
+/* ---------------------------------------------------------------- network */
+
+#define H(f) WIRE_F32(health, f)
+#define HD(f) WIRE_F64(health, f)
+#define HI(f) WIRE_I32(health, f)
+static const wire_field HEALTH_FIELDS[] = {
+    H(organ[0]),
+    H(organ[1]),
+    H(organ[2]),
+    H(organ[3]),
+    H(organ[4]),
+    H(organ[5]),
+    WIRE_I32R(health, wound_count, 0, HEALTH_MAX_WOUNDS),
+    H(blood),
+    H(rbc),
+    H(water),
+    H(stomach_water),
+    H(stomach_kcal),
+    H(glycogen),
+    H(fat),
+    H(bleed_ext),
+    H(bleed_int),
+    H(hr),
+    H(sv),
+    H(co),
+    H(svr),
+    H(map),
+    H(sbp),
+    H(dbp),
+    H(symp),
+    H(ischemia),
+    H(strain),
+    H(catechol),
+    H(surge),
+    H(rr_k),
+    WIRE_I32R(health, rhythm, 0, RHYTHM_COUNT - 1),
+    H(arrest_time),
+    H(beat_phase),
+    HI(pvc_pending),
+    HI(last_beat_pvc),
+    HD(last_r),
+    HD(prev_r),
+    HD(next_r),
+    H(beat_pp),
+    H(beat_dbp),
+    WIRE_I32R(health, defib.phase, DEFIB_OFF, DEFIB_CLEAR),
+    WIRE_I32R(health, defib.seen, -1, RHYTHM_COUNT - 1),
+    HI(defib.advice),
+    HI(defib.shocks),
+    H(defib.timer),
+    H(defib.joules),
+    H(defib.since_shock),
+    H(rr),
+    H(breath_phase),
+    HI(breathing),
+    H(o2_store),
+    H(pao2),
+    H(sao2),
+    H(spo2_shown),
+    H(paco2),
+    H(etco2),
+    H(lung_water),
+    H(pneumothorax),
+    H(apnea_time),
+    H(gasp_timer),
+    H(power),
+    H(vo2),
+    H(wbal),
+    H(lactate),
+    H(shock_debt),
+    H(temp),
+    H(vaso),
+    H(sweat_w),
+    H(sweat_acc),
+    H(wet),
+    H(heat_loss),
+    H(burn_tbsa),
+    H(air_temp),
+    H(radiant),
+    HI(in_fire),
+    H(reperfused),
+    H(myoglobin),
+    H(potassium),
+    H(brain_o2),
+    H(ich),
+    H(ich_rate),
+    H(icp),
+    H(concussion),
+    H(confusion),
+    H(pain),
+    H(painkiller),
+    H(antibiotic),
+    H(sepsis),
+    WIRE_I32R(health, conscious, CONS_UNCONSCIOUS, CONS_ALERT),
+    HI(dead),
+    WIRE_I32R(health, cause, DEATH_NONE, DEATH_BURNS),
+    H(hurt_flash),
+    HD(t),
+    WIRE_U32(health, rng),
+    H(base.hr_rest),
+    H(base.map_set),
+    H(base.pain_gain),
+    H(base.clot_gain),
+    H(base.metab_gain),
+    H(base.cold_bias),
+    HI(base.vary),
+    WIRE_U32(health, vrng),
+    H(hr_noise),
+    H(map_noise),
+    H(rr_noise),
+    H(spo2_noise),
+    WIRE_I32R(health, wave_pos, 0, HEALTH_WAVE_LEN - 1),
+    H(wave_acc),
+    H(log_age[0]),
+    H(log_age[1]),
+    H(log_age[2]),
+    H(log_age[3]),
+    H(log_age[4]),
+};
+#undef H
+#undef HD
+#undef HI
+
+#define P(f) WIRE_F32(body_part, f)
+static const wire_field PART_FIELDS[] = {
+    P(integrity),
+    WIRE_U8R(body_part, fracture, FX_NONE, FX_OPEN),
+    WIRE_U8(body_part, splinted),
+    WIRE_U8R(body_part, dislocated, DISLOC_NONE, DISLOC_ELBOW),
+    P(fracture_heal),
+    P(sprain),
+    P(internal),
+    P(pain),
+    P(pain_spike),
+    P(skin),
+    P(surface),
+    P(burn_omega),
+    P(burn_area),
+    P(burn_age),
+    P(cool_time),
+    WIRE_U8R(body_part, burn, 0, 3),
+    WIRE_U8(body_part, burn_cooled),
+    WIRE_U8R(body_part, frost, FROST_NONE, FROST_DEEP),
+    P(freeze_time),
+    P(frost_heal),
+    P(crush),
+    P(crush_released),
+    P(crush_load),
+    P(crush_next),
+};
+#undef P
+
+#define W(f) WIRE_F32(wound, f)
+static const wire_field WOUND_FIELDS[] = {
+    WIRE_U8R(wound, part, 0, BP_COUNT - 1),
+    WIRE_U8R(wound, kind, WOUND_CUT, WOUND_FROSTBITE),
+    WIRE_U8R(wound, bandage, BANDAGE_NONE, BANDAGE_IMPROVISED),
+    WIRE_U8(wound, arterial),
+    W(depth),
+    W(bleed0),
+    W(bleed),
+    W(clot),
+    W(contamination),
+    W(infection),
+    W(closure),
+    W(bandage_age),
+    W(area),
+};
+#undef W
+
+#define NFIELDS(t) (sizeof(t) / sizeof((t)[0]))
+
+/* The newest HEALTH_NET_WAVE samples of a trace, oldest first. */
+static void put_wave(wire_w *w, const float *ring, int pos)
+{
+    for (int i = HEALTH_NET_WAVE; i > 0; i--) wire_f32(w, ring[(pos - i + HEALTH_WAVE_LEN) % HEALTH_WAVE_LEN]);
+}
+
+static void get_wave(wire_r *r, float *ring, int pos)
+{
+    for (int i = HEALTH_NET_WAVE; i > 0; i--) ring[(pos - i + HEALTH_WAVE_LEN) % HEALTH_WAVE_LEN] = wire_get_f32(r);
+}
+
+size_t health_encode(const health *h, uint8_t *out, size_t cap)
+{
+    wire_w w = wire_writer(out, cap);
+    wire_put_fields(&w, h, HEALTH_FIELDS, NFIELDS(HEALTH_FIELDS));
+    for (int i = 0; i < BP_COUNT; i++) wire_put_fields(&w, &h->part[i], PART_FIELDS, NFIELDS(PART_FIELDS));
+    for (int i = 0; i < h->wound_count && i < HEALTH_MAX_WOUNDS; i++)
+        wire_put_fields(&w, &h->wounds[i], WOUND_FIELDS, NFIELDS(WOUND_FIELDS));
+    for (int i = 0; i < HEALTH_LOG; i++) wire_str(&w, h->log[i], sizeof h->log[i] - 1);
+    put_wave(&w, h->ecg, h->wave_pos);
+    put_wave(&w, h->art, h->wave_pos);
+    put_wave(&w, h->pleth, h->wave_pos);
+    put_wave(&w, h->capno, h->wave_pos);
+    return w.bad ? 0 : w.len;
+}
+
+int health_decode(health *h, const uint8_t *in, size_t len)
+{
+    /* Too big for the stack; the older trace samples carry over from h. */
+    health *t = mem_alloc(sizeof *t);
+    memcpy(t, h, sizeof *t);
+    memset(t->wounds, 0, sizeof t->wounds);
+    wire_r r = wire_reader(in, len);
+    wire_get_fields(&r, t, HEALTH_FIELDS, NFIELDS(HEALTH_FIELDS));
+    for (int i = 0; i < BP_COUNT; i++) wire_get_fields(&r, &t->part[i], PART_FIELDS, NFIELDS(PART_FIELDS));
+    for (int i = 0; i < t->wound_count && !r.bad; i++)
+        wire_get_fields(&r, &t->wounds[i], WOUND_FIELDS, NFIELDS(WOUND_FIELDS));
+    for (int i = 0; i < HEALTH_LOG; i++) wire_get_str(&r, t->log[i], sizeof t->log[i]);
+    if (!r.bad) {
+        get_wave(&r, t->ecg, t->wave_pos);
+        get_wave(&r, t->art, t->wave_pos);
+        get_wave(&r, t->pleth, t->wave_pos);
+        get_wave(&r, t->capno, t->wave_pos);
+    }
+    int ok = !r.bad && r.pos == len;
+    if (ok) memcpy(h, t, sizeof *h);
+    mem_free(t);
+    return ok ? 0 : -1;
 }

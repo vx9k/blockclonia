@@ -301,6 +301,17 @@ typedef struct health {
     float log_age[HEALTH_LOG];
 } health;
 
+/* The whole body as bytes for a multiplayer client, whose HUD, limits and
+ * sounds read the same struct the authority simulates. Every field goes
+ * except the monitor traces, of which only the newest HEALTH_NET_WAVE
+ * samples are sent: snapshots go out ten times a second, so they overlap.
+ * Add a new field to the table in health.c too. health_decode validates
+ * every field and leaves h untouched on failure (-1). */
+#define HEALTH_NET_WAVE 32
+#define HEALTH_NET_MAX 4096
+size_t health_encode(const health *h, uint8_t *out, size_t cap);
+int health_decode(health *h, const uint8_t *in, size_t len);
+
 /* A healthy, rested and fed adult, at the population mean (HR_REST,
  * MAP_SET, ... in health.c) with no short-term variability: the reference
  * body the tests check exact numbers against. seed drives the model's own

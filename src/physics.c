@@ -4,6 +4,7 @@
 #include "log.h"
 #include "mem.h"
 #include "noise.h"
+#include "wire.h"
 
 #include <math.h>
 #include <string.h>
@@ -23,7 +24,7 @@
  * in work rather than time so collapses replay the same on any machine. */
 #define STRUCT_BUDGET 3600
 
-enum { SWEEP_BODIES = 1, SWEEP_PLAYER = 2 };
+enum { SWEEP_BODIES = 1 };
 
 static inline double getc3(dvec3 v, int a) { return a == 0 ? v.x : (a == 1 ? v.y : v.z); }
 static inline void addc3(dvec3 *v, int a, double d)
@@ -270,8 +271,6 @@ static double sweep(const physics *ph, aabb box, int axis, double delta, int fla
             delta = clip_against(box, ob, axis, delta);
         }
     }
-    if ((flags & SWEEP_PLAYER) && ph->pl && !ph->pl->flying)
-        delta = clip_against(box, player_box(ph->pl), axis, delta);
     return delta;
 }
 
@@ -294,6 +293,54 @@ static double water_fraction(const world *w, aabb box)
 }
 
 /* --------------------------------------------------------------- player */
+
+#define PF(f) WIRE_F64(player, f)
+static const wire_field PLAYER_FIELDS[] = {
+    PF(pos.x),
+    PF(pos.y),
+    PF(pos.z),
+    PF(prev_pos.x),
+    PF(prev_pos.y),
+    PF(prev_pos.z),
+    PF(vel.x),
+    PF(vel.y),
+    PF(vel.z),
+    WIRE_F32(player, yaw),
+    WIRE_F32(player, pitch),
+    WIRE_I32(player, on_ground),
+    WIRE_I32(player, flying),
+    PF(submerged),
+    WIRE_I32(player, sprinting),
+    WIRE_I32(player, sneaking),
+    WIRE_I32(player, hit_wall),
+    PF(fall_speed),
+};
+#undef PF
+
+size_t player_encode(const player *p, uint8_t *out, size_t cap)
+{
+    wire_w w = wire_writer(out, cap);
+    wire_put_fields(&w, p, PLAYER_FIELDS, sizeof PLAYER_FIELDS / sizeof PLAYER_FIELDS[0]);
+    return w.bad ? 0 : w.len;
+}
+
+static int pos_sane(dvec3 v)
+{ return fabs(v.x) < WORLD_LIMIT && fabs(v.z) < WORLD_LIMIT && v.y > -1024.0 && v.y < WORLD_H + 4096.0; }
+
+int player_decode(player *p, const uint8_t *in, size_t len)
+{
+    player t = *p;
+    wire_r r = wire_reader(in, len);
+    wire_get_fields(&r, &t, PLAYER_FIELDS, sizeof PLAYER_FIELDS / sizeof PLAYER_FIELDS[0]);
+    /* Terminal velocity in air is ~55 m/s; 1000 leaves room for anything
+     * physics can do while keeping a step's travel small. */
+    if (r.bad || r.pos != len || !pos_sane(t.pos) || !pos_sane(t.prev_pos) || dv3_len(t.vel) > 1000.0 ||
+        fabsf(t.yaw) > 100.0f || fabsf(t.pitch) > 2.0f || t.submerged < 0.0 || t.submerged > 1.0 ||
+        fabs(t.fall_speed) > 1000.0)
+        return -1;
+    *p = t;
+    return 0;
+}
 
 void player_spawn(player *p, const world *w, double x, double z)
 {
@@ -493,7 +540,8 @@ static int solidify(physics *ph, const body *b)
         /* Never inside the player, flying or not; and only where it will
          * stay put, or the structural check would knock it loose again. A
          * body resting on the player just rests until they move. */
-        if (ph->pl && boxes_overlap(cell, player_box(ph->pl))) return 0;
+        for (int k = 0; k < ph->pl_count; k++)
+            if (boxes_overlap(cell, player_box(ph->pls[k]))) return 0;
         if (!supported_below(w, x, y, z, b->block)) return 0;
         int displaced = id == B_WATER ? world_water_level(w, x, y, z) : 0;
         world_set(w, x, y, z, b->block, b->meta);
@@ -513,14 +561,15 @@ static int solidify(physics *ph, const body *b)
 
 /* A body ran into the player: report it for the health model. Slow
  * contacts (a block resting on the player's head) are not blows. */
-static void record_hit(physics *ph, const body *b, aabb box, int axis)
+static void record_hit(physics *ph, int who, const body *b, aabb box, int axis)
 {
-    const player *pl = ph->pl;
+    const player *pl = ph->pls[who];
+    player_contact *c = &ph->contact[who];
     double rel = fabs(getc3(b->vel, axis) - getc3(pl->vel, axis));
-    if (rel < 1.0 || ph->hit_count >= MAX_PLAYER_HITS) return;
+    if (rel < 1.0 || c->hit_count >= MAX_PLAYER_HITS) return;
     double height = axis == 1 ? (getc3(b->vel, 1) < 0 ? 1.0 : 0.0)
                               : ((box.min.y + box.max.y) * 0.5 - pl->pos.y) / PLAYER_HEIGHT;
-    player_hit *k = &ph->hits[ph->hit_count++];
+    player_hit *k = &c->hits[c->hit_count++];
     k->mass = block_get(b->block)->density; /* one cubic metre */
     k->speed = (float)rel;
     k->height = (float)clampd(height, 0.0, 1.0);
@@ -643,21 +692,23 @@ static void check_splash(physics *ph, aabb before, aabb after)
  * shove was capped, or the ground took it) stops against the player.
  * Slower contacts are a block leaning or lying on them; one lying on top
  * adds its weight to pinned_mass. Returns 1 if a brittle body broke. */
-static int strike_player(physics *ph, player *pl, body *b, aabb box, int axis)
+static int strike_player(physics *ph, int who, body *b, aabb box, int axis)
 {
+    player *pl = ph->pls[who];
+    player_contact *c = &ph->contact[who];
     double vb = getc3(b->vel, axis), vp = getc3(pl->vel, axis), rel = vb - vp;
     double mb = (double)block_get(b->block)->density; /* one cubic metre */
     if (fabs(rel) < 1.0) {
         if (axis == 1 && vb < 0.0 && vb > -1.0) {
             double at = clampd((box.min.y - pl->pos.y) / PLAYER_HEIGHT, 0.0, 1.0);
-            double m0 = (double)ph->pinned_mass;
-            ph->pinned_height = (float)(((double)ph->pinned_height * m0 + at * mb) / (m0 + mb));
-            ph->pinned_mass = (float)(m0 + mb);
+            double m0 = (double)c->pinned_mass;
+            c->pinned_height = (float)(((double)c->pinned_height * m0 + at * mb) / (m0 + mb));
+            c->pinned_mass = (float)(m0 + mb);
         }
         setc3(&b->vel, axis, 0.0);
         return 0;
     }
-    record_hit(ph, b, box, axis);
+    record_hit(ph, who, b, box, axis);
     double dv = mb * rel / (PLAYER_MASS + mb);
     if (axis == 1 && dv < 0.0 && pl->on_ground) dv = 0.0;
     dv = clampd(dv, -KNOCK_MAX, KNOCK_MAX);
@@ -691,7 +742,10 @@ static int ground_contact(const physics *ph, body *b)
     if (!supported_below(ph->w, x, y, z, b->block)) {
         dvec3 to = dv3(b->pos.x + tip_move(x - b->pos.x), b->pos.y, b->pos.z + tip_move(z - b->pos.z));
         aabb nb = {to, dv3(to.x + 1, to.y + 1, to.z + 1)};
-        if (!ph->pl || ph->pl->flying || !boxes_overlap(nb, player_box(ph->pl))) b->pos = to;
+        int blocked = 0;
+        for (int k = 0; k < ph->pl_count; k++)
+            blocked |= !ph->pls[k]->flying && boxes_overlap(nb, player_box(ph->pls[k]));
+        if (!blocked) b->pos = to;
         b->vel.x = b->vel.z = 0.0;
         return 0;
     }
@@ -727,7 +781,7 @@ static void spin_step(body *b, int contact, double sub)
     b->rot[3] = q.w;
 }
 
-static void bodies_step(physics *ph, player *pl)
+static void bodies_step(physics *ph)
 {
     const double dt = PHYS_DT;
     for (int i = 0; i < ph->body_count; i++) {
@@ -759,12 +813,21 @@ static void bodies_step(physics *ph, player *pl)
         for (int axis = 0; axis < 3; axis++) {
             double d = getc3(b->vel, axis) * dt;
             if (d == 0.0) continue;
-            double m = sweep(ph, box, axis, d, SWEEP_PLAYER, i);
+            /* The world first, then whichever player is in the way. */
+            double mw = sweep(ph, box, axis, d, 0, i), m = mw;
+            int who = -1;
+            for (int q = 0; q < ph->pl_count; q++) {
+                if (ph->pls[q]->flying) continue;
+                double mq = clip_against(box, player_box(ph->pls[q]), axis, m);
+                if (fabs(mq) < fabs(m)) {
+                    m = mq;
+                    who = q;
+                }
+            }
             if (m != d) {
-                double mw = sweep(ph, box, axis, d, 0, i);
                 contact = 1;
-                if (fabs(m) < fabs(mw)) {
-                    shatter |= strike_player(ph, pl, b, box, axis); /* the player stopped it */
+                if (who >= 0) {
+                    shatter |= strike_player(ph, who, b, box, axis); /* a player stopped it */
                 } else {
                     /* The world stopped it: a landing, or a wall. */
                     double v = fabs(getc3(b->vel, axis));
@@ -863,12 +926,12 @@ int physics_drop_item(physics *ph, dvec3 pos, dvec3 vel, int id, int count, floa
     return 1;
 }
 
-int physics_pickup(physics *ph, int (*accept)(void *user, int id, int count), void *user)
+int physics_pickup(physics *ph, int who, int (*accept)(void *user, int id, int count), void *user)
 {
     int done = 0;
     for (int i = 0; i < ph->item_count; i++) {
         item_ent *it = &ph->items[i];
-        if (!it->touching) continue;
+        if (it->touching != who + 1) continue;
         int took = accept(user, it->id, it->count);
         if (took >= it->count) {
             ph->items[i--] = ph->items[--ph->item_count];
@@ -904,7 +967,6 @@ static void items_step(physics *ph)
 {
     const double dt = PHYS_DT;
     const world *w = ph->w;
-    const player *pl = ph->pl;
     for (int i = 0; i < ph->item_count; i++) {
         item_ent *it = &ph->items[i];
         it->prev_pos = it->pos;
@@ -942,15 +1004,28 @@ static void items_step(physics *ph)
         it->vel = dv3_scale(it->vel, 1.0 / (1.0 + (k * speed + 2.0 * sub) * dt));
         it->spin += (float)(dt * (it->on_ground ? 1.2 : 3.0));
 
-        /* The pickup magnet: close items accelerate toward the chest. */
-        if (ph->magnet && pl && it->age >= it->delay) {
-            dvec3 d = dv3(pl->pos.x - it->pos.x, pl->pos.y + 0.8 - it->pos.y, pl->pos.z - it->pos.z);
-            double dist = dv3_len(d);
+        /* The pickup magnet: close items accelerate toward the chest of
+         * the nearest player taking them. */
+        int near = -1;
+        dvec3 to = dv3(0, 0, 0);
+        double dist = ITEM_PICKUP_RANGE;
+        for (int q = 0; q < ph->pl_count && it->age >= it->delay; q++) {
+            const player *pl = ph->pls[q];
+            if (!ph->contact[q].magnet) continue;
+            dvec3 dq = dv3(pl->pos.x - it->pos.x, pl->pos.y + 0.8 - it->pos.y, pl->pos.z - it->pos.z);
+            double lq = dv3_len(dq);
+            if (lq < dist) {
+                near = q;
+                to = dq;
+                dist = lq;
+            }
+        }
+        if (near >= 0) {
             if (dist < 0.55) {
-                it->touching = 1;
-            } else if (dist < ITEM_PICKUP_RANGE) {
+                it->touching = (uint8_t)(near + 1);
+            } else {
                 double a = 30.0 * dt / dist;
-                it->vel = dv3_add(it->vel, dv3(d.x * a, d.y * a + GRAVITY * dt, d.z * a));
+                it->vel = dv3_add(it->vel, dv3(to.x * a, to.y * a + GRAVITY * dt, to.z * a));
                 double v = dv3_len(it->vel);
                 if (v > 8.0) it->vel = dv3_scale(it->vel, 8.0 / v);
             }
@@ -1253,21 +1328,37 @@ void physics_fluid_tick(physics *ph)
 
 /* ------------------------------------------------------------------ step */
 
-void physics_step(physics *ph, player *p, const player_input *in)
+/* The player's own move, and a splash if it went into water fast. */
+static void move_player(physics *ph, player *p, const player_input *in)
 {
-    ph->pl = p;
-    ph->hit_count = 0;
-    ph->pinned_mass = ph->pinned_height = 0.0f;
-    ph->shatter_count = ph->splash_count = ph->thud_count = 0;
     player_step(ph, p, in);
-    {
-        aabb now = player_box(p), was = now;
-        double dy = p->prev_pos.y - p->pos.y;
-        was.min.y += dy;
-        was.max.y += dy;
-        check_splash(ph, was, now);
+    aabb now = player_box(p), was = now;
+    double dy = p->prev_pos.y - p->pos.y;
+    was.min.y += dy;
+    was.max.y += dy;
+    check_splash(ph, was, now);
+}
+
+void physics_move_player(physics *ph, player *p, const player_input *in)
+{
+    ph->shatter_count = ph->splash_count = ph->thud_count = 0;
+    move_player(ph, p, in);
+}
+
+void physics_step(physics *ph, player *p, const player_input *in) { physics_step_players(ph, &p, in, 1); }
+
+void physics_step_players(physics *ph, player *const *ps, const player_input *ins, int n)
+{
+    ph->pl_count = n < PHYS_MAX_PLAYERS ? n : PHYS_MAX_PLAYERS;
+    ph->shatter_count = ph->splash_count = ph->thud_count = 0;
+    for (int k = 0; k < ph->pl_count; k++) {
+        player_contact *c = &ph->contact[k];
+        c->hit_count = 0;
+        c->pinned_mass = c->pinned_height = 0.0f;
+        ph->pls[k] = ps[k];
+        move_player(ph, ps[k], &ins[k]);
     }
-    bodies_step(ph, p);
+    bodies_step(ph);
     items_step(ph);
 
     /* At least one structural check per step, more while the budget allows. */

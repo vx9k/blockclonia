@@ -14,6 +14,13 @@ static body *drop(test_world *t, double x, double y, double z, uint8_t id)
     return b;
 }
 
+static int test_take_all(void *user, int id, int count)
+{
+    (void)id;
+    *(int *)user += count;
+    return count;
+}
+
 static int count_blocks(const world *w, int x0, int z0, int r, int y, uint8_t id)
 {
     int n = 0;
@@ -179,13 +186,13 @@ static void test_pinned(void)
     drop(&t, 5, GROUND + PLAYER_HEIGHT + 0.01, 5, B_LOG);
     run_steps(&t, &p, &idle, 30);
     CHECK(t.ph.body_count == 1);
-    CHECK(fabsf(t.ph.pinned_mass - 600.0f) < 1.0f);
-    CHECK(fabsf(t.ph.pinned_height - 1.0f) < 0.01f);
-    CHECK(t.ph.hit_count == 0);
+    CHECK(fabsf(t.ph.contact[0].pinned_mass - 600.0f) < 1.0f);
+    CHECK(fabsf(t.ph.contact[0].pinned_height - 1.0f) < 0.01f);
+    CHECK(t.ph.contact[0].hit_count == 0);
 
     p.pos.x += 2.0;
     physics_step(&t.ph, &p, &idle);
-    CHECK(t.ph.pinned_mass == 0.0f);
+    CHECK(t.ph.contact[0].pinned_mass == 0.0f);
     run_steps(&t, &p, &idle, 120);
     CHECK(t.ph.body_count == 0 && world_get(&t.w, 5, GROUND, 5) == B_LOG);
 
@@ -195,12 +202,12 @@ static void test_pinned(void)
     int stood = 1;
     for (int i = 0; i < 90; i++) {
         physics_step(&t.ph, &p, &idle);
-        if (t.ph.hit_count) hit = (double)t.ph.hits[0].speed;
+        if (t.ph.contact[0].hit_count) hit = (double)t.ph.contact[0].hits[0].speed;
         stood &= fabs(p.pos.y - GROUND) < 1e-9 && fabs(p.vel.x) < 1e-9 && fabs(p.vel.z) < 1e-9;
     }
     CHECK(stood);
     CHECK(fabs(hit - sqrt(2.0 * GRAVITY * 2.2)) < 0.2);
-    CHECK(fabsf(t.ph.pinned_mass - 2600.0f) < 1.0f);
+    CHECK(fabsf(t.ph.contact[0].pinned_mass - 2600.0f) < 1.0f);
     tw_free(&t);
 }
 
@@ -330,9 +337,9 @@ static void test_knockback(void)
     b->vel.x = 3.0;
     double rel = 0.0;
     int i = 0;
-    for (i = 0; i < 60 && !t.ph.hit_count; i++) physics_step(&t.ph, &p, &idle);
-    CHECK(t.ph.hit_count == 1);
-    if (t.ph.hit_count) rel = (double)t.ph.hits[0].speed;
+    for (i = 0; i < 60 && !t.ph.contact[0].hit_count; i++) physics_step(&t.ph, &p, &idle);
+    CHECK(t.ph.contact[0].hit_count == 1);
+    if (t.ph.contact[0].hit_count) rel = (double)t.ph.contact[0].hits[0].speed;
     CHECK(rel > 2.9 && rel < 3.0); /* air drag on leaves is small */
     CHECK(fabs(p.vel.x - 150.0 * rel / 225.0) < 1e-4);
     CHECK(t.ph.body_count == 1 && fabs(t.ph.bodies[0].vel.x - p.vel.x) < 1e-4);
@@ -343,13 +350,61 @@ static void test_knockback(void)
     player_spawn(&p, &t.w, 5.5, 5.5);
     b = drop(&t, 3.0, GROUND + 0.4, 5, B_STONE);
     b->vel.x = 8.0;
-    for (i = 0; i < 60 && !t.ph.hit_count; i++) physics_step(&t.ph, &p, &idle);
-    CHECK(t.ph.hit_count == 1);
+    for (i = 0; i < 60 && !t.ph.contact[0].hit_count; i++) physics_step(&t.ph, &p, &idle);
+    CHECK(t.ph.contact[0].hit_count == 1);
     CHECK(fabs(p.vel.x - 5.0) < 1e-9);
     double x0 = p.pos.x;
     run_steps(&t, &p, &idle, 120);
     CHECK(p.pos.x - x0 > 1.8 && p.pos.x - x0 < 2.4);
     CHECK(fabs(p.vel.x) < 1e-9);
+    tw_free(&t);
+}
+
+/* Several players at once: a falling block strikes the one it falls on,
+ * not the other, an item goes to the nearest player whose magnet is on,
+ * and moving one player alone leaves the falling blocks where they are. */
+static void test_two_players(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    player a = {0}, b = {0};
+    player_spawn(&a, &t.w, 2.5, 2.5);
+    player_spawn(&b, &t.w, 9.5, 9.5);
+    player *ps[2] = {&a, &b};
+    player_input idle[2] = {0};
+    drop(&t, 9.0, GROUND + 4.0, 9.0, B_STONE);
+    int hit_b = 0, hit_a = 0;
+    for (int i = 0; i < 90; i++) {
+        physics_step_players(&t.ph, ps, idle, 2);
+        hit_a += t.ph.contact[0].hit_count;
+        hit_b += t.ph.contact[1].hit_count;
+    }
+    CHECK(hit_b == 1 && hit_a == 0);
+
+    t.ph.body_count = 0;
+    player_spawn(&a, &t.w, 3.5, 14.5); /* clear of the block that fell */
+    player_spawn(&b, &t.w, 14.5, 3.5);
+    t.ph.contact[0].magnet = 0;
+    t.ph.contact[1].magnet = 1;
+    CHECK(physics_drop_item(&t.ph, dv3(b.pos.x + 0.8, b.pos.y + 0.5, b.pos.z), dv3(0, 0, 0), B_DIRT, 3, 0.0f));
+    CHECK(physics_drop_item(&t.ph, dv3(a.pos.x + 0.8, a.pos.y + 0.5, a.pos.z), dv3(0, 0, 0), B_SAND, 2, 0.0f));
+    /* Pickup runs after every step, as in the game. */
+    int took_a = 0, took_b = 0, stacks_a = 0, stacks_b = 0;
+    for (int i = 0; i < 60; i++) {
+        physics_step_players(&t.ph, ps, idle, 2);
+        stacks_a += physics_pickup(&t.ph, 0, test_take_all, &took_a);
+        stacks_b += physics_pickup(&t.ph, 1, test_take_all, &took_b);
+    }
+    CHECK(stacks_a == 0 && took_a == 0); /* a's magnet is off */
+    CHECK(stacks_b == 1 && took_b == 3);
+    CHECK(t.ph.item_count == 1);
+
+    body *f = drop(&t, 20.0, GROUND + 6.0, 20.0, B_STONE);
+    double y0 = f->pos.y;
+    player_input fwd = {.forward = 1.0f};
+    double x0 = a.pos.x, z0 = a.pos.z;
+    for (int i = 0; i < 60; i++) physics_move_player(&t.ph, &a, &fwd);
+    CHECK(t.ph.bodies[0].pos.y == y0 && hypot(a.pos.x - x0, a.pos.z - z0) > 1.0);
     tw_free(&t);
 }
 
@@ -362,4 +417,5 @@ void test_bodies_all(void)
     test_pinned();
     test_splash();
     test_knockback();
+    test_two_players();
 }

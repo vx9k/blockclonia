@@ -25,6 +25,8 @@ void inv_starting_kit(inventory *inv);
 /* Adds items, filling matching stacks first, then empty slots (hotbar
  * first). Returns how many did not fit. */
 int inv_add(inventory *inv, int id, int count);
+/* inv_add as a physics_pickup callback: returns how many it took. */
+int inv_accept(void *inv, int id, int count);
 /* How many of an item are in the slots (not the cursor). */
 int inv_count(const inventory *inv, int id);
 /* Removes up to count, from the last slot backwards so the hotbar is used

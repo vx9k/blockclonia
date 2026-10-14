@@ -255,16 +255,18 @@ static void send_activity(discord *d, double now)
     unsigned nonce = ++d->nonce;
     int n = 0;
     if (!d->have) {
-        n = snprintf(json, sizeof json, "{\"cmd\":\"SET_ACTIVITY\",\"args\":{\"pid\":%d},\"nonce\":\"%u\"}", pid, nonce);
+        n = snprintf(json, sizeof json, "{\"cmd\":\"SET_ACTIVITY\",\"args\":{\"pid\":%d},\"nonce\":\"%u\"}", pid,
+                     nonce);
     } else {
         char det[TEXT_MAX * 6] = {0}, st[TEXT_MAX * 6] = {0}, when[48] = {0};
         discord_json_escape(d->details, det, sizeof det);
         discord_json_escape(d->state, st, sizeof st);
         if (d->start > 0) snprintf(when, sizeof when, ",\"timestamps\":{\"start\":%lld}", (long long)d->start);
-        n = snprintf(json, sizeof json,
-                     "{\"cmd\":\"SET_ACTIVITY\",\"args\":{\"pid\":%d,\"activity\":{\"type\":0,\"details\":\"%s\"%s%s%s%s,"
-                     "\"assets\":{\"large_image\":\"logo\",\"large_text\":\"blockclonia\"}}},\"nonce\":\"%u\"}",
-                     pid, det, st[0] ? ",\"state\":\"" : "", st, st[0] ? "\"" : "", when, nonce);
+        n = snprintf(
+            json, sizeof json,
+            "{\"cmd\":\"SET_ACTIVITY\",\"args\":{\"pid\":%d,\"activity\":{\"type\":0,\"details\":\"%s\"%s%s%s%s,"
+            "\"assets\":{\"large_image\":\"logo\",\"large_text\":\"blockclonia\"}}},\"nonce\":\"%u\"}",
+            pid, det, st[0] ? ",\"state\":\"" : "", st, st[0] ? "\"" : "", when, nonce);
     }
     if (n <= 0 || (size_t)n >= sizeof json) return;
     if (send_frame(d, DISCORD_OP_FRAME, json, now) == 0) {

@@ -1,4 +1,5 @@
 #include "survival.h"
+#include "thermo.h"
 
 #include <math.h>
 #include <string.h>
@@ -78,7 +79,7 @@ static float grit_under(const world *w, const player *p)
     }
 }
 
-void survival_impacts(health *h, const world *w, const physics *ph, const player *p, const survival_before *b)
+void survival_impacts(health *h, const world *w, const player_contact *c, const player *p, const survival_before *b)
 {
     if (p->flying || h->dead) return;
     /* Landing on ground: the whole downward speed goes in one stop. */
@@ -107,8 +108,8 @@ void survival_impacts(health *h, const world *w, const physics *ph, const player
         if (b->on_ground && p->on_ground) health_abrasion(h, BP_RARM, 0.08f, 0.3f);
     }
     /* Blocks resting on the player: the weight bears where they lie. */
-    if (ph->pinned_mass > 0.0f) {
-        double m = (double)ph->pinned_mass, y = (double)ph->pinned_height;
+    if (c->pinned_mass > 0.0f) {
+        double m = (double)c->pinned_mass, y = (double)c->pinned_height;
         if (y >= 0.87) health_crush(h, BP_HEAD, m, PHYS_DT);
         else if (y >= 0.6) health_crush(h, BP_CHEST, m, PHYS_DT);
         else if (y >= 0.45) health_crush(h, BP_ABDOMEN, m, PHYS_DT);
@@ -118,8 +119,8 @@ void survival_impacts(health *h, const world *w, const physics *ph, const player
         }
     }
     /* Falling blocks that struck the player. */
-    for (int i = 0; i < ph->hit_count; i++) {
-        const player_hit *k = &ph->hits[i];
+    for (int i = 0; i < c->hit_count; i++) {
+        const player_hit *k = &c->hits[i];
         double soft = k->block == B_LEAVES
                           ? 0.95
                           : (k->block == B_SNOW ? 0.7 : (k->block == B_SAND || k->block == B_GRAVEL ? 0.3 : 0.0));
@@ -266,4 +267,40 @@ int survival_water_nearby(const world *w, const player *p, vec3 dir)
         if (block_solid(id)) break;
     }
     return 0;
+}
+
+void survival_thermal(const thermo *th, const world *w, const player *p, health_env *e)
+{
+    dvec3 mid = dv3(p->pos.x, p->pos.y + 0.9, p->pos.z);
+    double air = (double)thermo_air(th, w, mid.x, mid.y, mid.z);
+    double radiant = p->flying ? 0.0 : thermo_radiant(th, w, mid);
+    int fx = (int)floor(p->pos.x), fz = (int)floor(p->pos.z), fy = (int)floor(p->pos.y - 0.05);
+    double contact = block_solid(world_get(w, fx, fy, fz)) ? (double)thermo_block_temp(th, w, fx, fy, fz) : air;
+    survival_env_thermal(e, air, radiant, contact, 0);
+}
+
+void survival_drop_all(physics *ph, inventory *inv, const player *p, uint32_t *rng)
+{
+    item_stack left = inv_return_cursor(inv);
+    if (left.count) inv_add(inv, left.id, left.count);
+    for (int i = 0; i < INV_SLOTS; i++) {
+        item_stack *st = &inv->slot[i];
+        if (!st->count) continue;
+        *rng = *rng * 1664525u + 1013904223u;
+        double a = (double)(*rng >> 8) / 16777216.0 * 2.0 * MC_PI;
+        if (physics_drop_item(ph, dv3(p->pos.x, p->pos.y + 1.0, p->pos.z), dv3(cos(a) * 2.0, 3.0, sin(a) * 2.0), st->id,
+                              st->count, 1.0f))
+            *st = (item_stack){0, 0};
+    }
+}
+
+void survival_toss(physics *ph, inventory *inv, const player *p, item_stack st)
+{
+    if (!st.count) return;
+    vec3 d = look_dir(p->yaw, p->pitch);
+    if (!physics_drop_item(ph, dv3(p->pos.x, p->pos.y + 1.3, p->pos.z), dv3((double)d.x * 3.0, 1.5, (double)d.z * 3.0),
+                           st.id, st.count, 1.2f)) {
+        int left = inv_add(inv, st.id, st.count);
+        if (left) inv->cursor = (item_stack){st.id, (uint8_t)left};
+    }
 }

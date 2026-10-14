@@ -9,7 +9,11 @@
 #   FETCH   always the pinned release (macOS builds, portable Linux
 #           tarballs, reproducible CI)
 #
-# Provides the interface targets mc::mimalloc, mc::sqlite and mc::glfw.
+# libsodium always comes from the system, like Vulkan: it builds with
+# autotools, and every platform the game runs on packages it.
+#
+# Provides the interface targets mc::mimalloc, mc::sqlite, mc::enet,
+# mc::sodium and mc::glfw.
 
 include(FetchContent)
 
@@ -27,6 +31,9 @@ set(MC_SQLITE_VERSION 3.53.4 CACHE STRING "SQLite release used when fetching")
 set(MC_SQLITE_YEAR 2026 CACHE STRING "Year directory of that release on sqlite.org")
 set(MC_SQLITE_SHA256 "1e71ddf93849c6a6ecf58b827c0692073d2dd7ee40196158068f7b29f422e87d"
     CACHE STRING "SHA256 of the SQLite amalgamation zip")
+set(MC_ENET_VERSION 1.3.18 CACHE STRING "ENet release used when fetching")
+set(MC_ENET_SHA256 "28603c895f9ed24a846478180ee72c7376b39b4bb1287b73877e5eae7d96b0dd"
+    CACHE STRING "SHA256 of the ENet archive")
 
 if(POLICY CMP0135) # CMake 3.24+: extracted files get the extraction time
   cmake_policy(SET CMP0135 NEW)
@@ -136,7 +143,10 @@ set(MC_SQLITE_MIN 3.31 CACHE STRING "Oldest system SQLite used")
 add_library(mc_sqlite INTERFACE)
 add_library(mc::sqlite ALIAS mc_sqlite)
 set(MC_SQLITE_SYSTEM OFF)
-if(NOT MC_DEPS STREQUAL "FETCH")
+# macOS's own libsqlite3 is Apple's modified build: its read-only
+# connections fail where stock SQLite's work (save_db_peek), so AUTO builds
+# the pinned release there.
+if(MC_DEPS STREQUAL "SYSTEM" OR (MC_DEPS STREQUAL "AUTO" AND NOT APPLE))
   find_package(SQLite3 ${MC_SQLITE_MIN} QUIET)
 endif()
 if(SQLite3_FOUND)
@@ -174,6 +184,59 @@ else()
   target_link_libraries(mc_sqlite_impl PUBLIC Threads::Threads m)
   target_link_libraries(mc_sqlite INTERFACE mc_sqlite_impl)
   message(STATUS "blockclonia: SQLite ${MC_SQLITE_VERSION} (built from source)")
+endif()
+
+# ---------------------------------------------------------------- libsodium
+# Multiplayer encryption (netcrypto.c): X25519 key exchange and
+# ChaCha20-Poly1305. 1.0.18 (Debian bookworm, Ubuntu 24.04) has all of it.
+add_library(mc_sodium INTERFACE)
+add_library(mc::sodium ALIAS mc_sodium)
+find_path(MC_SODIUM_INCLUDE_DIR sodium.h)
+find_library(MC_SODIUM_LIBRARY NAMES sodium libsodium)
+if(NOT MC_SODIUM_INCLUDE_DIR OR NOT MC_SODIUM_LIBRARY)
+  message(FATAL_ERROR "libsodium not found. Install it (Debian/Ubuntu: libsodium-dev, "
+                      "Homebrew: libsodium, Arch: libsodium).")
+endif()
+target_include_directories(mc_sodium SYSTEM INTERFACE "${MC_SODIUM_INCLUDE_DIR}")
+target_link_libraries(mc_sodium INTERFACE "${MC_SODIUM_LIBRARY}")
+message(STATUS "blockclonia: libsodium ${MC_SODIUM_LIBRARY} (system)")
+
+# ---------------------------------------------------------------- ENet
+# Multiplayer transport (net.c): reliable and unreliable messages over
+# UDP. The API has been stable through the whole 1.3 series.
+add_library(mc_enet INTERFACE)
+add_library(mc::enet ALIAS mc_enet)
+if(NOT MC_DEPS STREQUAL "FETCH")
+  find_path(MC_ENET_INCLUDE_DIR enet/enet.h)
+  find_library(MC_ENET_LIBRARY NAMES enet)
+endif()
+if(MC_ENET_INCLUDE_DIR AND MC_ENET_LIBRARY)
+  target_include_directories(mc_enet SYSTEM INTERFACE "${MC_ENET_INCLUDE_DIR}")
+  target_link_libraries(mc_enet INTERFACE "${MC_ENET_LIBRARY}")
+  message(STATUS "blockclonia: ENet ${MC_ENET_LIBRARY} (system)")
+elseif(MC_DEPS STREQUAL "SYSTEM")
+  message(FATAL_ERROR "ENet not found and MC_DEPS=SYSTEM. Install it "
+                      "(Debian/Ubuntu: libenet-dev) or use MC_DEPS=AUTO.")
+else()
+  # Built here from its sources rather than through its CMakeLists, whose
+  # install rules would end up in the game's packages. Every platform the
+  # game builds on is POSIX with the functions its configure step probes.
+  _mc_hash_arg(hash "${MC_ENET_SHA256}")
+  FetchContent_Declare(enet
+    URL https://github.com/lsalzman/enet/archive/refs/tags/v${MC_ENET_VERSION}.tar.gz
+    ${hash}
+    SOURCE_SUBDIR no-cmake-project)
+  FetchContent_MakeAvailable(enet)
+  set(_enet_src callbacks.c compress.c host.c list.c packet.c peer.c protocol.c unix.c)
+  list(TRANSFORM _enet_src PREPEND "${enet_SOURCE_DIR}/")
+  add_library(mc_enet_impl STATIC ${_enet_src})
+  target_include_directories(mc_enet_impl SYSTEM PUBLIC "${enet_SOURCE_DIR}/include")
+  target_compile_definitions(mc_enet_impl PRIVATE HAS_FCNTL=1 HAS_POLL=1 HAS_GETADDRINFO=1
+                             HAS_GETNAMEINFO=1 HAS_INET_PTON=1 HAS_INET_NTOP=1
+                             HAS_MSGHDR_FLAGS=1 HAS_SOCKLEN_T=1)
+  target_compile_options(mc_enet_impl PRIVATE -w)
+  target_link_libraries(mc_enet INTERFACE mc_enet_impl)
+  message(STATUS "blockclonia: ENet ${MC_ENET_VERSION} (built from source)")
 endif()
 
 # ---------------------------------------------------------------- GLFW

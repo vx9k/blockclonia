@@ -36,9 +36,22 @@ void survival_env_thermal(health_env *e, double air_temp, double radiant, double
 
 /* Injuries from the step that just ran: landings, water entry, running
  * into walls, sliding landings on rough ground (abrasions), falling blocks
- * that hit the player (ph->hits) and blocks resting on the player
- * (ph->pinned_mass at ph->pinned_height: crush). */
-void survival_impacts(health *h, const world *w, const physics *ph, const player *p, const survival_before *b);
+ * that hit the player (c->hits) and blocks resting on the player
+ * (c->pinned_mass at c->pinned_height: crush). */
+void survival_impacts(health *h, const world *w, const player_contact *c, const player *p, const survival_before *b);
+
+struct thermo;
+/* survival_env_thermal from the heat field around the body: the air at
+ * the chest, radiant heat from fires (none while flying) and the block
+ * under the feet. */
+void survival_thermal(const struct thermo *th, const world *w, const player *p, health_env *e);
+
+/* Everything carried falls where the player died, in directions from
+ * rng; a stack that finds no room in the world stays in the inventory. */
+void survival_drop_all(physics *ph, inventory *inv, const player *p, uint32_t *rng);
+/* Throws a stack the way the player looks. With no room for more items
+ * in the world it goes back into the inventory, or onto the cursor. */
+void survival_toss(physics *ph, inventory *inv, const player *p, item_stack st);
 
 /* Scales and filters movement by what the body can do. */
 void survival_limit_input(const health *h, const player *p, player_input *in);

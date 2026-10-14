@@ -460,7 +460,7 @@ static void hud(ui *u, const health *h, const hud_state *s)
         ui_text_shadow(u, (u->w - ui_text_width(t, 1)) * 0.5f, by - 42, 1, C_DIM, t);
     }
     if (!s->hide_hints) {
-        const char *hint = "H: health   Tab: inventory";
+        const char *hint = s->chat ? "H: health   Tab: inventory   T: chat" : "H: health   Tab: inventory";
         ui_text_shadow(u, u->w - ui_text_width(hint, 1) - 4, by, 1, ui_alpha(C_DIM, 0.8f), hint);
     }
 }

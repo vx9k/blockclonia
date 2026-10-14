@@ -38,6 +38,8 @@ int save_read_seed(const char *dir, uint32_t *seed);
  * write_file goes through "<path>.tmp" and a rename. */
 long save_read_file(const char *path, void *buf, size_t cap);
 int save_write_file(const char *path, const void *data, size_t len);
+/* The same, readable by this user only (a secret key). */
+int save_write_private(const char *path, const void *data, size_t len);
 
 /* Moving files from where older builds kept them: both copy through the
  * checks above, never overwrite, and leave the source alone.

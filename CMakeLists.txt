@@ -150,6 +150,10 @@ set(MC_CORE_SOURCES
   src/mem.c
   src/menu.c
   src/mesher.c
+  src/net.c
+  src/mp.c
+  src/netcrypto.c
+  src/netkeys.c
   src/noise.c
   src/os.c
   src/paths.c
@@ -167,6 +171,7 @@ set(MC_CORE_SOURCES
   src/viewmodel.c
   src/world.c
   src/worldgen.c
+  src/wire.c
   src/worlds.c
 )
 
@@ -181,7 +186,7 @@ endif()
 function(mc_add_core name)
   add_library(${name} STATIC ${MC_CORE_SOURCES})
   target_include_directories(${name} PUBLIC src)
-  target_link_libraries(${name} PUBLIC Threads::Threads mc::sqlite PRIVATE mc_warnings)
+  target_link_libraries(${name} PUBLIC Threads::Threads mc::sqlite mc::sodium mc::enet PRIVATE mc_warnings)
   if(MC_MEM_LIBC)
     target_compile_definitions(${name} PUBLIC MC_MEM_LIBC)
   else()
@@ -228,10 +233,17 @@ if(MC_BUILD_TESTS)
                           tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_gpucaps.c
                           tests/test_health_debug.c tests/test_defib.c tests/test_paths.c
                           tests/test_save_db.c tests/test_worlds.c tests/test_hud.c tests/test_cardio.c
-                          tests/test_discord.c)
+                          tests/test_discord.c tests/test_netcrypto.c tests/test_wire.c tests/test_net.c tests/test_mp.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)
-  set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT 120)
+  # Under qemu user emulation (cross builds) the suite runs several times
+  # slower than on the hardware.
+  if(CMAKE_CROSSCOMPILING_EMULATOR)
+    set(_mc_unit_timeout 600)
+  else()
+    set(_mc_unit_timeout 120)
+  endif()
+  set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT ${_mc_unit_timeout})
 
   if(MC_BUILD_GAME)
     add_test(NAME bench COMMAND blockclonia --bench)
@@ -267,6 +279,9 @@ if(MC_BUILD_FUZZ)
   add_executable(fuzz_save tests/fuzz_save.c)
   target_link_libraries(fuzz_save PRIVATE mccore_fuzz)
   target_link_options(fuzz_save PRIVATE -fsanitize=fuzzer,address,undefined)
+  add_executable(fuzz_net tests/fuzz_net.c)
+  target_link_libraries(fuzz_net PRIVATE mccore_fuzz)
+  target_link_options(fuzz_net PRIVATE -fsanitize=fuzzer,address,undefined)
   add_executable(fuzz_save_db tests/fuzz_save_db.c)
   target_link_libraries(fuzz_save_db PRIVATE mccore_fuzz)
   target_link_options(fuzz_save_db PRIVATE -fsanitize=fuzzer,address,undefined)

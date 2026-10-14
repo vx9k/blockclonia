@@ -30,3 +30,75 @@ shaders, and a 32-bit float depth buffer, which Apple GPUs have.
 **Before starting**, record the F3 frame times (`--debug`) on that Mac,
 with MoltenVK's warnings on (`MVK_CONFIG_LOG_LEVEL=2`), so the native
 renderer has a baseline to beat.
+
+## Multiplayer
+
+**Status:** in progress on `feat/multiplayer`. Decisions (2026-10-14):
+peer-to-peer first, ENet over UDP, every packet sealed with
+ChaCha20-Poly1305 (libsodium), chat end-to-end, simulation fully
+authoritative on one peer.
+
+**Shape of the peer-to-peer mode.**
+
+- Every peer holds one ENet host and a direct connection to every other
+  peer (a full mesh). Joining one peer is enough: it answers with the
+  addresses of the others, and the newcomer dials them.
+- The peer that created the session is the *authority*. It simulates
+  the world (physics, water, collapse, heat) and every player's body and
+  health from the inputs the others send, and saves the world. The
+  others send inputs, predict their own movement and reconcile against
+  the authority's snapshots.
+- Terrain comes from the authority in the save format, then edits as
+  they happen. (Generating it from the seed on every peer was dropped:
+  float contraction differs between compilers and CPUs, so terrain could
+  differ at noise thresholds.)
+- Crypto per connection: static X25519 identity keys (TOFU-pinned like
+  SSH's known_hosts), an ephemeral `crypto_kx` exchange for session keys,
+  then `crypto_aead_chacha20poly1305_ietf` on every payload with a
+  counter nonce and a replay window. ENet's own headers (acks, peer ids)
+  stay in the clear: an on-path attacker can drop or delay traffic but
+  cannot read or forge it.
+- Chat goes straight to each recipient over that pair's session, never
+  through the authority, so it is end-to-end by construction.
+
+**Steps** (tick as they land):
+
+- [x] libsodium and ENet in `cmake/Dependencies.cmake`, CI, BUILDING.md
+- [x] `netcrypto.c`: keys, handshake, AEAD seal/open, replay window, tests
+- [x] message codecs (`wire.c`, `mp.c`), validated decoders, fuzz target
+- [x] `net.c`: ENet mesh, handshake, peers joining and leaving
+- [x] physics and health for more than one player
+- [x] authority loop: inputs in, snapshots and edits out; client
+      prediction and reconciliation (`mp.c`)
+- [x] remote players drawn (entity list), chat UI (T), `--host`/`--join`,
+      README and controls
+- [ ] host/join from the menus (a Multiplayer screen with an address
+      field); until then only the command line starts a session
+
+**Known limits of the first version** (each also a reason for the
+headless server below): the authority's world streams around its own
+player, so others must stay within its view distance; remote players'
+bodies and inventories are not saved with the world; when the host
+leaves, the session ends (no handing the authority over).
+
+**Security follow-ups** from the audit of 2026-10-14 (the rest were
+fixed on the branch):
+
+- A host that never answers a column request leaves that column loading
+  on the client for good; re-request after a timeout.
+- `tests/fuzz_net.c` covers what a host sends, not what a joiner sends
+  (inputs, operations, column requests): give it an offline host world.
+- Safety numbers for chat: today a player compares key fingerprints from
+  the join notices by hand.
+
+**Later** (deferred, in this order):
+
+- *Client-server mode*: the same authority code with the mesh switched
+  off: clients connect only to the server, and chat is relayed as
+  ciphertext sealed to each recipient's key so it stays end-to-end.
+- *Headless server* (`--server`): runs the authority without a window,
+  GPU or audio. Needs world streaming around every player instead of one
+  camera, and a console for chat and admin.
+- *NAT traversal*: peers behind home routers need a forwarded port or a
+  rendezvous server for UDP hole punching. Only direct addresses (LAN,
+  forwarded port, VPN) work until then.

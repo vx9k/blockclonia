@@ -151,10 +151,10 @@ static void sync_parent(const char *path)
     close(fd);
 }
 
-int os_write_atomic(const char *path, const char *tmp, const void *data, size_t len)
+int os_write_atomic(const char *path, const char *tmp, const void *data, size_t len, unsigned mode)
 {
     unlink(tmp); /* a stale or planted temp entry; unlink never follows */
-    int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, (mode_t)mode);
     if (fd < 0) return -1;
     const uint8_t *p = data;
     size_t done = 0;

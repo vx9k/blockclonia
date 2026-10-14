@@ -226,3 +226,5 @@ int inv_decode(inventory *inv, const uint8_t *in, size_t len)
     *inv = t;
     return 0;
 }
+
+int inv_accept(void *inv, int id, int count) { return count - inv_add(inv, id, count); }

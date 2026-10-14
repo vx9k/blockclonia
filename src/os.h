@@ -72,8 +72,9 @@ long os_read_regular(const char *path, uint8_t *buf, size_t cap);
  * before (a symlink, a hard link to another file) is replaced, never
  * written through. The data is synced before the rename and the folder
  * after it, so a power cut leaves the old file or the new one. Returns 0
- * or -1 (and then the old file is still there). */
-int os_write_atomic(const char *path, const char *tmp, const void *data, size_t len);
+ * or -1 (and then the old file is still there). mode is the new file's
+ * permissions (0644, or 0600 for a secret). */
+int os_write_atomic(const char *path, const char *tmp, const void *data, size_t len, unsigned mode);
 
 /* Creates one directory with the given mode. Returns 0, or -1 if it was
  * not created, including because something already exists there. */

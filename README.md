@@ -64,6 +64,7 @@ Every texture and sound is generated at start-up, and all memory comes from
 | F11 | Fullscreen on or off |
 | F3 | Debug overlay |
 | K (with F3 on) | Debug health menu: trigger any injury, or heal |
+| T | Chat, in a multiplayer game: type a line, Enter sends it, Esc cancels |
 | Esc | Close the inventory or panel; otherwise pause |
 | Enter | Respawn after death |
 
@@ -304,7 +305,8 @@ troubleshooting. In short, on Debian or Ubuntu:
 
 ```sh
 sudo apt install build-essential cmake ninja-build glslc libvulkan-dev \
-                 libglfw3-dev libmimalloc-dev libsqlite3-dev mesa-vulkan-drivers
+                 libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev \
+                 mesa-vulkan-drivers
 cmake --preset native && cmake --build --preset native
 ./build/native/blockclonia
 ```
@@ -319,6 +321,7 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
             [--debug] [--time HH] [--give LIST] [--hurt LIST]
             [--frames N] [--screenshot F] [--look YAW,PITCH] [--spawn X,Z]
             [--demo] [--health-panel] [--bench] [--mem-stats]
+            [--host [--port N] | --join ADDR[:PORT]] [--name NAME]
 ```
 
 - `--play` skips the menus and plays the default world; `--screen` opens a menu at start and
@@ -337,6 +340,8 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
   `--bench` runs CPU benchmarks without opening a window.
 - `--world` and `--config` default to the XDG paths described in "Where
   files live" below, instead of a fixed name in the working directory.
+- `--host` opens the world you play to other players, and `--join` plays
+  in someone else's; see "Multiplayer" below.
 - `blockclonia --help` lists everything.
 
 Headless (no GPU), with Mesa's software rasterizer:
@@ -346,6 +351,44 @@ xvfb-run -a env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
   ./build/native/blockclonia --frames 300 --screenshot shot.ppm --no-save --no-sound
 ```
 
+## Multiplayer
+
+One player hosts and the others join; there is no separate server.
+
+```sh
+blockclonia --play --host --name Alice          # UDP port 27450, or --port N
+blockclonia --join 192.168.1.20 --name Bob      # or ADDR:PORT
+```
+
+- **The host is the authority.** It simulates the world and every
+  player's body, health, inventory and hands from what each player does,
+  and saves the world. Joining players predict their own movement so it
+  feels immediate and are corrected by the host's snapshots. Their world
+  comes from the host; nothing of it is saved on their side.
+- **Peer to peer.** Joining the host is enough: it tells everyone who
+  else is there, and players connect to each other directly (a mesh), so
+  chat goes straight to each recipient. When routers keep two players
+  apart, their chat travels through the host instead.
+- **Encrypted.** Every connection starts with an X25519 handshake and
+  seals every packet after it with ChaCha20-Poly1305 (libsodium). Chat is
+  end-to-end on top of that: each pair of players has its own keys, so a
+  host relaying chat cannot read or change it. The host does vouch for
+  which key belongs to whom, though, so a host you do not trust could swap
+  keys to sit in the middle. Join notices show each player's key
+  fingerprint (`Bob joined [1a2b3c4d]`) to compare out of band, and the
+  game warns in the chat when a name comes back with a different key.
+- **Pinned keys.** Each player has an identity key, made on first use.
+  The first time you join a host, its key is remembered for that address;
+  if it is different next time (someone in the middle, or the host's key
+  file was replaced) joining stops with a message instead of connecting.
+  Other players' keys are remembered by name the same way.
+- **Limits of this first version.** The host's world loads around the
+  host, so other players need to stay within its view distance. Joined
+  players' bodies and inventories are not saved with the world; the host
+  keeps them for the rest of the session, so leaving and joining again
+  gives them back. When the host leaves, the session ends. Players need an address the others can reach: the same network,
+  a forwarded UDP port or a VPN.
+
 ## Where files live
 
 blockclonia follows the XDG Base Directory Specification:
@@ -354,6 +397,10 @@ blockclonia follows the XDG Base Directory Specification:
   to `~/.config/blockclonia/blockclonia.cfg`.
 - Worlds: `$XDG_DATA_HOME/blockclonia/worlds/world/`, falling back to
   `~/.local/share/blockclonia/worlds/world/`.
+- Multiplayer keys, next to the settings file: `identity.key` (this
+  player's secret key, readable only by you), `known_hosts` (the keys
+  of hosts joined before) and `known_players` (other players' keys, by
+  name).
 - The Vulkan pipeline cache:
   `$XDG_CACHE_HOME/blockclonia/blockclonia.pipelines`, falling back to
   `~/.cache/blockclonia/blockclonia.pipelines`.

@@ -35,6 +35,7 @@ typedef struct {
     int debug;              /* F3 overlay is up: keep clear of its left column */
     const inventory *inv;   /* supplies for the panel, and the hotbar */
     int hide_hints;         /* the key hints setting is off */
+    int chat;               /* in a multiplayer game: T opens the chat */
     /* Alert animation, owned by hud_update. */
     hud_alert alerts[HUD_ALERTS];
     int alert_count;
