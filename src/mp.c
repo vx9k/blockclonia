@@ -1083,8 +1083,7 @@ void mp_say(mp *m, const char *text)
     if (text[0] == '/') {
         if (strncmp(text, "/safety", 7) == 0 && (text[7] == '\0' || text[7] == ' '))
             show_safety(m, text[7] ? text + 8 : "");
-        else
-            chat_add(m, "", "commands: /safety [name] (read the number to that player in person or by voice)");
+        else chat_add(m, "", "commands: /safety [name] (read the number to that player in person or by voice)");
         return;
     }
     net_chat(m->n, text);
