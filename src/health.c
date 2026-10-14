@@ -652,6 +652,47 @@ void health_burn(health *h, int part, double omega)
 
 /* ------------------------------------------------------------ treatment */
 
+/* The two treatments that bypass a safeguard: adrenaline, which on a
+ * living circulation races the heart, and a shock the AED did not advise. */
+static int treat_adrenaline(health *h, inventory *inv, char *msg, size_t msg_size)
+{
+    if (!inv_take(inv, I_ADRENALINE, 1)) {
+        snprintf(msg, msg_size, "No adrenaline auto-injector");
+        return 0;
+    }
+    /* 0.3 mg into the thigh: on a living circulation it peaks in minutes
+     * and races the heart; in arrest it is what is given every few
+     * minutes, and it can coarsen a flat line into a shockable one. */
+    h->catechol += 1.5f;
+    if (!health_rhythm_perfusing(h->rhythm)) {
+        if ((h->rhythm == RHYTHM_ASYSTOLE || h->rhythm == RHYTHM_PEA) && frand(h) < 0.15f) {
+            h->rhythm = RHYTHM_VF;
+            health_log(h, "Adrenaline: the heart fibrillates again (shockable)");
+        }
+        snprintf(msg, msg_size, "Injected adrenaline into a stopped heart");
+    } else {
+        snprintf(msg, msg_size,
+                 h->catechol > 3.0f ? "Adrenaline again: heart pounding, pressure soaring"
+                                    : "Injected adrenaline: heart racing, hands shaking");
+    }
+    return 1;
+}
+
+static int treat_shock(health *h, char *msg, size_t msg_size)
+{
+    if (h->defib.phase == DEFIB_OFF) {
+        snprintf(msg, msg_size, "Put the defibrillator pads on first");
+        return 0;
+    }
+    /* The override skips the analysis that keeps an AED from shocking a
+     * beating heart. */
+    health_shock(h);
+    h->defib.shocks++;
+    h->defib.since_shock = 0.0f;
+    snprintf(msg, msg_size, health_rhythm_perfusing(h->rhythm) ? "Shocked a beating heart" : "Shock delivered");
+    return 1;
+}
+
 int health_treat(health *h, inventory *inv, int part, int what, int water_nearby, char *msg, size_t msg_size)
 {
     if (h->dead) {
@@ -884,40 +925,8 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
         health_pads(h, 1);
         snprintf(msg, msg_size, "Defibrillator pads on: it shocks by itself if the heart fibrillates");
         return 1;
-    case TREAT_ADRENALINE: {
-        if (!inv_take(inv, I_ADRENALINE, 1)) {
-            snprintf(msg, msg_size, "No adrenaline auto-injector");
-            return 0;
-        }
-        /* 0.3 mg into the thigh: on a living circulation it peaks in minutes
-         * and races the heart; in arrest it is what is given every few
-         * minutes, and it can coarsen a flat line into a shockable one. */
-        h->catechol += 1.5f;
-        if (!health_rhythm_perfusing(h->rhythm)) {
-            if ((h->rhythm == RHYTHM_ASYSTOLE || h->rhythm == RHYTHM_PEA) && frand(h) < 0.15f) {
-                h->rhythm = RHYTHM_VF;
-                health_log(h, "Adrenaline: the heart fibrillates again (shockable)");
-            }
-            snprintf(msg, msg_size, "Injected adrenaline into a stopped heart");
-        } else {
-            snprintf(msg, msg_size,
-                     h->catechol > 3.0f ? "Adrenaline again: heart pounding, pressure soaring"
-                                        : "Injected adrenaline: heart racing, hands shaking");
-        }
-        return 1;
-    }
-    case TREAT_SHOCK:
-        if (h->defib.phase == DEFIB_OFF) {
-            snprintf(msg, msg_size, "Put the defibrillator pads on first");
-            return 0;
-        }
-        /* The override skips the analysis that keeps an AED from shocking
-         * a beating heart. */
-        health_shock(h);
-        h->defib.shocks++;
-        h->defib.since_shock = 0.0f;
-        snprintf(msg, msg_size, health_rhythm_perfusing(h->rhythm) ? "Shocked a beating heart" : "Shock delivered");
-        return 1;
+    case TREAT_ADRENALINE: return treat_adrenaline(h, inv, msg, msg_size);
+    case TREAT_SHOCK: return treat_shock(h, msg, msg_size);
     default: snprintf(msg, msg_size, "?"); return 0;
     }
 }
