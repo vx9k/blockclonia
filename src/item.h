@@ -32,15 +32,17 @@ enum {
     I_GUNPOWDER,
     I_CARTRIDGE,
     I_RIFLE,
-    I_TOOL_FIRST,                                   /* TOOL_KINDS x TIER_COUNT tools, kind-major */
-    ITEM_END = I_TOOL_FIRST + 5 * 4
+    I_TOOL_FIRST /* then TOOL_KINDS x TIER_COUNT tools, kind-major, to ITEM_END */
 };
+
+#define ITEM_END (I_TOOL_FIRST + 5 * 4)
 
 /* Tools and blades come in kinds and tiers; the item id is
  * I_TOOL_FIRST + kind * TIER_COUNT + tier. */
 enum { TOOL_PICKAXE, TOOL_AXE, TOOL_SHOVEL, TOOL_KNIFE, TOOL_SWORD, TOOL_KINDS };
 enum { TIER_WOOD, TIER_STONE, TIER_COPPER, TIER_IRON, TIER_COUNT };
 _Static_assert((TOOL_KINDS * TIER_COUNT) == (ITEM_END - I_TOOL_FIRST), "one item per tool kind and tier");
+_Static_assert((TOOL_KINDS * TIER_COUNT) == (T_COUNT - T_TOOL_FIRST), "one texture per tool kind and tier");
 
 static inline int item_tool_id(int kind, int tier) { return I_TOOL_FIRST + kind * TIER_COUNT + tier; }
 /* 1 if id is a tool or blade, with its kind and tier. */

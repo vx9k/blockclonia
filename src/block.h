@@ -111,9 +111,10 @@ typedef enum {
     T_ITEM_GUNPOWDER,
     T_ITEM_CARTRIDGE,
     T_ITEM_RIFLE,
-    T_TOOL_FIRST, /* one per tool kind and tier, in item order */
-    T_COUNT = T_TOOL_FIRST + 5 * 4
+    T_TOOL_FIRST /* then one per tool kind and tier, in item order (T_COUNT) */
 } tex_id;
+
+#define T_COUNT (T_TOOL_FIRST + 5 * 4) /* item.h checks the 5 kinds x 4 tiers */
 
 #define T_FIRE_FRAMES 4
 

@@ -845,6 +845,8 @@ typedef struct {
     char worlds_root[WORLDS_PATH_MAX];
     world w;
     physics ph;
+    mobs mobs;                /* creatures (simulated here unless this is a client) */
+    combat cb;                /* blows and bullets in flight */
     thermo *th;
     world_hooks hooks;
     save_db *db;              /* NULL: not saving */
@@ -864,6 +866,7 @@ typedef struct {
     float eat_anim;           /* 1 at the start of eating, easing to 0 */
     uint32_t death_rng;
     int actions;              /* blocks broken or placed since the last physics step */
+    float inv_wheel;          /* wheel notches for the inventory screen's recipe list */
     menu mn;
     camera_anim cam;
     debug_frames dframes;
@@ -882,9 +885,6 @@ typedef struct {
     float swim_t, prev_hurt, prev_breath;
     double last_beat;         /* health.last_r of the last heartbeat heard */
     discord *dc;              /* NULL: the Discord status is off or this build has no application */
-    float inv_wheel;   /* wheel notches for the inventory screen's recipe list */
-    mobs mobs;         /* creatures (simulated here unless this is a client) */
-    combat cb;         /* blows and bullets in flight */
     char world_name[SAVE_NAME_MAX + 1]; /* the name the world was given, "" for none */
     int64_t session_start, play_start; /* Unix seconds: the game started, the world was opened */
     mp *mp;                   /* multiplayer session, NULL in single player */
