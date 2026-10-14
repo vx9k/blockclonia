@@ -344,6 +344,60 @@ static void test_client_server(void)
     for (int i = 2; i >= 0; i--) net_destroy(p[i].n);
 }
 
+/* STUN answers are parsed with their bounds checked, and a punch is
+ * sent and swallowed without disturbing the session. */
+static void test_nat(void)
+{
+    const uint8_t tx[12] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+    /* 203.0.113.5:40000 as XOR-MAPPED-ADDRESS, after an unknown attribute. */
+    uint8_t r[44] = {0x01, 0x01, 0x00, 0x18, 0x21, 0x12, 0xA4, 0x42};
+    memcpy(r + 8, tx, 12);
+    /* An unknown attribute (3 bytes and padding), then XOR-MAPPED-ADDRESS:
+     * family 1, 40000 ^ 0x2112, 203.0.113.5 ^ the cookie. */
+    const uint8_t attrs[24] = "\x80\x22\x00\x03"
+                              "abc\0"
+                              "\x00\x20\x00\x08"
+                              "\x00\x01\xBD\x52"
+                              "\xEA\x12\xD5\x47";
+    memcpy(r + 20, attrs, sizeof attrs);
+    uint8_t ip[4] = {0};
+    uint16_t port = 0;
+    CHECK(net_stun_parse(r, 44, tx, ip, &port) == 0 && port == 40000 && ip[0] == 203 && ip[2] == 113 && ip[3] == 5);
+    uint8_t other[12] = {0};
+    CHECK(net_stun_parse(r, 44, other, ip, &port) == -1);
+    r[3] = 0x40; /* claims more than arrived */
+    CHECK(net_stun_parse(r, 44, tx, ip, &port) == -1);
+    r[3] = 0x18;
+    r[22] = 0x10; /* an attribute running past the end */
+    CHECK(net_stun_parse(r, 44, tx, ip, &port) == -1);
+    for (size_t n = 0; n < sizeof r; n++) net_stun_parse(r, n, tx, ip, &port); /* every truncation */
+
+    nc_keypair kh = {0}, ka = {0};
+    nc_keypair_new(&kh);
+    nc_keypair_new(&ka);
+    static peer p[2];
+    memset(p, 0, sizeof p);
+    uint16_t hp = 0;
+    for (int tries = 0; tries < 20 && !p[0].n; tries++) {
+        hp = (uint16_t)(30000 + (getpid() * 17 + tries * 191 + 5) % 30000);
+        p[0].n = net_host(&kh, "Host", hp);
+    }
+    CHECK(p[0].n != NULL);
+    if (!p[0].n) return;
+    char addr[32] = {0};
+    CHECK(!net_public_addr(p[0].n, addr, sizeof addr));
+    CHECK(net_punch(p[0].n, "nonsense") == -1 && net_punch(p[0].n, "127.0.0.1:0") == -1);
+    p[1].n = net_join(&ka, "Alice", "127.0.0.1", hp, 0, NULL);
+    CHECK(wait_for(p, 2, &p[1], NET_EV_JOINED, 1) != NULL);
+    snprintf(addr, sizeof addr, "127.0.0.1:%u", (unsigned)net_port(p[1].n));
+    CHECK(net_punch(p[0].n, addr) == 0); /* lands on Alice's socket, which ignores it */
+    pump(p, 2, 0.5);
+    CHECK(net_chat(p[1].n, "still here") == 1);
+    const net_event *e = wait_for(p, 2, &p[0], NET_EV_CHAT, 1);
+    CHECK(e && strcmp(e->text, "still here") == 0);
+    for (int i = 1; i >= 0; i--) net_destroy(p[i].n);
+}
+
 void test_net_all(void)
 {
     CHECK(nc_init() == 0);
@@ -352,4 +406,5 @@ void test_net_all(void)
     test_session();
     test_forged_mesh();
     test_client_server();
+    test_nat();
 }

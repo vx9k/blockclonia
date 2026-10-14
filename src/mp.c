@@ -113,7 +113,7 @@ typedef struct {
 struct mp {
     net *n;
     mp_world ctx;
-    int host, ended;
+    int host, ended, told_pub;
     char why[NET_CHAT_MAX + 1];
     remote r[NET_MAX_PLAYERS]; /* host: by player id, 0 unused */
     client c;
@@ -1110,6 +1110,13 @@ static void announce(mp *m, int id)
 void mp_poll(mp *m, double now)
 {
     m->now = now;
+    char pub[32] = {0};
+    if (!m->told_pub && net_public_addr(m->n, pub, sizeof pub)) {
+        char line[NET_CHAT_MAX + 1] = {0};
+        snprintf(line, sizeof line, "the internet sees this game at %s", pub);
+        chat_add(m, "", line);
+        m->told_pub = 1;
+    }
     net_event e;
     while (net_poll(m->n, now, &e)) {
         char line[NET_CHAT_MAX + 1] = {0};
@@ -1167,13 +1174,24 @@ static void show_safety(mp *m, const char *name)
     if (!shown) chat_add(m, "", *name ? "no player by that name" : "nobody else is here");
 }
 
+/* "/punch a.b.c.d:port": open this side's router to a friend's address. */
+static void punch(mp *m, const char *addr)
+{
+    char line[NET_CHAT_MAX + 1] = {0};
+    if (net_punch(m->n, addr) == 0)
+        snprintf(line, sizeof line, "punching a way in for %s for 30 s: they join now", addr);
+    else snprintf(line, sizeof line, "usage: /punch a.b.c.d:port (the address the other player's game shows)");
+    chat_add(m, "", line);
+}
+
 void mp_say(mp *m, const char *text)
 {
     if (!net_chat_valid(text, strlen(text))) return;
     if (text[0] == '/') {
-        if (strncmp(text, "/safety", 7) == 0 && (text[7] == '\0' || text[7] == ' '))
+        if (strncmp(text, "/punch ", 7) == 0) punch(m, text + 7);
+        else if (strncmp(text, "/safety", 7) == 0 && (text[7] == '\0' || text[7] == ' '))
             show_safety(m, text[7] ? text + 8 : "");
-        else chat_add(m, "", "commands: /safety [name] (read the number to that player in person or by voice)");
+        else chat_add(m, "", "commands: /safety [name] (compare keys), /punch a.b.c.d:port (let a friend in)");
         return;
     }
     net_chat(m->n, text);

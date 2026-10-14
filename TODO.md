@@ -150,6 +150,16 @@ fixed on the branch):
 - *Headless server* (`--server`): runs the authority without a window,
   GPU or audio. Needs world streaming around every player instead of one
   camera, and a console for chat and admin.
-- *NAT traversal*: peers behind home routers need a forwarded port or a
-  rendezvous server for UDP hole punching. Only direct addresses (LAN,
-  forwarded port, VPN) work until then.
+- [x] *NAT traversal* (first version): STUN (stun.l.google.com) tells
+  each game its public address, the joiner redials for a minute, and the
+  host's `/punch ADDR:PORT` opens its router to the joiner. Left: a
+  rendezvous server so nobody swaps addresses by hand, the joiner's
+  address shown on screen while it waits (only the log has it), and a
+  relay for symmetric NATs.
+- *Headless server* (`--server`): started on `feat/headless-server`
+  (local work, 2026-10-14): `mp_set_dedicated` (the server's stand-in
+  player is never seen or hit), `mp_kick`/`net_kick`,
+  `worldgen_find_spawn` shared with `main.c`. Still to write: `server.c`
+  (open/tick/close, a stdin console with /players, /kick, /save, /stop),
+  a `blockclonia-server` executable on the core library, `--server` in
+  `main.c`, and a test driving a server and a client in one thread.

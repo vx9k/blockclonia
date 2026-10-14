@@ -1356,6 +1356,7 @@ static void start_host(game *g)
         return;
     }
     if (g->o.client_server) net_no_mesh(n);
+    net_stun(n);
     mp_world ctx = mp_ctx(g);
     g->mp = mp_create(n, &ctx);
     g->hooks.mp = g->mp;
@@ -1460,11 +1461,13 @@ static void start_join(game *g, const char *where)
         return;
     }
     close_world(g);
+    net_stun(n);
     mp_world ctx = mp_ctx(g);
     g->mp = mp_create(n, &ctx);
-    log_info("joining %s as %s", host_id, name);
+    log_info("joining %s as %s (if the host is behind a router, they type /punch with the address shown below)",
+             host_id, name);
     uint32_t seed = 0;
-    if (wait_session(g, welcomed, 15.0) && mp_welcome(g->mp, &seed)) {
+    if (wait_session(g, welcomed, 65.0) && mp_welcome(g->mp, &seed)) {
         open_remote_world(g, seed);
         ctx = mp_ctx(g);
         mp_attach(g->mp, &ctx);

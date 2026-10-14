@@ -479,6 +479,21 @@ mkdir -p /tmp/bob && blockclonia --config /tmp/bob/blockclonia.cfg --join 127.0.
   inventory with the world, by their identity key, so they get them back
   when they next join, in this session or a later one (health is not
   saved, the host's own included).
+- **Playing across the internet (hole punching).** Each game asks a
+  public STUN server which address the internet sees it at and shows it
+  in the chat and the log ("the internet sees this game at
+  203.0.113.5:27450"). To let a friend in without forwarding a port:
+  1. The friend joins your shown address (`--join 203.0.113.5:27450` or
+     the Multiplayer screen). Their game keeps trying for a minute and
+     prints its own address in its log ("the world sees this game at
+     198.51.100.7:41234").
+  2. They send you that address (any chat app), and you type
+     `/punch 198.51.100.7:41234` in the game's chat (T) within that
+     minute. Your router opens to them and they get in.
+
+  This works across most home routers. It does not work when either side
+  is behind a symmetric NAT (some mobile and corporate networks); then
+  forward UDP port 27450 on the host's router, or use a VPN.
 - **Limits.** When the host leaves, the session ends. Players need an address the others can reach: the same network,
   a forwarded UDP port or a VPN.
 
