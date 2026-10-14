@@ -2,9 +2,10 @@
 
 A Minecraft-style voxel sandbox written from scratch in C11 and Vulkan,
 with physics that tries to behave like the real world, a simulated human
-body instead of a health bar, and a renderer tuned for low-end hardware.
-Every texture and sound is generated at start-up, and all memory comes from
-[mimalloc](https://github.com/microsoft/mimalloc).
+body instead of a health bar, encrypted multiplayer you can join across
+the internet by typing an address, and a renderer tuned for low-end
+hardware. Every texture and sound is generated at start-up, and all
+memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
 
 ![the title screen](docs/title.jpg)
 
@@ -14,6 +15,8 @@ Every texture and sound is generated at start-up, and all memory comes from
   continents, hills, mountain ranges with bare rock and snow caps, beaches,
   oceans and trees, cave tunnels winding through the rock and opening onto
   the surface, and veins of coal, copper and iron ore.
+
+  ![mountain ranges with snow caps](docs/mountains.jpg)
 - **Realistic physics** (1 block = 1 m, SI units, fixed 60 Hz step). See
   [Physics](#physics).
 - **Heat and weather**: a day that lasts 20 minutes, air temperature from
@@ -23,6 +26,15 @@ Every texture and sound is generated at start-up, and all memory comes from
 - **A body that works like one** (press **H**): circulation, breathing,
   metabolism, temperature and a long list of injuries, all treatable. See
   [Health](#health).
+- **Tools, weapons and creatures**: axes, pickaxes, shovels, knives and
+  swords in four tiers (wood, stone, copper, iron) that wear out, a rifle
+  with cartridges, a furnace for smelting ore into ingots, and boars and
+  wolves that roam, flee, hunt and bite. See [Crafting](#crafting).
+- **Multiplayer** for up to 8 players: host from the menu, and friends
+  join by typing your address; your router's port is opened for you
+  (UPnP). Every packet is encrypted (ChaCha20-Poly1305) and chat is
+  end-to-end, with safety numbers to check it. Each player can roam
+  anywhere. See [Multiplayer](#multiplayer).
 - **Inventory and crafting** (press **Tab**): 36 slots, a hotbar, stacks
   you can split and move, and recipes grouped in categories that open and
   close (Basics, Building, Smelting & cooking, Tools, Weapons, Medical),
@@ -32,7 +44,8 @@ Every texture and sound is generated at start-up, and all memory comes from
   breaks what, its blow, food energy, a block's density and span, or a
   recipe's ingredients against what you have. Items you drop are physical
   objects that bob, spin and roll to you when you walk past.
-- **Menus** in the same style as the HUD: a title screen, a pause menu, a
+- **Menus** in the same style as the HUD: a title screen, your worlds
+  (create, rename, delete), a Multiplayer screen, a pause menu, a
   settings screen with Video, Controls and Audio tabs, and a controls
   reference.
 - **F3 debug overlay**: position, facing, the targeted block's material
@@ -45,9 +58,11 @@ Every texture and sound is generated at start-up, and all memory comes from
   sprinting, a first-person arm that sways, swings, eats and switches
   items, tumbling falling blocks, debris and splashes, and menus and HUD
   alerts that slide and fade.
-- **Saves**: only the columns you changed are written, one RLE-compressed
-  file per column, atomically, plus your position, inventory and the time
-  of day. Autosave runs every minute.
+- **Saves**: each world is one SQLite database holding only the columns
+  you changed (RLE-compressed), your position, inventory and the time of
+  day, and on a host every joined player's place and inventory. Saves
+  are transactions, so a crash never leaves half a save. Autosave runs
+  every minute.
 
 ## Controls
 
@@ -420,6 +435,9 @@ xvfb-run -a env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
 ## Multiplayer
 
 One player hosts and the others join; there is no separate server.
+
+![the Multiplayer screen](docs/multiplayer.png)
+
 From the title screen, **Multiplayer** asks for your name and the host's
 address to join, or lets you pick a world to host (and whether players
 connect to each other or only to you). A world you are already playing
