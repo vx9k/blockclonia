@@ -136,16 +136,16 @@ static void carve_caves(uint32_t seed, column *c, const int hm[CHUNK_W + 2][CHUN
 /* -------------------------------------------------------------- ores */
 
 typedef struct {
-    uint8_t block;
     int veins, size, ymin, ymax; /* per column; blocks per vein; height band */
+    uint8_t block;
 } ore_rule;
 
 /* Coal is common and shallow, copper mid-depth, iron deeper and rarer:
  * roughly the order they turn up in sedimentary and igneous rock. */
 static const ore_rule ORES[] = {
-    {B_COAL_ORE, 14, 9, 8, 110},
-    {B_COPPER_ORE, 7, 7, 16, 72},
-    {B_IRON_ORE, 6, 6, 4, 54},
+    {14, 9, 8, 110, B_COAL_ORE},
+    {7, 7, 16, 72, B_COPPER_ORE},
+    {6, 6, 4, 54, B_IRON_ORE},
 };
 
 static uint32_t lcg(uint32_t *s)

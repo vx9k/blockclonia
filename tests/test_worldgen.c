@@ -1,10 +1,10 @@
 /* Terrain generation: the first generator unchanged for old worlds, caves
  * and ore in the second, and caves that stand up to the collapse check. */
-#include "test_util.h"
 #include "inventory.h"
 #include "item.h"
 #include "jobs.h"
 #include "physics.h"
+#include "test_util.h"
 #include "world.h"
 
 #include <stdlib.h>
