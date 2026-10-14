@@ -272,7 +272,7 @@ void test_mp_all(void)
         nc_keypair kp[3] = {0};
         for (int i = 0; i < 3; i++) {
             nc_keypair_new(&kp[i]);
-            char name[2] = {(char)('A' + i), 0};
+            const char name[2] = {(char)('A' + i), 0};
             net_test_add_player(on, i + 1, name, kp[i].pk);
         }
         mp_world offw = {&h.t.w, &h.t.ph, h.th, h.fx, &h.pl, h.hl, &h.inv, 1, NULL, NULL, NULL};
