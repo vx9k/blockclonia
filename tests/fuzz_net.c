@@ -55,7 +55,7 @@ static void fuzz_host(const uint8_t *data, size_t size)
     inv_init(&inv);
     mobs_init(&mb, 1);
     combat_init(&cb, 1);
-    mp_world ctx = {&w, &ph, th, &fx, &pl, hl, &inv, 1, NULL, &mb, &cb};
+    mp_world ctx = {&w, &ph, th, &fx, &pl, hl, &inv, 1, NULL, &mb, &cb, NULL};
     net *n = net_offline_host(&kh, "Host");
     const char *names[FUZZ_PLAYERS] = {"A", "B", "C"};
     for (int i = 0; i < FUZZ_PLAYERS; i++) net_test_add_player(n, i + 1, names[i], kp[i].pk);

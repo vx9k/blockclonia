@@ -125,9 +125,10 @@ authoritative on one peer.
 
 **Known limits of the first version** (each also a reason for the
 headless server below): the authority's world streams around its own
-player, so others must stay within its view distance; remote players'
-bodies and inventories are not saved with the world; when the host
-leaves, the session ends (no handing the authority over).
+player, so others must stay within its view distance; when the host
+leaves, the session ends (no handing the authority over). Joined players'
+place and inventory are saved with the world by identity key
+(`mp_save_players`); health is saved for nobody yet.
 
 **Security follow-ups** from the audit of 2026-10-14 (the rest were
 fixed on the branch):

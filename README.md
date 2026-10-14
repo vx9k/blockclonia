@@ -472,10 +472,11 @@ mkdir -p /tmp/bob && blockclonia --config /tmp/bob/blockclonia.cfg --join 127.0.
   file was replaced) joining stops with a message instead of connecting.
   Other players' keys are remembered by name the same way.
 - **Limits of this first version.** The host's world loads around the
-  host, so other players need to stay within its view distance. Joined
-  players' bodies and inventories are not saved with the world; the host
-  keeps them for the rest of the session, so leaving and joining again
-  gives them back. When the host leaves, the session ends. Players need an address the others can reach: the same network,
+  host, so other players need to stay within its view distance. The host
+  saves each joined player's place and inventory with the world, by their
+  identity key, so they get them back when they next join, in this
+  session or a later one (health is not saved, the host's own included).
+  When the host leaves, the session ends. Players need an address the others can reach: the same network,
   a forwarded UDP port or a VPN.
 
 ## Where files live

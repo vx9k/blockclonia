@@ -3,6 +3,7 @@
 #include "mem.h"
 #include "netkeys.h"
 #include "save.h"
+#include "save_db.h"
 #include "survival.h"
 #include "wire.h"
 
@@ -80,6 +81,7 @@ typedef struct {
     uint8_t pk[NC_KEY_BYTES];
     health *hl;
     inventory inv;
+    player pl;
     uint32_t rng;
 } gone;
 
@@ -262,6 +264,55 @@ int mp_ended(const mp *m, const char **why)
 
 /* ---------------------------------------------------------------- host */
 
+/* The database row of the player with this identity key. */
+static void saved_name(const uint8_t *key, char *out, size_t cap)
+{
+    char hex[2 * NC_KEY_BYTES + 1] = {0};
+    nc_key_hex(key, hex);
+    snprintf(out, cap, "player:%s", hex);
+}
+
+/* What the world kept of this key from an earlier session: 1 with *pl and
+ * *inv set, 0 if nothing usable (the row is untrusted and decoded with
+ * the single-player checks). */
+static int load_saved(const mp *m, const uint8_t *key, player *pl, inventory *inv)
+{
+    if (!m->ctx.db || !key) return 0;
+    char name[80] = {0};
+    saved_name(key, name, sizeof name);
+    uint8_t buf[PLAYER_FILE_SIZE + 1] = {0};
+    long n = save_db_get_blob(m->ctx.db, name, buf, sizeof buf);
+    if (n <= 0) return 0;
+    if (survival_decode_player(pl, inv, NULL, buf, (size_t)n) != 0) {
+        log_warn("mp: the saved state of %.15s... is corrupt; a fresh start", name);
+        return 0;
+    }
+    return 1;
+}
+
+static int save_one(const mp *m, const uint8_t *key, const player *pl, const inventory *inv)
+{
+    char name[80] = {0};
+    saved_name(key, name, sizeof name);
+    uint8_t buf[PLAYER_FILE_SIZE] = {0};
+    size_t n = survival_encode_player(pl, inv, thermo_day_time(m->ctx.th), buf, sizeof buf);
+    return n && save_db_put_blob(m->ctx.db, name, buf, n) == 0 ? 0 : -1;
+}
+
+int mp_save_players(const mp *m)
+{
+    if (!m->host || !m->ctx.db) return 0;
+    for (int id = 1; id < NET_MAX_PLAYERS; id++) {
+        const remote *r = &m->r[id];
+        if (r->active && !r->hl->dead && save_one(m, m->keys[id], &r->pl, &r->inv) != 0) return -1;
+    }
+    for (int i = 0; i < GONE_MAX; i++) {
+        const gone *g = &m->gone[i];
+        if (g->used && !(g->hl && g->hl->dead) && save_one(m, g->pk, &g->pl, &g->inv) != 0) return -1;
+    }
+    return 0;
+}
+
 static void host_join(mp *m, int id)
 {
     remote *r = &m->r[id];
@@ -272,12 +323,16 @@ static void host_join(mp *m, int id)
     r->col_t = m->now;
     const uint8_t *key = net_player_key(m->n, id);
     gone *back = NULL;
+    player was = {0};
+    int have_was = 0;
     for (int i = 0; i < GONE_MAX && key; i++)
         if (m->gone[i].used && memcmp(m->gone[i].pk, key, NC_KEY_BYTES) == 0) back = &m->gone[i];
     if (back) {
         r->hl = back->hl;
         r->inv = back->inv;
         r->rng = back->rng;
+        was = back->pl;
+        have_was = 1;
         back->hl = NULL;
         back->used = 0;
     } else {
@@ -286,12 +341,20 @@ static void host_join(mp *m, int id)
         r->hl = mem_alloc(sizeof *r->hl);
         health_init_varied(r->hl, r->rng);
         inv_init(&r->inv);
-        inv_starting_kit(&r->inv);
+        have_was = load_saved(m, key, &was, &r->inv);
+        if (!have_was) inv_starting_kit(&r->inv);
     }
     interact_init(&r->ia, r->rng);
-    /* Next to the host, inside the terrain its world has loaded. */
+    /* Where they were, if the host has that terrain loaded; else next to
+     * the host. */
     const player *h = m->ctx.pl;
-    player_spawn(&r->pl, m->ctx.w, floor(h->pos.x) + 0.5 + (double)(id % 3) - 1.0, floor(h->pos.z) + 3.5);
+    if (have_was && world_column(m->ctx.w, chunk_of((int)floor(was.pos.x)), chunk_of((int)floor(was.pos.z)))) {
+        r->pl = was;
+        r->pl.vel = dv3(0, 0, 0);
+        r->pl.prev_pos = r->pl.pos;
+    } else {
+        player_spawn(&r->pl, m->ctx.w, floor(h->pos.x) + 0.5 + (double)(id % 3) - 1.0, floor(h->pos.z) + 3.5);
+    }
     r->cur.selected = 0;
 
     uint8_t buf[32] = {0};
@@ -322,6 +385,7 @@ static void host_leave(mp *m, int id, const uint8_t *key)
         memcpy(g->pk, key, NC_KEY_BYTES);
         g->hl = r->hl;
         g->inv = r->inv;
+        g->pl = r->pl;
         g->rng = r->rng;
         r->hl = NULL;
     }

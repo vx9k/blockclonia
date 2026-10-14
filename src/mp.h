@@ -21,7 +21,7 @@
  * Not here: window, input devices, drawing (main.c), sockets and crypto
  * (net.c). Known limits: the host's world streams around the host, so
  * players far from it stand still at the edge of what it has loaded;
- * remote players' inventories and bodies are not saved with the world. */
+ * joined players' health is not saved (nor is the host's). */
 #ifndef MC_MP_H
 #define MC_MP_H
 
@@ -35,6 +35,8 @@
 #include "world.h"
 
 #define MP_CHAT_LINES 8
+
+struct save_db;
 
 /* The game state mp works on; not owned. On a client, pl, hl and inv are
  * the local player's, which mp corrects from the host's messages. */
@@ -55,6 +57,9 @@ typedef struct {
      * client, which draws the mobs it is sent). */
     mobs *mobs;
     combat *cb;
+    /* The host's world database, where joined players are kept by
+     * identity key (NULL: not saved, and a client). */
+    struct save_db *db;
 } mp_world;
 
 /* Inventory operations a client sends; the host applies the same call. */
@@ -122,6 +127,12 @@ combat_targets mp_targets(mp *m);
 /* On a client, the creatures near this player as the host last sent them
  * (positions, headings and kinds only, for drawing). */
 const mobs *mp_client_mobs(const mp *m);
+/* Host: writes every joined player, present or gone this session, into
+ * the world database as "player:<key hex>" (the single-player record:
+ * position, view, inventory), for the next time that key joins. Call
+ * inside the transaction that saves the world. A dead player keeps the
+ * record saved before. 0, or -1 if a write failed. */
+int mp_save_players(const mp *m);
 /* Host: a block changed (the world's edit hook): sent at the next flush. */
 void mp_on_block_changed(mp *m, int x, int y, int z);
 

@@ -631,6 +631,7 @@ typedef struct {
     const inventory *inv;
     const thermo *th;
     save_db *db;
+    mp *const *mp; /* the session, if hosting: its players are saved too */
 } save_ctx;
 
 /* The world's on_save hook: the player goes into the transaction that
@@ -642,9 +643,15 @@ static int save_player(void *user)
     const save_ctx *sc = user;
     uint8_t buf[PLAYER_FILE_SIZE] = {0};
     size_t n = survival_encode_player(sc->pl, sc->inv, thermo_day_time(sc->th), buf, sizeof buf);
-    if (n && save_db_put_blob(sc->db, "player", buf, n) == 0) return 0;
-    log_warn("could not save the player");
-    return -1;
+    if (!n || save_db_put_blob(sc->db, "player", buf, n) != 0) {
+        log_warn("could not save the player");
+        return -1;
+    }
+    if (*sc->mp && mp_save_players(*sc->mp) != 0) {
+        log_warn("could not save the other players");
+        return -1;
+    }
+    return 0;
 }
 
 /* 1 if a saved player was loaded into pl and inv, -1 if it could not be
@@ -1218,7 +1225,7 @@ static void open_world(game *g, const char *dir, int backdrop)
     g->w.edit_user = &g->hooks;
     g->w.on_block_changed = on_block_changed;
     g->w.on_column_unload = on_column_unload;
-    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, g->db};
+    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, g->db, &g->mp};
     log_set_fatal_hook(save_on_fatal, &g->sc);
     renderer_bind_world(g->rd, &g->w);
 
@@ -1283,18 +1290,17 @@ static void open_world(game *g, const char *dir, int backdrop)
  * frees everything open_world made. */
 static void close_world(game *g)
 {
-    /* Leaving ends the session: a host's players are told, a client's
-     * world was never saved here. */
+    if (g->client) g->w.on_save = NULL; /* a client's world was never saved here */
+    log_set_fatal_hook(NULL, NULL);
+    physics_settle_bodies(&g->ph, NULL);
+    if (g->hl.dead) g->w.on_save = NULL; /* quitting dead keeps the last saved player */
+    world_save_all(&g->w);               /* a host's joined players too: before the session ends */
+    /* Leaving ends the session: a host's players are told. */
     mp_destroy(g->mp);
     g->mp = NULL;
     g->hooks.mp = NULL;
     g_in.mp_active = g_in.chat_open = 0;
-    if (g->client) g->w.on_save = NULL;
     g->client = 0;
-    log_set_fatal_hook(NULL, NULL);
-    physics_settle_bodies(&g->ph, NULL);
-    if (g->hl.dead) g->w.on_save = NULL; /* quitting dead keeps the last saved player */
-    world_save_all(&g->w);
     world_destroy(&g->w); /* waits for the jobs and hands the meshes back to the renderer */
     save_db_close(g->db);
     g->db = NULL;
@@ -1333,7 +1339,7 @@ static mp_world mp_ctx(game *g)
 {
     static char known[PATHS_MAX + 32];
     key_path(g, "known_players", known, sizeof known);
-    return (mp_world){&g->w, &g->ph, g->th, g->fx, &g->pl, &g->hl, &g->inv, g->seed, known, &g->mobs, &g->cb};
+    return (mp_world){&g->w, &g->ph, g->th, g->fx, &g->pl, &g->hl, &g->inv, g->seed, known, &g->mobs, &g->cb, g->db};
 }
 
 /* Opens the world being played to other players. */
@@ -1370,7 +1376,7 @@ static void open_remote_world(game *g, uint32_t seed)
     g->hooks = (world_hooks){&g->ph, g->th, &g->w, g->mp, 1, g->snd, g->fx};
     g->w.edit_user = &g->hooks;
     g->w.on_block_changed = on_block_changed;
-    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, NULL};
+    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, NULL, &g->mp};
     renderer_bind_world(g->rd, &g->w);
     memset(&g->pl, 0, sizeof g->pl);
     inv_init(&g->inv);
