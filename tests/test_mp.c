@@ -117,6 +117,55 @@ static void client_leave(host_side *h, client_side *c)
     }
 }
 
+/* An offline host (as fuzz_net drives it) shrugs off seeded garbage
+ * from three players on both channels, stepping after every message,
+ * and still answers a well-formed operation. */
+static void check_offline_host(host_side *h, const nc_keypair *kh)
+{
+    net *on = net_offline_host(kh, "Host");
+    nc_keypair kp[3] = {0};
+    for (int i = 0; i < 3; i++) {
+        nc_keypair_new(&kp[i]);
+        const char name[2] = {(char)('A' + i), 0};
+        net_test_add_player(on, i + 1, name, kp[i].pk);
+    }
+    mp_world offw = {&h->t.w, &h->t.ph, h->th, h->fx, &h->pl, h->hl, &h->inv, 1, NULL, NULL, NULL};
+    mp *om = mp_create(on, &offw);
+    mp_poll(om, 0.0);
+    mp_avatar oa[NET_MAX_PLAYERS];
+    CHECK(mp_avatars(om, 0.0, 1.0, oa, NET_MAX_PLAYERS) == 3);
+    uint32_t x = 12345u;
+    const player_input idle = {0};
+    for (int i = 0; i < 3000; i++) {
+        uint8_t g[64] = {0};
+        size_t len = 1 + (x >> 8) % sizeof g;
+        for (size_t k = 0; k < len; k++) {
+            x = x * 1664525u + 1013904223u;
+            g[k] = (uint8_t)(x >> 24);
+        }
+        g[0] = (uint8_t)(1 + g[0] % 3); /* mostly real message types */
+        mp_receive(om, 1 + i % 3, i % 2 ? NET_CH_STATE : NET_CH_GAME, g, len);
+        mp_host_step(om, &idle);
+        mp_flush(om, i / 60.0);
+    }
+    CHECK(isfinite(h->pl.pos.y));
+    mp_destroy(om);
+}
+
+/* Safety numbers: both sides show the same one, and the command is not
+ * sent as chat. */
+static void check_safety(host_side *h, client_side *c)
+{
+    mp_say(c->m, "/safety Host");
+    mp_say(h->m, "/safety Client");
+    const char *cs = strstr(last_chat(c->m)->text, ": "), *hs = strstr(last_chat(h->m)->text, ": ");
+    CHECK(cs && hs && strlen(cs) == NC_SAFETY_CHARS + 1 && strcmp(cs, hs) == 0);
+    for (int i = 0; i < 50; i++) frame(h, c, NULL);
+    CHECK(strncmp(last_chat(h->m)->text, "safety number with Client", 25) == 0);
+    mp_say(h->m, "/safety Nobody");
+    CHECK(strcmp(last_chat(h->m)->text, "no player by that name") == 0);
+}
+
 void test_mp_all(void)
 {
     CHECK(nc_init() == 0);
@@ -184,16 +233,7 @@ void test_mp_all(void)
         warned |= strstr(lines[i].text, "Client has a different key") != NULL;
     }
     CHECK(joined && warned);
-    /* Safety numbers: both sides show the same one, and the command is
-     * not sent as chat. */
-    mp_say(c.m, "/safety Host");
-    mp_say(h.m, "/safety Client");
-    const char *cs = strstr(last_chat(c.m)->text, ": "), *hs = strstr(last_chat(h.m)->text, ": ");
-    CHECK(cs && hs && strlen(cs) == NC_SAFETY_CHARS + 1 && strcmp(cs, hs) == 0);
-    for (int i = 0; i < 50; i++) frame(&h, &c, NULL);
-    CHECK(strncmp(last_chat(h.m)->text, "safety number with Client", 25) == 0);
-    mp_say(h.m, "/safety Nobody");
-    CHECK(strcmp(last_chat(h.m)->text, "no player by that name") == 0);
+    check_safety(&h, &c);
 
     /* An edit made now follows. */
     CHECK(world_set(&h.t.w, 4, GROUND, 4, B_STONE, 0));
@@ -274,39 +314,7 @@ void test_mp_all(void)
     CHECK(same && had.cursor.count > 0);
     client_leave(&h, &c);
 
-    /* An offline host (as fuzz_net drives it) shrugs off seeded garbage
-     * from three players on both channels, stepping after every message,
-     * and still answers a well-formed operation. */
-    {
-        net *on = net_offline_host(&kh, "Host");
-        nc_keypair kp[3] = {0};
-        for (int i = 0; i < 3; i++) {
-            nc_keypair_new(&kp[i]);
-            const char name[2] = {(char)('A' + i), 0};
-            net_test_add_player(on, i + 1, name, kp[i].pk);
-        }
-        mp_world offw = {&h.t.w, &h.t.ph, h.th, h.fx, &h.pl, h.hl, &h.inv, 1, NULL, NULL, NULL};
-        mp *om = mp_create(on, &offw);
-        mp_poll(om, 0.0);
-        mp_avatar oa[NET_MAX_PLAYERS];
-        CHECK(mp_avatars(om, 0.0, 1.0, oa, NET_MAX_PLAYERS) == 3);
-        uint32_t x = 12345u;
-        const player_input idle = {0};
-        for (int i = 0; i < 3000; i++) {
-            uint8_t g[64] = {0};
-            size_t len = 1 + (x >> 8) % sizeof g;
-            for (size_t k = 0; k < len; k++) {
-                x = x * 1664525u + 1013904223u;
-                g[k] = (uint8_t)(x >> 24);
-            }
-            g[0] = (uint8_t)(1 + g[0] % 3); /* mostly real message types */
-            mp_receive(om, 1 + i % 3, i % 2 ? NET_CH_STATE : NET_CH_GAME, g, len);
-            mp_host_step(om, &idle);
-            mp_flush(om, i / 60.0);
-        }
-        CHECK(isfinite(h.pl.pos.y));
-        mp_destroy(om);
-    }
+    check_offline_host(&h, &kh);
 
     mp_destroy(h.m);
     thermo_destroy(c.th);
