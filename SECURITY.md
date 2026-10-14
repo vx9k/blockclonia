@@ -55,7 +55,7 @@ The game treats these as **untrusted input**:
 | Pipeline cache | `$XDG_CACHE_HOME/blockclonia/blockclonia.pipelines` | Copied between machines or left by another driver, and its contents go to the GPU driver, which may not survive garbage. It is read through `save_read_file` (regular file, no symlink, at most 16 MB) and only handed over when its header names this vendor, device and driver UUID (`gpucaps_pipeline_cache_load`); anything else starts an empty cache. |
 | Command line | `--give`, `--hurt`, `--spawn`, `--join`, `--name`, sizes and so on | Launchers and scripts pass these through. |
 | Multiplayer peers | UDP (ENet), default port 27450, only with `--host` or `--join` | Anyone can send packets to an open port. A host must survive any joiner, a joiner any host, and both anyone on the path. Every byte is decoded by checked code (`net.c`, `mp.c`, `wire.c`, `health_decode`, `player_decode`, `save_decode_column`). |
-| Multiplayer key files | `identity.key` and `known_hosts` next to the settings file | Small text files; a damaged one is not used and not overwritten (`netkeys.c`). |
+| Multiplayer key files | `identity.key`, `known_hosts` and `known_players` next to the settings file | Small text files; one that exists but cannot be read is not used and not overwritten (`netkeys.c`). |
 | Discord's replies | the Discord app's local IPC socket | Size-capped frames, PINGs answered, everything else read and dropped (`discord.c`). |
 
 In scope:
@@ -67,10 +67,10 @@ In scope:
   writes somewhere else;
 - inputs that hang the game or make it allocate without bound;
 - in multiplayer: reading or changing chat between two players without
-  being one of them (the host relaying it included), pretending to be
-  another player or another host, joining a session's mesh without the
-  host announcing you, or a peer's packets crashing, hanging or
-  exhausting another player's game;
+  being one of them, a host relaying it included, unless the host swaps
+  their keys (see below); pretending to be another player or another
+  host; joining a session's mesh without the host announcing you; or a
+  peer's packets crashing, hanging or exhausting another player's game;
 - flaws in the build that let someone swap a dependency (see *Supply
   chain* below).
 
@@ -84,7 +84,14 @@ Out of scope:
 - running out of memory or VRAM with extreme but valid settings (such as
   render distance 32 on a small device);
 - cheating by the host: the host is the authority, simulates everyone
-  and sees all game state (not chat) by design; join hosts you trust;
+  and sees all game state by design; join hosts you trust;
+- a dishonest host swapping players' identity keys to read their chat in
+  the middle: the host is the one that tells players each other's keys.
+  The game shows each key's fingerprint when a player joins and warns
+  when a name comes back with a different key; comparing fingerprints out
+  of band is what rules this out;
+- a host's list of players making joiners open ENet connections to the
+  addresses it names (at most seven, once per session);
 - an attacker on the network path dropping or delaying packets, or
   disconnecting peers: ENet's own headers (acknowledgements, peer ids)
   are not encrypted, only what they carry is;
@@ -132,18 +139,27 @@ Out of scope:
   ChaCha20-Poly1305 (IETF), one key per direction, the channel and a
   counter as nonce and associated data, and a replay window per channel;
   a packet that does not authenticate is dropped before it is read.
-- **Who is who.** The host's key is pinned per address on the first join
+- **Who is who.** Right after the handshake each side sends a sealed
+  identity message (protocol, role, name, player id, port); nothing about
+  a link is believed, and no player is admitted, until that message opens
+  with the session keys, which proves the sender holds the identity key
+  it named. The host's key is pinned per address on the first join
   (`known_hosts`); a different key later stops the join. The host tells
   each player the others' keys; a direct link between two players is
   accepted only with the key the host announced, and the host writes the
-  sender of relayed messages itself. Chat is end-to-end: each pair of
-  players has its own session, so a relaying host cannot read or forge
-  it. Chat text must be valid UTF-8 without control characters, and each
-  sender is rate-limited.
-- **Bounded peers.** A joiner's queued inputs, column requests (per
-  frame, and only near its player), inventory slot and recipe indices are
-  checked before use; block edits, entity counts, positions and the body
-  snapshot from a host are range-checked before they touch the game.
+  sender of relayed messages itself. Players' keys are pinned by name
+  (`known_players`) and their fingerprints shown on joining. Chat is
+  end-to-end: each pair of players has its own session, so a relaying
+  host cannot read or forge it without swapping keys. Chat text must be
+  valid UTF-8 without control characters, and each sender is
+  rate-limited.
+- **Bounded peers.** ENet's packet size and per-peer buffering are
+  capped at the largest message (a column) before any handshake. A
+  joiner's queued inputs, column requests (a rate budget per player, and
+  only near its player), inventory slot and recipe indices are checked
+  before use; block edits, entity counts, positions and the body snapshot
+  from a host are range-checked before they touch the game. A player who
+  leaves and rejoins gets back what they had, so rejoining makes nothing.
 - **Compiler and tool gates.** CI builds with gcc and clang using
   `-Werror` and strict conversion warnings, runs the unit tests under
   AddressSanitizer and UndefinedBehaviorSanitizer, and runs clang-tidy

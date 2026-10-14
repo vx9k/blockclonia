@@ -81,6 +81,16 @@ player, so others must stay within its view distance; remote players'
 bodies and inventories are not saved with the world; when the host
 leaves, the session ends (no handing the authority over).
 
+**Security follow-ups** from the audit of 2026-10-14 (the rest were
+fixed on the branch):
+
+- A host that never answers a column request leaves that column loading
+  on the client for good; re-request after a timeout.
+- `tests/fuzz_net.c` covers what a host sends, not what a joiner sends
+  (inputs, operations, column requests): give it an offline host world.
+- Safety numbers for chat: today a player compares key fingerprints from
+  the join notices by hand.
+
 **Later** (deferred, in this order):
 
 - *Client-server mode*: the same authority code with the mesh switched

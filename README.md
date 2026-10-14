@@ -372,16 +372,21 @@ blockclonia --join 192.168.1.20 --name Bob      # or ADDR:PORT
 - **Encrypted.** Every connection starts with an X25519 handshake and
   seals every packet after it with ChaCha20-Poly1305 (libsodium). Chat is
   end-to-end on top of that: each pair of players has its own keys, so a
-  host relaying chat cannot read or change it.
+  host relaying chat cannot read or change it. The host does vouch for
+  which key belongs to whom, though, so a host you do not trust could swap
+  keys to sit in the middle. Join notices show each player's key
+  fingerprint (`Bob joined [1a2b3c4d]`) to compare out of band, and the
+  game warns in the chat when a name comes back with a different key.
 - **Pinned keys.** Each player has an identity key, made on first use.
   The first time you join a host, its key is remembered for that address;
   if it is different next time (someone in the middle, or the host's key
   file was replaced) joining stops with a message instead of connecting.
+  Other players' keys are remembered by name the same way.
 - **Limits of this first version.** The host's world loads around the
   host, so other players need to stay within its view distance. Joined
-  players' bodies and inventories are not saved (what they carry drops
-  where they stand when they leave). When the host leaves, the session
-  ends. Players need an address the others can reach: the same network,
+  players' bodies and inventories are not saved with the world; the host
+  keeps them for the rest of the session, so leaving and joining again
+  gives them back. When the host leaves, the session ends. Players need an address the others can reach: the same network,
   a forwarded UDP port or a VPN.
 
 ## Where files live
@@ -393,8 +398,9 @@ blockclonia follows the XDG Base Directory Specification:
 - Worlds: `$XDG_DATA_HOME/blockclonia/worlds/world/`, falling back to
   `~/.local/share/blockclonia/worlds/world/`.
 - Multiplayer keys, next to the settings file: `identity.key` (this
-  player's secret key, readable only by you) and `known_hosts` (the keys
-  of hosts joined before).
+  player's secret key, readable only by you), `known_hosts` (the keys
+  of hosts joined before) and `known_players` (other players' keys, by
+  name).
 - The Vulkan pipeline cache:
   `$XDG_CACHE_HOME/blockclonia/blockclonia.pipelines`, falling back to
   `~/.cache/blockclonia/blockclonia.pipelines`.
