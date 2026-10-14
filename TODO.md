@@ -70,8 +70,10 @@ authoritative on one peer.
 - [x] physics and health for more than one player
 - [x] authority loop: inputs in, snapshots and edits out; client
       prediction and reconciliation (`mp.c`)
-- [ ] remote players drawn (entity list), chat UI (T), host/join menus,
-      `--host`/`--join`, README and controls
+- [x] remote players drawn (entity list), chat UI (T), `--host`/`--join`,
+      README and controls
+- [ ] host/join from the menus (a Multiplayer screen with an address
+      field); until then only the command line starts a session
 
 **Known limits of the first version** (each also a reason for the
 headless server below): the authority's world streams around its own
