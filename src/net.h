@@ -110,6 +110,8 @@ int net_player_direct(const net *n, int player);
 /* The host's identity key once the link to it is up (for pinning), or
  * NULL; on the host, its own. */
 const uint8_t *net_host_key(const net *n);
+/* This side's own identity key. */
+const uint8_t *net_my_key(const net *n);
 /* The UDP port this side listens on. */
 uint16_t net_port(const net *n);
 

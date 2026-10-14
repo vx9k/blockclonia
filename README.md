@@ -448,9 +448,13 @@ mkdir -p /tmp/bob && blockclonia --config /tmp/bob/blockclonia.cfg --join 127.0.
   end-to-end on top of that: each pair of players has its own keys, so a
   host relaying chat cannot read or change it. The host does vouch for
   which key belongs to whom, though, so a host you do not trust could swap
-  keys to sit in the middle. Join notices show each player's key
-  fingerprint (`Bob joined [1a2b3c4d]`) to compare out of band, and the
-  game warns in the chat when a name comes back with a different key.
+  keys to sit in the middle. To rule that out, type `/safety Bob` in the
+  chat: it shows a 30-digit safety number for your key and the key you
+  were given for Bob. Bob types `/safety Alice`, and you read the numbers
+  to each other in person or by voice. If they match, nobody is in
+  between. Join notices also show each player's key fingerprint (`Bob
+  joined [1a2b3c4d]`), and the game warns in the chat when a name comes
+  back with a different key.
 - **Pinned keys.** Each player has an identity key, made on first use.
   The first time you join a host, its key is remembered for that address;
   if it is different next time (someone in the middle, or the host's key

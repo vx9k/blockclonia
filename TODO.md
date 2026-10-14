@@ -136,8 +136,8 @@ fixed on the branch):
 - [x] `tests/fuzz_net.c` now covers what joiners send too (inputs,
   operations, column requests), through an offline host
   (`net_offline_host`) that steps its simulation after every message.
-- Safety numbers for chat: today a player compares key fingerprints from
-  the join notices by hand.
+- [x] Safety numbers for chat: `/safety [name]` shows a 30-digit number
+  from both identity keys to read to each other.
 
 **Later** (deferred, in this order):
 

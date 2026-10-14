@@ -1,12 +1,14 @@
 #include "netcrypto.h"
 
 #include <sodium.h>
+#include <stdio.h>
 #include <string.h>
 
 /* Bumped with any change to the handshake or the packet layout, so two
  * builds that disagree fail the handshake instead of misreading. */
 static const uint8_t HELLO_MAGIC[4] = {'B', 'C', 'N', '1'};
 static const char KDF_LABEL[] = "blockclonia net v1 session keys";
+static const char SAFETY_LABEL[] = "blockclonia safety number v1";
 #define HEAD_BYTES 9 /* channel, then the counter, little-endian */
 
 int nc_init(void) { return sodium_init() < 0 ? -1 : 0; }
@@ -134,6 +136,24 @@ long nc_open(nc_session *s, const uint8_t *in, size_t len, uint8_t *out, size_t 
 
 void nc_key_hex(const uint8_t key[NC_KEY_BYTES], char out[2 * NC_KEY_BYTES + 1])
 { sodium_bin2hex(out, 2 * NC_KEY_BYTES + 1, key, NC_KEY_BYTES); }
+
+void nc_safety_number(const uint8_t a[NC_KEY_BYTES], const uint8_t b[NC_KEY_BYTES], char out[NC_SAFETY_CHARS])
+{
+    int low = memcmp(a, b, NC_KEY_BYTES) < 0;
+    uint8_t h[30] = {0};
+    crypto_generichash_state st;
+    crypto_generichash_init(&st, NULL, 0, sizeof h);
+    crypto_generichash_update(&st, (const uint8_t *)SAFETY_LABEL, sizeof SAFETY_LABEL - 1);
+    crypto_generichash_update(&st, low ? a : b, NC_KEY_BYTES);
+    crypto_generichash_update(&st, low ? b : a, NC_KEY_BYTES);
+    crypto_generichash_final(&st, h, sizeof h);
+    /* 40 bits per group of five digits: the bias of the modulo is 1e-7. */
+    for (int g = 0; g < 6; g++) {
+        uint64_t v = 0;
+        for (int k = 0; k < 5; k++) v = v << 8 | h[g * 5 + k];
+        snprintf(out + g * 6, 7, "%05u%s", (unsigned)(v % 100000u), g < 5 ? " " : "");
+    }
+}
 
 int nc_key_parse(const char *hex, uint8_t key[NC_KEY_BYTES])
 {

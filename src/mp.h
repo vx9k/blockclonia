@@ -141,7 +141,10 @@ int mp_client_crack(const mp *m, ipos *at, float *progress);
  * flushes the network. Call once a frame after simulating. */
 void mp_flush(mp *m, double now);
 
-/* Chat: sends a line to everyone (end-to-end) and shows it here. */
+/* Chat: sends a line to everyone (end-to-end) and shows it here. A line
+ * starting with '/' is a command for this side and is not sent:
+ * "/safety [name]" shows the safety number with that player, or with
+ * everyone. */
 void mp_say(mp *m, const char *text);
 /* The newest lines, oldest first; returns how many. */
 int mp_chat(const mp *m, const mp_chat_line **lines);

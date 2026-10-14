@@ -857,6 +857,7 @@ int net_chat(net *n, const char *text)
 int net_is_host(const net *n) { return n->host; }
 int net_me(const net *n) { return n->me; }
 uint16_t net_port(const net *n) { return n->port; }
+const uint8_t *net_my_key(const net *n) { return n->id.pk; }
 void net_test_no_mesh(net *n) { n->no_mesh = 1; }
 
 net *net_offline_host(const nc_keypair *id, const char *name)

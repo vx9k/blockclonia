@@ -184,6 +184,16 @@ void test_mp_all(void)
         warned |= strstr(lines[i].text, "Client has a different key") != NULL;
     }
     CHECK(joined && warned);
+    /* Safety numbers: both sides show the same one, and the command is
+     * not sent as chat. */
+    mp_say(c.m, "/safety Host");
+    mp_say(h.m, "/safety Client");
+    const char *cs = strstr(last_chat(c.m)->text, ": "), *hs = strstr(last_chat(h.m)->text, ": ");
+    CHECK(cs && hs && strlen(cs) == NC_SAFETY_CHARS + 1 && strcmp(cs, hs) == 0);
+    for (int i = 0; i < 50; i++) frame(&h, &c, NULL);
+    CHECK(strncmp(last_chat(h.m)->text, "safety number with Client", 25) == 0);
+    mp_say(h.m, "/safety Nobody");
+    CHECK(strcmp(last_chat(h.m)->text, "no player by that name") == 0);
 
     /* An edit made now follows. */
     CHECK(world_set(&h.t.w, 4, GROUND, 4, B_STONE, 0));

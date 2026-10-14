@@ -239,6 +239,19 @@ static void test_keys(void)
     tmp_remove(id);
     tmp_remove(hosts);
     tmp_remove(dir);
+
+    /* Safety numbers: the same from both ends, different for another key,
+     * and laid out as six groups of five digits. */
+    char ab[NC_SAFETY_CHARS] = {0}, ba[NC_SAFETY_CHARS] = {0}, ac[NC_SAFETY_CHARS] = {0};
+    nc_keypair c = {0};
+    nc_keypair_new(&c);
+    nc_safety_number(a.pk, c.pk, ab);
+    nc_safety_number(c.pk, a.pk, ba);
+    nc_safety_number(b.pk, c.pk, ac);
+    CHECK(strcmp(ab, ba) == 0 && strcmp(ab, ac) != 0);
+    int shape = strlen(ab) == NC_SAFETY_CHARS - 1;
+    for (int i = 0; i < NC_SAFETY_CHARS - 1; i++) shape &= i % 6 == 5 ? ab[i] == ' ' : (ab[i] >= '0' && ab[i] <= '9');
+    CHECK(shape);
 }
 
 /* Someone who knows only Bob's public key dials Alice claiming to be

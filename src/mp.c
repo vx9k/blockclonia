@@ -1059,9 +1059,34 @@ void mp_flush(mp *m, double now)
     net_flush(m->n);
 }
 
+/* The safety numbers with one player (by name) or with everyone, as
+ * notices on this side only. */
+static void show_safety(mp *m, const char *name)
+{
+    int shown = 0;
+    for (int id = 0; id < NET_MAX_PLAYERS; id++) {
+        const uint8_t *theirs = net_player_key(m->n, id);
+        const char *who = net_player_name(m->n, id);
+        if (id == net_me(m->n) || !theirs || (*name && strcmp(name, who) != 0)) continue;
+        char num[NC_SAFETY_CHARS] = {0}, line[NET_CHAT_MAX + 1] = {0};
+        nc_safety_number(net_my_key(m->n), theirs, num);
+        snprintf(line, sizeof line, "safety number with %s: %s", who, num);
+        chat_add(m, "", line);
+        shown++;
+    }
+    if (!shown) chat_add(m, "", *name ? "no player by that name" : "nobody else is here");
+}
+
 void mp_say(mp *m, const char *text)
 {
     if (!net_chat_valid(text, strlen(text))) return;
+    if (text[0] == '/') {
+        if (strncmp(text, "/safety", 7) == 0 && (text[7] == '\0' || text[7] == ' '))
+            show_safety(m, text[7] ? text + 8 : "");
+        else
+            chat_add(m, "", "commands: /safety [name] (read the number to that player in person or by voice)");
+        return;
+    }
     net_chat(m->n, text);
     chat_add(m, net_player_name(m->n, net_me(m->n)), text);
 }
