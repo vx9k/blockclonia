@@ -77,6 +77,7 @@ typedef struct {
     char footer[160];  /* title screen, bottom left: versions and seed */
     char status[160];  /* pause screen: a line about the survivor */
     int tab;           /* settings: 0 video, 1 display, 2 controls, 3 audio */
+    int discord_ok;    /* this build has a Discord application: offer the status setting */
     int clicked;       /* a button or setting was used this frame (UI sound) */
     int hovered;       /* the focus moved to another item this frame (UI sound) */
     /* Debug health screen: the part cycled to, and what MENU_DEBUG_INJURE

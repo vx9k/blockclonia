@@ -338,6 +338,7 @@ static int settings_controls(ctx *c, settings *s, float rx, float ry, float rw)
     changed |= cycle(c, rx, ry + 20, rw, "Invert mouse", &s->invert_y, ONOFF, 2);
     changed |= cycle(c, rx, ry + 40, rw, "Sprint", &s->sprint_toggle, SPRINT, 2);
     changed |= cycle(c, rx, ry + 60, rw, "Key hints", &s->show_hints, ONOFF, 2);
+    if (c->m->discord_ok) changed |= cycle(c, rx, ry + 80, rw, "Discord status", &s->discord, ONOFF, 2);
     return changed;
 }
 

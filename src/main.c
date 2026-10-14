@@ -4,6 +4,7 @@
 #include "bench.h"
 #include "camera.h"
 #include "debug.h"
+#include "discord.h"
 #include "fx.h"
 #include "health.h"
 #include "hud.h"
@@ -820,6 +821,9 @@ typedef struct {
     float landing;            /* hardest landing this frame, m/s */
     float swim_t, prev_hurt, prev_breath;
     double last_beat;         /* health.last_r of the last heartbeat heard */
+    discord *dc;              /* NULL: the Discord status is off or this build has no application */
+    char world_name[SAVE_NAME_MAX + 1]; /* the name the world was given, "" for none */
+    int64_t session_start, play_start; /* Unix seconds: the game started, the world was opened */
 
     /* This frame. */
     int in_menu, frozen;
@@ -1200,6 +1204,13 @@ static void open_world(game *g, const char *dir, int backdrop)
         int64_t gen = 0;
         if (save_db_get_meta(g->db, "generator", &gen) == -1) save_db_set_meta(g->db, "generator", WORLDGEN_VERSION);
     }
+    /* The name goes out to Discord, and world files are shared: only a
+     * valid one is used. */
+    g->world_name[0] = '\0';
+    char name[SAVE_NAME_MAX + 1] = {0};
+    long len = g->db ? save_db_get_blob(g->db, "name", name, SAVE_NAME_MAX) : -1;
+    if (len > 0 && save_name_valid(name, (size_t)len)) memcpy(g->world_name, name, (size_t)len + 1);
+    g->play_start = (int64_t)time(NULL);
 }
 
 /* Saves the world being played (the backdrop has nothing to save) and
@@ -1281,6 +1292,37 @@ static void game_init(game *g)
     open_start_screen(g);
     refresh_worlds(g); /* --screen worlds opens the list without asking for it */
     snprintf(g->mn.footer, sizeof g->mn.footer, "%s", g->versions);
+}
+
+#ifndef MC_DISCORD_APP_ID
+#define MC_DISCORD_APP_ID "" /* CMake sets it from -DMC_DISCORD_APP_ID */
+#endif
+
+/* Starts or stops the Discord status to match the setting. Builds without
+ * an application ID never connect. */
+static void apply_discord(game *g)
+{
+    if (g->st.discord && !g->dc) g->dc = discord_create(MC_DISCORD_APP_ID);
+    else if (!g->st.discord && g->dc) {
+        discord_destroy(g->dc);
+        g->dc = NULL;
+    }
+}
+
+/* What the status shows: the menus, or how the body is doing in which
+ * world, with the time since it was opened. Sent only when it changes,
+ * and discord.c limits how often. */
+static void update_discord(game *g)
+{
+    if (!g->dc) return;
+    if (g->backdrop) {
+        discord_set(g->dc, "In the menus", NULL, g->session_start);
+        return;
+    }
+    char cond[128] = {0}, where[64] = {0};
+    hud_condition(&g->hl, cond, sizeof cond);
+    if (g->world_name[0]) snprintf(where, sizeof where, "In %s", g->world_name);
+    discord_set(g->dc, cond, where[0] ? where : NULL, g->play_start);
 }
 
 /* Menus, focus, the inventory screen opening and closing, and what that
@@ -1748,6 +1790,8 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
         renderer_set_filtering(g->rd, g->st.filtering);
         set_fullscreen(g, g->st.fullscreen);
         apply_volumes(g);
+        apply_discord(g);
+        update_discord(g);
         g->settings_dirty = 1;
         break;
     case MENU_DEBUG_INJURE: health_injure(&g->hl, g->mn.debug_kind, g->mn.debug_part); break;
@@ -1861,6 +1905,7 @@ static void frame_bookkeeping(game *g, double now)
                  g->pl.flying ? " | fly" : "", rs.draw_calls, g->ph.body_count, rs.pool_used_kb / 1024,
                  rs.pool_total_kb / 1024);
         glfwSetWindowTitle(g->win, title);
+        update_discord(g);
     }
     if (now - g->save_t >= AUTOSAVE_SECONDS) {
         g->save_t = now;
@@ -1873,6 +1918,8 @@ static void game_shutdown(game *g)
     if (g->settings_dirty && save_settings(g) != 0)
         log_warn("could not save settings to %s", g->o.config);
     log_info("saving and shutting down");
+    discord_destroy(g->dc); /* closing the connection clears the status */
+    g->dc = NULL;
     close_world(g);
     audio_device_close(g->audio); /* stops the callback before the mixer goes */
     sound_destroy(g->snd);
@@ -1916,8 +1963,12 @@ int main(int argc, char **argv)
         return r;
     }
 
+    g->session_start = (int64_t)time(NULL);
     game_init(g);
     set_fullscreen(g, g->st.fullscreen);
+    g->mn.discord_ok = MC_DISCORD_APP_ID[0] != '\0';
+    apply_discord(g);
+    update_discord(g);
     double prev = glfwGetTime();
     g->title_t = g->save_t = prev;
     while (!glfwWindowShouldClose(g->win)) {
@@ -1951,6 +2002,7 @@ int main(int argc, char **argv)
         g_in.ui_click = g_in.ui_rclick = g_in.ui_up = g_in.ui_dn = g_in.ui_left = g_in.ui_right = g_in.ui_enter =
             g_in.ui_back = g_in.ui_letter = g_in.ui_backspace = g_in.text_len = 0;
         frame_bookkeeping(g, now);
+        discord_poll(g->dc, now);
         if (g->o.frames && g->frame >= g->o.frames) break;
         /* Frame limit with VSync off: sleep out the rest of the frame. The
          * physics accumulator reads the clock, so it is unaffected. */

@@ -231,6 +231,7 @@ starts with the defaults and doesn't save changes over it.
 | Display | GUI scale | automatic, or 1–4 |
 | Controls | Mouse sensitivity | 10–300% |
 | Controls | Invert Y, sprint toggle, key hints | on/off |
+| Controls | Discord status | off (default)/on: shows Discord friends how the body is doing ("Badly hurt (Bleeding 40 mL/min)", "Dead man walking"), the world's name and the time played, or "In the menus". Only in builds made with `MC_DISCORD_APP_ID` (see BUILDING.md); needs the Discord app running on the same machine |
 | Audio | Master, effects, ambience volume | 0–100% |
 | Audio | Interface, body (heartbeat, breathing) volume | 0–100%, on top of effects |
 | Audio | Mute in background | on (default)/off: silent while the window is not focused |
@@ -459,7 +460,7 @@ src/debug.c       F3 overlay           src/ui.c        2D overlay batch and font
 src/camera.c      camera motion        src/viewmodel.c the first-person arm
 src/fx.c          debris, splashes and the entity list      src/anim.h   easing helpers
 src/settings.c    the settings file    src/save.c      column codec, file access
-src/save_db.c     world.db (SQLite)
+src/save_db.c     world.db (SQLite)   src/discord.c   Discord status over its local IPC socket
 src/jobs.c        thread pool          src/gpupool.c   vertex pool allocator
 src/mem.c         mimalloc wrappers    src/log.c       logging, save-on-fatal hook
 src/bench.c       --bench

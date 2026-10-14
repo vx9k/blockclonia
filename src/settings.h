@@ -25,6 +25,7 @@ typedef struct {
     int volume_ui;        /* percent: menu clicks and the inventory */
     int volume_body;      /* percent: heartbeat and laboured breathing */
     int mute_unfocused;   /* silence while the window is in the background */
+    int discord;          /* show what the player is doing as their Discord status */
 } settings;
 
 #define SETTINGS_FOV_MIN 50
