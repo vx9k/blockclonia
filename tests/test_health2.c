@@ -287,7 +287,7 @@ static void test_abrasion(void)
         for (int i = 0; i < 90; i++) {
             survival_before b = survival_capture(&p);
             physics_step(&t.ph, &p, &idle);
-            survival_impacts(h, &t.w, &t.ph, &p, &b);
+            survival_impacts(h, &t.w, &t.ph.contact[0], &p, &b);
         }
         CHECK(p.on_ground);
         if (!trial) CHECK(h->wound_count == 0);
@@ -369,13 +369,13 @@ static void test_crush(void)
     player_spawn(&p, &t.w, 4.5, 4.5);
     health *h = new_body(35);
     survival_before sb = survival_capture(&p);
-    t.ph.pinned_mass = 300.0f;
-    t.ph.pinned_height = 0.2f;
-    survival_impacts(h, &t.w, &t.ph, &p, &sb);
+    t.ph.contact[0].pinned_mass = 300.0f;
+    t.ph.contact[0].pinned_height = 0.2f;
+    survival_impacts(h, &t.w, &t.ph.contact[0], &p, &sb);
     health_step(h, &e, PHYS_DT);
     CHECK(fabsf(h->part[BP_LLEG].crush_load - 150.0f) < 1e-3f && fabsf(h->part[BP_RLEG].crush_load - 150.0f) < 1e-3f);
-    t.ph.pinned_mass = 0.0f;
-    survival_impacts(h, &t.w, &t.ph, &p, &sb);
+    t.ph.contact[0].pinned_mass = 0.0f;
+    survival_impacts(h, &t.w, &t.ph.contact[0], &p, &sb);
     health_step(h, &e, PHYS_DT);
     CHECK(h->part[BP_LLEG].crush_load == 0.0f);
 

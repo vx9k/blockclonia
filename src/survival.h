@@ -38,7 +38,7 @@ void survival_env_thermal(health_env *e, double air_temp, double radiant, double
  * into walls, sliding landings on rough ground (abrasions), falling blocks
  * that hit the player (ph->hits) and blocks resting on the player
  * (ph->pinned_mass at ph->pinned_height: crush). */
-void survival_impacts(health *h, const world *w, const physics *ph, const player *p, const survival_before *b);
+void survival_impacts(health *h, const world *w, const player_contact *c, const player *p, const survival_before *b);
 
 /* Scales and filters movement by what the body can do. */
 void survival_limit_input(const health *h, const player *p, player_input *in);

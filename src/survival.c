@@ -78,7 +78,7 @@ static float grit_under(const world *w, const player *p)
     }
 }
 
-void survival_impacts(health *h, const world *w, const physics *ph, const player *p, const survival_before *b)
+void survival_impacts(health *h, const world *w, const player_contact *c, const player *p, const survival_before *b)
 {
     if (p->flying || h->dead) return;
     /* Landing on ground: the whole downward speed goes in one stop. */
@@ -107,8 +107,8 @@ void survival_impacts(health *h, const world *w, const physics *ph, const player
         if (b->on_ground && p->on_ground) health_abrasion(h, BP_RARM, 0.08f, 0.3f);
     }
     /* Blocks resting on the player: the weight bears where they lie. */
-    if (ph->pinned_mass > 0.0f) {
-        double m = (double)ph->pinned_mass, y = (double)ph->pinned_height;
+    if (c->pinned_mass > 0.0f) {
+        double m = (double)c->pinned_mass, y = (double)c->pinned_height;
         if (y >= 0.87) health_crush(h, BP_HEAD, m, PHYS_DT);
         else if (y >= 0.6) health_crush(h, BP_CHEST, m, PHYS_DT);
         else if (y >= 0.45) health_crush(h, BP_ABDOMEN, m, PHYS_DT);
@@ -118,8 +118,8 @@ void survival_impacts(health *h, const world *w, const physics *ph, const player
         }
     }
     /* Falling blocks that struck the player. */
-    for (int i = 0; i < ph->hit_count; i++) {
-        const player_hit *k = &ph->hits[i];
+    for (int i = 0; i < c->hit_count; i++) {
+        const player_hit *k = &c->hits[i];
         double soft = k->block == B_LEAVES
                           ? 0.95
                           : (k->block == B_SNOW ? 0.7 : (k->block == B_SAND || k->block == B_GRAVEL ? 0.3 : 0.0));

@@ -1408,7 +1408,7 @@ static player_input frame_input(game *g)
 /* Fixed 60 Hz steps: physics, what it did to the body, and the body. */
 static void frame_simulate(game *g, const player_input *in, double dt)
 {
-    g->ph.magnet = !g->hl.dead && !g->in_menu;
+    g->ph.contact[0].magnet = !g->hl.dead && !g->in_menu;
     int steps = 0;
     float landing = 0.0f; /* hardest landing this frame, for the camera */
     double t0 = glfwGetTime();
@@ -1420,7 +1420,7 @@ static void frame_simulate(game *g, const player_input *in, double dt)
         survival_env(&g->w, &g->pl, &sb, g->actions, &env);
         thermal_env(g->th, &g->w, &g->pl, &env);
         g->actions = 0;
-        survival_impacts(&g->hl, &g->w, &g->ph, &g->pl, &sb);
+        survival_impacts(&g->hl, &g->w, &g->ph.contact[0], &g->pl, &sb);
         /* Per-step physics events, cleared by the next step. */
         for (int k = 0; k < g->ph.shatter_count; k++)
             fx_break(g->fx, g->ph.shatter_block[k], g->ph.shatter_pos[k].x, g->ph.shatter_pos[k].y,
@@ -1434,7 +1434,7 @@ static void frame_simulate(game *g, const player_input *in, double dt)
     }
     if (steps == MAX_STEPS_PER_FRAME) g->acc = 0.0; /* too slow to keep up: slow down time instead */
     g->landing = landing;
-    if (steps && physics_pickup(&g->ph, accept_item, &g->inv)) sound_play(g->snd, SND_PICKUP, NULL, 0, 0.7f);
+    if (steps && physics_pickup(&g->ph, 0, accept_item, &g->inv)) sound_play(g->snd, SND_PICKUP, NULL, 0, 0.7f);
     if (!g->in_menu) {
         thermo_step(g->th, &g->w, dt, g->pl.pos);
         fx_step(g->fx, &g->w, dt);

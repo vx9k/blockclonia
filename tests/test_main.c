@@ -918,7 +918,7 @@ static void test_survival(void)
     for (int i = 0; i < 120; i++) {
         survival_before b = survival_capture(&p);
         physics_step(&t.ph, &p, &idle);
-        survival_impacts(h, &t.w, &t.ph, &p, &b);
+        survival_impacts(h, &t.w, &t.ph.contact[0], &p, &b);
     }
     CHECK(p.on_ground && h->wound_count == 0 && !h->part[BP_LLEG].fracture && !h->part[BP_RLEG].fracture);
 
@@ -930,7 +930,7 @@ static void test_survival(void)
     for (int i = 0; i < 240; i++) {
         survival_before b = survival_capture(&p);
         physics_step(&t.ph, &p, &idle);
-        survival_impacts(h, &t.w, &t.ph, &p, &b);
+        survival_impacts(h, &t.w, &t.ph.contact[0], &p, &b);
     }
     CHECK(p.on_ground);
     CHECK(h->part[BP_LLEG].integrity + h->part[BP_RLEG].integrity < before - 0.2f);
@@ -1153,7 +1153,8 @@ static void test_items_physics(void)
     tw_init(&t);
     player p = {0};
     player_spawn(&p, &t.w, 0.5, 0.5);
-    t.ph.pl = &p;
+    t.ph.pls[0] = &p;
+    t.ph.pl_count = 1;
     /* Dropped from 3 m, an item falls, bounces a little and comes to rest
      * on the ground. */
     CHECK(physics_drop_item(&t.ph, dv3(8.5, GROUND + 3.0, 8.5), dv3(0, 0, 0), B_STONE, 1, 0.0f));
@@ -1190,13 +1191,13 @@ static void test_items_physics(void)
     t.ph.item_count = 0;
     p.pos = dv3(5.5, GROUND, 5.5);
     physics_drop_item(&t.ph, dv3(6.7, GROUND + 0.2, 5.5), dv3(0, 0, 0), I_APPLE, 2, 0.1f);
-    t.ph.magnet = 1;
+    t.ph.contact[0].magnet = 1;
     inventory inv = {0};
     inv_init(&inv);
     int got = 0;
     for (int i = 0; i < 120 && !got; i++) {
         physics_step(&t.ph, &p, &idle);
-        got = physics_pickup(&t.ph, test_accept, &inv);
+        got = physics_pickup(&t.ph, 0, test_accept, &inv);
     }
     CHECK(got == 1 && inv_count(&inv, I_APPLE) == 2 && t.ph.item_count == 0);
     /* A full inventory leaves the item on the ground. */
@@ -1205,7 +1206,7 @@ static void test_items_physics(void)
     inv_add(&full, B_DIRT, 64 * INV_SLOTS);
     physics_drop_item(&t.ph, dv3(5.5, GROUND + 0.9, 5.5), dv3(0, 0, 0), I_APPLE, 1, 0.0f);
     run_steps(&t, &p, &idle, 10);
-    CHECK(physics_pickup(&t.ph, test_accept, &full) == 0 && t.ph.item_count == 1);
+    CHECK(physics_pickup(&t.ph, 0, test_accept, &full) == 0 && t.ph.item_count == 1);
     tw_free(&t);
 }
 
@@ -1218,7 +1219,8 @@ static void test_interact(void)
     player p = {0};
     player_spawn(&p, &t.w, 0.5, 0.5);
     p.pitch = -1.2f;
-    t.ph.pl = &p;
+    t.ph.pls[0] = &p;
+    t.ph.pl_count = 1;
     inventory inv = {0};
     inv_init(&inv);
     interact s = {0};
@@ -1305,7 +1307,8 @@ static void test_review_fixes(void)
     tw_init(&t);
     player p = {0};
     player_spawn(&p, &t.w, 0.5, 0.5);
-    t.ph.pl = &p;
+    t.ph.pls[0] = &p;
+    t.ph.pl_count = 1;
     player_input idle = {0};
 
     /* 1 km away nothing is loaded: the item waits instead of vanishing. */

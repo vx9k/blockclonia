@@ -361,7 +361,8 @@ static void test_defib_item(void)
     player p = {0};
     player_spawn(&p, &t.w, 0.5, 0.5);
     p.pitch = -1.2f;
-    t.ph.pl = &p;
+    t.ph.pls[0] = &p;
+    t.ph.pl_count = 1;
     inventory held = {0};
     inv_init(&held);
     inv_add(&held, I_DEFIBRILLATOR, 1);

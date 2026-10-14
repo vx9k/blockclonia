@@ -99,6 +99,17 @@ typedef struct {
 } player_hit;
 
 #define MAX_PLAYER_HITS 8
+#define PHYS_MAX_PLAYERS 8 /* bodies and items collide with this many players at once */
+
+/* What the last step did to one player, for survival_impacts, and
+ * whether items should come to them. */
+typedef struct {
+    player_hit hits[MAX_PLAYER_HITS];
+    int hit_count;
+    float pinned_mass;   /* kg of falling blocks resting on them (crush injuries) */
+    float pinned_height; /* 0 feet .. 1 head, where the weight bears */
+    int magnet;          /* set by the caller: pull nearby items to this player */
+} player_contact;
 
 /* Per-step event lists for the effects: brittle blocks that shattered on
  * impact (their cell and material, for shards) and fast entries into water
@@ -122,7 +133,7 @@ typedef struct {
     float spin;                   /* radians, for drawing */
     uint8_t id, count;
     uint8_t on_ground;
-    uint8_t touching;             /* reached the player this step */
+    uint8_t touching;             /* reached a player this step: their index + 1 */
 } item_ent;
 
 typedef struct physics {
@@ -142,14 +153,13 @@ typedef struct physics {
     uint8_t *st_id;              /* block ids of the region, read once per check */
     int32_t *st_bucket[STRUCT_MAX_SPAN + 2];
     int st_bucket_len[STRUCT_MAX_SPAN + 2];
-    const player *pl;    /* for body-vs-player collisions */
-    player_hit hits[MAX_PLAYER_HITS]; /* reset at the start of each step */
-    int hit_count;
+    /* The players of the last step, for collisions with bodies and items.
+     * Their contacts are reset at the start of each step, all but magnet. */
+    player *pls[PHYS_MAX_PLAYERS];
+    int pl_count;
+    player_contact contact[PHYS_MAX_PLAYERS];
     item_ent *items;
     int item_count;
-    /* Falling blocks resting on the player this step (crush injuries). */
-    float pinned_mass;            /* kg */
-    float pinned_height;          /* 0 feet .. 1 head, where the weight bears */
     /* Effects events of the last step, reset at the start of each step. */
     ipos shatter_pos[MAX_SHATTERS];
     uint8_t shatter_block[MAX_SHATTERS];
@@ -161,7 +171,6 @@ typedef struct physics {
     float thud_speed[MAX_SPLASHES];   /* m/s of the impact */
     uint8_t thud_block[MAX_SPLASHES];
     int thud_count;
-    int magnet;                   /* pull nearby items to the player (alive, not in a menu) */
     /* Stats for the HUD/bench. */
     int last_collapse;
     int fluid_updates;
@@ -181,6 +190,13 @@ void physics_on_block_changed(void *user, int x, int y, int z, uint8_t old_id, u
  * The per-step event lists (hits, shatters, splashes, thuds) are cleared,
  * then refilled for the caller to turn into injuries, effects and sounds. */
 void physics_step(physics *ph, player *p, const player_input *in);
+/* The same with n players (at most PHYS_MAX_PLAYERS), each with its own
+ * input and contact[i]; the world steps once after they have all moved.
+ * physics_step is this with one player. */
+void physics_step_players(physics *ph, player *const *ps, const player_input *ins, int n);
+/* Moves one player through the world without stepping anything else:
+ * a multiplayer client predicting its own movement between snapshots. */
+void physics_move_player(physics *ph, player *p, const player_input *in);
 
 /* Resets the player and stands them on the surface at (x, z), centred in
  * the block; at the top of the world if that column is not loaded. */
@@ -213,10 +229,10 @@ void physics_fluid_tick(physics *ph);
  * how long before it can be picked up (a thrown item flies clear first).
  * Returns 0 if there is no room for more items. */
 int physics_drop_item(physics *ph, dvec3 pos, dvec3 vel, int id, int count, float delay);
-/* Hands items that reached the player to `accept`, which returns how many
- * it took (the inventory may be full). Returns the number of stacks
- * picked up completely. */
-int physics_pickup(physics *ph, int (*accept)(void *user, int id, int count), void *user);
+/* Hands items that reached player `who` (an index into the last step's
+ * players) to `accept`, which returns how many it took (the inventory may
+ * be full). Returns the number of stacks picked up completely. */
+int physics_pickup(physics *ph, int who, int (*accept)(void *user, int id, int count), void *user);
 
 /* Places falling bodies back into the world (all of them, or only those in
  * one column) so they survive a save. */
