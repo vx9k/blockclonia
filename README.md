@@ -11,7 +11,9 @@ Every texture and sound is generated at start-up, and all memory comes from
 ## What's in it
 
 - **Infinite terrain** streamed around the player in 16×128×16 columns:
-  continents, hills, ridged mountains with snow, beaches, oceans and trees.
+  continents, hills, mountain ranges with bare rock and snow caps, beaches,
+  oceans and trees, cave tunnels winding through the rock and opening onto
+  the surface, and veins of coal, copper and iron ore.
 - **Realistic physics** (1 block = 1 m, SI units, fixed 60 Hz step). See
   [Physics](#physics).
 - **Heat and weather**: a day that lasts 20 minutes, air temperature from
@@ -22,7 +24,8 @@ Every texture and sound is generated at start-up, and all memory comes from
   metabolism, temperature and a long list of injuries, all treatable. See
   [Health](#health).
 - **Inventory and crafting** (press **Tab**): 36 slots, a hotbar, stacks
-  you can split and move, and recipes, some of which need a campfire. Items
+  you can split and move, and recipes, some of which need a campfire or a
+  furnace. Items
   you drop are physical objects that bob, spin and roll to you when you
   walk past.
 - **Menus** in the same style as the HUD: a title screen, a pause menu, a
@@ -95,7 +98,8 @@ dislocation.
   shows them for the block you look at.
 - **Structural integrity**: every block needs a load path to the ground.
   Each material can cantilever a set number of blocks (stone 7, timber 6,
-  brick 5, dirt 1); sand and gravel only rest on what's directly below.
+  brick 5, dirt 1, rock and ore in place 15); sand and gravel only rest on
+  what's directly below.
   Knock out a support and everything it held becomes falling rigid bodies.
   They tumble as they fall, bounce by their restitution, slide to a stop
   by friction, shatter if they are glass or ice, shove or pin the player,
@@ -184,6 +188,16 @@ or burns.
 | 1 campfire | 4 sticks, 1 log | |
 | 1 glass | 2 sand | a burning campfire nearby |
 | 1 brick | 2 dirt, 1 sand | a burning campfire nearby |
+| 1 furnace | 8 stone | |
+| 1 copper ingot | 1 raw copper, 1 coal | a furnace nearby |
+| 1 iron ingot | 1 raw iron, 2 coal | a furnace nearby |
+
+Rock, the stone the world is made of, breaks into stone blocks; coal ore
+gives coal, and copper and iron ore give raw metal to smelt. A campfire
+cannot reach the 1085–1540 °C copper and iron melt at; a furnace burning
+the coal can. Rock in place holds together as one mass, so a cave roof
+stays up when you dig into it, while a stone block you set yourself can
+only hang as far as any masonry (see [Physics](#physics)).
 
 ## Saves
 
@@ -201,7 +215,9 @@ Each world is one SQLite database, `world.db`, in its own folder. The
 folder name comes from the world's first name and stays put when you
 rename it. A world records the terrain generator version it was made
 with; a build refuses a world from a newer generator instead of joining
-different terrain onto it. A folder written by an older build
+different terrain onto it, and goes on growing an older world with the
+generator that made it (worlds from before caves and ore stay without
+them, with no seams). A folder written by an older build
 (`level.dat`, `player.dat`, `c.X.Z.bin`) is imported into the database
 the first time it is opened; the old files are left in place but are no
 longer read. Only one running game can hold a world's database open at a

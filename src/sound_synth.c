@@ -247,7 +247,12 @@ synth_material synth_material_of(uint8_t block)
     case B_ASH: return MAT_DIRT;
     case B_STONE:
     case B_BEDROCK:
-    case B_BRICK: return MAT_STONE;
+    case B_BRICK:
+    case B_COAL_ORE:
+    case B_COPPER_ORE:
+    case B_IRON_ORE:
+    case B_ROCK:
+    case B_FURNACE: return MAT_STONE;
     case B_LOG:
     case B_PLANKS:
     case B_CAMPFIRE: return MAT_WOOD;

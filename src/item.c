@@ -67,6 +67,36 @@ static const item_def ITEMS[ITEM_END - ITEM_FIRST] = {
                                       .tex = T_ITEM_DEFIBRILLATOR,
                                       .desc = "Automatic. Right-click: pads on or off.",
                                       .density = 650.0f},
+    [I_COAL - ITEM_FIRST] = {.name = "Coal",
+                             .stack = 64,
+                             .block = B_AIR,
+                             .tex = T_ITEM_COAL,
+                             .desc = "Fuel for smelting ore in a furnace.",
+                             .density = 1350.0f},
+    [I_COPPER_INGOT - ITEM_FIRST] = {.name = "Copper ingot",
+                                     .stack = 64,
+                                     .block = B_AIR,
+                                     .tex = T_ITEM_COPPER_INGOT,
+                                     .desc = "Smelted copper.",
+                                     .density = 8960.0f},
+    [I_IRON_INGOT - ITEM_FIRST] = {.name = "Iron ingot",
+                                   .stack = 64,
+                                   .block = B_AIR,
+                                   .tex = T_ITEM_IRON_INGOT,
+                                   .desc = "Smelted iron.",
+                                   .density = 7870.0f},
+    [I_RAW_COPPER - ITEM_FIRST] = {.name = "Raw copper",
+                                   .stack = 64,
+                                   .block = B_AIR,
+                                   .tex = T_ITEM_RAW_COPPER,
+                                   .desc = "Copper ore. Smelt with coal in a furnace.",
+                                   .density = 4000.0f},
+    [I_RAW_IRON - ITEM_FIRST] = {.name = "Raw iron",
+                                 .stack = 64,
+                                 .block = B_AIR,
+                                 .tex = T_ITEM_RAW_IRON,
+                                 .desc = "Iron ore. Smelt with coal in a furnace.",
+                                 .density = 5000.0f},
 };
 
 static const item_def UNKNOWN = {
@@ -74,7 +104,11 @@ static const item_def UNKNOWN = {
 
 int item_valid(int id)
 {
-    if (item_is_block(id)) return id < B_COUNT && id != B_WATER && id != B_BEDROCK;
+    /* Rock and ore only exist in place: breaking them gives stone, coal or
+     * raw metal, so they never become building blocks. */
+    if (item_is_block(id))
+        return id < B_COUNT && id != B_WATER && id != B_BEDROCK && id != B_ROCK && id != B_COAL_ORE &&
+               id != B_COPPER_ORE && id != B_IRON_ORE;
     return id >= ITEM_FIRST && id < ITEM_END;
 }
 
@@ -97,6 +131,7 @@ const item_def *item_get(int id)
         blocks[B_GRAVEL].desc = "Needs support from below.";
         blocks[B_CAMPFIRE].desc = "Heat, light and cooking. Feed it sticks, planks or logs.";
         blocks[B_ASH].desc = "What is left of a fire.";
+        blocks[B_FURNACE].desc = "Smelts ore. Craft next to it.";
         built = 1;
     }
     if (item_is_block(id) && id < B_COUNT) return &blocks[id];
@@ -122,6 +157,10 @@ int item_drops(uint8_t block, uint32_t *rng, item_stack out[3])
         if (chance(rng, 1, 6)) out[n++] = (item_stack){I_APPLE, 1};
         break;
     case B_GRASS: out[n++] = (item_stack){B_DIRT, 1}; break;
+    case B_ROCK: out[n++] = (item_stack){B_STONE, 1}; break;
+    case B_COAL_ORE: out[n++] = (item_stack){I_COAL, (uint8_t)(1 + chance(rng, 1, 3))}; break;
+    case B_COPPER_ORE: out[n++] = (item_stack){I_RAW_COPPER, 1}; break;
+    case B_IRON_ORE: out[n++] = (item_stack){I_RAW_IRON, 1}; break;
     case B_GLASS: break; /* shatters */
     case B_CAMPFIRE: out[n++] = (item_stack){I_STICK, 2}; break; /* the unburnt ends */
     case B_WATER:

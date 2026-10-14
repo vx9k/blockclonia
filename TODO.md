@@ -3,6 +3,28 @@
 Larger work that has been considered and deliberately deferred, with
 what would make it worth doing.
 
+## Roadmap (2026-10-14)
+
+One branch and pull request per item, in this order:
+
+1. **World generation** (`feat/worldgen-caves-ores`): taller mountains,
+   caves, coal/copper/iron ore, a furnace and smelting. Old worlds keep
+   the generator they were made with.
+2. **Tools, weapons and mobs**: pickaxe/axe/shovel tiers that change
+   breaking speed and drops, durability (inventory format INV2), sword
+   and knife, guns with projectiles and ammo, creatures with simple AI
+   so weapons have targets in single player.
+3. **Inventory screen redesign**: recipes grouped in collapsible
+   categories with scrolling, richer tooltips (ingredients, station,
+   durability, stats), hover and selection states. After item 2, so it
+   is built around the full item list.
+4. **Health**: adrenaline and stress hormones, harmful treatments (a
+   shock to a healthy heart, overdoses, drug interactions), organ damage
+   with effects felt in play (vision, movement, tremor, fainting), a
+   more interactive panel.
+5. **Finish multiplayer**: the items under Multiplayer below, NAT
+   traversal by UDP hole punching through a rendezvous server included.
+
 ## Native Metal renderer (macOS)
 
 **Status:** deferred. macOS runs the Vulkan renderer through MoltenVK
@@ -33,7 +55,7 @@ renderer has a baseline to beat.
 
 ## Multiplayer
 
-**Status:** in progress on `feat/multiplayer`. Decisions (2026-10-14):
+**Status:** peer-to-peer mode merged (#28). Decisions (2026-10-14):
 peer-to-peer first, ENet over UDP, every packet sealed with
 ChaCha20-Poly1305 (libsodium), chat end-to-end, simulation fully
 authoritative on one peer.

@@ -1,6 +1,7 @@
 #include "thermo.h"
 /* Thermodynamics: the day clock, ambient air, the heat field, campfires,
  * melting and freezing (thermo.c). */
+#include "inventory.h"
 #include "test_util.h"
 
 #include <math.h>
@@ -154,6 +155,11 @@ static void test_fire_air_and_radiation(void)
     CHECK(thermo_radiant(th, w, dv3(0.5, GROUND + 0.5, -1.5)) == 0.0); /* behind a wall */
     CHECK(thermo_near_fire(th, w, dv3(1.5, GROUND + 0.5, 0.5), 1.5));
     CHECK(!thermo_near_fire(th, w, dv3(3.5, GROUND + 0.5, 0.5), 1.5));
+    CHECK(thermo_stations(th, w, dv3(1.5, GROUND + 0.5, 0.5)) == STATION_FIRE);
+    world_set(w, 3, GROUND, 3, B_FURNACE, 0);
+    CHECK(thermo_stations(th, w, dv3(1.5, GROUND + 0.5, 0.5)) == (STATION_FIRE | STATION_FURNACE));
+    CHECK(thermo_stations(th, w, dv3(9.5, GROUND + 0.5, 9.5)) == 0);
+    world_set(w, 3, GROUND, 3, B_AIR, 0);
 
     /* Put out by water beside it: ash, no more heat, and the field fades. */
     world_set(w, 1, GROUND, 0, B_WATER, 0);

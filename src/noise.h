@@ -1,4 +1,4 @@
-/* Deterministic, seedable 2D gradient noise. No global state, so worker
+/* Deterministic, seedable 2D and 3D gradient noise. No global state, so worker
  * threads can call it freely. */
 #ifndef MC_NOISE_H
 #define MC_NOISE_H
@@ -20,5 +20,6 @@ static inline uint32_t hash2i(uint32_t seed, int x, int z)
 
 float noise2(uint32_t seed, float x, float z);                  /* [-1, 1] */
 float fbm2(uint32_t seed, float x, float z, int octaves);       /* ~[-1, 1] */
+float noise3(uint32_t seed, float x, float y, float z);         /* ~[-1, 1] */
 
 #endif

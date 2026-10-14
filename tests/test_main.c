@@ -1715,6 +1715,7 @@ int main(void)
     test_wire_all();
     test_net_all();
     test_mp_all();
+    test_worldgen_all();
     test_cardio_all();
     printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);
     return g_failed ? 1 : 0;

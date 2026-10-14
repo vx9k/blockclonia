@@ -1,5 +1,6 @@
 #include "thermo.h"
 #include "health.h"
+#include "inventory.h"
 #include "mem.h"
 
 #include <math.h>
@@ -827,6 +828,18 @@ int thermo_near_fire(const thermo *t, const world *w, dvec3 p, double r)
         if (flame_dist(f, p) <= r && world_get(w, f->x, f->y, f->z) == B_CAMPFIRE) return 1;
     }
     return 0;
+}
+
+int thermo_stations(const thermo *t, const world *w, dvec3 p)
+{
+    const int reach = 3; /* metres, as for campfires */
+    int s = thermo_near_fire(t, w, p, (double)reach) ? STATION_FIRE : 0;
+    int px = (int)floor(p.x), py = (int)floor(p.y), pz = (int)floor(p.z);
+    for (int y = py - reach; y <= py + reach && !(s & STATION_FURNACE); y++)
+        for (int z = pz - reach; z <= pz + reach; z++)
+            for (int x = px - reach; x <= px + reach; x++)
+                if (world_get(w, x, y, z) == B_FURNACE) s |= STATION_FURNACE;
+    return s;
 }
 
 int thermo_fires_near(const thermo *t, const world *w, dvec3 p, double r, dvec3 *out, int max)

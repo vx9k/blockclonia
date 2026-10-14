@@ -23,7 +23,7 @@ typedef struct {
     float mx, my;        /* cursor, logical pixels */
     int click, rclick;   /* pressed this frame */
     int shift;
-    int near_fire;       /* recipes that need a fire can be made */
+    int stations;        /* STATION_* bits within reach */
     float dt;
 } invui_input;
 

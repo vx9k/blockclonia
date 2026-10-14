@@ -43,3 +43,33 @@ float fbm2(uint32_t seed, float x, float z, int octaves)
     }
     return sum / norm;
 }
+
+/* The 12 cube-edge directions of improved Perlin noise. */
+static const float GRAD3[12][3] = {
+    {1, 1, 0},  {-1, 1, 0},  {1, -1, 0}, {-1, -1, 0}, {1, 0, 1},  {-1, 0, 1},
+    {1, 0, -1}, {-1, 0, -1}, {0, 1, 1},  {0, -1, 1},  {0, 1, -1}, {0, -1, -1},
+};
+
+static inline float grad3_dot(uint32_t seed, int ix, int iy, int iz, float fx, float fy, float fz)
+{
+    const float *g = GRAD3[hash2i(seed ^ hash_u32((uint32_t)iy * 0x85EBCA77U), ix, iz) % 12u];
+    return g[0] * fx + g[1] * fy + g[2] * fz;
+}
+
+float noise3(uint32_t seed, float x, float y, float z)
+{
+    float flx = floorf(x), fly = floorf(y), flz = floorf(z);
+    int ix = (int)flx, iy = (int)fly, iz = (int)flz;
+    float fx = x - flx, fy = y - fly, fz = z - flz;
+    float u = fade(fx), v = fade(fy), w = fade(fz);
+    float c[2][2] = {{0}};
+    for (int dy = 0; dy < 2; dy++)
+        for (int dz = 0; dz < 2; dz++) {
+            float a = grad3_dot(seed, ix, iy + dy, iz + dz, fx, fy - (float)dy, fz - (float)dz);
+            float b = grad3_dot(seed, ix + 1, iy + dy, iz + dz, fx - 1.0f, fy - (float)dy, fz - (float)dz);
+            c[dy][dz] = a + u * (b - a);
+        }
+    float y0 = c[0][0] + w * (c[0][1] - c[0][0]);
+    float y1 = c[1][0] + w * (c[1][1] - c[1][0]);
+    return y0 + v * (y1 - y0);
+}

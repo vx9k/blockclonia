@@ -210,7 +210,9 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
     ui_rect(u, 0, 0, u->w, u->h, ui_rgba(0, 0, 0, (int)(120.0f * fade)));
 
     const float grid_w = INV_HOTBAR * SLOT + (INV_HOTBAR - 1) * GAP;
-    const float pw = 8 + grid_w + 12 + 190 + 8, ph = 170;
+    /* Tall enough for the recipe list (rows of 20 from y 36). shortcut: one
+     * column of rows, fine to ~20 recipes; the redesign adds categories. */
+    const float pw = 8 + grid_w + 12 + 190 + 8, ph = fmaxf(170.0f, 36.0f + 20.0f * (float)g_recipe_count + 6.0f);
     const float x0 = floorf((u->w - pw) * 0.5f), y0 = floorf((u->h - ph) * 0.5f + (1.0f - t) * 10.0f);
     ui_rect(u, x0, y0, pw, ph, ui_alpha(C_PANEL, fade));
     ui_frame(u, x0, y0, pw, ph, 1, ui_alpha(C_BORDER, fade));
@@ -252,7 +254,7 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
     for (int k = 0; k < g_recipe_count; k++) {
         const recipe *rc = &g_recipes[k];
         float ry = y0 + 36 + (float)k * 20;
-        int ok = inv_can_craft(inv, k, in->near_fire);
+        int ok = inv_can_craft(inv, k, in->stations);
         int hot = inside(in, cx, ry, cw, 18);
         if (hot) hover_recipe = k;
         float st = ease_out_cubic((s->open_t - 0.03f * (float)k) / 0.25f);
@@ -272,12 +274,14 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
             ui_text_shadow(u, ix + 12, ry + 9, 1, ui_alpha(have >= rc->in[m].count ? C_HEAD : C_ART, st), b);
             ix += 26;
         }
-        if (rc->needs_fire)
-            ui_text(u, cx + cw - 4 - ui_text_width("fire", 1), ry + 5, 1, ui_alpha(in->near_fire ? C_CO2 : C_DIM, st),
-                    "fire");
+        if (rc->station) {
+            const char *sn = rc->station & STATION_FURNACE ? "furnace" : "fire";
+            ui_text(u, cx + cw - 4 - ui_text_width(sn, 1), ry + 5, 1,
+                    ui_alpha((in->stations & rc->station) == rc->station ? C_CO2 : C_DIM, st), sn);
+        }
         if (hot && in->click && ok) {
             int n = 0;
-            while (inv_craft(inv, k, in->near_fire) && ++n < (in->shift ? 64 : 1)) {}
+            while (inv_craft(inv, k, in->stations) && ++n < (in->shift ? 64 : 1)) {}
             if (n) {
                 r.crafted = k;
                 r.craft_all = in->shift;
@@ -294,10 +298,11 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
         } else if (hover_recipe >= 0) {
             const recipe *rc = &g_recipes[hover_recipe];
             const item_def *d = item_get(rc->out.id);
-            int ok = inv_can_craft(inv, hover_recipe, in->near_fire);
-            const char *why = ok ? "Click to craft, Shift-click for all"
-                                 : (rc->needs_fire && !in->near_fire ? "Needs a burning campfire nearby"
-                                                                     : "Missing ingredients");
+            int ok = inv_can_craft(inv, hover_recipe, in->stations);
+            const char *why = "Missing ingredients";
+            if (ok) why = "Click to craft, Shift-click for all";
+            else if (rc->station & ~in->stations & STATION_FURNACE) why = "Needs a furnace nearby";
+            else if (rc->station & ~in->stations & STATION_FIRE) why = "Needs a burning campfire nearby";
             tooltip(u, in->mx, in->my, d->name, why, ok ? C_ECG : C_ART);
         }
     }

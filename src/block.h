@@ -22,6 +22,11 @@ typedef enum {
     B_WATER,
     B_CAMPFIRE,  /* burns its fuel (meta) and heats its surroundings */
     B_ASH,       /* what a campfire leaves */
+    B_COAL_ORE,
+    B_COPPER_ORE,
+    B_IRON_ORE,
+    B_FURNACE,   /* a crafting station for smelting; not a heat source itself */
+    B_ROCK,      /* stone in place, as generated: one mass, so caves hold up */
     B_COUNT
 } block_id;
 
@@ -89,6 +94,16 @@ typedef enum {
     /* Items added later go last, so the layers the shaders animate keep
      * their numbers. */
     T_ITEM_DEFIBRILLATOR,
+    T_COAL_ORE,
+    T_COPPER_ORE,
+    T_IRON_ORE,
+    T_FURNACE_FRONT,
+    T_FURNACE_TOP,
+    T_ITEM_COAL,
+    T_ITEM_COPPER_INGOT,
+    T_ITEM_IRON_INGOT,
+    T_ITEM_RAW_COPPER,
+    T_ITEM_RAW_IRON,
     T_COUNT
 } tex_id;
 

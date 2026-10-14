@@ -48,20 +48,24 @@ item_stack inv_return_cursor(inventory *inv);
 
 /* ------------------------------------------------------------ crafting */
 
+/* Crafting stations, as bits: what a recipe needs and what is nearby. */
+enum { STATION_FIRE = 1, STATION_FURNACE = 2 };
+
 typedef struct {
     item_stack out;
     item_stack in[3];    /* id 0 ends the list */
-    uint8_t needs_fire;  /* only next to a burning campfire */
+    uint8_t station;     /* STATION_* bits it needs nearby, 0 for none */
 } recipe;
 
 extern const recipe g_recipes[];
 extern const int g_recipe_count;
 
-/* 1 if the ingredients are there (and fire, when needed). */
-int inv_can_craft(const inventory *inv, int r, int near_fire);
+/* 1 if the ingredients are there and the stations it needs are among
+ * the STATION_* bits in stations. */
+int inv_can_craft(const inventory *inv, int r, int stations);
 /* Crafts once; returns 1 on success. The result goes into the inventory,
  * or fails without using anything if there is no room. */
-int inv_craft(inventory *inv, int r, int near_fire);
+int inv_craft(inventory *inv, int r, int stations);
 
 /* ---------------------------------------------------------- persistence */
 

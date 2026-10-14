@@ -43,4 +43,25 @@ const block_def g_blocks[B_COUNT] = {
                     1700.0f,
                     0.15f},
     [B_ASH] = {"ash", BF_SOLID | BF_OPAQUE | BF_GRANULAR, ALL(T_ASH), 0, 600.0f, 0.6f, 0.02f, 0.3f, 800.0f, 0.1f},
+    /* Ores are host rock with a share of mineral: denser and harder than
+     * plain stone, more so the more metal they carry. Like rock they are
+     * part of the mass around them, and never come loose as blocks. */
+    [B_COAL_ORE] = {"coal ore", BF_SOLID | BF_OPAQUE, ALL(T_COAL_ORE), 15, 2200.0f, 0.7f, 0.25f, 7.0f, 900.0f, 1.5f},
+    [B_COPPER_ORE] = {"copper ore", BF_SOLID | BF_OPAQUE, ALL(T_COPPER_ORE), 15, 3000.0f, 0.7f, 0.25f, 8.0f, 700.0f,
+                      3.0f},
+    [B_IRON_ORE] = {"iron ore", BF_SOLID | BF_OPAQUE, ALL(T_IRON_ORE), 15, 3400.0f, 0.7f, 0.25f, 9.0f, 650.0f, 3.5f},
+    [B_FURNACE] = {"furnace",
+                   BF_SOLID | BF_OPAQUE,
+                   {T_FURNACE_FRONT, T_FURNACE_FRONT, T_FURNACE_TOP, T_FURNACE_TOP, T_FURNACE_FRONT, T_FURNACE_FRONT},
+                   5,
+                   2300.0f,
+                   0.7f,
+                   0.2f,
+                   7.0f,
+                   840.0f,
+                   1.0f},
+    /* Bedrock-like rock mass spans caverns tens of metres wide; a stone
+     * block set in a wall by hand (B_STONE, what breaking rock gives) is
+     * only as good as its mortar. 15 is the most the support check counts. */
+    [B_ROCK] = {"stone", BF_SOLID | BF_OPAQUE, ALL(T_STONE), 15, 2700.0f, 0.7f, 0.25f, 6.0f, 790.0f, 2.5f},
 };
