@@ -15,6 +15,7 @@ typedef struct {
     float name_age;      /* s since the item in hand changed */
     int last_sel, last_id;
     float pop[INV_SLOTS];/* per-slot pulse when a stack grows (pickup) */
+    int recipe_top;      /* first recipe row shown (the list scrolls) */
     uint8_t last_count[INV_SLOTS];
     uint8_t last_slot_id[INV_SLOTS];
 } invui;
@@ -24,6 +25,7 @@ typedef struct {
     int click, rclick;   /* pressed this frame */
     int shift;
     int stations;        /* STATION_* bits within reach */
+    float wheel;         /* mouse wheel notches this frame, + up */
     float dt;
 } invui_input;
 

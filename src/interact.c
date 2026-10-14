@@ -21,10 +21,10 @@ static float frand(interact *s)
 int interact_box_hits_cell(aabb b, int x, int y, int z)
 { return b.min.x < x + 1 && b.max.x > x && b.min.y < y + 1 && b.max.y > y && b.min.z < z + 1 && b.max.z > z; }
 
-static void spill_drops(interact *s, physics *ph, uint8_t block, ipos at)
+static void spill_drops(interact *s, physics *ph, uint8_t block, int held, ipos at)
 {
     item_stack drops[3] = {0};
-    int n = item_drops(block, &s->rng, drops);
+    int n = item_harvests(held, block) ? item_drops(block, &s->rng, drops) : 0;
     for (int k = 0; k < n; k++) {
         dvec3 p = dv3(at.x + 0.5, at.y + 0.4, at.z + 0.5);
         dvec3 v = dv3((double)(frand(s) - 0.5f) * 2.0, 2.0 + (double)frand(s), (double)(frand(s) - 0.5f) * 2.0);
@@ -52,8 +52,8 @@ static void emit(interact_out *o, int kind, uint8_t block, dvec3 at)
 
 static dvec3 centre(ipos b) { return dv3(b.x + 0.5, b.y + 0.5, b.z + 0.5); }
 
-static void do_break(interact *s, world *w, physics *ph, const player *pl, fx_state *fx, ipos b, uint8_t id,
-                     interact_out *o)
+static void do_break(interact *s, world *w, physics *ph, const player *pl, inventory *inv, fx_state *fx, ipos b,
+                     uint8_t id, interact_out *o)
 {
     emit(o, IE_BREAK, id, centre(b));
     world_set_player(w, b.x, b.y, b.z, B_AIR, 0);
@@ -61,9 +61,17 @@ static void do_break(interact *s, world *w, physics *ph, const player *pl, fx_st
     fx_break(fx, id, b.x, b.y, b.z, (d->flags & BF_BRITTLE) ? 20 : 12);
     o->actions++;
     if (!pl->flying) {
-        spill_drops(s, ph, id, b);
+        const item_stack *held = inv_held(inv);
+        spill_drops(s, ph, id, held->count ? held->id : 0, b);
         o->broke = 1;
         o->broken_id = id;
+        if (held->count && item_durability(held->id)) {
+            int was = held->id;
+            if (inv_wear_held(inv, 1)) {
+                o->tool_broke = was;
+                o->msg = "Your tool wore out";
+            }
+        }
     }
     s->progress = 0.0f;
     s->has_target = 0;
@@ -120,10 +128,10 @@ static void use_item(interact *s, world *w, const physics *ph, thermo *th, const
         return;
     }
     if (!hit.hit || !held->count) {
-        if (held->id == I_APPLE && held->count) o->eat = 1;
+        if (held->count && item_food(held->id, NULL) > 0.0f) o->eat = 1;
         return;
     }
-    if (held->id == I_APPLE) {
+    if (item_food(held->id, NULL) > 0.0f) {
         o->eat = 1;
         return;
     }
@@ -199,12 +207,13 @@ interact_out interact_frame(interact *s, world *w, physics *ph, thermo *th, cons
             /* Creative: a click breaks at once; holding keeps going. */
             s->repeat -= in->dt;
             if (in->attack_click || s->repeat <= 0.0f) {
-                do_break(s, w, ph, pl, fx, hit.block, hit.id, &o);
+                do_break(s, w, ph, pl, inv, fx, hit.block, hit.id, &o);
                 s->repeat = 0.22f;
             }
         } else {
             float hard = block_get(hit.id)->hardness;
-            float speed = in->speed > 0.05f ? in->speed : 0.05f;
+            const item_stack *held = inv_held(inv);
+            float speed = (in->speed > 0.05f ? in->speed : 0.05f) * item_dig_speed(held->count ? held->id : 0, hit.id);
             s->progress += hard > 0.0f ? in->dt * speed / hard : 1.0f;
             s->chip_t -= in->dt;
             if (s->chip_t <= 0.0f) {
@@ -216,7 +225,7 @@ interact_out interact_frame(interact *s, world *w, physics *ph, thermo *th, cons
                 s->chip_t = 0.25f;
                 s->swing = 1.0f;
             }
-            if (s->progress >= 1.0f) do_break(s, w, ph, pl, fx, hit.block, hit.id, &o);
+            if (s->progress >= 1.0f) do_break(s, w, ph, pl, inv, fx, hit.block, hit.id, &o);
         }
     } else {
         s->has_target = 0;
@@ -235,7 +244,7 @@ interact_out interact_frame(interact *s, world *w, physics *ph, thermo *th, cons
             dvec3 p = dv3(eye.x + (double)dir.x * 0.4, eye.y - 0.3 + (double)dir.y * 0.4, eye.z + (double)dir.z * 0.4);
             dvec3 v = dv3(pl->vel.x + (double)dir.x * 4.5, pl->vel.y + (double)dir.y * 4.5 + 1.0,
                           pl->vel.z + (double)dir.z * 4.5);
-            if (physics_drop_item(ph, p, v, held->id, n, 1.2f)) {
+            if (physics_drop_stack(ph, p, v, (item_stack){held->id, (uint8_t)n, held->wear}, 1.2f)) {
                 emit(&o, IE_DROP, item_is_block(held->id) ? held->id : 0, p);
                 inv_use_held(inv, n);
             }

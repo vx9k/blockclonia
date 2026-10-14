@@ -120,6 +120,13 @@ static void slot_item(ui *u, const item_stack *st, float x, float y, float scale
     float s = 16.0f * scale;
     invui_icon(u, st->id, x + (SLOT - s) * 0.5f, y + (SLOT - s) * 0.5f, s, a);
     count_label(u, st, x, y, a);
+    int dur = item_durability(st->id);
+    if (dur && st->wear) {
+        /* Uses left as a bar along the bottom, green to red. */
+        float left = 1.0f - (float)st->wear / (float)dur;
+        ui_rect(u, x + 3, y + SLOT - 4, SLOT - 6, 2, ui_alpha(ui_rgba(10, 10, 12, 230), a));
+        ui_rect(u, x + 3, y + SLOT - 4, (SLOT - 6) * left, 2, ui_alpha(pal_mix(C_ART, C_ECG, left), a));
+    }
 }
 
 void invui_init(invui *s)
@@ -203,16 +210,23 @@ static void tooltip(ui *u, float mx, float my, const char *title, const char *li
 
 invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in)
 {
-    invui_result r = {0, {0, 0}, -1, 0, -1, 0, 0};
+    invui_result r = {0, {0, 0, 0}, -1, 0, -1, 0, 0};
     s->open_t += in->dt;
     track_pops(s, inv, in->dt);
     float t = ease_out_back(s->open_t / 0.25f), fade = ease_out_cubic(s->open_t / 0.18f);
     ui_rect(u, 0, 0, u->w, u->h, ui_rgba(0, 0, 0, (int)(120.0f * fade)));
 
     const float grid_w = INV_HOTBAR * SLOT + (INV_HOTBAR - 1) * GAP;
-    /* Tall enough for the recipe list (rows of 20 from y 36). shortcut: one
-     * column of rows, fine to ~20 recipes; the redesign adds categories. */
-    const float pw = 8 + grid_w + 12 + 190 + 8, ph = fmaxf(170.0f, 36.0f + 20.0f * (float)g_recipe_count + 6.0f);
+    /* Tall enough for the recipe rows shown (20 px each from y 36); the
+     * wheel scrolls through the rest. shortcut: one scrolling column, until
+     * the redesign groups recipes in categories. */
+    enum { RECIPE_ROWS = 14 };
+    const int rows = g_recipe_count < RECIPE_ROWS ? g_recipe_count : RECIPE_ROWS;
+    s->recipe_top -= (int)in->wheel;
+    if (s->recipe_top > g_recipe_count - rows) s->recipe_top = g_recipe_count - rows;
+    if (s->recipe_top < 0) s->recipe_top = 0;
+    const float pw = 8 + grid_w + 12 + 190 + 8,
+                ph = fmaxf(170.0f, 36.0f + 20.0f * (float)rows + 16.0f /* room for the "more" hint */);
     const float x0 = floorf((u->w - pw) * 0.5f), y0 = floorf((u->h - ph) * 0.5f + (1.0f - t) * 10.0f);
     ui_rect(u, x0, y0, pw, ph, ui_alpha(C_PANEL, fade));
     ui_frame(u, x0, y0, pw, ph, 1, ui_alpha(C_BORDER, fade));
@@ -243,7 +257,7 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
         r.changed = 1;
     } else if (inv->cursor.count && in->click && !inside(in, x0, y0, pw, ph)) {
         r.drop = inv->cursor; /* thrown out of the window */
-        inv->cursor = (item_stack){0, 0};
+        inv->cursor = (item_stack){0, 0, 0};
         r.changed = 1;
     }
 
@@ -251,13 +265,16 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
     const float cx = x0 + 8 + grid_w + 12, cw = 190;
     ui_text(u, cx, y0 + 24, 1, ui_alpha(C_HEAD, fade), "CRAFTING");
     int hover_recipe = -1;
-    for (int k = 0; k < g_recipe_count; k++) {
+    if (s->recipe_top > 0) ui_text(u, cx + cw - 50, y0 + 24, 1, ui_alpha(C_DIM, fade), "more ^");
+    if (s->recipe_top + rows < g_recipe_count)
+        ui_text(u, cx + cw - 50, y0 + ph - 12, 1, ui_alpha(C_DIM, fade), "more v");
+    for (int k = s->recipe_top; k < s->recipe_top + rows; k++) {
         const recipe *rc = &g_recipes[k];
-        float ry = y0 + 36 + (float)k * 20;
+        float ry = y0 + 36 + (float)(k - s->recipe_top) * 20;
         int ok = inv_can_craft(inv, k, in->stations);
         int hot = inside(in, cx, ry, cw, 18);
         if (hot) hover_recipe = k;
-        float st = ease_out_cubic((s->open_t - 0.03f * (float)k) / 0.25f);
+        float st = ease_out_cubic((s->open_t - 0.03f * (float)(k - s->recipe_top)) / 0.25f);
         ui_rect(u, cx, ry, cw, 18, ui_alpha(hot && ok ? ui_rgba(40, 52, 50, 235) : ui_rgba(22, 26, 32, 220), st));
         ui_frame(u, cx, ry, cw, 18, 1, ui_alpha(hot && ok ? C_ECG : C_BORDER, st));
         float a = st * (ok ? 1.0f : 0.45f);
@@ -293,8 +310,12 @@ invui_result invui_screen(ui *u, invui *s, inventory *inv, const invui_input *in
     /* Tooltips, then the stack riding the cursor on top of everything. */
     if (!inv->cursor.count) {
         if (hover >= 0 && inv->slot[hover].count) {
-            const item_def *d = item_get(inv->slot[hover].id);
-            tooltip(u, in->mx, in->my, d->name, d->desc, C_DIM);
+            const item_stack *hs = &inv->slot[hover];
+            const item_def *d = item_get(hs->id);
+            int dur = item_durability(hs->id);
+            char worn[64] = {0};
+            if (dur) snprintf(worn, sizeof worn, "%s %d of %d uses left.", d->name, dur - hs->wear, dur);
+            tooltip(u, in->mx, in->my, dur ? worn : d->name, d->desc, C_DIM);
         } else if (hover_recipe >= 0) {
             const recipe *rc = &g_recipes[hover_recipe];
             const item_def *d = item_get(rc->out.id);

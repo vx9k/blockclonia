@@ -14,11 +14,10 @@ static body *drop(test_world *t, double x, double y, double z, uint8_t id)
     return b;
 }
 
-static int test_take_all(void *user, int id, int count)
+static int test_take_all(void *user, item_stack s)
 {
-    (void)id;
-    *(int *)user += count;
-    return count;
+    *(int *)user += s.count;
+    return s.count;
 }
 
 static int count_blocks(const world *w, int x0, int z0, int r, int y, uint8_t id)

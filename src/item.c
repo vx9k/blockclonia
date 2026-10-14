@@ -1,6 +1,8 @@
 #include "item.h"
 
-static const item_def ITEMS[ITEM_END - ITEM_FIRST] = {
+#include <stdio.h>
+
+static const item_def ITEMS[I_TOOL_FIRST - ITEM_FIRST] = {
     [I_STICK - ITEM_FIRST] = {.name = "Stick",
                               .stack = 64,
                               .block = B_AIR,
@@ -97,10 +99,158 @@ static const item_def ITEMS[ITEM_END - ITEM_FIRST] = {
                                  .tex = T_ITEM_RAW_IRON,
                                  .desc = "Iron ore. Smelt with coal in a furnace.",
                                  .density = 5000.0f},
+    [I_RAW_MEAT - ITEM_FIRST] = {.name = "Raw meat",
+                                 .stack = 16,
+                                 .block = B_AIR,
+                                 .tex = T_ITEM_RAW_MEAT,
+                                 .desc = "Better cooked over a fire. E to eat.",
+                                 .density = 1050.0f},
+    [I_COOKED_MEAT - ITEM_FIRST] = {.name = "Cooked meat",
+                                    .stack = 16,
+                                    .block = B_AIR,
+                                    .tex = T_ITEM_COOKED_MEAT,
+                                    .desc = "350 kcal. E to eat.",
+                                    .density = 1000.0f},
+    [I_GUNPOWDER - ITEM_FIRST] = {.name = "Gunpowder",
+                                  .stack = 64,
+                                  .block = B_AIR,
+                                  .tex = T_ITEM_GUNPOWDER,
+                                  .desc = "Coal and the potash in ash. For cartridges.",
+                                  .density = 1700.0f},
+    [I_CARTRIDGE - ITEM_FIRST] = {.name = "Cartridge",
+                                  .stack = 32,
+                                  .block = B_AIR,
+                                  .tex = T_ITEM_CARTRIDGE,
+                                  .desc = "Rifle ammunition.",
+                                  .density = 5000.0f},
+    [I_RIFLE - ITEM_FIRST] = {.name = "Rifle",
+                              .stack = 1,
+                              .block = B_AIR,
+                              .tex = T_ITEM_RIFLE,
+                              .desc = "Right-click to fire. Uses cartridges.",
+                              .density = 900.0f},
 };
 
 static const item_def UNKNOWN = {
     .name = "?", .desc = "", .density = 1000.0f, .stack = 1, .block = B_AIR, .tex = T_STONE};
+
+static const char *const TIER_NAME[TIER_COUNT] = {"Wooden", "Stone", "Copper", "Iron"};
+static const char *const KIND_NAME[TOOL_KINDS] = {"pickaxe", "axe", "shovel", "knife", "sword"};
+static const char *const KIND_DESC[TOOL_KINDS] = {"Breaks rock and ore", "Fells trees, cuts timber",
+                                                  "Digs soil, sand and snow", "A short blade", "A long blade"};
+/* Uses per tier: harder edges last longer. Wood about a hundred strikes,
+ * iron a few hundred (and wear fits in a byte). */
+static const int TIER_USES[TIER_COUNT] = {60, 130, 180, 250};
+/* Breaking speed with the right tool, times the bare hand. */
+static const float TIER_SPEED[TIER_COUNT] = {2.0f, 4.0f, 5.0f, 6.5f};
+
+static item_def g_tools[TOOL_KINDS * TIER_COUNT];
+
+static void build_tools(void)
+{
+    static char names[TOOL_KINDS * TIER_COUNT][24], descs[TOOL_KINDS * TIER_COUNT][48];
+    for (int k = 0; k < TOOL_KINDS; k++)
+        for (int t = 0; t < TIER_COUNT; t++) {
+            int i = k * TIER_COUNT + t;
+            snprintf(names[i], sizeof names[i], "%s %s", TIER_NAME[t], KIND_NAME[k]);
+            snprintf(descs[i], sizeof descs[i], "%s. %d uses.", KIND_DESC[k], TIER_USES[t]);
+            /* Densities of the head's material, so a dropped tool floats or
+             * sinks as its head would. */
+            static const float DENS[TIER_COUNT] = {600.0f, 2600.0f, 8960.0f, 7870.0f};
+            g_tools[i] = (item_def){.name = names[i],
+                                    .desc = descs[i],
+                                    .density = DENS[t],
+                                    .stack = 1,
+                                    .block = B_AIR,
+                                    .tex = (uint8_t)(T_TOOL_FIRST + i)};
+        }
+}
+
+float item_food(int id, float *water)
+{
+    /* A 180 g apple, and about 150 g of pork: cooking drives off water
+     * but makes more of the energy digestible. */
+    float kcal = 0.0f, w = 0.0f;
+    switch (id) {
+    case I_APPLE:
+        kcal = 95.0f;
+        w = 0.085f;
+        break;
+    case I_RAW_MEAT:
+        kcal = 200.0f;
+        w = 0.09f;
+        break;
+    case I_COOKED_MEAT:
+        kcal = 350.0f;
+        w = 0.05f;
+        break;
+    default: break;
+    }
+    if (water) *water = w;
+    return kcal;
+}
+
+int item_durability(int id)
+{
+    int kind = 0, tier = 0;
+    if (id == I_RIFLE) return 250; /* shots before the barrel is shot out (wear is a byte) */
+    return item_tool(id, &kind, &tier) ? TIER_USES[tier] : 0;
+}
+
+int block_tool(uint8_t block)
+{
+    switch (block) {
+    case B_STONE:
+    case B_ROCK:
+    case B_BRICK:
+    case B_FURNACE:
+    case B_COAL_ORE:
+    case B_COPPER_ORE:
+    case B_IRON_ORE:
+    case B_ICE: return TOOL_PICKAXE;
+    case B_LOG:
+    case B_PLANKS:
+    case B_CAMPFIRE: return TOOL_AXE;
+    case B_DIRT:
+    case B_GRASS:
+    case B_SAND:
+    case B_GRAVEL:
+    case B_SNOW:
+    case B_ASH: return TOOL_SHOVEL;
+    default: return -1;
+    }
+}
+
+/* The pickaxe tier a block needs before it yields anything, -1 for none. */
+static int pick_tier(uint8_t block)
+{
+    switch (block) {
+    case B_STONE:
+    case B_ROCK:
+    case B_BRICK:
+    case B_FURNACE:
+    case B_COAL_ORE: return TIER_WOOD;
+    case B_COPPER_ORE:
+    case B_IRON_ORE: return TIER_STONE;
+    default: return -1;
+    }
+}
+
+int item_harvests(int held, uint8_t block)
+{
+    int need = pick_tier(block), kind = 0, tier = 0;
+    if (need < 0) return 1;
+    return item_tool(held, &kind, &tier) && kind == TOOL_PICKAXE && tier >= need;
+}
+
+float item_dig_speed(int held, uint8_t block)
+{
+    int kind = 0, tier = 0;
+    if (item_tool(held, &kind, &tier) && kind == block_tool(block)) return TIER_SPEED[tier];
+    /* Bare hands (or the wrong tool) on rock: a third of the speed, and
+     * item_harvests says it yields nothing. */
+    return pick_tier(block) >= 0 ? 1.0f / 3.0f : 1.0f;
+}
 
 int item_valid(int id)
 {
@@ -132,10 +282,12 @@ const item_def *item_get(int id)
         blocks[B_CAMPFIRE].desc = "Heat, light and cooking. Feed it sticks, planks or logs.";
         blocks[B_ASH].desc = "What is left of a fire.";
         blocks[B_FURNACE].desc = "Smelts ore. Craft next to it.";
+        build_tools();
         built = 1;
     }
     if (item_is_block(id) && id < B_COUNT) return &blocks[id];
-    if (id >= ITEM_FIRST && id < ITEM_END) return &ITEMS[id - ITEM_FIRST];
+    if (id >= I_TOOL_FIRST && id < ITEM_END) return &g_tools[id - I_TOOL_FIRST];
+    if (id >= ITEM_FIRST && id < I_TOOL_FIRST) return &ITEMS[id - ITEM_FIRST];
     return &UNKNOWN;
 }
 
@@ -153,21 +305,21 @@ int item_drops(uint8_t block, uint32_t *rng, item_stack out[3])
     switch (block) {
     case B_LEAVES:
         /* Torn apart by hand: fibre about half the time, sometimes an apple. */
-        if (chance(rng, 1, 2)) out[n++] = (item_stack){I_FIBRE, 1};
-        if (chance(rng, 1, 6)) out[n++] = (item_stack){I_APPLE, 1};
+        if (chance(rng, 1, 2)) out[n++] = (item_stack){I_FIBRE, 1, 0};
+        if (chance(rng, 1, 6)) out[n++] = (item_stack){I_APPLE, 1, 0};
         break;
-    case B_GRASS: out[n++] = (item_stack){B_DIRT, 1}; break;
-    case B_ROCK: out[n++] = (item_stack){B_STONE, 1}; break;
-    case B_COAL_ORE: out[n++] = (item_stack){I_COAL, (uint8_t)(1 + chance(rng, 1, 3))}; break;
-    case B_COPPER_ORE: out[n++] = (item_stack){I_RAW_COPPER, 1}; break;
-    case B_IRON_ORE: out[n++] = (item_stack){I_RAW_IRON, 1}; break;
+    case B_GRASS: out[n++] = (item_stack){B_DIRT, 1, 0}; break;
+    case B_ROCK: out[n++] = (item_stack){B_STONE, 1, 0}; break;
+    case B_COAL_ORE: out[n++] = (item_stack){I_COAL, (uint8_t)(1 + chance(rng, 1, 3)), 0}; break;
+    case B_COPPER_ORE: out[n++] = (item_stack){I_RAW_COPPER, 1, 0}; break;
+    case B_IRON_ORE: out[n++] = (item_stack){I_RAW_IRON, 1, 0}; break;
     case B_GLASS: break; /* shatters */
-    case B_CAMPFIRE: out[n++] = (item_stack){I_STICK, 2}; break; /* the unburnt ends */
+    case B_CAMPFIRE: out[n++] = (item_stack){I_STICK, 2, 0}; break; /* the unburnt ends */
     case B_WATER:
     case B_AIR:
     case B_BEDROCK: break;
     default:
-        if (block < B_COUNT) out[n++] = (item_stack){block, 1};
+        if (block < B_COUNT) out[n++] = (item_stack){block, 1, 0};
         break;
     }
     return n;

@@ -340,7 +340,7 @@ static void test_defib_item(void)
     inventory back = {0};
     CHECK(inv_decode(&back, buf, sizeof buf) == 0 && inv_count(&back, I_DEFIBRILLATOR) == 1);
     for (int i = 0; i < INV_SLOTS; i++)
-        if (buf[8 + 2 * i] == I_DEFIBRILLATOR) buf[8 + 2 * i + 1] = 2; /* two in a slot of one */
+        if (buf[8 + 3 * i] == I_DEFIBRILLATOR) buf[8 + 3 * i + 1] = 2; /* two in a slot of one */
     CHECK(inv_decode(&back, buf, sizeof buf) == -1);
 
     health *h = new_body(51);

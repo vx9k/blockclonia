@@ -775,8 +775,14 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
         h->antibiotic = 7.0f * 24.0f;
         snprintf(msg, msg_size, "Started a 7-day course of antibiotics");
         return 1;
-    case TREAT_EAT:
-        if (inv_count(inv, I_APPLE) <= 0) {
+    case TREAT_EAT: {
+        /* The food in hand, else the best there is. */
+        static const int PREF[] = {I_COOKED_MEAT, I_APPLE, I_RAW_MEAT};
+        const item_stack *held = inv_held(inv);
+        int food = held->count && item_food(held->id, NULL) > 0.0f ? held->id : 0;
+        for (size_t k = 0; !food && k < sizeof PREF / sizeof PREF[0]; k++)
+            if (inv_count(inv, PREF[k]) > 0) food = PREF[k];
+        if (!food) {
             snprintf(msg, msg_size, "No food (apples drop from leaves)");
             return 0;
         }
@@ -784,11 +790,13 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
             snprintf(msg, msg_size, "Too full to eat");
             return 0;
         }
-        inv_take(inv, I_APPLE, 1);
-        h->stomach_kcal += 95.0f;
-        h->stomach_water += 0.085f;
-        snprintf(msg, msg_size, "Ate an apple (95 kcal)");
+        float water = 0.0f, kcal = item_food(food, &water);
+        inv_take(inv, food, 1);
+        h->stomach_kcal += kcal;
+        h->stomach_water += water;
+        snprintf(msg, msg_size, "Ate %s (%.0f kcal)", food == I_APPLE ? "an apple" : "meat", (double)kcal);
         return 1;
+    }
     case TREAT_DRINK:
         if (!water_nearby) {
             snprintf(msg, msg_size, "No water within reach");

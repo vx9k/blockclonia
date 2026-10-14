@@ -190,8 +190,10 @@ void physics_destroy(physics *ph)
 aabb player_box(const player *p)
 {
     aabb b = {0};
-    b.min = dv3(p->pos.x - PLAYER_HALF_W, p->pos.y, p->pos.z - PLAYER_HALF_W);
-    b.max = dv3(p->pos.x + PLAYER_HALF_W, p->pos.y + PLAYER_HEIGHT, p->pos.z + PLAYER_HALF_W);
+    double hw = p->half_w > 0.0f ? (double)p->half_w : PLAYER_HALF_W;
+    double ht = p->height > 0.0f ? (double)p->height : PLAYER_HEIGHT;
+    b.min = dv3(p->pos.x - hw, p->pos.y, p->pos.z - hw);
+    b.max = dv3(p->pos.x + hw, p->pos.y + ht, p->pos.z + hw);
     return b;
 }
 
@@ -914,25 +916,33 @@ static double item_restitution(int id) { return item_is_block(id) ? (double)bloc
 int physics_drop_item(physics *ph, dvec3 pos, dvec3 vel, int id, int count, float delay)
 {
     if (!item_valid(id) || count <= 0) return 1;
+    return physics_drop_stack(ph, pos, vel, (item_stack){(uint8_t)id, (uint8_t)(count > 255 ? 255 : count), 0}, delay);
+}
+
+int physics_drop_stack(physics *ph, dvec3 pos, dvec3 vel, item_stack s, float delay)
+{
+    int id = s.id, count = s.count;
+    if (!item_valid(id) || count <= 0) return 1;
     if (ph->item_count >= MAX_ITEMS) return 0;
     item_ent *it = &ph->items[ph->item_count++];
     memset(it, 0, sizeof *it);
     it->pos = it->prev_pos = pos;
     it->vel = vel;
     it->id = (uint8_t)id;
-    it->count = (uint8_t)(count > 255 ? 255 : count);
+    it->count = (uint8_t)count;
+    it->wear = s.wear;
     it->delay = delay;
     it->spin = (float)(hash_u32((uint32_t)ph->step_count * 2654435761u + (uint32_t)ph->item_count) % 628u) * 0.01f;
     return 1;
 }
 
-int physics_pickup(physics *ph, int who, int (*accept)(void *user, int id, int count), void *user)
+int physics_pickup(physics *ph, int who, int (*accept)(void *user, item_stack s), void *user)
 {
     int done = 0;
     for (int i = 0; i < ph->item_count; i++) {
         item_ent *it = &ph->items[i];
         if (it->touching != who + 1) continue;
-        int took = accept(user, it->id, it->count);
+        int took = accept(user, (item_stack){it->id, it->count, it->wear});
         if (took >= it->count) {
             ph->items[i--] = ph->items[--ph->item_count];
             done++;

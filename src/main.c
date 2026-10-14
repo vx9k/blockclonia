@@ -3,6 +3,7 @@
 #include "audio_device.h"
 #include "bench.h"
 #include "camera.h"
+#include "combat.h"
 #include "debug.h"
 #include "discord.h"
 #include "fx.h"
@@ -844,6 +845,8 @@ typedef struct {
     char worlds_root[WORLDS_PATH_MAX];
     world w;
     physics ph;
+    mobs mobs;                /* creatures (simulated here unless this is a client) */
+    combat cb;                /* blows and bullets in flight */
     thermo *th;
     world_hooks hooks;
     save_db *db;              /* NULL: not saving */
@@ -851,6 +854,7 @@ typedef struct {
     double sx, sz;            /* spawn point */
     player pl;
     inventory inv;
+    float inv_wheel;          /* wheel notches for the inventory screen's recipe list */
     health hl;
     hud_state hs;
     fx_state *fx;
@@ -874,17 +878,17 @@ typedef struct {
     int inv_was_open;
     double title_t, save_t;
     int fps_frames;
+    int last_step;            /* stride half-cycles, for footsteps */
     sound *snd;
     audio_device *audio;
-    int last_step;            /* stride half-cycles, for footsteps */
     float landing;            /* hardest landing this frame, m/s */
     float swim_t, prev_hurt, prev_breath;
     double last_beat;         /* health.last_r of the last heartbeat heard */
     discord *dc;              /* NULL: the Discord status is off or this build has no application */
+    int client;               /* playing in someone else's world */
     char world_name[SAVE_NAME_MAX + 1]; /* the name the world was given, "" for none */
     int64_t session_start, play_start; /* Unix seconds: the game started, the world was opened */
     mp *mp;                   /* multiplayer session, NULL in single player */
-    int client;               /* playing in someone else's world */
     char note[512];           /* why the last session ended, for the title */
 
     /* This frame. */
@@ -1250,6 +1254,8 @@ static void open_world(game *g, const char *dir, int backdrop)
     if (o->hurt && !backdrop) apply_hurt(&g->hl, o->hurt);
 
     fx_init(g->fx, g->seed);
+    mobs_init(&g->mobs, g->seed ^ 0x5EEDB0A5u);
+    combat_init(&g->cb, g->seed ^ 0xC0BA7u);
     interact_init(&g->ia, g->seed ^ 0xA5A5u);
     viewmodel_init(&g->vm);
     camera_init(&g->cam);
@@ -1319,7 +1325,7 @@ static mp_world mp_ctx(game *g)
 {
     static char known[PATHS_MAX + 32];
     key_path(g, "known_players", known, sizeof known);
-    return (mp_world){&g->w, &g->ph, g->th, g->fx, &g->pl, &g->hl, &g->inv, g->seed, known};
+    return (mp_world){&g->w, &g->ph, g->th, g->fx, &g->pl, &g->hl, &g->inv, g->seed, known, &g->mobs, &g->cb};
 }
 
 /* Opens the world being played to other players. */
@@ -1624,7 +1630,9 @@ static player_input frame_input(game *g)
     pl->yaw = fmodf(pl->yaw, (float)(2 * MC_PI));
     g_in.mouse_dx = g_in.mouse_dy = 0;
     if (g_in.scroll != 0) {
-        if (!g->in_menu && !g_in.panel) {
+        if (g_in.inv_open) {
+            g->inv_wheel += (float)g_in.scroll; /* scrolls the recipe list */
+        } else if (!g->in_menu && !g_in.panel) {
             int s = g->inv.selected - (g_in.scroll > 0 ? 1 : -1);
             g->inv.selected = (s % INV_HOTBAR + INV_HOTBAR) % INV_HOTBAR;
         }
@@ -1680,8 +1688,17 @@ static void frame_simulate(game *g, const player_input *raw, double dt)
     const player_input *in = &lim;
     while (g->acc >= PHYS_DT && steps < MAX_STEPS_PER_FRAME) {
         survival_before sb = survival_capture(&g->pl);
-        if (g->mp) mp_host_step(g->mp, in);
-        else physics_step(&g->ph, &g->pl, in);
+        if (g->mp) {
+            mp_host_step(g->mp, in);
+        } else {
+            physics_step(&g->ph, &g->pl, in);
+            if (!g->backdrop) {
+                player *tp[1] = {g->hl.dead ? NULL : &g->pl};
+                health *th[1] = {g->hl.dead ? NULL : &g->hl};
+                combat_targets t = {tp, th, 1};
+                combat_creatures(&g->cb, &g->mobs, &g->ph, &t, thermo_daylight(g->th));
+            }
+        }
         if ((float)g->pl.fall_speed > landing) landing = (float)g->pl.fall_speed;
         health_env env = {0};
         survival_env(&g->w, &g->pl, &sb, g->actions, &env);
@@ -1769,6 +1786,31 @@ static void frame_interact(game *g, double dt)
                          .can_act = hands,
                          .speed = pl->flying ? 1.0f : 0.4f + 0.6f * lim.move_scale,
                          .dt = g->in_menu ? 0.0f : (float)dt};
+    if (!g->backdrop && !g->in_menu) {
+        /* A creature or player in reach takes the blow instead of the block
+         * behind it; the rifle fires on right-click. */
+        player *tp[1] = {&g->pl};
+        health *th[1] = {&g->hl};
+        combat_targets t = g->mp ? mp_targets(g->mp) : (combat_targets){tp, th, 1};
+        double block_d = g->hit.hit ? dv3_len(dv3(g->hit.block.x + 0.5 - g->eye.x, g->hit.block.y + 0.5 - g->eye.y,
+                                                  g->hit.block.z + 0.5 - g->eye.z))
+                                    : 5.0;
+        if (combat_aim(&g->mobs, &t, 0, g->eye, g->look, block_d)) ii.attack = 0;
+        if (hands) {
+            combat_out co = combat_frame(&g->cb, &g->mobs, &g->ph, &t, 0, &g->inv, g->eye, g->look, block_d,
+                                         ii.attack_click, ii.use_click, (float)dt);
+            if (co.fired) sound_play(g->snd, SND_SHOT, NULL, 0, 1.0f);
+            if (co.struck) sound_play(g->snd, SND_HIT, &co.at, 0, 0.8f);
+            if (co.struck || co.fired) {
+                ii.attack_click = 0;
+                g->ia.swing = 1.0f;
+            }
+            if (co.msg) {
+                snprintf(g->hs.msg, sizeof g->hs.msg, "%s", co.msg);
+                g->hs.msg_age = 0.0f;
+            }
+        }
+    }
     interact_out io = interact_frame(&g->ia, &g->w, &g->ph, g->th, pl, &g->inv, g->fx, g->eye, g->look, g->hit, &ii);
     g->actions += io.actions;
     sound_interact_events(g, &io);
@@ -1835,6 +1877,23 @@ static void add_players(game *g, dvec3 eye, double alpha, double now, float ligh
     }
 }
 
+/* Creatures as figures among the opaque entities: the ones simulated here,
+ * or on a client the ones the host last sent. */
+static void add_mobs(game *g, dvec3 eye, double alpha, float light, int *n_op, int n_tr)
+{
+    const mobs *ms = g->client ? mp_client_mobs(g->mp) : &g->mobs;
+    for (int i = 0; ms && i < ms->count; i++) {
+        int room = RENDER_MAX_ENTS - *n_op - n_tr;
+        if (room < MOB_FIGURE) return;
+        const mob *m = &ms->m[i];
+        dvec3 p = dv3_lerp(m->body.prev_pos, m->body.pos, alpha);
+        if (dv3_len(dv3(p.x - eye.x, p.y - eye.y, p.z - eye.z)) > 160.0) continue;
+        memmove(g->ents + *n_op + MOB_FIGURE, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
+        const float feet[3] = {(float)(p.x - eye.x), (float)(p.y - eye.y), (float)(p.z - eye.z)};
+        *n_op += mob_figure(m, feet, light, g->ents + *n_op, MOB_FIGURE);
+    }
+}
+
 /* Camera, sky, entities and the first-person arm for the renderer. */
 static render_view build_view(game *g, double now, double dt, double alpha)
 {
@@ -1890,6 +1949,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     int n_op = 0, n_tr = 0;
     fx_build_entities(g->fx, &g->ph, &g->crack, v.eye, alpha, v.time, g->ents, RENDER_MAX_ENTS, &n_op, &n_tr);
     if (g->mp) add_players(g, v.eye, alpha, now, v.daylight, &n_op, n_tr);
+    if (!on_title) add_mobs(g, v.eye, alpha, v.daylight, &n_op, n_tr);
     v.ents = g->ents;
     v.ent_opaque = n_op;
     v.ent_trans = n_tr;
@@ -2208,7 +2268,9 @@ static int draw_overlay(game *g, double dt, double alpha)
                           g_in.ui_rclick,
                           g_in.keys[GLFW_KEY_LEFT_SHIFT] || g_in.keys[GLFW_KEY_RIGHT_SHIFT],
                           thermo_stations(g->th, &g->w, g->pl.pos),
+                          g->inv_wheel,
                           (float)dt};
+        g->inv_wheel = 0.0f;
         invui_result ir = invui_screen(&u, &g->iu, &g->inv, &in);
         if (g->client) {
             /* Shown at once; the host repeats each and has the last word. */

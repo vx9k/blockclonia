@@ -18,7 +18,7 @@ void inv_starting_kit(inventory *inv)
     for (int i = 0; i < INV_HOTBAR; i++) {
         if (!inv->slot[i].count) continue;
         inv->slot[INV_HOTBAR + i] = inv->slot[i];
-        inv->slot[i] = (item_stack){0, 0};
+        inv->slot[i] = (item_stack){0, 0, 0};
     }
 }
 
@@ -39,7 +39,7 @@ int inv_add(inventory *inv, int id, int count)
         item_stack *s = &inv->slot[i];
         if (s->count) continue;
         int put = count < ms ? count : ms;
-        *s = (item_stack){(uint8_t)id, (uint8_t)put};
+        *s = (item_stack){(uint8_t)id, (uint8_t)put, 0};
         count -= put;
     }
     return count;
@@ -75,7 +75,11 @@ void inv_use_held(inventory *inv, int n)
 }
 
 void inv_set_held(inventory *inv, int id, int count)
-{ *inv_held(inv) = count > 0 && item_valid(id) ? (item_stack){(uint8_t)id, (uint8_t)count} : (item_stack){0, 0}; }
+{
+    item_stack s = {0, 0, 0};
+    if (count > 0 && item_valid(id)) s = (item_stack){(uint8_t)id, (uint8_t)count, 0};
+    *inv_held(inv) = s;
+}
 
 /* Moves a whole stack into [lo, hi): merging first, then an empty slot. */
 static void move_stack(inventory *inv, int from, int lo, int hi)
@@ -110,10 +114,10 @@ void inv_click(inventory *inv, int slot, int button, int shift)
     if (button == 0) {
         if (!c->count) {
             *c = *s;
-            *s = (item_stack){0, 0};
+            *s = (item_stack){0, 0, 0};
         } else if (!s->count) {
             *s = *c;
-            *c = (item_stack){0, 0};
+            *c = (item_stack){0, 0, 0};
         } else if (s->id == c->id) {
             int ms = max_stack(s->id), t = ms - s->count < c->count ? ms - s->count : c->count;
             s->count = (uint8_t)(s->count + t);
@@ -128,11 +132,11 @@ void inv_click(inventory *inv, int slot, int button, int shift)
         if (!c->count) {
             if (!s->count) return;
             int half = (s->count + 1) / 2;
-            *c = (item_stack){s->id, (uint8_t)half};
+            *c = (item_stack){s->id, (uint8_t)half, s->wear}; /* a split never mends a tool */
             s->count = (uint8_t)(s->count - half);
             if (!s->count) s->id = 0;
         } else if (!s->count || (s->id == c->id && s->count < max_stack(s->id))) {
-            s->id = c->id;
+            if (!s->count) *s = (item_stack){c->id, 0, c->wear};
             s->count++;
             c->count--;
             if (!c->count) c->id = 0;
@@ -147,10 +151,10 @@ void inv_click(inventory *inv, int slot, int button, int shift)
 item_stack inv_return_cursor(inventory *inv)
 {
     item_stack c = inv->cursor;
-    inv->cursor = (item_stack){0, 0};
+    inv->cursor = (item_stack){0, 0, 0};
     if (!c.count) return c;
-    int left = inv_add(inv, c.id, c.count);
-    return left ? (item_stack){c.id, (uint8_t)left} : (item_stack){0, 0};
+    int left = inv_add_stack(inv, c);
+    return left ? (item_stack){c.id, (uint8_t)left, c.wear} : (item_stack){0, 0, 0};
 }
 
 /* ------------------------------------------------------------ crafting */
@@ -163,11 +167,39 @@ const recipe g_recipes[] = {
     {{B_GLASS, 1}, {{B_SAND, 2}}, STATION_FIRE},
     {{B_BRICK, 1}, {{B_DIRT, 2}, {B_SAND, 1}}, STATION_FIRE},
     {{B_CAMPFIRE, 1}, {{I_STICK, 4}, {B_LOG, 1}}, 0},
+    {{I_COOKED_MEAT, 1}, {{I_RAW_MEAT, 1}}, STATION_FIRE},
+    {{I_GUNPOWDER, 2}, {{I_COAL, 2}, {B_ASH, 1}}, 0},
+    {{I_CARTRIDGE, 4}, {{I_COPPER_INGOT, 1}, {I_GUNPOWDER, 1}}, 0},
+    {{I_RIFLE, 1}, {{I_IRON_INGOT, 4}, {B_PLANKS, 2}}, STATION_FURNACE},
     {{B_FURNACE, 1}, {{B_STONE, 8}}, 0},
     /* A campfire cannot reach the 1085-1540 C these metals need; a
      * furnace burning the coal can. */
     {{I_COPPER_INGOT, 1}, {{I_RAW_COPPER, 1}, {I_COAL, 1}}, STATION_FURNACE},
     {{I_IRON_INGOT, 1}, {{I_RAW_IRON, 1}, {I_COAL, 2}}, STATION_FURNACE},
+/* A head of the material on a stick handle. */
+#define TOOL_RECIPE(kind, tier, mat, n, sticks) \
+    {{I_TOOL_FIRST + (kind) * TIER_COUNT + (tier), 1}, {{mat, n}, {I_STICK, sticks}}, 0}
+    TOOL_RECIPE(TOOL_PICKAXE, TIER_WOOD, B_PLANKS, 3, 2),
+    TOOL_RECIPE(TOOL_PICKAXE, TIER_STONE, B_STONE, 3, 2),
+    TOOL_RECIPE(TOOL_PICKAXE, TIER_COPPER, I_COPPER_INGOT, 3, 2),
+    TOOL_RECIPE(TOOL_PICKAXE, TIER_IRON, I_IRON_INGOT, 3, 2),
+    TOOL_RECIPE(TOOL_AXE, TIER_WOOD, B_PLANKS, 3, 2),
+    TOOL_RECIPE(TOOL_AXE, TIER_STONE, B_STONE, 3, 2),
+    TOOL_RECIPE(TOOL_AXE, TIER_COPPER, I_COPPER_INGOT, 3, 2),
+    TOOL_RECIPE(TOOL_AXE, TIER_IRON, I_IRON_INGOT, 3, 2),
+    TOOL_RECIPE(TOOL_SHOVEL, TIER_WOOD, B_PLANKS, 1, 2),
+    TOOL_RECIPE(TOOL_SHOVEL, TIER_STONE, B_STONE, 1, 2),
+    TOOL_RECIPE(TOOL_SHOVEL, TIER_COPPER, I_COPPER_INGOT, 1, 2),
+    TOOL_RECIPE(TOOL_SHOVEL, TIER_IRON, I_IRON_INGOT, 1, 2),
+    TOOL_RECIPE(TOOL_KNIFE, TIER_WOOD, B_PLANKS, 1, 1),
+    TOOL_RECIPE(TOOL_KNIFE, TIER_STONE, B_STONE, 1, 1),
+    TOOL_RECIPE(TOOL_KNIFE, TIER_COPPER, I_COPPER_INGOT, 1, 1),
+    TOOL_RECIPE(TOOL_KNIFE, TIER_IRON, I_IRON_INGOT, 1, 1),
+    TOOL_RECIPE(TOOL_SWORD, TIER_WOOD, B_PLANKS, 2, 1),
+    TOOL_RECIPE(TOOL_SWORD, TIER_STONE, B_STONE, 2, 1),
+    TOOL_RECIPE(TOOL_SWORD, TIER_COPPER, I_COPPER_INGOT, 2, 1),
+    TOOL_RECIPE(TOOL_SWORD, TIER_IRON, I_IRON_INGOT, 2, 1),
+#undef TOOL_RECIPE
 };
 const int g_recipe_count = (int)(sizeof g_recipes / sizeof g_recipes[0]);
 
@@ -194,12 +226,12 @@ int inv_craft(inventory *inv, int r, int stations)
 
 /* ---------------------------------------------------------- persistence */
 
-/* "INV1", selected, 3 reserved bytes, then (id, count) for every slot and
- * the cursor. */
+/* "INV2", selected, 3 reserved bytes, then (id, count, wear) for every slot
+ * and the cursor. INV1, read but no longer written, had no wear byte. */
 size_t inv_encode(const inventory *inv, uint8_t *out, size_t cap)
 {
     if (cap < INV_ENCODED_SIZE) return 0;
-    memcpy(out, "INV1", 4);
+    memcpy(out, "INV2", 4);
     out[4] = (uint8_t)inv->selected;
     out[5] = out[6] = out[7] = 0;
     uint8_t *p = out + 8;
@@ -207,24 +239,28 @@ size_t inv_encode(const inventory *inv, uint8_t *out, size_t cap)
         const item_stack *s = i < INV_SLOTS ? &inv->slot[i] : &inv->cursor;
         *p++ = s->count ? s->id : 0;
         *p++ = s->count;
+        *p++ = s->count ? s->wear : 0;
     }
     return INV_ENCODED_SIZE;
 }
 
 int inv_decode(inventory *inv, const uint8_t *in, size_t len)
 {
-    /* Every INV1 ever written has zero reserved bytes: anything else is a
-     * layout this build does not know. */
-    if (len != INV_ENCODED_SIZE || memcmp(in, "INV1", 4) != 0 || in[4] >= INV_HOTBAR || in[5] || in[6] || in[7])
-        return -1;
+    /* Every INV1/INV2 ever written has zero reserved bytes: anything else is
+     * a layout this build does not know. */
+    int v2 = len == INV_ENCODED_SIZE && memcmp(in, "INV2", 4) == 0;
+    int v1 = len == INV1_ENCODED_SIZE && memcmp(in, "INV1", 4) == 0;
+    if (!(v1 || v2) || in[4] >= INV_HOTBAR || in[5] || in[6] || in[7]) return -1;
     inventory t = {0};
     inv_init(&t);
     t.selected = in[4];
     const uint8_t *p = in + 8;
-    for (int i = 0; i <= INV_SLOTS; i++, p += 2) {
-        item_stack s = {p[0], p[1]};
+    for (int i = 0; i <= INV_SLOTS; i++, p += v2 ? 3 : 2) {
+        item_stack s = {p[0], p[1], v2 ? p[2] : 0};
         if ((s.id == 0) != (s.count == 0)) return -1;
         if (s.count && (!item_valid(s.id) || s.count > max_stack(s.id))) return -1;
+        /* Wear only on things that wear, and never past worn out. */
+        if (s.wear && (!s.count || s.wear >= item_durability(s.id))) return -1;
         if (i < INV_SLOTS) t.slot[i] = s;
         else t.cursor = s;
     }
@@ -232,4 +268,29 @@ int inv_decode(inventory *inv, const uint8_t *in, size_t len)
     return 0;
 }
 
-int inv_accept(void *inv, int id, int count) { return count - inv_add(inv, id, count); }
+int inv_add_stack(inventory *inv, item_stack s)
+{
+    if (!s.wear) return inv_add(inv, s.id, s.count);
+    if (!item_valid(s.id) || !s.count) return s.count;
+    for (int i = 0; i < INV_SLOTS; i++)
+        if (!inv->slot[i].count) {
+            inv->slot[i] = (item_stack){s.id, 1, s.wear}; /* worn things do not stack */
+            return s.count - 1;
+        }
+    return s.count;
+}
+
+int inv_accept(void *inv, item_stack s) { return s.count - inv_add_stack(inv, s); }
+
+int inv_wear_held(inventory *inv, int uses)
+{
+    item_stack *s = inv_held(inv);
+    int dur = s->count ? item_durability(s->id) : 0;
+    if (!dur) return 0;
+    if (s->wear + uses < dur) {
+        s->wear = (uint8_t)(s->wear + uses);
+        return 0;
+    }
+    *s = (item_stack){0, 0, 0};
+    return 1;
+}

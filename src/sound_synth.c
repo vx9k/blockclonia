@@ -405,6 +405,28 @@ static int splash(float *buf, rng_t *r)
     return n;
 }
 
+/* A rifle: the muzzle blast (a broadband crack, then a low boom) and its
+ * echo off the surroundings. */
+static int shot(float *buf, rng_t *r)
+{
+    int n = secs(1.2f);
+    memset(buf, 0, sizeof(float) * (size_t)n);
+    add_noise(buf, n, 0, secs(0.05f), 1.0f, 800.0f, 14000.0f, 0.0005f, 0.02f, r);
+    add_noise(buf, n, 0, secs(0.4f), 0.9f, 60.0f, 600.0f, 0.002f, 0.12f, r);
+    add_noise(buf, n, secs(0.25f), secs(0.6f), 0.2f, 150.0f, 2500.0f, 0.05f, 0.25f, r);
+    return n;
+}
+
+/* A blow on flesh: a dull thump with a short slap on top. */
+static int hit(float *buf, rng_t *r)
+{
+    int n = secs(0.3f);
+    memset(buf, 0, sizeof(float) * (size_t)n);
+    add_noise(buf, n, 0, secs(0.12f), 0.9f, 80.0f, 700.0f, 0.002f, 0.05f, r);
+    add_noise(buf, n, 0, secs(0.03f), 0.4f, 1500.0f, 6000.0f, 0.0005f, 0.01f, r);
+    return n;
+}
+
 static int swim(float *buf, rng_t *r)
 {
     int n = secs(0.5f);
@@ -647,7 +669,7 @@ static float gain_of(int id)
         [SND_EAT] = 0.5f,       [SND_DRINK] = 0.5f,     [SND_BUCKET_FILL] = 0.5f, [SND_BUCKET_POUR] = 0.5f,
         [SND_FIRE_FEED] = 0.5f, [SND_FIRE_OUT] = 0.5f,  [SND_HEARTBEAT] = 0.9f,   [SND_BREATH] = 0.45f,
         [SND_UI_CLICK] = 0.3f,  [SND_UI_HOVER] = 0.12f, [SND_UI_OPEN] = 0.25f,    [SND_UI_CLOSE] = 0.25f,
-        [SND_CRAFT] = 0.4f,
+        [SND_CRAFT] = 0.4f,     [SND_SHOT] = 1.0f,      [SND_HIT] = 0.6f,
     };
     return id >= 0 && id < SND_COUNT ? G[id] : 0.5f;
 }
@@ -676,6 +698,8 @@ static int render_one(float *buf, int id, synth_material m, rng_t *r)
     case SND_UI_OPEN: return blip(buf, 660.0f, 990.0f, 0.09f, 0.7f);
     case SND_UI_CLOSE: return blip(buf, 990.0f, 660.0f, 0.09f, 0.7f);
     case SND_CRAFT: return craft(buf, r);
+    case SND_SHOT: return shot(buf, r);
+    case SND_HIT: return hit(buf, r);
     default: return 0;
     }
 }

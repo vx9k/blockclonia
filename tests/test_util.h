@@ -72,5 +72,7 @@ void test_wire_all(void);
 void test_net_all(void);
 void test_mp_all(void);
 void test_worldgen_all(void);
+void test_tools_all(void);
+void test_combat_all(void);
 
 #endif
