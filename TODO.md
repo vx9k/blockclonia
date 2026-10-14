@@ -61,8 +61,8 @@ authoritative on one peer.
 
 **Steps** (tick as they land):
 
-- [ ] libsodium and ENet in `cmake/Dependencies.cmake`, CI, BUILDING.md
-- [ ] `netcrypto.c`: keys, handshake, AEAD seal/open, replay window, tests
+- [x] libsodium and ENet in `cmake/Dependencies.cmake`, CI, BUILDING.md
+- [x] `netcrypto.c`: keys, handshake, AEAD seal/open, replay window, tests
 - [ ] `netmsg.c`: message codec, validated decoders, fuzz target
 - [ ] `net.c`: ENet mesh, handshake, peers joining and leaving
 - [ ] physics and health for more than one player

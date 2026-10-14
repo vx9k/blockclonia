@@ -1709,6 +1709,7 @@ int main(void)
     test_hud_all();
     test_discord_all();
     test_netcrypto_all();
+    test_wire_all();
     test_cardio_all();
     printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);
     return g_failed ? 1 : 0;

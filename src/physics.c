@@ -4,6 +4,7 @@
 #include "log.h"
 #include "mem.h"
 #include "noise.h"
+#include "wire.h"
 
 #include <math.h>
 #include <string.h>
@@ -294,6 +295,42 @@ static double water_fraction(const world *w, aabb box)
 }
 
 /* --------------------------------------------------------------- player */
+
+#define PF(f) WIRE_F64(player, f)
+static const wire_field PLAYER_FIELDS[] = {
+    PF(pos.x), PF(pos.y), PF(pos.z), PF(prev_pos.x), PF(prev_pos.y), PF(prev_pos.z), PF(vel.x), PF(vel.y), PF(vel.z),
+    WIRE_F32(player, yaw), WIRE_F32(player, pitch), WIRE_I32(player, on_ground),
+    WIRE_I32(player, flying), PF(submerged), WIRE_I32(player, sprinting),
+    WIRE_I32(player, sneaking), WIRE_I32(player, hit_wall), PF(fall_speed),
+};
+#undef PF
+
+size_t player_encode(const player *p, uint8_t *out, size_t cap)
+{
+    wire_w w = wire_writer(out, cap);
+    wire_put_fields(&w, p, PLAYER_FIELDS, sizeof PLAYER_FIELDS / sizeof PLAYER_FIELDS[0]);
+    return w.bad ? 0 : w.len;
+}
+
+static int pos_sane(dvec3 v)
+{
+    return fabs(v.x) < WORLD_LIMIT && fabs(v.z) < WORLD_LIMIT && v.y > -1024.0 && v.y < WORLD_H + 4096.0;
+}
+
+int player_decode(player *p, const uint8_t *in, size_t len)
+{
+    player t = *p;
+    wire_r r = wire_reader(in, len);
+    wire_get_fields(&r, &t, PLAYER_FIELDS, sizeof PLAYER_FIELDS / sizeof PLAYER_FIELDS[0]);
+    /* Terminal velocity in air is ~55 m/s; 1000 leaves room for anything
+     * physics can do while keeping a step's travel small. */
+    if (r.bad || r.pos != len || !pos_sane(t.pos) || !pos_sane(t.prev_pos) || dv3_len(t.vel) > 1000.0 ||
+        fabsf(t.yaw) > 100.0f || fabsf(t.pitch) > 2.0f || t.submerged < 0.0 || t.submerged > 1.0 ||
+        fabs(t.fall_speed) > 1000.0)
+        return -1;
+    *p = t;
+    return 0;
+}
 
 void player_spawn(player *p, const world *w, double x, double z)
 {

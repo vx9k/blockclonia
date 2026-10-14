@@ -20,6 +20,7 @@
 #ifndef MC_PHYSICS_H
 #define MC_PHYSICS_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include "mathlib.h"
 #include "world.h"
@@ -186,6 +187,14 @@ void physics_step(physics *ph, player *p, const player_input *in);
 void player_spawn(player *p, const world *w, double x, double z);
 /* The player's collision box at its current position. */
 aabb player_box(const player *p);
+
+/* A player's whole movement state as bytes, for multiplayer: the
+ * authority sends it so a client can correct its prediction. Decoding
+ * checks every field (positions inside WORLD_LIMIT and the world's
+ * height, angles and speeds sane) and leaves p untouched on failure (-1). */
+#define PLAYER_NET_BYTES 128
+size_t player_encode(const player *p, uint8_t *out, size_t cap);
+int player_decode(player *p, const uint8_t *in, size_t len);
 
 /* Voxel raycast (Amanatides-Woo). Returns 1 on hit, with the block and the
  * empty cell in front of the hit face. */
