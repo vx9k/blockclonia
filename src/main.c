@@ -623,28 +623,7 @@ static void give_items(inventory *inv, const char *list)
     }
 }
 
-static int accept_item(void *user, int id, int count)
-{
-    inventory *inv = user;
-    return count - inv_add(inv, id, count);
-}
 
-/* Everything carried falls where the player died. */
-static void drop_everything(physics *ph, inventory *inv, const player *pl, uint32_t *rng)
-{
-    item_stack left = inv_return_cursor(inv);
-    if (left.count) inv_add(inv, left.id, left.count);
-    for (int i = 0; i < INV_SLOTS; i++) {
-        item_stack *st = &inv->slot[i];
-        if (!st->count) continue;
-        *rng = *rng * 1664525u + 1013904223u;
-        double a = (double)(*rng >> 8) / 16777216.0 * 2.0 * MC_PI;
-        /* A stack that finds no room in the world stays in the inventory. */
-        if (physics_drop_item(ph, dv3(pl->pos.x, pl->pos.y + 1.0, pl->pos.z), dv3(cos(a) * 2.0, 3.0, sin(a) * 2.0),
-                              st->id, st->count, 1.0f))
-            *st = (item_stack){0, 0};
-    }
-}
 
 static void find_spawn(uint32_t seed, double *sx, double *sz)
 {
@@ -688,15 +667,6 @@ static void on_column_unload(void *user, const column *c)
 }
 
 /* What the skin is exposed to: air, fires, the ground under the feet. */
-static void thermal_env(const thermo *th, const world *w, const player *p, health_env *e)
-{
-    dvec3 mid = dv3(p->pos.x, p->pos.y + 0.9, p->pos.z);
-    double air = (double)thermo_air(th, w, mid.x, mid.y, mid.z);
-    double radiant = p->flying ? 0.0 : thermo_radiant(th, w, mid);
-    int fx = (int)floor(p->pos.x), fz = (int)floor(p->pos.z), fy = (int)floor(p->pos.y - 0.05);
-    double contact = block_solid(world_get(w, fx, fy, fz)) ? (double)thermo_block_temp(th, w, fx, fy, fz) : air;
-    survival_env_thermal(e, air, radiant, contact, 0);
-}
 
 /* --hurt: start with a chosen set of injuries, for screenshots and for
  * trying treatments without having to get hurt first. The names and what
@@ -970,18 +940,6 @@ static void frame_sound(game *g, double dt, const render_view *v)
 
 /* Drops a stack in front of the player (inventory closed with a stack on
  * the cursor, or thrown out of the window). */
-static void toss(game *g, item_stack st)
-{
-    if (!st.count) return;
-    vec3 d = look_dir(g->pl.yaw, g->pl.pitch);
-    if (!physics_drop_item(&g->ph, dv3(g->pl.pos.x, g->pl.pos.y + 1.3, g->pl.pos.z),
-                           dv3((double)d.x * 3.0, 1.5, (double)d.z * 3.0), st.id, st.count, 1.2f)) {
-        /* No room for more items in the world: back into the inventory, or
-         * held on the cursor until there is. */
-        int left = inv_add(&g->inv, st.id, st.count);
-        if (left) g->inv.cursor = (item_stack){st.id, (uint8_t)left};
-    }
-}
 
 static void open_start_screen(game *g)
 {
@@ -1352,7 +1310,7 @@ static void frame_menus(game *g, double dt)
         set_captured(g->win, 0);
         g->iu.open_t = 0.0f;
     } else if (!g_in.inv_open && g->inv_was_open) {
-        toss(g, inv_return_cursor(&g->inv));
+        survival_toss(&g->ph, &g->inv, &g->pl, inv_return_cursor(&g->inv));
         if (!g->in_menu) set_captured(g->win, 1);
     }
     g->inv_was_open = g_in.inv_open;
@@ -1418,7 +1376,7 @@ static void frame_simulate(game *g, const player_input *in, double dt)
         if ((float)g->pl.fall_speed > landing) landing = (float)g->pl.fall_speed;
         health_env env = {0};
         survival_env(&g->w, &g->pl, &sb, g->actions, &env);
-        thermal_env(g->th, &g->w, &g->pl, &env);
+        survival_thermal(g->th, &g->w, &g->pl, &env);
         g->actions = 0;
         survival_impacts(&g->hl, &g->w, &g->ph.contact[0], &g->pl, &sb);
         /* Per-step physics events, cleared by the next step. */
@@ -1434,7 +1392,7 @@ static void frame_simulate(game *g, const player_input *in, double dt)
     }
     if (steps == MAX_STEPS_PER_FRAME) g->acc = 0.0; /* too slow to keep up: slow down time instead */
     g->landing = landing;
-    if (steps && physics_pickup(&g->ph, 0, accept_item, &g->inv)) sound_play(g->snd, SND_PICKUP, NULL, 0, 0.7f);
+    if (steps && physics_pickup(&g->ph, 0, inv_accept, &g->inv)) sound_play(g->snd, SND_PICKUP, NULL, 0, 0.7f);
     if (!g->in_menu) {
         thermo_step(g->th, &g->w, dt, g->pl.pos);
         fx_step(g->fx, &g->w, dt);
@@ -1492,7 +1450,7 @@ static void frame_interact(game *g, double dt)
         health_pads(&g->hl, 0);
     if (g_in.respawn) {
         if (g->hl.dead) {
-            drop_everything(&g->ph, &g->inv, pl, &g->death_rng);
+            survival_drop_all(&g->ph, &g->inv, pl, &g->death_rng);
             world_load_blocking(&g->w, g->sx, g->sz, 1);
             player_spawn(pl, &g->w, g->sx, g->sz);
             health_init_varied(&g->hl, g->seed ^ (uint32_t)g->frame * 2654435761u);
@@ -1855,7 +1813,7 @@ static int draw_overlay(game *g, double dt, double alpha)
                           thermo_near_fire(g->th, &g->w, g->pl.pos, 3.0),
                           (float)dt};
         invui_result ir = invui_screen(&u, &g->iu, &g->inv, &in);
-        toss(g, ir.drop);
+        survival_toss(&g->ph, &g->inv, &g->pl, ir.drop);
         if (ir.crafted >= 0) sound_play(g->snd, SND_CRAFT, NULL, 0, 0.8f);
         else if (ir.changed) sound_play(g->snd, SND_UI_CLICK, NULL, 0, 0.5f);
     }

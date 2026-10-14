@@ -1,4 +1,5 @@
 #include "survival.h"
+#include "thermo.h"
 
 #include <math.h>
 #include <string.h>
@@ -266,4 +267,40 @@ int survival_water_nearby(const world *w, const player *p, vec3 dir)
         if (block_solid(id)) break;
     }
     return 0;
+}
+
+void survival_thermal(const thermo *th, const world *w, const player *p, health_env *e)
+{
+    dvec3 mid = dv3(p->pos.x, p->pos.y + 0.9, p->pos.z);
+    double air = (double)thermo_air(th, w, mid.x, mid.y, mid.z);
+    double radiant = p->flying ? 0.0 : thermo_radiant(th, w, mid);
+    int fx = (int)floor(p->pos.x), fz = (int)floor(p->pos.z), fy = (int)floor(p->pos.y - 0.05);
+    double contact = block_solid(world_get(w, fx, fy, fz)) ? (double)thermo_block_temp(th, w, fx, fy, fz) : air;
+    survival_env_thermal(e, air, radiant, contact, 0);
+}
+
+void survival_drop_all(physics *ph, inventory *inv, const player *p, uint32_t *rng)
+{
+    item_stack left = inv_return_cursor(inv);
+    if (left.count) inv_add(inv, left.id, left.count);
+    for (int i = 0; i < INV_SLOTS; i++) {
+        item_stack *st = &inv->slot[i];
+        if (!st->count) continue;
+        *rng = *rng * 1664525u + 1013904223u;
+        double a = (double)(*rng >> 8) / 16777216.0 * 2.0 * MC_PI;
+        if (physics_drop_item(ph, dv3(p->pos.x, p->pos.y + 1.0, p->pos.z), dv3(cos(a) * 2.0, 3.0, sin(a) * 2.0), st->id,
+                              st->count, 1.0f))
+            *st = (item_stack){0, 0};
+    }
+}
+
+void survival_toss(physics *ph, inventory *inv, const player *p, item_stack st)
+{
+    if (!st.count) return;
+    vec3 d = look_dir(p->yaw, p->pitch);
+    if (!physics_drop_item(ph, dv3(p->pos.x, p->pos.y + 1.3, p->pos.z), dv3((double)d.x * 3.0, 1.5, (double)d.z * 3.0),
+                           st.id, st.count, 1.2f)) {
+        int left = inv_add(inv, st.id, st.count);
+        if (left) inv->cursor = (item_stack){st.id, (uint8_t)left};
+    }
 }
