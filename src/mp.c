@@ -29,6 +29,7 @@
 #define GONE_MAX 16          /* departed players remembered for a rejoin */
 #define COLUMN_RATE 64.0     /* columns per second a player may be sent ... */
 #define COLUMN_BURST 160.0   /* ... after a burst of this many (joining at radius 8) */
+#define COLUMN_RETRY 3.0     /* s between a client's passes over columns the host has not sent */
 _Static_assert(SAVE_MAX_FILE + 9 <= NET_MAX_MESSAGE, "a column message must fit ENet's packet cap");
 
 enum { C_INPUT = 1, C_OP, C_COLUMN };
@@ -104,6 +105,7 @@ typedef struct {
     int cracking;
     char msg[96], taken[96];
     mobs mobs;           /* the creatures near this player, as last sent */
+    double retry_t;      /* last world_retry_requests */
 } client;
 
 struct mp {
@@ -401,6 +403,11 @@ static void host_column(remote *r, wire_r *rd)
     if (rd->bad || rd->pos != rd->len || r->col_n == COLUMN_QUEUE) return;
     int pcx = chunk_of((int)floor(r->pl.pos.x)), pcz = chunk_of((int)floor(r->pl.pos.z));
     if (llabs((long long)cx - pcx) > COLUMN_REACH || llabs((long long)cz - pcz) > COLUMN_REACH) return;
+    /* A client asks again for what it has waited long for: once is enough. */
+    for (int k = 0; k < r->col_n; k++) {
+        const int *q = r->col[(r->col_h + k) % COLUMN_QUEUE];
+        if (q[0] == cx && q[1] == cz) return;
+    }
     int at = (r->col_h + r->col_n++) % COLUMN_QUEUE;
     r->col[at][0] = cx;
     r->col[at][1] = cz;
@@ -1045,6 +1052,10 @@ void mp_flush(mp *m, double now)
 {
     m->now = now;
     if (m->host) host_flush(m);
+    else if (m->c.attached && now - m->c.retry_t >= COLUMN_RETRY) {
+        m->c.retry_t = now;
+        world_retry_requests(m->ctx.w);
+    }
     net_flush(m->n);
 }
 
