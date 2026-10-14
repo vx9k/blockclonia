@@ -133,8 +133,9 @@ fixed on the branch):
 - [x] A host that never answers a column request left that column
   loading on the client for good: the client now asks again every few
   seconds (`world_retry_requests`).
-- `tests/fuzz_net.c` covers what a host sends, not what a joiner sends
-  (inputs, operations, column requests): give it an offline host world.
+- [x] `tests/fuzz_net.c` now covers what joiners send too (inputs,
+  operations, column requests), through an offline host
+  (`net_offline_host`) that steps its simulation after every message.
 - Safety numbers for chat: today a player compares key fingerprints from
   the join notices by hand.
 
