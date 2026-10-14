@@ -4,9 +4,10 @@
 #ifndef MC_WORLD_H
 #define MC_WORLD_H
 
-#include <stdint.h>
 #include "block.h"
 #include "mesher.h"
+#include <stddef.h>
+#include <stdint.h>
 
 #define CHUNK_W 16
 #define CHUNK_SHIFT 4
@@ -108,6 +109,11 @@ typedef struct world {
     int (*on_save)(void *user);
     /* Test hook: replaces terrain generation when set. */
     void (*generator)(uint32_t seed, column *c);
+    /* A multiplayer client's world comes from the host: when set, a column
+     * entering the ring is asked for here instead of generated, and stays
+     * loading until world_column_arrived. Called on the main thread. */
+    void *remote_user;
+    void (*on_column_request)(void *user, int cx, int cz);
 } world;
 
 /* An empty world: columns stream in from world_update. radius is clamped
@@ -166,6 +172,15 @@ int world_surface_y(const world *w, int x, int z);
  * changed, so it doubles as the autosave, and it retries columns kept
  * loaded because their save on unloading failed. */
 void world_save_all(world *w);
+
+/* A requested column's bytes (save format, untrusted) from the host. A
+ * column that does not decode is generated from the seed instead. Returns
+ * 0 if it was used, -1 if that column is no longer wanted. */
+int world_column_arrived(world *w, int cx, int cz, const uint8_t *data, size_t len);
+/* A column for a multiplayer client, in the save format: from memory if
+ * it is loaded, else its saved row, else freshly generated. Returns the
+ * length written to out (capacity SAVE_MAX_FILE), 0 if out of limits. */
+size_t world_column_encode(world *w, int cx, int cz, uint8_t *out, size_t cap);
 
 /* Worker-side entry point for generating one column (also used by bench). */
 void worldgen_column(uint32_t seed, column *c);

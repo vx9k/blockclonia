@@ -232,6 +232,11 @@ static void request_column(world *w, int cx, int cz)
 {
     column *c = column_alloc(cx, cz);
     w->grid[slot_of(w, cx, cz)] = c;
+    if (w->on_column_request) {
+        w->gen_in_flight++;
+        w->on_column_request(w->remote_user, cx, cz);
+        return;
+    }
     gen_job *g = mem_calloc(1, sizeof *g);
     g->base.run = gen_run;
     g->base.done = gen_done;
@@ -675,6 +680,62 @@ void world_save_all(world *w)
         w->save_failed = 0;
         w->have_center = 0; /* the next world_update unloads the columns kept meanwhile */
     }
+}
+
+int world_column_arrived(world *w, int cx, int cz, const uint8_t *data, size_t len)
+{
+    if (!in_limits(cx, cz)) return -1;
+    int slot = slot_of(w, cx, cz);
+    column *c = w->grid[slot];
+    if (!c || c->cx != cx || c->cz != cz || c->state != COL_LOADING) return -1;
+    w->gen_in_flight--;
+    if (c->want_unload) {
+        w->grid[slot] = NULL;
+        column_free(c);
+        w->gen_cursor = 0;
+        return -1;
+    }
+    /* Decoded here rather than on a worker: a block edit the host sends
+     * after the column must find it loaded. */
+    if (save_decode_column(c, data, len) != 0) {
+        log_warn("column %d,%d from the host does not decode; generating it instead", cx, cz);
+        (w->generator ? w->generator : worldgen_column)(w->seed, c);
+        mem_free(c->meta);
+        c->meta = NULL;
+    }
+    c->modified = c->unsaved = 0;
+    column_recount(c);
+    c->state = COL_READY;
+    for (int s = 0; s < SECTIONS; s++) {
+        c->dirty[s] = 1;
+        c->version[s] = ++w->version_counter;
+    }
+    w->sched_pending = 1;
+    return 0;
+}
+
+size_t world_column_encode(world *w, int cx, int cz, uint8_t *out, size_t cap)
+{
+    if (!in_limits(cx, cz) || cap < SAVE_MAX_FILE) return 0;
+    const column *c = world_column(w, cx, cz);
+    if (c) return save_encode_column(c, out, cap);
+    uint8_t *saved = NULL;
+    long n = w->db ? save_db_get_column(w->db, cx, cz, &saved) : -1;
+    if (n > 0 && (size_t)n <= cap) {
+        memcpy(out, saved, (size_t)n);
+        mem_free(saved);
+        return (size_t)n;
+    }
+    mem_free(saved);
+    /* Never edited (or unreadable here): the client gets fresh terrain,
+     * 0.35 ms of generation on the main thread. */
+    column *g = column_alloc(cx, cz);
+    (w->generator ? w->generator : worldgen_column)(w->seed, g);
+    mem_free(g->meta);
+    g->meta = NULL;
+    size_t len = save_encode_column(g, out, cap);
+    column_free(g);
+    return len;
 }
 
 void world_destroy(world *w)
