@@ -1707,6 +1707,7 @@ int main(void)
     test_save_db_all();
     test_worlds_all();
     test_hud_all();
+    test_discord_all();
     test_cardio_all();
     printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);
     return g_failed ? 1 : 0;

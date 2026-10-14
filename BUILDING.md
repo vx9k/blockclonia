@@ -123,6 +123,12 @@ Options you can add when configuring, with `-D`:
 - `MC_CPU=pi4|pi5|native|x86-64-v2` picks the CPU to tune for.
 - `MC_SOUND=OFF` builds without sound, so miniaudio isn't needed.
 - `MC_WERROR=ON` turns compiler warnings into errors.
+- `MC_DISCORD_APP_ID=<digits>` builds in the Discord status the player
+  can turn on in the settings, under the Discord application with that
+  ID (discord.com/developers, "New Application"). Without it (the
+  default) the setting is not offered and the game never contacts
+  Discord. The status shows the application's Rich Presence art asset
+  named `logo` when it has one.
 
 ## Dependencies
 
