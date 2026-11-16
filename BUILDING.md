@@ -109,8 +109,8 @@ cmake --build --preset macos
 
 CI builds this and runs the unit tests on every change, but nobody has
 played it on a Mac yet. If you try it, please report what happens,
-working or not. A native Metal renderer is deferred; [TODO.md](TODO.md)
-explains why.
+working or not. A native Metal renderer is deferred;
+[docs/design/metal.md](docs/design/metal.md) explains why.
 
 ## Build presets
 
