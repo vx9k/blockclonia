@@ -98,6 +98,13 @@ static void test_ambient(void)
     CHECK(fabsf(thermo_ambient(th, w, 0.5, 92.0, 0.5)) < 0.1f);
     CHECK(fabsf(thermo_ambient(th, w, 0.5, SEA_LEVEL, 0.5) - 14.0f) < 0.1f);
     CHECK(thermo_ambient(th, w, 0.5, 70.0, 0.5) > thermo_ambient(th, w, 0.5, 110.0, 0.5));
+    /* Above the old ceiling only towers stand: the real 6.5 K/km, so the
+     * top of the world is cold but survivable, and there is no jump. */
+    float ceiling = thermo_ambient(th, w, 0.5, WORLD_H_V1, 0.5);
+    float top = thermo_ambient(th, w, 0.5, WORLD_H, 0.5);
+    CHECK(fabsf(ceiling - (14.0f - 14.0f / 44.0f * (WORLD_H_V1 - SEA_LEVEL))) < 0.1f);
+    CHECK(fabsf(thermo_ambient(th, w, 0.5, WORLD_H_V1 - 0.01, 0.5) - ceiling) < 0.01f);
+    CHECK(top < ceiling && fabsf(top - (ceiling - 0.0065f * (WORLD_H - WORLD_H_V1))) < 0.05f);
     thermo_set_day_time(th, 15.0 / 24.0);
     float warm = thermo_ambient(th, w, 0.5, SEA_LEVEL, 0.5);
     thermo_set_day_time(th, 3.0 / 24.0);

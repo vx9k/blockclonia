@@ -42,9 +42,9 @@
 #define NET_MAX_PLAYERS 8
 #define NET_NAME_MAX 16
 #define NET_CHAT_MAX 200      /* bytes of UTF-8 per chat line */
-#define NET_PROTOCOL 5        /* bump when peers would disagree: messages, block or item ids */
+#define NET_PROTOCOL 6        /* bump when peers would disagree: messages, block or item ids */
 /* The largest game message: a column in the save format with a header. */
-#define NET_MAX_MESSAGE (4 * 16 * 128 * 16 + 1024)
+#define NET_MAX_MESSAGE (4 * 16 * 384 * 16 + 1024) /* mp.c checks it against SAVE_MAX_FILE */
 
 enum { NET_CH_CONTROL, NET_CH_GAME, NET_CH_STATE, NET_CH_CHAT, NET_CHANNELS };
 _Static_assert(NET_CHANNELS <= NC_CHANNELS, "each channel needs its own nonce counter");

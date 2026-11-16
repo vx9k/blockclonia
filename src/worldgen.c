@@ -9,6 +9,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Generators 1 and 2 were written for a 128-block world; they keep its
+ * ceiling so the terrain they make does not change with WORLD_H. */
+#define GEN_H WORLD_H_V1
+
 static int height_v1(uint32_t seed, int x, int z)
 {
     float fx = (float)x, fz = (float)z;
@@ -17,7 +21,7 @@ static int height_v1(uint32_t seed, int x, int z)
     float ridge = 1.0f - fabsf(noise2(seed + 31, fx / 260.0f, fz / 260.0f));
     float mountain = fmaxf(0.0f, continent + 0.15f) * ridge * ridge * ridge;
     float h = 51.0f + continent * 24.0f + hills * 8.0f + mountain * 60.0f;
-    return clampi((int)h, 4, WORLD_H - 12);
+    return clampi((int)h, 4, GEN_H - 12);
 }
 
 int worldgen_height(uint32_t seed, int x, int z)
@@ -34,14 +38,14 @@ int worldgen_height(uint32_t seed, int x, int z)
     float ridge = r1 * r1 * r1 * (0.75f + 0.25f * r2 * r2);
     float h = 51.0f + continent * 24.0f + hills * 8.0f + mask * ridge * 78.0f;
     /* Ease into the build limit instead of flattening peaks against it. */
-    const float knee = 96.0f, room = (float)(WORLD_H - 12) - knee;
+    const float knee = 96.0f, room = (float)(GEN_H - 12) - knee;
     if (h > knee) h = knee + room * (1.0f - expf(-(h - knee) / room));
-    return clampi((int)h, 4, WORLD_H - 12);
+    return clampi((int)h, 4, GEN_H - 12);
 }
 
 static void put(column *c, int x, int y, int z, uint8_t id)
 {
-    if (x < 0 || x >= CHUNK_W || z < 0 || z >= CHUNK_W || y < 1 || y >= WORLD_H) return;
+    if (x < 0 || x >= CHUNK_W || z < 0 || z >= CHUNK_W || y < 1 || y >= GEN_H) return;
     uint8_t *b = &c->blocks[col_index(x, y, z)];
     if (*b == B_AIR || (*b == B_LEAVES && id == B_LOG)) *b = id;
 }
@@ -50,7 +54,7 @@ static void grow_tree(column *c, uint32_t h, int x, int y, int z)
 {
     int trunk = 4 + (int)(h % 3);
     int top = y + trunk;
-    if (top + 2 >= WORLD_H) return;
+    if (top + 2 >= GEN_H) return;
     for (int ly = top - 2; ly <= top + 1; ly++) {
         int r = ly >= top ? 1 : 2;
         for (int dz = -r; dz <= r; dz++)
@@ -68,7 +72,7 @@ static void grow_tree(column *c, uint32_t h, int x, int y, int z)
 
 #define CAVE_STEP 4
 #define CAVE_NX (CHUNK_W / CAVE_STEP + 1)
-#define CAVE_NY (WORLD_H / CAVE_STEP + 1)
+#define CAVE_NY (GEN_H / CAVE_STEP + 1)
 
 /* Tunnels are where two independent noise fields are both near zero: the
  * intersection of two surfaces, a winding tube ("spaghetti" caves). A third,
@@ -166,7 +170,7 @@ static void place_ores(uint32_t seed, column *c)
             int y = r->ymin + (int)(lcg(&s) % (uint32_t)(r->ymax - r->ymin));
             int n = r->size / 2 + (int)(lcg(&s) % (uint32_t)r->size);
             for (int b = 0; b < n; b++) {
-                if (x >= 0 && x < CHUNK_W && z >= 0 && z < CHUNK_W && y > 0 && y < WORLD_H) {
+                if (x >= 0 && x < CHUNK_W && z >= 0 && z < CHUNK_W && y > 0 && y < GEN_H) {
                     uint8_t *p = &c->blocks[col_index(x, y, z)];
                     if (*p == B_ROCK) *p = r->block;
                 }

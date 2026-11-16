@@ -1,4 +1,4 @@
-/* World storage: a ring grid of 16 x 128 x 16 block columns streamed around
+/* World storage: a ring grid of 16 x 384 x 16 block columns streamed around
  * the player, and on a multiplayer host the columns around the other
  * players too (anchors), kept loaded but never meshed. Generation and
  * meshing run on worker threads; everything else (edits, physics,
@@ -13,7 +13,11 @@
 
 #define CHUNK_W 16
 #define CHUNK_SHIFT 4
-#define WORLD_H 128
+/* 384 m: room for mountains above a sea at 48 and for towers on top of
+ * them. Worlds from before were 128 high (WORLD_H_V1); their columns load
+ * with air above. */
+#define WORLD_H 384
+#define WORLD_H_V1 128
 #define SECTION_H 16
 #define SECTIONS (WORLD_H / SECTION_H)
 #define COL_AREA (CHUNK_W * CHUNK_W)

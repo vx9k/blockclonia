@@ -80,15 +80,14 @@ should look different for a reason you could explain.
 
 **Steps, one pull request each:**
 
-1. **A 256-block world** (breaking). `WORLD_H` 128 to 256 (16
-   sections). The vertex format already packs y per section, so the
-   mesher is untouched; the column blob in `world.db` grows, so the
-   column format gets a new tag and old 128-high rows are read padded
-   with air; `NET_PROTOCOL` bumps; per-column memory doubles, so the
-   column caches and default view distance in `sys_plan` are re-checked
-   (Raspberry Pi 4 with 4 GB as the floor). `SEA_LEVEL` stays 48 so
-   versions 1 and 2 generate unchanged; the new generator puts its
-   land between them and the new ceiling (about 200 m of relief).
+1. [x] **A 384-block world** (breaking, #63). `WORLD_H` 128 to 384
+   (24 sections), with room above the terrain for towers. Column rows
+   store their height (old rows load with air above; columns under the
+   old ceiling are still written the old way), `NET_PROTOCOL` 6, the
+   real lapse rate above 128 m. `SEA_LEVEL` stays 48 and versions 1
+   and 2 generate unchanged; the new generator puts its land between
+   the sea and about 250 m. Follow-up: store all-air sections sparsely,
+   which wins back the +224 MB the sky costs at radius 32.
 2. **Climate.** `worldgen_climate(seed, x, z)`: a mean temperature
    offset and a yearly rainfall, from slow (several km) warped noise,
    with rain shadows behind high ground and cooler, wetter air near

@@ -18,8 +18,10 @@
  * temperate climate). The real lapse rate is 6.5 K/km, but the terrain is
  * squeezed into 128 m of height, so it is scaled to put 0 C at the snow line
  * (y = 92, 44 m above the sea): 14/44 = 0.32 K/m, about 49 times the real
- * rate. Below sea level only pits and caves have air, so the lapse is not
- * extrapolated down. The day swings +/-5 C around the mean, peaking at 15:00:
+ * rate. Above the old 128 m ceiling, which terrain never passes, there
+ * are only towers, and the air cools at the real 6.5 K/km: the scaled rate
+ * would put -93 C on top of a 384 m tower. Below sea level only pits and
+ * caves have air, so the lapse is not extrapolated down. The day swings +/-5 C around the mean, peaking at 15:00:
  * the ground stores the morning sun and the air lags it by about 3 hours.
  * Under a roof or in a cave (an opaque block within 8 m above) the air
  * follows the ground instead, whose mean is ~10 C in a temperate climate,
@@ -31,6 +33,8 @@
 #define T_SEA 14.0                  /* C */
 #define SNOW_LINE 92
 #define LAPSE (T_SEA / (double)(SNOW_LINE - SEA_LEVEL)) /* K/m, scaled */
+#define LAPSE_TOP ((double)WORLD_H_V1)  /* m: the scaled lapse stops here */
+#define LAPSE_REAL 0.0065           /* K/m */
 #define DIURNAL_K 5.0               /* K amplitude */
 #define PEAK_DAY (15.0 / 24.0)      /* warmest at 15:00 */
 #define GROUND_MEAN 10.0            /* C */
@@ -269,7 +273,8 @@ static int sheltered(const world *w, int x, int y, int z)
 /* swing: the diurnal term, computed once per call. */
 static double ambient(double y, int shelter, double swing)
 {
-    double open = T_SEA - LAPSE * fmax(y - (double)SEA_LEVEL, 0.0);
+    double up = fmax(y - (double)SEA_LEVEL, 0.0), high = fmax(y - LAPSE_TOP, 0.0);
+    double open = T_SEA - LAPSE * (up - high) - LAPSE_REAL * high;
     if (!shelter) return open + swing;
     return GROUND_MEAN + (1.0 - SHELTER_PULL) * (open - GROUND_MEAN) + SHELTER_SWING * swing;
 }

@@ -106,8 +106,8 @@ void sys_plan(const sys_info *si, sys_budget *b)
     b->workers = clampi(cores - 1, 1, 64);
     b->workers = clampi(b->workers, 1, (int)(usable / (128 * MIB) > 64 ? 64 : usable / (128 * MIB)));
 
-    /* Columns are 32 KB of blocks plus meshes and metadata, ~100 KB in
-     * all; radius 16 keeps 1089 of them. The radius also costs GPU memory
+    /* Columns are 96 KB of blocks plus meshes and metadata, ~170 KB in
+     * all; radius 16 keeps 1089 of them (~185 MB), radius 8 289 (~50 MB). The radius also costs GPU memory
      * and frame time, which this cannot see, so it stays moderate; the
      * player can raise it to 32 in the settings. */
     if (usable >= 6 * GIB && cores >= 8) b->render_distance = 16;

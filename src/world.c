@@ -36,8 +36,17 @@ void column_recount(column *c)
 {
     for (int s = 0; s < SECTIONS; s++) {
         const uint8_t *b = &c->blocks[s * SECTION_H * COL_AREA];
+        /* Most of a 384-block column is sky: an all-air section is found
+         * eight bytes at a time, without the per-block opacity lookup. */
+        uint64_t any = 0;
+        for (int i = 0; i < SECTION_H * COL_AREA; i += 8) {
+            uint64_t v = 0;
+            memcpy(&v, b + i, sizeof v);
+            any |= v;
+        }
         int n = 0, o = 0;
-        for (int i = 0; i < SECTION_H * COL_AREA; i++) {
+        _Static_assert(B_AIR == 0, "air sections are all zero bytes");
+        for (int i = 0; any && i < SECTION_H * COL_AREA; i++) {
             n += b[i] != B_AIR;
             o += block_opaque(b[i]);
         }

@@ -10,16 +10,21 @@
 
 /* File layout (little endian):
  *   0  "MCCL"        magic
- *   4  u8  version   (1)
+ *   4  u8  version   (1 or 2)
  *   5  u8  flags     bit 0: meta present
- *   6  u16 reserved  (0)
+ *   6  u16 height    version 2: layers stored, a multiple of SECTION_H up
+ *                    to WORLD_H; version 1: 0, and the height is WORLD_H_V1
  *   8  i32 cx, 12 i32 cz
  *  16  u32 payload length
  *  20  u32 FNV-1a of payload
- *  24  payload: RLE blocks, then RLE meta if flagged.
- *      RLE = pairs of (run length - 1, value). */
+ *  24  payload: RLE blocks, then RLE meta if flagged, of the bottom
+ *      `height` layers; everything above is air.
+ *      RLE = pairs of (run length - 1, value).
+ * A column with nothing above the old 128-block ceiling is still written
+ * as version 1, so builds from before the taller world read it. */
 #define HEADER_SIZE 24
-#define SAVE_VERSION 1
+#define SAVE_V1 1
+#define SAVE_V2 2
 
 static const uint8_t MAGIC[4] = {'M', 'C', 'C', 'L'};
 
@@ -77,19 +82,27 @@ size_t save_encode_column(const column *c, uint8_t *out, size_t cap)
     int has_meta = 0;
     if (c->meta)
         for (size_t i = 0; i < COL_VOL && !has_meta; i++) has_meta = c->meta[i] != 0;
+    /* Meta only lives in non-air cells, so the blocks alone set the height. */
+    size_t top = COL_VOL;
+    while (top > 0 && c->blocks[top - 1] == B_AIR) top--;
+    size_t layers = (top + COL_AREA * SECTION_H - 1) / (COL_AREA * SECTION_H) * SECTION_H;
+    int v1 = layers <= WORLD_H_V1;
+    if (v1) layers = WORLD_H_V1;
+    size_t vol = layers * COL_AREA;
 
-    size_t n = rle_encode(c->blocks, COL_VOL, out + HEADER_SIZE, cap - HEADER_SIZE);
+    size_t n = rle_encode(c->blocks, vol, out + HEADER_SIZE, cap - HEADER_SIZE);
     if (!n) return 0;
     size_t payload = n;
     if (has_meta) {
-        n = rle_encode(c->meta, COL_VOL, out + HEADER_SIZE + payload, cap - HEADER_SIZE - payload);
+        n = rle_encode(c->meta, vol, out + HEADER_SIZE + payload, cap - HEADER_SIZE - payload);
         if (!n) return 0;
         payload += n;
     }
     memcpy(out, MAGIC, 4);
-    out[4] = SAVE_VERSION;
+    out[4] = v1 ? SAVE_V1 : SAVE_V2;
     out[5] = (uint8_t)has_meta;
-    out[6] = out[7] = 0;
+    out[6] = v1 ? 0 : (uint8_t)layers;
+    out[7] = v1 ? 0 : (uint8_t)(layers >> 8);
     put_u32(out + 8, (uint32_t)c->cx);
     put_u32(out + 12, (uint32_t)c->cz);
     put_u32(out + 16, (uint32_t)payload);
@@ -100,9 +113,17 @@ size_t save_encode_column(const column *c, uint8_t *out, size_t cap)
 int save_decode_column(column *c, const uint8_t *data, size_t len)
 {
     if (len < HEADER_SIZE || len > SAVE_MAX_FILE) return -1;
-    if (memcmp(data, MAGIC, 4) != 0 || data[4] != SAVE_VERSION) return -1;
+    if (memcmp(data, MAGIC, 4) != 0 || (data[4] != SAVE_V1 && data[4] != SAVE_V2)) return -1;
     uint8_t flags = data[5];
-    if ((flags & ~1u) || data[6] || data[7]) return -1;
+    size_t layers = (size_t)data[6] | (size_t)data[7] << 8;
+    if (data[4] == SAVE_V1) {
+        if (layers) return -1;
+        layers = WORLD_H_V1;
+    } else if (layers == 0 || layers > WORLD_H || layers % SECTION_H) {
+        return -1;
+    }
+    if (flags & ~1u) return -1;
+    size_t vol = layers * COL_AREA;
     if ((int32_t)get_u32(data + 8) != c->cx || (int32_t)get_u32(data + 12) != c->cz) return -1;
     uint32_t payload = get_u32(data + 16);
     if (payload != len - HEADER_SIZE) return -1;
@@ -111,14 +132,15 @@ int save_decode_column(column *c, const uint8_t *data, size_t len)
 
     /* Decoded aside and applied only once all of it checks out, so a
      * rejected column leaves c as it was. */
-    uint8_t *blocks = mem_alloc(COL_VOL), *meta = (flags & 1) ? mem_alloc(COL_VOL) : NULL;
-    size_t used = rle_decode(p, payload, blocks, COL_VOL, B_COUNT - 1);
+    uint8_t *blocks = mem_calloc(COL_VOL, 1), *meta = (flags & 1) ? mem_calloc(COL_VOL, 1) : NULL;
+    _Static_assert(B_AIR == 0, "layers above the stored height are zeroed to air");
+    size_t used = rle_decode(p, payload, blocks, vol, B_COUNT - 1);
     int ok = used != 0;
     if (ok && meta) {
-        size_t m = rle_decode(p + used, payload - used, meta, COL_VOL, WATER_FULL - 1);
+        size_t m = rle_decode(p + used, payload - used, meta, vol, WATER_FULL - 1);
         ok = m != 0;
         used += m;
-        for (size_t i = 0; ok && i < COL_VOL; i++)
+        for (size_t i = 0; ok && i < vol; i++)
             if (meta[i] && !block_has_meta(blocks[i])) ok = 0;
     }
     if (ok && used == payload) {

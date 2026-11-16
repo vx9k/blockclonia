@@ -81,10 +81,12 @@ reads `world`, so the main thread can change the world while it runs.
 
 ## World data
 
-- The world is a ring grid of **columns** (16 × 128 × 16 blocks, one byte
+- The world is a ring grid of **columns** (16 × 384 × 16 blocks, one byte
   per block, plus an optional byte of meta per block for water levels and
-  campfire fuel). Each column is split into eight 16³ **sections** for
-  meshing and culling.
+  campfire fuel). Each column is split into twenty-four 16³ **sections**
+  for meshing and culling; sections of sky are skipped. Worlds from before
+  were 128 blocks high: their columns load with air above, and a column
+  with nothing above that old ceiling is still saved in the old format.
 - Columns load in a spiral around the player out to the render radius, and
   unload (after saving any edits) beyond it. A column whose save fails stays
   loaded and is saved again on the next attempt, so its edits wait until a
