@@ -11,6 +11,7 @@
 #include "ui.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 typedef struct {
@@ -215,8 +216,69 @@ static void test_condition(void)
     mem_free(h);
 }
 
+/* The glyph quads drawn in colour c, whatever their alpha. */
+static int glyphs_in(const ui *u, uint32_t c, float *y_min, float *y_max)
+{
+    int n = 0;
+    *y_min = 1e9f;
+    *y_max = -1e9f;
+    for (int q = 0; q < u->quads; q++) {
+        if (!is_glyph(u, q) || (quad_v(u, q)[0].rgba & 0xFFFFFFu) != (c & 0xFFFFFFu)) continue;
+        n++;
+        *y_min = fminf(*y_min, quad_v(u, q)[0].y);
+        *y_max = fmaxf(*y_max, quad_v(u, q)[0].y);
+    }
+    return n;
+}
+
+/* The voice in its colour: level when sober, riding a wave when drunk,
+ * with red and cyan ghosts when the brain is short of oxygen. */
+static void test_thought_style_drawn(void)
+{
+    health *h = new_body(63);
+    hud_state s;
+    memset(&s, 0, sizeof s);
+    snprintf(s.voice.now.text, sizeof s.voice.now.text, "So cold. So very cold.");
+    s.voice.now.voice = VOICE_BODY;
+    s.voice.now.feeling = FEEL_COLD;
+    s.voice.now.age = 1.0f;
+    s.voice.now.life = 6.0f;
+    thought_style st = thoughts_style(&s.voice.now, h);
+    const uint32_t icy = ui_rgba(st.r, st.g, st.b, 255);
+    ui_vertex *mem = mem_alloc(sizeof(ui_vertex) * 4 * 4096);
+    ui u;
+    float lo = 0.0f, hi = 0.0f;
+    ui_begin(&u, mem, 4096, 1280, 720);
+    hud_draw(&u, h, &s);
+    CHECK(glyphs_in(&u, icy, &lo, &hi) == 18 && hi - lo < 0.5f);
+    CHECK(glyphs_in(&u, ui_rgba(255, 60, 60, 127), &lo, &hi) == 0);
+
+    h->bac = 2.5f;
+    ui_begin(&u, mem, 4096, 1280, 720);
+    hud_draw(&u, h, &s);
+    CHECK(glyphs_in(&u, icy, &lo, &hi) == 18 && hi - lo > 2.0f * u.scale);
+
+    h->bac = 0.0f;
+    h->sao2 = 0.6f;
+    int ghosts = 0;
+    for (int f = 0; f < 10; f++) {
+        s.voice.now.age = 1.0f + 0.1f * (float)f;
+        ui_begin(&u, mem, 4096, 1280, 720);
+        hud_draw(&u, h, &s);
+        ghosts += glyphs_in(&u, ui_rgba(255, 60, 60, 127), &lo, &hi);
+    }
+    CHECK(ghosts > 10);
+    s.hide_thoughts = 1;
+    ui_begin(&u, mem, 4096, 1280, 720);
+    hud_draw(&u, h, &s);
+    CHECK(glyphs_in(&u, icy, &lo, &hi) == 0);
+    mem_free(mem);
+    mem_free(h);
+}
+
 void test_hud_all(void)
 {
+    test_thought_style_drawn();
     test_ui_fit();
     test_debug_left_bottom();
     test_vitals_fits();

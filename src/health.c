@@ -2602,6 +2602,7 @@ const health_debug_kind HEALTH_DEBUG_KINDS[HEALTH_DEBUG_COUNT] = {
     {"drunk", "Drunk (2 g/L)", HDBG_SYSTEMIC, BP_HEAD},
     {"overdose", "Opioid overdose (60 mg)", HDBG_SYSTEMIC, BP_HEAD},
     {"faint", "Vasovagal faint", HDBG_SYSTEMIC, BP_HEAD},
+    {"brain-damage", "Brain damage (hypoxic)", HDBG_SYSTEMIC, BP_HEAD},
 };
 
 int health_debug_find(const char *name)
@@ -2695,6 +2696,10 @@ void health_injure(health *h, int kind, int part)
     case 31: /* faint */
         h->faint_drive = FAINT_S;
         health_log(h, "Debug: vasovagal reflex");
+        break;
+    case 32: /* brain-damage: what minutes without oxygen leave behind */
+        h->organ[ORG_BRAIN] = minf(h->organ[ORG_BRAIN], 0.35f);
+        health_log(h, "Debug: brain damage");
         break;
     default: break;
     }

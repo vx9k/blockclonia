@@ -579,8 +579,148 @@ static void test_setting_and_hud(void)
     mem_free(h);
 }
 
+/* Each feeling has its colour; the voice's own when it has none. */
+static void test_style_colour(void)
+{
+    health *h = new_body(60);
+    thought t = {0};
+    t.voice = VOICE_INNER;
+    t.feeling = FEEL_THIRST;
+    thought_style s = thoughts_style(&t, h);
+    CHECK(s.r == 255 && s.g == 244 && s.b == 220);
+    t.voice = VOICE_BODY;
+    s = thoughts_style(&t, h);
+    CHECK(s.r == 175 && s.g == 200 && s.b == 225);
+    t.feeling = FEEL_COLD;
+    s = thoughts_style(&t, h);
+    CHECK(s.b > s.r + 80); /* icy blue */
+    t.feeling = FEEL_PAIN;
+    s = thoughts_style(&t, h);
+    CHECK(s.r > s.b + 80);
+    t.feeling = FEEL_BURN;
+    s = thoughts_style(&t, h);
+    CHECK(s.r > s.g && s.g > s.b); /* orange */
+    t.feeling = FEEL_DOPED;
+    s = thoughts_style(&t, h);
+    CHECK(s.b > s.g && s.r > s.g); /* violet */
+    t.feeling = FEEL_COUNT + 3; /* out of range: no tint, no crash */
+    s = thoughts_style(&t, h);
+    CHECK(s.r == 175);
+    mem_free(h);
+}
+
+/* A healthy body reads plainly; drink, opioids and a faint make the words
+ * swim, short oxygen makes them glitch, a damaged brain garbles them. */
+static void test_style_distortion(void)
+{
+    health *h = new_body(61);
+    thought t = {0};
+    thought_style s = thoughts_style(&t, h);
+    CHECK(s.wave == 0.0f && s.glitch == 0.0f && s.garble == 0.0f);
+    h->bac = 2.5f;
+    CHECK(thoughts_style(&t, h).wave > 0.9f);
+    h->bac = 0.8f;
+    float some = thoughts_style(&t, h).wave;
+    CHECK(some > 0.1f && some < 0.5f);
+    h->bac = 0.0f;
+    h->opioid = 40.0f;
+    CHECK(thoughts_style(&t, h).wave > 0.3f);
+    h->opioid = 0.0f;
+    h->vagal = 1.0f;
+    CHECK(thoughts_style(&t, h).wave >= 0.8f);
+    h->vagal = 0.0f;
+    h->sao2 = 0.7f;
+    CHECK(thoughts_style(&t, h).glitch > 0.6f);
+    h->sao2 = 0.97f;
+    h->brain_o2 = 0.55f;
+    CHECK(thoughts_style(&t, h).glitch > 0.6f);
+    h->brain_o2 = 1.0f;
+    float g[3] = {0};
+    const float brain[3] = {0.85f, 0.6f, 0.3f};
+    for (int i = 0; i < 3; i++) {
+        h->organ[ORG_BRAIN] = brain[i];
+        g[i] = thoughts_style(&t, h).garble;
+    }
+    CHECK(g[0] < 0.1f && g[0] < g[1] && g[1] < g[2] && g[2] > 0.8f);
+    mem_free(h);
+}
+
+static int count_of(const char *s, char c)
+{
+    int n = 0;
+    for (; *s; s++) n += *s == c;
+    return n;
+}
+
+/* Words of a that come through b untouched; the spaces stay, so the
+ * words line up. */
+static int words_intact(const char *a, const char *b)
+{
+    int n = 0;
+    while (*a && *b) {
+        size_t la = strcspn(a, " "), lb = strcspn(b, " ");
+        n += la == lb && !strncmp(a, b, la);
+        a += la + (a[la] == ' ');
+        b += lb + (b[lb] == ' ');
+    }
+    return n;
+}
+
+static void test_garble(void)
+{
+    const char *in = "\"I can't feel my fingers, and it's getting dark.\"";
+    char out[96] = {0}, again[96] = {0}, other[96] = {0};
+    thoughts_garble(out, sizeof out, in, 0.0f, 7);
+    CHECK(!strcmp(out, in));
+    thoughts_garble(out, sizeof out, in, 0.6f, 7);
+    thoughts_garble(again, sizeof again, in, 0.6f, 7);
+    thoughts_garble(other, sizeof other, in, 0.6f, 8);
+    CHECK(!strcmp(out, again) && strcmp(out, other) != 0 && strcmp(out, in) != 0);
+    CHECK(strlen(out) <= strlen(in));
+    CHECK(count_of(out, ' ') == count_of(in, ' ') && count_of(out, '"') == 2 && count_of(out, ',') == 1);
+    CHECK(count_of(out, '.') == 1 && count_of(out, '\'') == 2);
+    /* More damage, more letters lost to it. */
+    char light[96] = {0}, heavy[96] = {0};
+    int lighter = 0, heavier = 0, words = 0;
+    for (uint32_t seed = 1; seed <= 20; seed++) {
+        thoughts_garble(light, sizeof light, in, 0.2f, seed);
+        thoughts_garble(heavy, sizeof heavy, in, 1.0f, seed);
+        lighter += words_intact(in, light);
+        heavier += words_intact(in, heavy);
+        words += words_intact(in, in);
+    }
+    CHECK(lighter < words && heavier < lighter / 2);
+    /* Short buffers are cut, never overrun. */
+    char tiny[5] = {'x', 'x', 'x', 'x', 'x'};
+    thoughts_garble(tiny, sizeof tiny, in, 1.0f, 3);
+    CHECK(memchr(tiny, 0, sizeof tiny) != NULL);
+    thoughts_garble(tiny, 1, in, 1.0f, 3);
+    CHECK(tiny[0] == '\0');
+    thoughts_garble(tiny, 0, in, 1.0f, 3); /* nothing written */
+    CHECK(tiny[0] == '\0');
+}
+
+/* Every line gets its own seed, so two lines in a row garble differently. */
+static void test_thought_seed(void)
+{
+    thoughts t;
+    thoughts_init(&t, 9);
+    health *h = new_body(62);
+    h->pain = 8.0f;
+    uint32_t seeds[2] = {0};
+    int got = 0;
+    for (int i = 0; i < 20000 && got < 2; i++)
+        if (thoughts_step(&t, h, 0.05f)) seeds[got++] = t.now.seed;
+    CHECK(got == 2 && seeds[0] != seeds[1]);
+    mem_free(h);
+}
+
 void test_thoughts_all(void)
 {
+    test_style_colour();
+    test_style_distortion();
+    test_garble();
+    test_thought_seed();
     test_healthy_is_quiet();
     test_pain_levels();
     test_blood_levels();
