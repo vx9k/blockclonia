@@ -284,6 +284,21 @@ static void test_wide_ids(void)
     for (item_id id = ITEM_FIRST; id < ITEM_END; id++) CHECK(item_valid(id) && strcmp(item_get(id)->name, "?") != 0);
 }
 
+/* Tool ids map to and from (kind, tier) one to one, and only inside the
+ * tool range: an id a byte or more past it is no tool. */
+static void test_tool_ids(void)
+{
+    int kind = -1, tier = -1, seen = 0;
+    for (int k = 0; k < TOOL_KINDS; k++)
+        for (int t = 0; t < TIER_COUNT; t++) {
+            item_id id = item_tool_id(k, t);
+            seen += item_tool(id, &kind, &tier) && kind == k && tier == t && item_valid(id);
+        }
+    CHECK(seen == TOOL_KINDS * TIER_COUNT);
+    CHECK(!item_tool(I_TOOL_FIRST - 1, &kind, &tier) && !item_tool(I_TOOL_END, &kind, &tier));
+    CHECK(!item_tool(I_TOOL_FIRST + 0x100u, &kind, &tier) && !item_tool(I_TOOL_FIRST | 0x80000000u, &kind, &tier));
+}
+
 /* INV3 keeps the id as four little-endian bytes, and a flipped bit in any
  * byte above the lowest refuses the whole inventory, leaving the old one. */
 static void test_inv3_ids(void)
@@ -318,5 +333,6 @@ void test_tools_all(void)
     test_formats();
     test_breaking();
     test_wide_ids();
+    test_tool_ids();
     test_inv3_ids();
 }
