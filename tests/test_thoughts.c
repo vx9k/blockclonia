@@ -693,7 +693,7 @@ static void test_garble(void)
     /* Short buffers are cut, never overrun. */
     char tiny[5] = {'x', 'x', 'x', 'x', 'x'};
     thoughts_garble(tiny, sizeof tiny, in, 1.0f, 3);
-    CHECK(strlen(tiny) <= 4);
+    CHECK(memchr(tiny, 0, sizeof tiny) != NULL);
     thoughts_garble(tiny, 1, in, 1.0f, 3);
     CHECK(tiny[0] == '\0');
     thoughts_garble(tiny, 0, in, 1.0f, 3); /* nothing written */
