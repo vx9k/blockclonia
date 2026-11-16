@@ -219,7 +219,8 @@ void health_log(health *h, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(h->log[0], sizeof h->log[0], fmt, ap);
     va_end(ap);
-    h->log_age[0] = 0.0f;}
+    h->log_age[0] = 0.0f;
+}
 
 static const char *const PART_NAMES[BP_COUNT] = {"Head",      "Chest",    "Abdomen",  "Left arm",
                                                  "Right arm", "Left leg", "Right leg"};
