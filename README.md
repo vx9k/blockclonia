@@ -198,7 +198,11 @@ thirst, hunger) run on the survival clock.
   and sensations ("You feel cold.", "Your fingers are going numb."). It
   speaks when a feeling sets in or worsens, again now and then while it
   lasts, with relief when a bad one clears, and cries out at a fresh
-  injury. It goes quiet while you are out cold. Settings, Controls, Inner
+  injury. It goes quiet while you are out cold. Each line takes the colour
+  of what it is about (icy blue for cold, red for pain, violet on
+  opioids), the words swim when you are drunk, drugged or about to faint,
+  glitch when the brain is short of oxygen, and come out garbled, worse
+  the more of it is lost, after brain damage. Settings, Controls, Inner
   voice turns it off.
 - **The H panel** has a body diagram and the status of each of the seven
   parts, advice for the selected one, the organs (brain, heart, lungs,

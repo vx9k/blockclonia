@@ -368,7 +368,43 @@ void hud_update(hud_state *s, const health *h, float dt)
 
 /* The inner voice, above the hotbar: thoughts in quotes, what the body
  * feels in a cooler, plainer colour. */
-static void draw_thought(ui *u, const hud_state *s, float y)
+static uint32_t hash32(uint32_t x)
+{
+    x ^= x >> 16;
+    x *= 0x7FEB352Du;
+    x ^= x >> 15;
+    x *= 0x846CA68Bu;
+    return x ^ (x >> 16);
+}
+
+/* A thought drawn letter by letter: riding a sine when the head swims;
+ * jittering, ghosting red and cyan and flickering to symbols when the
+ * brain is short of oxygen. Runs on the thought's age, so it looks the
+ * same at any frame rate. */
+static void draw_styled(ui *u, float x, float y, uint32_t col, const thought_style *st, float age, uint32_t seed,
+                        const char *s)
+{
+    static const char NOISE[] = "#%&/\\|<>*";
+    uint32_t alpha = col >> 24;
+    for (int i = 0; s[i]; i++) {
+        if (s[i] == ' ') continue;
+        char ch[2] = {s[i], 0};
+        float cx = x + (float)(i * UI_CELL_W);
+        float cy = y + st->wave * 2.5f * sinf(age * 3.0f + (float)i * 0.55f);
+        /* Twelve fresh rolls a second per letter. */
+        uint32_t r = hash32(seed ^ (uint32_t)i * 0x9E3779B1u ^ (uint32_t)(age * 12.0f) * 0x85EBCA6Bu);
+        if ((float)(r & 0xFFu) < st->glitch * 110.0f) {
+            cx += (float)((int)((r >> 8) % 5u) - 2) * 0.5f;
+            cy += (float)((int)((r >> 12) % 3u) - 1) * 0.5f;
+            ui_text(u, cx - 1.0f, cy, 1, ui_rgba(255, 60, 60, (int)(alpha / 2)), ch);
+            ui_text(u, cx + 1.0f, cy, 1, ui_rgba(60, 230, 255, (int)(alpha / 2)), ch);
+            if (((r >> 16) & 0xFu) < 3u) ch[0] = NOISE[(r >> 20) % (sizeof NOISE - 1)];
+        }
+        ui_text_shadow(u, cx, cy, 1, col, ch);
+    }
+}
+
+static void draw_thought(ui *u, const health *h, const hud_state *s, float y)
 {
     float a = thoughts_alpha(&s->voice);
     if (s->hide_thoughts || a <= 0.0f) return;
@@ -376,10 +412,14 @@ static void draw_thought(ui *u, const hud_state *s, float y)
     const thought *t = &s->voice.now;
     if (t->voice == VOICE_INNER) snprintf(buf, sizeof buf, "\"%s\"", t->text);
     else snprintf(buf, sizeof buf, "%s", t->text);
-    uint32_t col = t->voice == VOICE_INNER ? ui_rgba(255, 244, 220, 255) : ui_rgba(175, 200, 225, 255);
-    float w = ui_text_width(buf, 1);
+    thought_style st = thoughts_style(t, h);
+    /* A badly damaged brain's words shift as they are read. */
+    uint32_t seed = t->seed ^ (st.garble > 0.5f ? (uint32_t)(t->age * 3.0f) * 0x9E3779B1u : 0u);
+    char said[THOUGHT_LEN + 2] = {0};
+    thoughts_garble(said, sizeof said, buf, st.garble, seed);
+    float w = ui_text_width(said, 1);
     ui_rect(u, (u->w - w) * 0.5f - 4, y - 2, w + 8, 12, ui_rgba(0, 0, 0, (int)(90.0f * a)));
-    ui_text_shadow(u, (u->w - w) * 0.5f, y, 1, ui_alpha(col, a), buf);
+    draw_styled(u, (u->w - w) * 0.5f, y, ui_alpha(ui_rgba(st.r, st.g, st.b, 255), a), &st, t->age, t->seed, said);
 }
 
 /* Heart rate, pressure, SpO2, a live ECG strip, the four needs bars, and
@@ -481,7 +521,7 @@ static void hud(ui *u, const health *h, const hud_state *s)
 
     /* The hotbar owns the bottom 28 px. */
     float by = u->h - 14;
-    draw_thought(u, s, by - 58);
+    draw_thought(u, h, s, by - 58);
     if (s->held) ui_text(u, (u->w - ui_text_width(s->held, 1)) * 0.5f, by - 30, 1, C_TEXT, s->held);
     if (s->flying) {
         const char *t = "Flying: no injuries, instant building";

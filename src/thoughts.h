@@ -59,7 +59,17 @@ typedef struct {
     int level;              /* 1..3, 0 for relief */
     float age;              /* s since it was voiced */
     float life;             /* s it stays on screen */
+    uint32_t seed;          /* how this line is garbled and glitched */
 } thought;
+
+/* How a thought looks: a colour for what it is about (icy blue for cold,
+ * red for pain...) and three distortions, 0..1 each, read from the body. */
+typedef struct {
+    uint8_t r, g, b;
+    float wave;   /* the letters ride a slow sine: drink, opioids, a faint */
+    float glitch; /* the letters jitter, ghost and flicker: the brain short of oxygen */
+    float garble; /* letters swapped, replaced or lost: a damaged brain */
+} thought_style;
 
 typedef struct {
     thought now;
@@ -85,6 +95,14 @@ int thoughts_level(const health *h, int f);
 
 /* How many ways there are to say feeling f at level (0 is relief). */
 int thoughts_lines(int f, int level);
+
+/* The look of thought t in body h. */
+thought_style thoughts_style(const thought *t, const health *h);
+
+/* Copies in to out (size n) with about a share `garble` of its letters
+ * scrambled: replaced, swapped with the next one or dropped. The same seed
+ * gives the same result; spaces and punctuation stay. */
+void thoughts_garble(char *out, size_t n, const char *in, float garble, uint32_t seed);
 
 /* How visible t->now is (0..1): fades in, holds, fades out. */
 float thoughts_alpha(const thoughts *t);

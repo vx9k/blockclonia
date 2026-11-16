@@ -1,5 +1,6 @@
 #include "thoughts.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -348,6 +349,7 @@ static int say(thoughts *t, const health *h, int f, int level)
     t->now.feeling = f;
     t->now.level = level;
     t->now.age = 0.0f;
+    t->now.seed = next(t);
     t->now.life = 2.5f + 0.06f * (float)len;
     t->gap = t->now.life + 2.0f;
     t->since[f] = 0.0f;
@@ -425,6 +427,73 @@ int thoughts_lines(int f, int level)
     int n = 0;
     for (int i = 0; i < NLINES; i++) n += LINES[i].f == f && LINES[i].level == level;
     return n;
+}
+
+static float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
+static float ramp(float v, float a, float b) { return clamp01((v - a) / (b - a)); }
+
+/* Colours by feeling, r g b; 0,0,0 keeps the voice's own. */
+static const uint8_t TINT[FEEL_COUNT][3] = {
+    [FEEL_OUCH] = {255, 130, 115},  [FEEL_PAIN] = {255, 130, 115},  [FEEL_BLEEDING] = {235, 90, 90},
+    [FEEL_BURN] = {255, 165, 80},   [FEEL_HOT] = {255, 180, 110},   [FEEL_FEVER] = {250, 170, 120},
+    [FEEL_COLD] = {150, 210, 255},  [FEEL_NUMB] = {170, 200, 240},  [FEEL_SICK] = {185, 215, 130},
+    [FEEL_DRUNK] = {240, 200, 110}, [FEEL_DOPED] = {200, 170, 255}, [FEEL_SWOON] = {195, 195, 200},
+    [FEEL_FAINT] = {195, 195, 200}, [FEEL_AIR] = {150, 225, 235},   [FEEL_BREATH] = {150, 225, 235},
+};
+
+thought_style thoughts_style(const thought *t, const health *h)
+{
+    thought_style s = {255, 244, 220, 0.0f, 0.0f, 0.0f};
+    if (t->voice == VOICE_BODY) s = (thought_style){175, 200, 225, 0.0f, 0.0f, 0.0f};
+    if (t->feeling >= 0 && t->feeling < FEEL_COUNT && TINT[t->feeling][0]) {
+        s.r = TINT[t->feeling][0];
+        s.g = TINT[t->feeling][1];
+        s.b = TINT[t->feeling][2];
+    }
+    /* The opioid's share of sedation, without the drink's. */
+    float opi = health_sedation(h) - h->bac / 3.5f;
+    s.wave = clamp01(ramp(h->bac, 0.4f, 2.5f) + ramp(opi, 0.1f, 0.45f) + 0.8f * h->vagal);
+    s.glitch = fmaxf(ramp(0.88f - h->sao2, 0.0f, 0.25f), ramp(0.85f - h->brain_o2, 0.0f, 0.4f));
+    s.garble = ramp(1.0f - h->organ[ORG_BRAIN], 0.1f, 0.8f);
+    return s;
+}
+
+static uint32_t mix(uint32_t x)
+{
+    x ^= x >> 16;
+    x *= 0x85EBCA6Bu;
+    x ^= x >> 13;
+    x *= 0xC2B2AE35u;
+    return x ^ (x >> 16);
+}
+
+static int is_letter(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+
+void thoughts_garble(char *out, size_t n, const char *in, float garble, uint32_t seed)
+{
+    if (!n) return;
+    size_t o = 0;
+    for (size_t i = 0; in[i] && o + 1 < n; i++) {
+        char c = in[i];
+        uint32_t r = mix(seed ^ ((uint32_t)i * 0x9E3779B1u));
+        /* Up to ~70% of the letters touched at the worst: still a voice,
+         * hardly words. */
+        if (!is_letter(c) || (float)(r & 0xFFFFu) / 65536.0f >= 0.7f * garble) {
+            out[o++] = c;
+            continue;
+        }
+        uint32_t how = (r >> 16) % 10u;
+        if (how < 4) { /* a wrong letter, keeping the case */
+            char base = c >= 'a' ? 'a' : 'A';
+            out[o++] = (char)(base + (char)((r >> 20) % 26u));
+        } else if (how < 7 && is_letter(in[i + 1]) && o + 2 < n) { /* two letters swapped */
+            out[o++] = in[i + 1];
+            out[o++] = c;
+            i++;
+        } else if (how >= 7) { /* lost */
+        } else out[o++] = c;
+    }
+    out[o] = '\0';
 }
 
 float thoughts_alpha(const thoughts *t)

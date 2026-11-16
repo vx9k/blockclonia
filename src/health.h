@@ -455,7 +455,7 @@ typedef struct {
 } health_debug_kind;
 
 extern const health_debug_kind HEALTH_DEBUG_KINDS[];
-#define HEALTH_DEBUG_COUNT 32
+#define HEALTH_DEBUG_COUNT 33
 
 /* Looks a --hurt token up in HEALTH_DEBUG_KINDS; returns -1 if there is
  * no such name. */
