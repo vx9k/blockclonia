@@ -1,5 +1,6 @@
 /* Tools: breaking speed and what a block yields by tool, wear and wearing
  * out, wear surviving moves, drops and saves, and the older formats. */
+#include "combat.h"
 #include "interact.h"
 #include "inventory.h"
 #include "item.h"
@@ -261,6 +262,53 @@ static void test_ground(void)
     CHECK(block_tool(B_UNLOADED) == -1 && synth_material_of(B_UNLOADED) == MAT_GENERIC);
 }
 
+/* An item id is all 32 bits. One that matches a real item only in its low
+ * bytes is an unknown item, not that item: nothing may truncate it to a
+ * byte on the way, or a corrupt save or packet would conjure real items. */
+static void test_wide_ids(void)
+{
+    const item_id aliases[] = {ITEM_END, I_SPIRITS | 0x10000u, I_SPIRITS | 0x80000000u, B_STONE | 0x1000000u,
+                               0xFFFFFFFFu};
+    for (size_t i = 0; i < sizeof aliases / sizeof aliases[0]; i++) {
+        item_id a = aliases[i];
+        CHECK(!item_valid(a) && !strcmp(item_get(a)->name, "?") && !item_durability(a));
+        CHECK(item_dig_speed(a, B_DIRT) == item_dig_speed(0, B_DIRT) && combat_blow(a) == combat_blow(0));
+        inventory inv = {0};
+        inv_init(&inv);
+        CHECK(inv_add(&inv, a, 5) == 5 && inv_count(&inv, a) == 0);
+        inv_set_held(&inv, a, 1);
+        CHECK(inv_held(&inv)->count == 0);
+    }
+    /* Past one byte, every id up to ITEM_END is a real, named item. */
+    CHECK(ITEM_END > 256 && I_SPIRITS > 255);
+    for (item_id id = ITEM_FIRST; id < ITEM_END; id++) CHECK(item_valid(id) && strcmp(item_get(id)->name, "?") != 0);
+}
+
+/* INV3 keeps the id as four little-endian bytes, and a flipped bit in any
+ * byte above the lowest refuses the whole inventory, leaving the old one. */
+static void test_inv3_ids(void)
+{
+    inventory inv = {0}, out = {0};
+    inv_init(&inv);
+    inv_set_held(&inv, I_SPIRITS, 2);
+    uint8_t buf[INV_ENCODED_SIZE] = {0};
+    CHECK(inv_encode(&inv, buf, sizeof buf) == INV_ENCODED_SIZE && !memcmp(buf, "INV3", 4));
+    const uint8_t *slot = buf + 8 + 6 * inv.selected;
+    CHECK(slot[0] == (uint8_t)I_SPIRITS && slot[1] == (uint8_t)(I_SPIRITS >> 8) && !slot[2] && !slot[3]);
+    CHECK(slot[4] == 2 && slot[5] == 0);
+    CHECK(inv_decode(&out, buf, sizeof buf) == 0 && inv_held(&out)->id == I_SPIRITS && inv_held(&out)->count == 2);
+
+    for (int k = 1; k <= 4; k++) {
+        uint8_t bad[INV_ENCODED_SIZE] = {0};
+        memcpy(bad, buf, sizeof bad);
+        if (k < 4) bad[8 + 6 * inv.selected + k] ^= 0x40;
+        else memcpy(bad, "INV2", 4);
+        inv_init(&out);
+        inv_add(&out, I_APPLE, 1);
+        CHECK(inv_decode(&out, bad, sizeof bad) < 0 && inv_count(&out, I_APPLE) == 1);
+    }
+}
+
 void test_tools_all(void)
 {
     test_ground();
@@ -269,4 +317,6 @@ void test_tools_all(void)
     test_wear();
     test_formats();
     test_breaking();
+    test_wide_ids();
+    test_inv3_ids();
 }
