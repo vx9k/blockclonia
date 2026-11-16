@@ -405,6 +405,24 @@ static void test_sample(void)
     CHECK(differ > 250);
 }
 
+/* At the world's edge, 2000 km out, the terrain is as sane as near the
+ * origin: heights in range, known biomes, no cliff between neighbouring
+ * columns that the land's slope could not make, and the small-scale
+ * detail still there rather than lost to rounding. */
+static void test_far_edge(void)
+{
+    int jumps = 0, bad = 0, detail = 0;
+    for (int i = 0; i < 64; i++) {
+        int x = WORLD_LIMIT - 4000 + i * 61, z = -(WORLD_LIMIT - 4000) + i * 37;
+        worldgen_point p = worldgen_sample(1337, x, z), e = worldgen_sample(1337, x + 1, z);
+        worldgen_point s = worldgen_sample(1337, x, z + 1);
+        bad += p.height < 4 || p.height > WORLD_H - 12 || (int)p.b < 0 || (int)p.b >= BIOME_COUNT;
+        jumps += abs(p.height - e.height) > 24 || abs(p.height - s.height) > 24;
+        detail += p.height != e.height || p.height != s.height;
+    }
+    CHECK(bad == 0 && jumps == 0 && detail >= 4);
+}
+
 /* From the cold belt 6 km north (-z) to the hot belt 6 km south it gets
  * warmer band by band, and the hot belt is the drier. */
 static void test_climate_zones(void)
@@ -520,6 +538,7 @@ void test_worldgen_all(void)
     test_cave_shapes();
     test_landforms();
     test_sample();
+    test_far_edge();
     test_climate_zones();
     test_dry_landforms();
     test_caves_stand();
