@@ -219,7 +219,9 @@ from a job.
   Put any breaking change and anything the reviewer should look at first
   at the top, and link the issue with `Closes #N`.
 - Open the pull request as a draft while work is in progress. Mark it
-  ready when CI passes and the checklist is done.
+  ready when CI passes and the checklist is done. Two checks gate the
+  merge: `CI passed`, which stands for every CI job but the experimental
+  macOS one, and `Pull request rules` (the title and the test ratio).
 - Before review starts you may rebase your own branch on `main` and push
   with `--force-with-lease`. Once review has started, add commits instead
   of rewriting them.
@@ -266,6 +268,9 @@ What this project adds on top:
   `thermo`, `health`, `save`, `settings`, `sound`, `worldgen`, `menu`,
   ...), or `shaders`, `tests`, `lint`, `agents`, `readme` or `docs` for
   those areas. Leave the scope out when a change spans several modules.
+  The exception is `fix(security):`, for the fix of a vulnerability
+  reported through `SECURITY.md`: it releases as soon as it reaches `main`
+  (see Releases).
 - **Description**: imperative mood, starting with a lower-case letter
   (names and identifiers such as `Vulkan` or `INV1` keep their case), no
   full stop, and the whole header within 72 columns
@@ -301,3 +306,23 @@ feat(inventory)!: store item durability in the saved inventory
 BREAKING CHANGE: the inventory tag changes from INV1 to INV2, and
 inventories saved by older builds are no longer read.
 ```
+
+### Releases
+
+CI releases on its own; nobody tags by hand. Every Monday the scheduled
+run checks `main`'s head, and once `CI passed` is green the `release` job
+(`tools/release.sh`) bumps the calendar version (`YY.M.PATCH`) in
+`project()` in `CMakeLists.txt`, writes the changelog entry at the top of
+`CHANGELOG.md` from the Conventional Commits since the last tag, commits
+`chore(release): <version> after green CI` onto `main` and tags it
+`v<version>`. The Raspberry Pi packages are then built from that tag,
+attested (`gh attestation verify <file> --repo vx9k/blockclonia`) and
+published as the GitHub release. A push to `main` releases at once only for
+a `fix(security):` commit, or when the weekly release was missed. "Run
+workflow" on the CI workflow releases by hand. Every green push to `main`
+also replaces the `nightly` prerelease, whose packages are versioned
+`<release>+git.<date>.<commit>`.
+
+So write commit headers for the changelog: `feat` lands under Added, `fix`
+under Fixed, `perf` under Performance, the rest under Maintenance, and a
+`BREAKING CHANGE:` footer's text is quoted under Breaking changes.

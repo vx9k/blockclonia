@@ -1,0 +1,109 @@
+# Builds, tests and packages the Raspberry Pi .debs. ci.yml calls it twice:
+# for every run, from the commit under test (versioned "+git.<date>.<sha>",
+# feeding the nightly), and for a release, from its tag (the plain version).
+#
+#   pi-arm64  native arm64 runner inside Debian trixie (the base of
+#             Raspberry Pi OS trixie), tuned for the Pi 4; a .deb that
+#             installs on 64-bit Pi OS.
+#   pi-armhf  cross build for 32-bit Pi OS in Debian trixie, tests under
+#             qemu-user; an armhf .deb.
+name: Pi packages
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The tag to build; empty builds the commit under test.
+        type: string
+        default: ""
+      artifact-prefix:
+        description: Prefix of the uploaded artifacts' names.
+        type: string
+        default: blockclonia
+
+permissions:
+  contents: read
+
+jobs:
+  pi-arm64:
+    runs-on: ubuntu-26.04-arm # GitHub-hosted arm64; free for public repositories
+    container: debian:trixie
+    # mimalloc and GLFW build from source before the game.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          # Nothing here pushes: keep the token out of .git/config.
+          persist-credentials: false
+      - name: Install packages
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build ca-certificates glslc file \
+            libvulkan-dev libsqlite3-dev libsodium-dev pkg-config \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev libwayland-bin libxkbcommon-dev \
+            mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
+      - name: Version the package
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          # A release keeps its plain version; anything else names its commit.
+          if [ -z "$REF" ]; then
+            echo "MC_PACKAGE_VERSION_SUFFIX=+git.$(date -u +%Y%m%d).${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
+      # trixie ships mimalloc 3.0.x and GLFW 3.4, both older than the
+      # pinned 3.5 series, so MC_DEPS=AUTO builds mimalloc 3.5.3 and GLFW
+      # 3.5.1 from source here (GLFW needs the X11 and Wayland headers).
+      - run: cmake --preset release -DMC_CPU=pi4 -DMC_DEPS=AUTO -DMC_WERROR=ON -DMC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}"
+      - run: cmake --build --preset release
+      - run: ctest --preset release
+      - run: cd build/release && cpack -G DEB
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-prefix }}-pi-arm64
+          path: build/release/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
+  pi-armhf:
+    runs-on: ubuntu-26.04
+    container: debian:trixie
+    # The tests run under qemu-arm, several times slower than native.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          # Nothing here pushes: keep the token out of .git/config.
+          persist-credentials: false
+      - name: Install packages
+        run: |
+          dpkg --add-architecture armhf
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            cmake ninja-build ca-certificates glslc qemu-user \
+            crossbuild-essential-armhf \
+            libvulkan-dev:armhf libsqlite3-dev:armhf libsodium-dev:armhf pkg-config libwayland-bin \
+            libx11-dev:armhf libxrandr-dev:armhf libxinerama-dev:armhf \
+            libxcursor-dev:armhf libxi-dev:armhf \
+            libwayland-dev:armhf libxkbcommon-dev:armhf
+      - name: Version the package
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          # A release keeps its plain version; anything else names its commit.
+          if [ -z "$REF" ]; then
+            echo "MC_PACKAGE_VERSION_SUFFIX=+git.$(date -u +%Y%m%d).${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
+      - run: cmake --preset pi4-armhf -DMC_DEPS=AUTO -DMC_WERROR=ON -DMC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}"
+      - run: cmake --build --preset pi4-armhf
+      - run: ctest --preset pi4-armhf # unit + bench under qemu-arm
+      - run: cd build/pi4-armhf && cpack -G DEB
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-prefix }}-pi-armhf
+          path: build/pi4-armhf/*.deb
+          if-no-files-found: error
+          retention-days: 14
