@@ -1,0 +1,18 @@
+# CodeQL configuration for blockclonia (used by .github/workflows/codeql.yml).
+#
+# Untrusted input is what other people hand the game: shared world folders
+# (world.db and the files beside it), settings and pipeline caches copied
+# between machines, and every packet a multiplayer peer or the rendezvous
+# server sends. Keep findings about those visible. Paths from the command
+# line and the environment are chosen by the person running the game.
+name: blockclonia CodeQL config
+
+queries:
+  - uses: security-extended
+
+paths-ignore:
+  # Tests and fuzz targets make temporary directories and feed malformed
+  # input on purpose; build output holds fetched third-party sources.
+  - tests/**
+  - tools/tests/**
+  - build/**

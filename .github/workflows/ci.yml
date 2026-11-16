@@ -1,4 +1,4 @@
-# Builds and tests blockclonia on every push and pull request.
+# Builds, tests and releases blockclonia.
 #
 #   linux     Ubuntu 26.04, gcc and clang, Release flags, -Werror, system
 #             packages only; unit tests, --bench, and a 120-frame render on
@@ -10,38 +10,54 @@
 #             keep compiling.
 #   sanitize  ASan + UBSan (gcc).
 #   lint      tools/lint.sh: clang-tidy, cppcheck, shader checks, and
-#             clang-format on the lines this change touches.
-#   pi-arm64  native arm64 runner inside Debian trixie (the base of
-#             Raspberry Pi OS trixie), tuned for the Pi 4; produces a .deb
-#             that installs on 64-bit Pi OS.
-#   pi-armhf  cross build for 32-bit Pi OS in Debian trixie, tests under
-#             qemu-user; produces an armhf .deb.
+#             clang-format on the lines this change touches; and the tests
+#             of the CI and release tools.
+#   package   the Raspberry Pi .debs (package.yml).
 #   macos     experimental: the game through MoltenVK (Homebrew) and the
 #             unit tests on Apple Silicon, plus a best-effort render.
+#   ci-passed the one check the ruleset requires; it stands for the rest.
 #   nightly   on pushes to main that pass, replaces the "nightly"
 #             prerelease with the .debs.
+#   release   weekly: versions, tags and publishes the checked main
+#             revision (tools/release.sh), with release-package and
+#             release-publish building and attesting its .debs.
 name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+  # The weekly release: CI checks main's head, then the release job publishes
+  # it. Pushes release at once only for a security fix (`fix(security): …`)
+  # or to catch up a missed week; see due() in tools/release.py.
+  schedule:
+    - cron: "0 6 * * 1"
+  # A release by hand, e.g. when the weekly run lost a race to a merge.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# A new push to a pull request cancels its older run. Each push to main gets
+# its own group, so main's runs neither queue nor get cancelled; the event
+# keeps the weekly run apart from its commit's push run.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   linux:
     runs-on: ubuntu-26.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         compiler: [gcc, clang]
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Nothing here pushes: keep the token out of .git/config.
+          persist-credentials: false
       - name: Install packages
         run: |
           sudo apt-get update
@@ -54,8 +70,12 @@ jobs:
 
   old-vulkan-ubuntu:
     runs-on: ubuntu-24.04 # Vulkan headers 1.3.275, GLFW 3.3, mimalloc 2.1
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Nothing here pushes: keep the token out of .git/config.
+          persist-credentials: false
       - name: Install packages
         run: |
           sudo apt-get update
@@ -69,8 +89,13 @@ jobs:
   old-vulkan-debian:
     runs-on: ubuntu-26.04
     container: debian:bookworm # Vulkan headers 1.3.239
+    # mimalloc and GLFW build from source before the game.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Nothing here pushes: keep the token out of .git/config.
+          persist-credentials: false
       - name: Install packages
         run: |
           apt-get update
@@ -88,8 +113,13 @@ jobs:
 
   sanitize:
     runs-on: ubuntu-26.04
+    # Instrumented tests run a few times slower; GLFW and mimalloc build too.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Nothing here pushes: keep the token out of .git/config.
+          persist-credentials: false
       - name: Install packages
         run: |
           sudo apt-get update
@@ -107,9 +137,12 @@ jobs:
 
   lint:
     runs-on: ubuntu-26.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
+          # Nothing here pushes: keep the token out of .git/config.
+          persist-credentials: false
           fetch-depth: 0 # clang-format checks only lines changed since the base
       - name: Install packages
         run: |
@@ -123,67 +156,26 @@ jobs:
         env:
           MC_FORMAT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          # A new branch's first push has no "before" commit.
+          # A new branch's first push, and the weekly and manual runs, have
+          # no "before" commit.
           if ! git cat-file -e "${MC_FORMAT_BASE}^{commit}" 2>/dev/null; then MC_FORMAT_BASE=HEAD~1; fi
           export MC_FORMAT_BASE
           tools/lint.sh
 
-  pi-arm64:
-    runs-on: ubuntu-26.04-arm # GitHub-hosted arm64; free for public repositories
-    container: debian:trixie
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install packages
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build ca-certificates glslc file \
-            libvulkan-dev libsqlite3-dev libsodium-dev pkg-config \
-            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev libwayland-bin libxkbcommon-dev \
-            mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
-      # trixie ships mimalloc 3.0.x and GLFW 3.4, both older than the
-      # pinned 3.5 series, so MC_DEPS=AUTO builds mimalloc 3.5.3 and GLFW
-      # 3.5.1 from source here (GLFW needs the X11 and Wayland headers).
-      - run: cmake --preset release -DMC_CPU=pi4 -DMC_DEPS=AUTO -DMC_WERROR=ON
-      - run: cmake --build --preset release
-      - run: ctest --preset release
-      - run: cd build/release && cpack -G DEB
-      - uses: actions/upload-artifact@v7
-        with:
-          name: blockclonia-pi-arm64
-          path: build/release/*.deb
-
-  pi-armhf:
-    runs-on: ubuntu-26.04
-    container: debian:trixie
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install packages
-        run: |
-          dpkg --add-architecture armhf
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            cmake ninja-build ca-certificates glslc qemu-user \
-            crossbuild-essential-armhf \
-            libvulkan-dev:armhf libsqlite3-dev:armhf libsodium-dev:armhf pkg-config libwayland-bin \
-            libx11-dev:armhf libxrandr-dev:armhf libxinerama-dev:armhf \
-            libxcursor-dev:armhf libxi-dev:armhf \
-            libwayland-dev:armhf libxkbcommon-dev:armhf
-      - run: cmake --preset pi4-armhf -DMC_DEPS=AUTO -DMC_WERROR=ON
-      - run: cmake --build --preset pi4-armhf
-      - run: ctest --preset pi4-armhf # unit + bench under qemu-arm
-      - run: cd build/pi4-armhf && cpack -G DEB
-      - uses: actions/upload-artifact@v7
-        with:
-          name: blockclonia-pi-armhf
-          path: build/pi4-armhf/*.deb
+  package:
+    uses: ./.github/workflows/package.yml
 
   macos:
     runs-on: macos-26
+    # Experimental: a failure here neither fails the run nor blocks a merge,
+    # so ci-passed does not wait for it.
     continue-on-error: true
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Nothing here pushes: keep the token out of .git/config.
+          persist-credentials: false
       - run: brew install ninja libsodium mimalloc glfw vulkan-headers vulkan-loader molten-vk shaderc vulkan-validationlayers
       - run: cmake --preset macos -DCMAKE_PREFIX_PATH="$(brew --prefix)"
       - run: cmake --build --preset macos
@@ -219,12 +211,32 @@ jobs:
           path: shots/
           if-no-files-found: ignore
 
-  # Every push to main that passes the jobs below replaces the "nightly"
-  # prerelease (and its tag) with the packages built from that commit.
-  nightly:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [linux, sanitize, lint, pi-arm64, pi-armhf]
+  # The one check the ruleset needs from this workflow: it fails unless every
+  # job above succeeded (macos aside), so a new job is required as soon as it
+  # is listed here, and a skipped or cancelled one cannot pass for green.
+  ci-passed:
+    name: CI passed
+    needs: [linux, old-vulkan-ubuntu, old-vulkan-debian, sanitize, lint, package]
+    if: always()
     runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Check every job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || exit 1
+          done
+
+  # Every push to main that passes replaces the "nightly" prerelease (and its
+  # tag) with the packages built from that commit.
+  nightly:
+    needs: [ci-passed]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
     permissions:
       contents: write
     concurrency:
@@ -247,3 +259,75 @@ jobs:
             --prerelease \
             --title "Nightly ($(date -u +%Y-%m-%d), ${GITHUB_SHA::7})" \
             --notes "Automated build of ${GITHUB_SHA} from main. Not a stable release."
+
+  # Versions and tags the checked revision when a release is due; its output
+  # `version` is empty when none is.
+  release:
+    needs: [ci-passed]
+    # release.sh decides whether this run releases: weekly, or a push with a
+    # security fix or after a missed week.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: blockclonia-release
+      cancel-in-progress: false
+    outputs:
+      version: ${{ steps.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          # main is protected; this write deploy key is the ruleset's only
+          # bypass, so the release commit can land there.
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+      - name: Version and tag the checked main revision
+        id: prepare
+        run: bash tools/release.sh prepare
+
+  # The release's own .debs, built from its tag so they carry its version.
+  release-package:
+    needs: [release]
+    if: needs.release.outputs.version != ''
+    uses: ./.github/workflows/package.yml
+    with:
+      release: ${{ needs.release.outputs.version }}
+      artifact-prefix: release
+
+  release-publish:
+    needs: [release, release-package]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      # Sigstore signing of the packages' build provenance.
+      id-token: write
+      attestations: write
+    concurrency:
+      group: blockclonia-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: v${{ needs.release.outputs.version }}
+          # Nothing here pushes: keep the token out of .git/config.
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      # Signs which run and commit built the packages; verify a download with
+      # `gh attestation verify <file> --repo vx9k/blockclonia`.
+      - name: Attest the release packages
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/blockclonia_*.deb
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: bash tools/release.sh publish

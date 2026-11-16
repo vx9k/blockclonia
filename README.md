@@ -642,4 +642,6 @@ shaders/          GLSL, compiled to SPIR-V and embedded at build time
 tests/            unit tests and the save-file fuzzers
 cmake/            dependencies, shaders, warnings, packaging, Pi toolchains
 tools/lint.sh     the lint gate CI runs
+tools/release.*   the weekly release (version, changelog, tag, publish)
+tools/pr_check.py the pull request rules (title, test ratio)
 ```

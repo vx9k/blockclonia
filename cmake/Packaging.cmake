@@ -12,6 +12,11 @@ install(TARGETS blockclonia RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONEN
 install(FILES README.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT game)
 
 set(CPACK_PACKAGE_NAME blockclonia)
+# CI's nightly and pull request packages append "+git.<date>.<commit>", so
+# apt orders them after the release they were built on and never mistakes
+# one for that release.
+set(MC_PACKAGE_VERSION_SUFFIX "" CACHE STRING "Appended to the project version in package versions")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}${MC_PACKAGE_VERSION_SUFFIX}")
 set(CPACK_PACKAGE_VENDOR "blockclonia")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
 set(CPACK_PACKAGE_CONTACT "blockclonia developers" CACHE STRING "Package maintainer (Debian: 'Name <email>')")
