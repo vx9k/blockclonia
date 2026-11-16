@@ -9,7 +9,13 @@
 #include <math.h>
 #include <string.h>
 
-#define EPS 1e-7
+/* Contact tolerance: a box this close to a face touches it rather than
+ * entering it. It has to outlast a step's rounding of the position, a few
+ * units in the last place, anywhere in the world: 2^-18 m (3.8 um) is 16
+ * of them at the edge, where doubles are 2^-22 m apart (world.h), and
+ * still far below anything that shows. 1e-7 was, so boxes against a wall
+ * past 2^30 snagged on it or slid in. */
+#define EPS (1.0 / 262144.0)
 #define REGION_W (2 * STRUCT_RADIUS + 1)
 #define REGION_CELLS (REGION_W * REGION_W * REGION_W)
 #define FLUID_QUEUE_CAP 16384   /* initial; grows on demand */
@@ -327,7 +333,9 @@ size_t player_encode(const player *p, uint8_t *out, size_t cap)
 }
 
 static int pos_sane(dvec3 v)
-{ return fabs(v.x) < WORLD_LIMIT && fabs(v.z) < WORLD_LIMIT && v.y > -1024.0 && v.y < WORLD_H + 4096.0; }
+{
+    return fabs(v.x) <= WORLD_LIMIT && fabs(v.z) <= WORLD_LIMIT && v.y > -1024.0 && v.y < WORLD_H + 4096.0;
+}
 
 int player_decode(player *p, const uint8_t *in, size_t len)
 {
@@ -347,6 +355,9 @@ int player_decode(player *p, const uint8_t *in, size_t len)
 void player_spawn(player *p, const world *w, double x, double z)
 {
     memset(p, 0, sizeof *p);
+    /* Inside the last block, for a player joining beside a host at the edge. */
+    x = clampd(x, -WORLD_LIMIT, WORLD_LIMIT - 1);
+    z = clampd(z, -WORLD_LIMIT, WORLD_LIMIT - 1);
     int sy = world_surface_y(w, (int)floor(x), (int)floor(z));
     p->pos = dv3(floor(x) + 0.5, sy < 0 ? WORLD_H : sy, floor(z) + 0.5);
     p->prev_pos = p->pos;
