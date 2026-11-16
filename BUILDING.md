@@ -25,7 +25,10 @@ lavapipe, slowly (see [No GPU](#no-gpu)).
 
 **To build it:**
 
-- a C11 compiler (gcc or clang), CMake 3.21 or newer and Ninja;
+- LLVM: clang 14 or newer, lld and LLVM's binutils (`llvm-ar` and
+  friends), plus CMake 3.21 or newer and Ninja. gcc is not supported; see
+  [Toolchain](#toolchain). BOLT (`llvm-bolt`, 18 or newer) is optional
+  and makes release builds faster;
 - the Vulkan headers and loader, and `glslc` (from shaderc) to compile
   the shaders;
 - libsodium 1.0.18 or newer (multiplayer encryption);
@@ -42,9 +45,10 @@ a pinned release (GLFW 3.5.1, mimalloc 3.5.3, miniaudio 0.11.25, SQLite
 ### Debian, Ubuntu, Raspberry Pi OS
 
 ```sh
-sudo apt install build-essential cmake ninja-build glslc libvulkan-dev \
+sudo apt install clang lld llvm cmake ninja-build glslc libvulkan-dev \
                  libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev libminiupnpc-dev \
                  mesa-vulkan-drivers
+sudo apt install bolt-$(clang --version | sed -n 's/.*clang version \([0-9]*\).*/\1/p')   # optional: BOLT
 cmake --preset native            # tuned for this machine (use this on a Pi)
 cmake --build --preset native
 ./build/native/blockclonia
@@ -64,7 +68,7 @@ sudo apt install libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
 Arch packages are recent enough that nothing has to be downloaded:
 
 ```sh
-sudo pacman -S --needed base-devel cmake ninja shaderc vulkan-icd-loader \
+sudo pacman -S --needed clang lld llvm cmake ninja shaderc vulkan-icd-loader \
                         vulkan-headers glfw mimalloc sqlite miniaudio libsodium enet miniupnpc
 cmake --preset native
 cmake --build --preset native
@@ -112,26 +116,48 @@ explains why.
 | Preset | For |
 |---|---|
 | `native` | Playing: optimised for the CPU you build on |
-| `release` | Packages: -O2 and link-time optimisation, runs on any CPU of the architecture |
+| `release` | Packages: -O2, ThinLTO and BOLT, runs on any CPU of the architecture |
 | `dev` | Working on the code: debug build |
 | `macos` | macOS with MoltenVK |
 | `core` | Everything except the game itself; needs no Vulkan, GLFW or audio |
 | `asan` | AddressSanitizer and UBSan |
 | `profile` | Profiling |
-| `fuzz` | libFuzzer targets for the file decoders (clang) |
-| `ci-gcc`, `ci-clang` | What CI builds, with warnings as errors |
+| `fuzz` | libFuzzer targets for the file decoders |
+| `ci` | What CI builds: `release` with warnings as errors and system dependencies |
 
 Options you can add when configuring, with `-D`:
 
 - `MC_CPU=pi4|pi5|native|x86-64-v2` picks the CPU to tune for.
 - `MC_SOUND=OFF` builds without sound, so miniaudio isn't needed.
 - `MC_WERROR=ON` turns compiler warnings into errors.
+- `MC_BOLT=AUTO|ON|OFF` optimises the game with BOLT after linking
+  (see [Toolchain](#toolchain)). `release` and `native` use `AUTO`;
+  `ON` makes a missing or unusable `llvm-bolt` an error.
 - `MC_DISCORD_APP_ID=<digits>` builds in the Discord status the player
   can turn on in the settings, under the Discord application with that
   ID (discord.com/developers, "New Application"). Without it (the
   default) the setting is not offered and the game never contacts
   Discord. The status shows the application's Rich Presence art asset
   named `logo` when it has one.
+
+## Toolchain
+
+Every build uses LLVM: clang compiles, lld links, and `llvm-ar`,
+`llvm-ranlib` and `llvm-strip` handle archives and packages
+(`cmake/toolchains/llvm.cmake`). The build picks this toolchain itself,
+with or without a preset. `-DCMAKE_C_COMPILER=clang-19` selects a
+specific version, and the LLVM tools of the same version go with it. On
+macOS, Xcode's clang is used with Apple's linker.
+
+Release builds (`release`, `native`) then run **BOLT** on the game where
+it can: Linux on x86-64 or arm64, building for the same machine, with
+`llvm-bolt` 18 or newer installed. The build instruments a copy of the
+game, runs it through `--bench` (world generation, meshing, physics), and
+rewrites the binary from that profile, so the hot code is laid out
+together. The un-optimised binary stays next to it as
+`blockclonia.prebolt`; compare the two with `--bench`. 32-bit ARM and
+cross builds skip BOLT: BOLT has no 32-bit ARM support, and a cross build
+can't run the binary to profile it.
 
 ## Dependencies
 
@@ -195,7 +221,7 @@ xvfb-run -a env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
 cmake --preset dev && cmake --build --preset dev
 ctest --preset dev               # unit tests, benchmarks, and a render test when lavapipe and xvfb are installed
 ./build/dev/mc_tests             # just the unit tests, a few seconds
-tools/lint.sh                    # the lint checks CI runs (clang-tidy, cppcheck, clang-format 18)
+tools/lint.sh                    # the lint checks CI runs (-Werror build, clang-tidy, cppcheck, clang-format 18)
 ```
 
 ## Troubleshooting

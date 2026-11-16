@@ -1,12 +1,25 @@
 # blockclonia build. CMake 3.21+ with Ninja is the reference setup; see
 # CMakePresets.json for the supported configurations (`cmake --list-presets`).
 cmake_minimum_required(VERSION 3.21...3.31)
+# Every build uses LLVM (cmake/toolchains/llvm.cmake): clang, lld, llvm-ar.
+# The Raspberry Pi toolchains include it themselves.
+if(NOT CMAKE_TOOLCHAIN_FILE)
+  set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/toolchains/llvm.cmake")
+endif()
 project(blockclonia
   VERSION 0.1.0
   DESCRIPTION "Minecraft-style voxel sandbox for low-end hardware (C11, Vulkan 1.0)"
   LANGUAGES C)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+# clang 14 is Debian bookworm's, the oldest toolchain CI builds with.
+if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+  message(FATAL_ERROR "blockclonia builds with clang (LLVM), not ${CMAKE_C_COMPILER_ID}; see BUILDING.md")
+endif()
+if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_VERSION VERSION_LESS 14)
+  message(FATAL_ERROR "clang ${CMAKE_C_COMPILER_VERSION} is too old: blockclonia needs clang 14 or newer")
+endif()
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -22,7 +35,7 @@ endif()
 option(MC_BUILD_GAME  "Build the game (needs Vulkan headers/loader, GLFW and glslc)" ON)
 option(MC_SOUND       "Sound output through miniaudio (fetched like GLFW; off: silent build)" ON)
 option(MC_BUILD_TESTS "Build unit tests" ON)
-option(MC_BUILD_FUZZ  "Build libFuzzer targets (clang only)" OFF)
+option(MC_BUILD_FUZZ  "Build libFuzzer targets" OFF)
 option(MC_VK_MIMALLOC "Compile mimalloc-backed VkAllocationCallbacks (enabled at run time with MC_VK_ALLOC=1)" ON)
 option(MC_SANITIZE    "Build with AddressSanitizer + UBSan" OFF)
 option(MC_LTO         "Link-time optimisation in Release/MinSizeRel builds" ON)
@@ -39,10 +52,9 @@ endif()
 set(MC_DEPS AUTO CACHE STRING
   "Where GLFW and mimalloc come from: AUTO (system, else pinned download), SYSTEM, FETCH")
 set_property(CACHE MC_DEPS PROPERTY STRINGS AUTO SYSTEM FETCH)
-
-if(MC_BUILD_FUZZ AND NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
-  message(FATAL_ERROR "MC_BUILD_FUZZ needs clang")
-endif()
+set(MC_BOLT OFF CACHE STRING
+  "Optimise the game's layout with LLVM BOLT, trained on --bench: OFF, ON, or AUTO (where it can run)")
+set_property(CACHE MC_BOLT PROPERTY STRINGS OFF ON AUTO)
 
 # ---------------------------------------------------------------- CPU flags
 # Applied with add_compile_options so fetched dependencies (mimalloc, GLFW)
@@ -66,10 +78,7 @@ endif()
 set(MC_CPU_FLAGS "")
 if(MC_CPU STREQUAL "")
 elseif(MC_CPU STREQUAL "native")
-  if(MC_ARM32 AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
-    # Raspberry Pi OS's gcc defaults to -mfpu=vfp; auto derives NEON from the CPU.
-    set(MC_CPU_FLAGS -mcpu=native -mfpu=auto)
-  elseif(MC_ARM32 OR MC_ARM64)
+  if(MC_ARM32 OR MC_ARM64)
     set(MC_CPU_FLAGS -mcpu=native)
   else()
     set(MC_CPU_FLAGS -march=native)
@@ -229,6 +238,9 @@ if(MC_BUILD_GAME)
   mc_compile_shaders(blockclonia
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders
     SOURCES block.vert block.frag entity.vert line.vert line.frag ui.vert ui.frag)
+
+  include(Bolt)
+  mc_bolt(blockclonia)
 endif()
 
 # ---------------------------------------------------------------- tests

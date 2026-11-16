@@ -2,10 +2,11 @@
 #
 # Included by the top-level CMakeLists.txt, which applies MC_WARNINGS to our
 # own targets through the mc_warnings interface library. CI configures with
-# -DMC_WERROR=ON (the ci-* presets).
+# -DMC_WERROR=ON (the ci preset).
 #
-# Everything below is clean on gcc 13 and clang 18, on x86_64 and on a 32-bit
-# (ILP32) syntax pass, once the fixes in audits/lint.md are applied.
+# Everything below is clean on clang 14 to 23, on x86_64, arm64 and 32-bit
+# ARM (ILP32), once the fixes in audits/lint.md are applied. The build is
+# clang-only (cmake/toolchains/llvm.cmake), so there are no gcc-only flags.
 
 option(MC_WERROR "Treat compiler warnings as errors (use in CI)" OFF)
 
@@ -21,20 +22,16 @@ set(MC_WARNINGS
   -Wvla
   -Wimplicit-fallthrough
   -Wframe-larger-than=65536        # threads get OS_THREAD_STACK (4 MB); keep bigger buffers on the heap
+  -Wcomma
+  -Wunreachable-code-aggressive
+  -Wmissing-noreturn
+  -Wshorten-64-to-32               # catches VkDeviceSize -> size_t on 32-bit ARM
+  -Wformat-signedness              # was gcc-only; clang has it from 19
 )
-
-if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
-  list(APPEND MC_WARNINGS
-    -Wduplicated-cond -Wduplicated-branches -Wlogical-op
-    -Wjump-misses-init
-    -Wformat-signedness
-    -Wnested-externs -Wold-style-definition)
-elseif(CMAKE_C_COMPILER_ID MATCHES "Clang")
-  list(APPEND MC_WARNINGS
-    -Wcomma
-    -Wunreachable-code-aggressive
-    -Wmissing-noreturn
-    -Wshorten-64-to-32)            # catches VkDeviceSize -> size_t on 32-bit ARM
+include(CheckCCompilerFlag)
+check_c_compiler_flag(-Wformat-signedness MC_HAS_WFORMAT_SIGNEDNESS)
+if(NOT MC_HAS_WFORMAT_SIGNEDNESS)
+  list(REMOVE_ITEM MC_WARNINGS -Wformat-signedness)
 endif()
 
 if(MC_WERROR)

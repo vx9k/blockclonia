@@ -9,10 +9,13 @@
 #
 #   RPI_SYSROOT=~/pi-sysroot-armhf cmake --preset pi4-armhf
 #
-# Without a sysroot (Debian bookworm):
+# Without a sysroot (Debian trixie):
 #   dpkg --add-architecture armhf && apt update
-#   apt install crossbuild-essential-armhf libvulkan-dev:armhf \
-#               libglfw3-dev:armhf libmimalloc-dev:armhf glslc qemu-user
+#   apt install clang lld llvm libc6-dev:armhf libgcc-14-dev:armhf \
+#               libvulkan-dev:armhf libglfw3-dev:armhf libmimalloc-dev:armhf \
+#               glslc qemu-user
+#
+# BOLT does not handle 32-bit ARM, so this build is clang + lld + LTO only.
 set(CMAKE_SYSTEM_PROCESSOR arm)
 set(MC_TRIPLE arm-linux-gnueabihf)
 set(MC_QEMU arm)

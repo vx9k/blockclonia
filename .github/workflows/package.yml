@@ -3,10 +3,11 @@
 # feeding the nightly), and for a release, from its tag (the plain version).
 #
 #   pi-arm64  native arm64 runner inside Debian trixie (the base of
-#             Raspberry Pi OS trixie), tuned for the Pi 4; a .deb that
-#             installs on 64-bit Pi OS.
-#   pi-armhf  cross build for 32-bit Pi OS in Debian trixie, tests under
-#             qemu-user; an armhf .deb.
+#             Raspberry Pi OS trixie), tuned for the Pi 4, with ThinLTO
+#             and BOLT; a .deb that installs on 64-bit Pi OS.
+#   pi-armhf  clang cross build for 32-bit Pi OS in Debian trixie, tests
+#             under qemu-user; an armhf .deb. ThinLTO but no BOLT, which
+#             has no 32-bit ARM support.
 name: Pi packages
 
 on:
@@ -42,11 +43,18 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build ca-certificates glslc file \
+            clang lld llvm libc6-dev cmake ninja-build ca-certificates glslc file \
+            dpkg-dev \
             libvulkan-dev libsqlite3-dev libsodium-dev pkg-config \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev libwayland-bin libxkbcommon-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
+          # dpkg-dev is for dpkg-shlibdeps, which writes the package's exact
+          # Depends: from the binary (it pulls in GNU binutils for its own
+          # objdump; the build itself never uses them).
+          # BOLT comes per LLVM version (bolt-19 for trixie's clang 19).
+          v=$(clang --version | sed -n 's/.*clang version \([0-9]*\).*/\1/p' | head -n 1)
+          apt-get install -y --no-install-recommends "bolt-$v"
       - name: Version the package
         env:
           RELEASE: ${{ inputs.release }}
@@ -59,7 +67,8 @@ jobs:
       # trixie ships mimalloc 3.0.x and GLFW 3.4, both older than the
       # pinned 3.5 series, so MC_DEPS=AUTO builds mimalloc 3.5.3 and GLFW
       # 3.5.1 from source here (GLFW needs the X11 and Wayland headers).
-      - run: cmake --preset release -DMC_CPU=pi4 -DMC_DEPS=AUTO -DMC_WERROR=ON -DMC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}"
+      # MC_BOLT=ON: a package without BOLT fails the build instead of shipping.
+      - run: cmake --preset release -DMC_CPU=pi4 -DMC_DEPS=AUTO -DMC_WERROR=ON -DMC_BOLT=ON -DMC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}"
       - run: cmake --build --preset release
       - run: ctest --preset release
       - run: cd build/release && cpack -G DEB
@@ -89,7 +98,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             cmake ninja-build ca-certificates glslc qemu-user \
-            crossbuild-essential-armhf \
+            clang lld llvm libc6-dev:armhf libgcc-14-dev:armhf \
             libvulkan-dev:armhf libsqlite3-dev:armhf libsodium-dev:armhf pkg-config libwayland-bin \
             libx11-dev:armhf libxrandr-dev:armhf libxinerama-dev:armhf \
             libxcursor-dev:armhf libxi-dev:armhf \

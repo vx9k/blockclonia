@@ -22,12 +22,13 @@
     },
     {
       "name": "release",
-      "displayName": "Release: -O2 + LTO, portable CPU baseline",
+      "displayName": "Release: -O2 + ThinLTO + BOLT (where it can run), portable CPU baseline",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_FLAGS_RELEASE": "-O2 -DNDEBUG",
-        "MC_LTO": "ON"
+        "MC_LTO": "ON",
+        "MC_BOLT": "AUTO"
       }
     },
     {
@@ -59,10 +60,9 @@
     },
     {
       "name": "fuzz",
-      "displayName": "libFuzzer targets for the save decoders (clang)",
+      "displayName": "libFuzzer targets for the save decoders",
       "inherits": ["base", "linux-only"],
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang",
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "MC_BUILD_GAME": "OFF",
         "MC_BUILD_FUZZ": "ON",
@@ -71,25 +71,13 @@
     },
     {
       "name": "ci",
-      "hidden": true,
-      "inherits": "release",
+      "displayName": "CI: Release + BOLT, -Werror, system dependencies",
+      "inherits": ["release", "linux-only"],
       "cacheVariables": { "MC_WERROR": "ON", "MC_DEPS": "SYSTEM" }
     },
     {
-      "name": "ci-gcc",
-      "displayName": "CI: gcc, Release, -Werror",
-      "inherits": ["ci", "linux-only"],
-      "cacheVariables": { "CMAKE_C_COMPILER": "gcc" }
-    },
-    {
-      "name": "ci-clang",
-      "displayName": "CI: clang, Release, -Werror",
-      "inherits": ["ci", "linux-only"],
-      "cacheVariables": { "CMAKE_C_COMPILER": "clang" }
-    },
-    {
       "name": "pi4-aarch64",
-      "displayName": "Cross: Raspberry Pi 4, 64-bit Pi OS (set RPI_SYSROOT, optional RPI_COMPILER=clang)",
+      "displayName": "Cross: Raspberry Pi 4, 64-bit Pi OS (set RPI_SYSROOT)",
       "inherits": ["release", "linux-only"],
       "toolchainFile": "${sourceDir}/cmake/toolchains/rpi-aarch64.cmake",
       "cacheVariables": { "MC_CPU": "pi4" }
@@ -123,8 +111,7 @@
     { "name": "asan", "configurePreset": "asan" },
     { "name": "core", "configurePreset": "core" },
     { "name": "fuzz", "configurePreset": "fuzz" },
-    { "name": "ci-gcc", "configurePreset": "ci-gcc" },
-    { "name": "ci-clang", "configurePreset": "ci-clang" },
+    { "name": "ci", "configurePreset": "ci" },
     { "name": "pi4-aarch64", "configurePreset": "pi4-aarch64" },
     { "name": "pi5-aarch64", "configurePreset": "pi5-aarch64" },
     { "name": "pi4-armhf", "configurePreset": "pi4-armhf" },
@@ -149,8 +136,7 @@
         "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
       }
     },
-    { "name": "ci-gcc", "inherits": "base", "configurePreset": "ci-gcc" },
-    { "name": "ci-clang", "inherits": "base", "configurePreset": "ci-clang" },
+    { "name": "ci", "inherits": "base", "configurePreset": "ci" },
     { "name": "pi4-aarch64", "inherits": "base", "configurePreset": "pi4-aarch64",
       "filter": { "include": { "label": "headless" } } },
     { "name": "pi4-armhf", "inherits": "base", "configurePreset": "pi4-armhf",

@@ -160,7 +160,7 @@ Out of scope:
   before use; block edits, entity counts, positions and the body snapshot
   from a host are range-checked before they touch the game. A player who
   leaves and rejoins gets back what they had, so rejoining makes nothing.
-- **Compiler and tool gates.** CI builds with gcc and clang using
+- **Compiler and tool gates.** CI builds with clang (14 to current) using
   `-Werror` and strict conversion warnings, runs the unit tests under
   AddressSanitizer and UndefinedBehaviorSanitizer, and runs clang-tidy
   and cppcheck (`tools/lint.sh`).

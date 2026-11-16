@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# blockclonia lint gate: warnings-as-errors builds (clang + gcc), unit tests,
+# blockclonia lint gate: a warnings-as-errors build (clang, lld), unit tests,
 # clang-tidy, cppcheck, shader checks, the CI and release tools' tests,
 # clang-format on the working-tree diff.
 # Usage: [MC_FORMAT_BASE=<commit>] tools/lint.sh [build-root]   (default: ./build-lint)
-# Needs: cmake, ninja, gcc, clang, clang-tidy 18, cppcheck 2.13+, glslc,
+# Needs: cmake, ninja, clang, lld, llvm, clang-tidy 18, cppcheck 2.13+, glslc,
 #        glslangValidator (optional), clang-format 18, git (for the format step),
 #        python3 3.8+.
 set -euo pipefail
@@ -13,15 +13,12 @@ jobs=$(nproc 2>/dev/null || echo 4)
 fail=0
 step() { printf '\n== %s\n' "$*"; }
 
-for cc in clang gcc; do
-  step "build ($cc, -Werror)"
-  CC=$cc cmake -S "$src" -B "$out/$cc" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DMC_WERROR=ON >/dev/null
-  cmake --build "$out/$cc" || fail=1
-  "$out/$cc/mc_tests" || fail=1
-done
+step "build (clang, -Werror)"
+cmake -S "$src" -B "$out/clang" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DMC_WERROR=ON >/dev/null
+cmake --build "$out/clang" || fail=1
+"$out/clang/mc_tests" || fail=1
 
 step "clang-tidy (config: .clang-tidy)"
-# The clang build's compile_commands.json has no gcc-only warning flags.
 tidy_log="$out/clang-tidy.log"
 run-clang-tidy -p "$out/clang" -j "$jobs" -quiet "$src/(src|tests)/.*\\.c\$" >"$tidy_log" 2>&1 || true
 if grep -E 'warning:|error:' "$tidy_log"; then fail=1; else echo "clean"; fi
@@ -32,7 +29,7 @@ mkdir -p "$out/cppcheck"
 # them from source; only the project's own files are checked. The file
 # filter only selects sources, so findings in fetched headers (mimalloc.h's
 # inline functions) are suppressed separately.
-cppcheck --project="$out/gcc/compile_commands.json" --enable=all --inconclusive --std=c11 \
+cppcheck --project="$out/clang/compile_commands.json" --enable=all --inconclusive --std=c11 \
   --file-filter="$src/src/*" --file-filter="$src/tests/*" --suppress='*:*/_deps/*' \
   --library=posix --inline-suppr --cppcheck-build-dir="$out/cppcheck" -j "$jobs" -q \
   --suppressions-list="$src/tools/cppcheck-suppressions.txt" --error-exitcode=1 \

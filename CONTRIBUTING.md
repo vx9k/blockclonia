@@ -25,7 +25,7 @@ the same shape as the code around them.
    fit together.
 3. Add or update tests in `tests/`. A bug fix comes with a test that
    fails without it.
-4. Run `tools/lint.sh`. It builds with gcc and clang using `-Werror`,
+4. Run `tools/lint.sh`. It builds with clang using `-Werror`,
    runs the unit tests, clang-tidy and cppcheck, checks the shaders, and
    checks formatting on the lines you changed. CI runs the same script.
 5. For anything visible, try it in the game. For renderer changes, run

@@ -413,10 +413,11 @@ on older Mesa takes.
 
 [BUILDING.md](BUILDING.md) has the requirements, the steps for Debian,
 Ubuntu, Arch, the Raspberry Pi and macOS, the build presets, and
-troubleshooting. In short, on Debian or Ubuntu:
+troubleshooting. The build uses LLVM throughout (clang, lld, and BOLT
+for release builds when it is installed). In short, on Debian or Ubuntu:
 
 ```sh
-sudo apt install build-essential cmake ninja-build glslc libvulkan-dev \
+sudo apt install clang lld llvm cmake ninja-build glslc libvulkan-dev \
                  libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev \
                  mesa-vulkan-drivers
 cmake --preset native && cmake --build --preset native
@@ -598,7 +599,7 @@ override them.
 
 ```sh
 cmake --preset dev && cmake --build --preset dev && ctest --preset dev
-tools/lint.sh      # -Werror builds (gcc, clang), clang-tidy, cppcheck, shaders, clang-format
+tools/lint.sh      # -Werror clang build, clang-tidy, cppcheck, shaders, clang-format
 ```
 
 `ctest` runs the unit tests, `--bench`, and, when `xvfb-run` and Mesa's

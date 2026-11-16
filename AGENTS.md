@@ -36,8 +36,13 @@ tools/lint.sh                                      # the CI lint gate; run it be
 - Offline: point `FETCHCONTENT_SOURCE_DIR_MIMALLOC`, `..._GLFW`,
   `..._MINIAUDIO` and `..._SQLITE` at an existing `build/*/_deps/*-src`
   checkout.
+- The toolchain is LLVM only: clang, lld and LLVM's binutils, picked by
+  `cmake/toolchains/llvm.cmake` with or without a preset. gcc is refused
+  at configure time. Release builds also run BOLT (`cmake/Bolt.cmake`),
+  trained on `--bench`; a change to what `--bench` exercises changes what
+  BOLT optimises.
 
-A change is done when both compilers build it with `-DMC_WERROR=ON`,
+A change is done when clang builds it with `-DMC_WERROR=ON`,
 `mc_tests` passes, `tools/lint.sh` is clean, and anything visible has been
 run (a screenshot through `--frames`/`--screenshot` is the cheapest proof).
 
@@ -45,8 +50,8 @@ run (a screenshot through `--frames`/`--screenshot` is the cheapest proof).
 
 The compiler enforces most of these: `cmake/warnings.cmake` turns on
 `-Wconversion -Wsign-conversion -Wdouble-promotion -Wshadow -Wvla
--Wframe-larger-than=16384` and more, and CI builds with `-Werror` on gcc
-and clang. `.clang-tidy` and `cppcheck` run in `tools/lint.sh`.
+-Wframe-larger-than=16384` and more, and CI builds with `-Werror` on
+clang 14 (Debian bookworm) up to the newest Ubuntu's. `.clang-tidy` and `cppcheck` run in `tools/lint.sh`.
 
 - **C11, no extensions.** No VLAs. Stack frames stay under 64 KB
   (threads get `OS_THREAD_STACK`, 4 MB, on every OS), so big buffers go
