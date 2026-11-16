@@ -12,7 +12,7 @@
 #define HAND 1                /* instance order: sleeve, hand, held */
 #define HELD 2
 
-static viewmodel_input vm_input(int held)
+static viewmodel_input vm_input(item_id held)
 {
     viewmodel_input in = {0};
     memset(&in, 0, sizeof in);
@@ -390,8 +390,8 @@ static void test_vm_robust(void)
     CHECK(vm.time == 0.0f && vm.lag_x == 0.0f && vm.equip == 0.0f);
     CHECK(memcmp(out, again, (size_t)n * sizeof out[0]) == 0);
 
-    /* Garbage in (NaN, huge dt, negative ids) never leaks out. */
-    in = vm_input(-3);
+    /* Garbage in (NaN, huge dt, ids no item has) never leaks out. */
+    in = vm_input(0xFFFFFFFDu);
     in.dt = NAN;
     in.look_dx = INFINITY;
     in.stride = NAN;
@@ -411,7 +411,7 @@ static void test_vm_robust(void)
     int ok = 1, seen = 0, frames_up = 0;
     for (int i = 0; i < 6000; i++) {
         if (xs(&s) % 90u == 0u) {
-            static const int IDS[] = {0, B_STONE, B_GLASS, B_CAMPFIRE, I_STICK, I_APPLE, I_WATER_BUCKET, 99};
+            static const item_id IDS[] = {0, B_STONE, B_GLASS, B_CAMPFIRE, I_STICK, I_APPLE, I_WATER_BUCKET, 99};
             in.held_id = IDS[xs(&s) % 8u];
         }
         in.dt = 0.004f + 0.04f * frnd(&s);

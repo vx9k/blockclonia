@@ -1243,6 +1243,14 @@ static int inv_equal(const inventory *a, const inventory *b)
     return 1;
 }
 
+/* The first slot holding id, or -1. */
+static int slot_of(const inventory *inv, item_id id)
+{
+    for (int i = 0; i < INV_SLOTS; i++)
+        if (inv->slot[i].id == id) return i;
+    return -1;
+}
+
 static void test_inventory(void)
 {
     inventory inv = {0};
@@ -1305,14 +1313,17 @@ static void test_inventory(void)
     CHECK(inv_encode(&inv, buf, sizeof buf) == INV_ENCODED_SIZE);
     inventory back = {0};
     CHECK(inv_decode(&back, buf, sizeof buf) == 0 && inv_equal(&back, &inv));
+    /* Slots are 6 bytes: u32 id little-endian, count, wear. */
     buf[8] = B_BEDROCK;
-    buf[9] = 1;
+    buf[8 + 4] = 1;
     CHECK(inv_decode(&back, buf, sizeof buf) == -1);
     inv_encode(&inv, buf, sizeof buf);
-    buf[8 + 3 * 12 + 1] = 200; /* 200 bandages in a stack of 16 */
+    int band = slot_of(&inv, I_BANDAGE);
+    CHECK(band >= 0);
+    buf[8 + 6 * band + 4] = 200; /* 200 bandages in a stack of 16 */
     CHECK(inv_decode(&back, buf, sizeof buf) == -1);
     CHECK(inv_decode(&back, buf, sizeof buf - 1) == -1);
-    /* Reserved bytes are zero in every INV1/INV2 written, so anything else
+    /* Reserved bytes are zero in every INV3 written, so anything else
      * is a layout this build does not know. */
     for (int k = 5; k <= 7; k++) {
         inv_encode(&inv, buf, sizeof buf);

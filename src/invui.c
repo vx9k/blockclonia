@@ -23,7 +23,7 @@ static uint32_t pack(const uint8_t c[4]) { return ui_rgba(c[0], c[1], c[2], c[3]
 
 static void build_icons(void)
 {
-    for (int id = ITEM_FIRST; id < ITEM_END; id++)
+    for (item_id id = ITEM_FIRST; id < ITEM_END; id++)
         for (int y = 0; y < 16; y++)
             for (int x = 0; x < 16; x++) {
                 uint8_t c[4] = {0};
@@ -72,7 +72,7 @@ static void face(ui *u, const uint32_t *tex, float ox, float oy, float ux, float
         }
 }
 
-void invui_icon(ui *u, int id, float x, float y, float size, float alpha)
+void invui_icon(ui *u, item_id id, float x, float y, float size, float alpha)
 {
     if (!item_valid(id)) return;
     if (!g_icons_built) build_icons();
@@ -200,7 +200,8 @@ static const char *const CAT_NAME[RCAT_COUNT] = {"Basics", "Building", "Smelting
 int invui_recipe_category(int r)
 {
     if (r < 0 || r >= g_recipe_count) return RCAT_BASICS;
-    int id = g_recipes[r].out.id, kind = 0, tier = 0;
+    item_id id = g_recipes[r].out.id;
+    int kind = 0, tier = 0;
     if (item_tool(id, &kind, &tier)) return kind == TOOL_KNIFE || kind == TOOL_SWORD ? RCAT_WEAPONS : RCAT_TOOLS;
     switch (id) {
     case B_GLASS:
@@ -238,7 +239,8 @@ static void tooltip(ui *u, float mx, float my, const char *title, const char *li
 /* The facts about an item worth knowing before using it, one per line. */
 static int item_facts(const item_stack *st, char lines[4][48])
 {
-    int n = 0, id = st->id, kind = 0, tier = 0;
+    item_id id = st->id;
+    int n = 0, kind = 0, tier = 0;
     float water = 0.0f, kcal = item_food(id, &water);
     int dur = item_durability(id);
     if (dur) snprintf(lines[n++], 48, "%d of %d uses left", dur - st->wear, dur);

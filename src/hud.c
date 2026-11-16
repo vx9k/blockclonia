@@ -879,7 +879,7 @@ static void panel(ui *u, const health *h, hud_state *s)
     ui_text(u, x0 + 8, by, 1, C_HEAD, "SUPPLIES");
     struct {
         const char *name;
-        int id;
+        item_id id;
     } sup[12] = {
         {"Bandages", I_BANDAGE},       {"Splints", I_SPLINT},
         {"Antiseptic", I_ANTISEPTIC},  {"Plant fibre", I_FIBRE},

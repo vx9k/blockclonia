@@ -700,7 +700,7 @@ static void give_items(inventory *inv, const char *list)
             if (!parse_int(colon + 1, 1, 64 * INV_SLOTS, &n)) n = 1;
         }
         int found = 0;
-        for (int id = 1; id < ITEM_END && !found; id++) {
+        for (item_id id = 1; id < ITEM_END && !found; id++) {
             if (!item_valid(id)) continue;
             const char *name = item_get(id)->name;
             size_t k = 0;
@@ -820,7 +820,7 @@ static void demo_step(world *w, physics *ph, fx_state *fx, const player *p, demo
 {
     if (frame == 20) {
         /* A scatter of dropped items and a burst of debris in view. */
-        static const int IDS[] = {B_LOG, I_APPLE, I_BANDAGE, B_GLASS, I_STICK, B_SAND, I_WATER_BUCKET, B_BRICK};
+        static const item_id IDS[] = {B_LOG, I_APPLE, I_BANDAGE, B_GLASS, I_STICK, B_SAND, I_WATER_BUCKET, B_BRICK};
         for (int i = 0; i < 8; i++) {
             double a = -0.9 + 0.25 * i;
             physics_drop_item(ph, dv3(p->pos.x + sin(a) * 3.0, p->pos.y + 1.5, p->pos.z - cos(a) * 3.0), dv3(0, 1.0, 0),

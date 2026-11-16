@@ -109,7 +109,7 @@ static void advance(viewmodel *vm, const viewmodel_input *in, float dt)
     /* A NaN that got in once would stay forever; start clean instead. */
     if (!isfinite(vm->equip) || !isfinite(vm->swing_t) || !isfinite(vm->lag_x) || !isfinite(vm->lag_y) ||
         !isfinite(vm->time)) {
-        int shown = vm->shown_id;
+        item_id shown = vm->shown_id;
         viewmodel_init(vm);
         vm->shown_id = shown;
     }
@@ -117,7 +117,7 @@ static void advance(viewmodel *vm, const viewmodel_input *in, float dt)
 
     /* Equip: lower while the hand holds something other than what is
      * drawn, swap at the bottom, raise. */
-    int want = in->held_id > 0 ? in->held_id : 0;
+    item_id want = item_valid(in->held_id) ? in->held_id : 0; /* garbage shows the bare hand */
     if (want != vm->shown_id) {
         vm->equip -= dt / LOWER_S;
         if (vm->equip <= 0.0f) {
@@ -215,7 +215,7 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
                       light);
     parts[n++] = part(lag, base, arm, hand_at, quat_identity(), HAND_W, HAND_W, HAND_LEN, same_tex(T_SKIN), light);
 
-    int id = vm->shown_id;
+    item_id id = vm->shown_id;
     quat flick = quat_axis(1.0f, 0.0f, 0.0f, -0.6f * a); /* the wrist leads the swing */
     if (id > 0 && item_is_block(id)) {
         /* A block rests on the fingers, turned so the top and two sides

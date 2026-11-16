@@ -326,7 +326,7 @@ static void test_shock_other_rhythms(void)
     CHECK(block_kept == n && pea_kept == n);
 }
 
-/* The item: in the starting kit, one per slot, carried by the INV1 save,
+/* The item: in the starting kit, one per slot, carried by the saved inventory,
  * needed for the treatment but not used up, and put on by right-click. */
 static void test_defib_item(void)
 {
@@ -339,8 +339,11 @@ static void test_defib_item(void)
     CHECK(inv_encode(&inv, buf, sizeof buf) == INV_ENCODED_SIZE);
     inventory back = {0};
     CHECK(inv_decode(&back, buf, sizeof buf) == 0 && inv_count(&back, I_DEFIBRILLATOR) == 1);
-    for (int i = 0; i < INV_SLOTS; i++)
-        if (buf[8 + 3 * i] == I_DEFIBRILLATOR) buf[8 + 3 * i + 1] = 2; /* two in a slot of one */
+    for (int i = 0; i < INV_SLOTS; i++) {
+        const uint8_t *e = buf + 8 + 6 * i; /* u32 id little-endian, count, wear */
+        item_id id = (item_id)e[0] | (item_id)e[1] << 8 | (item_id)e[2] << 16 | (item_id)e[3] << 24;
+        if (id == I_DEFIBRILLATOR) buf[8 + 6 * i + 4] = 2; /* two in a slot of one */
+    }
     CHECK(inv_decode(&back, buf, sizeof buf) == -1);
 
     health *h = new_body(51);

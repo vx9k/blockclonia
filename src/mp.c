@@ -555,7 +555,7 @@ static void host_snapshot(mp *m, int id)
         wire_f64(&w, it->pos.y);
         wire_f64(&w, it->pos.z);
         wire_f32(&w, it->spin);
-        wire_u8(&w, it->id);
+        wire_u32(&w, it->id);
         wire_u8(&w, it->count);
         n++;
     }
@@ -952,7 +952,7 @@ static void client_snapshot(mp *m, wire_r *rd)
         item_ent *it = &items[i];
         it->pos = dv3(wire_get_f64(rd), wire_get_f64(rd), wire_get_f64(rd));
         it->spin = wire_get_f32(rd);
-        it->id = wire_get_u8(rd);
+        it->id = wire_get_u32(rd);
         it->count = wire_get_u8(rd);
         it->prev_pos = it->pos;
         if (!item_valid(it->id) || fabs(it->pos.x) > WORLD_LIMIT || fabs(it->pos.z) > WORLD_LIMIT ||

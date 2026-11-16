@@ -29,9 +29,9 @@ void inv_starting_kit(inventory *inv)
     }
 }
 
-static int max_stack(int id) { return item_get(id)->stack; }
+static int max_stack(item_id id) { return item_get(id)->stack; }
 
-int inv_add(inventory *inv, int id, int count)
+int inv_add(inventory *inv, item_id id, int count)
 {
     if (!item_valid(id) || count <= 0) return count < 0 ? 0 : count;
     int ms = max_stack(id);
@@ -46,13 +46,13 @@ int inv_add(inventory *inv, int id, int count)
         item_stack *s = &inv->slot[i];
         if (s->count) continue;
         int put = count < ms ? count : ms;
-        *s = (item_stack){(uint8_t)id, (uint8_t)put, 0};
+        *s = (item_stack){id, (uint8_t)put, 0};
         count -= put;
     }
     return count;
 }
 
-int inv_count(const inventory *inv, int id)
+int inv_count(const inventory *inv, item_id id)
 {
     int n = 0;
     for (int i = 0; i < INV_SLOTS; i++)
@@ -60,7 +60,7 @@ int inv_count(const inventory *inv, int id)
     return n;
 }
 
-int inv_take(inventory *inv, int id, int count)
+int inv_take(inventory *inv, item_id id, int count)
 {
     int got = 0;
     for (int i = INV_SLOTS - 1; i >= 0 && got < count; i--) {
@@ -81,10 +81,10 @@ void inv_use_held(inventory *inv, int n)
     if (!s->count) s->id = 0;
 }
 
-void inv_set_held(inventory *inv, int id, int count)
+void inv_set_held(inventory *inv, item_id id, int count)
 {
     item_stack s = {0, 0, 0};
-    if (count > 0 && item_valid(id)) s = (item_stack){(uint8_t)id, (uint8_t)count, 0};
+    if (count > 0 && item_valid(id)) s = (item_stack){id, (uint8_t)count, 0};
     *inv_held(inv) = s;
 }
 
@@ -236,18 +236,19 @@ int inv_craft(inventory *inv, int r, int stations)
 
 /* ---------------------------------------------------------- persistence */
 
-/* "INV2", selected, 3 reserved bytes, then (id, count, wear) for every slot
- * and the cursor. INV1, read but no longer written, had no wear byte. */
+/* "INV3", selected, 3 reserved bytes, then (id as u32 little-endian,
+ * count, wear) for every slot and the cursor. */
 size_t inv_encode(const inventory *inv, uint8_t *out, size_t cap)
 {
     if (cap < INV_ENCODED_SIZE) return 0;
-    memcpy(out, "INV2", 4);
+    memcpy(out, "INV3", 4);
     out[4] = (uint8_t)inv->selected;
     out[5] = out[6] = out[7] = 0;
     uint8_t *p = out + 8;
     for (int i = 0; i <= INV_SLOTS; i++) {
         const item_stack *s = i < INV_SLOTS ? &inv->slot[i] : &inv->cursor;
-        *p++ = s->count ? s->id : 0;
+        item_id id = s->count ? s->id : 0;
+        for (int k = 0; k < 4; k++) *p++ = (uint8_t)(id >> (8 * k));
         *p++ = s->count;
         *p++ = s->count ? s->wear : 0;
     }
@@ -256,17 +257,17 @@ size_t inv_encode(const inventory *inv, uint8_t *out, size_t cap)
 
 int inv_decode(inventory *inv, const uint8_t *in, size_t len)
 {
-    /* Every INV1/INV2 ever written has zero reserved bytes: anything else is
-     * a layout this build does not know. */
-    int v2 = len == INV_ENCODED_SIZE && memcmp(in, "INV2", 4) == 0;
-    int v1 = len == INV1_ENCODED_SIZE && memcmp(in, "INV1", 4) == 0;
-    if (!(v1 || v2) || in[4] >= INV_HOTBAR || in[5] || in[6] || in[7]) return -1;
+    /* Every INV3 written has zero reserved bytes: anything else is a layout
+     * this build does not know. */
+    if (len != INV_ENCODED_SIZE || memcmp(in, "INV3", 4) != 0 || in[4] >= INV_HOTBAR || in[5] || in[6] || in[7])
+        return -1;
     inventory t = {0};
     inv_init(&t);
     t.selected = in[4];
     const uint8_t *p = in + 8;
-    for (int i = 0; i <= INV_SLOTS; i++, p += v2 ? 3 : 2) {
-        item_stack s = {p[0], p[1], v2 ? p[2] : 0};
+    for (int i = 0; i <= INV_SLOTS; i++, p += 6) {
+        item_id id = (item_id)p[0] | (item_id)p[1] << 8 | (item_id)p[2] << 16 | (item_id)p[3] << 24;
+        item_stack s = {id, p[4], p[5]};
         if ((s.id == 0) != (s.count == 0)) return -1;
         if (s.count && (!item_valid(s.id) || s.count > max_stack(s.id))) return -1;
         /* Wear only on things that wear, and never past worn out. */

@@ -24,7 +24,7 @@ void inv_starting_kit(inventory *inv);
 
 /* Adds items, filling matching stacks first, then empty slots (hotbar
  * first). Returns how many did not fit. */
-int inv_add(inventory *inv, int id, int count);
+int inv_add(inventory *inv, item_id id, int count);
 /* inv_add keeping a stack's wear (a worn tool goes into an empty slot of its
  * own). Returns how many did not fit. */
 int inv_add_stack(inventory *inv, item_stack s);
@@ -33,16 +33,16 @@ int inv_accept(void *inv, item_stack s);
 /* Spends uses of the held tool; returns 1 if that wore it out (it is gone). */
 int inv_wear_held(inventory *inv, int uses);
 /* How many of an item are in the slots (not the cursor). */
-int inv_count(const inventory *inv, int id);
+int inv_count(const inventory *inv, item_id id);
 /* Removes up to count, from the last slot backwards so the hotbar is used
  * last. Returns how many were removed. */
-int inv_take(inventory *inv, int id, int count);
+int inv_take(inventory *inv, item_id id, int count);
 
 static inline item_stack *inv_held(inventory *inv) { return &inv->slot[inv->selected]; }
 /* Uses up n of the held stack. */
 void inv_use_held(inventory *inv, int n);
 /* Replaces the held stack (a bucket filling up). */
-void inv_set_held(inventory *inv, int id, int count);
+void inv_set_held(inventory *inv, item_id id, int count);
 
 /* Slot clicks on the inventory screen. button 0: left (take, place, merge,
  * swap), 1: right (take half, place one). shift moves the whole stack
@@ -74,8 +74,7 @@ int inv_craft(inventory *inv, int r, int stations);
 
 /* ---------------------------------------------------------- persistence */
 
-#define INV_ENCODED_SIZE (8 + 3 * (INV_SLOTS + 1))  /* INV2 */
-#define INV1_ENCODED_SIZE (8 + 2 * (INV_SLOTS + 1)) /* older, still read */
+#define INV_ENCODED_SIZE (8 + 6 * (INV_SLOTS + 1)) /* INV3 */
 /* Writes INV_ENCODED_SIZE bytes; returns that, or 0 if cap is smaller. */
 size_t inv_encode(const inventory *inv, uint8_t *out, size_t cap);
 /* 0 on success; -1 (inventory untouched) if the bytes are malformed. */

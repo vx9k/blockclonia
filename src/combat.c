@@ -19,7 +19,7 @@ static float frand(combat *c)
     return (float)(c->rng >> 8) / 16777216.0f;
 }
 
-float combat_blow(int held)
+float combat_blow(item_id held)
 {
     int kind = 0, tier = 0;
     if (!item_tool(held, &kind, &tier)) return held == I_RIFLE ? 2.0f : 1.0f; /* a rifle butt, a fist */
@@ -33,7 +33,7 @@ float combat_blow(int held)
 }
 
 /* s between blows: a knife is quick, a sword or an axe has to be swung. */
-static float blow_time(int held)
+static float blow_time(item_id held)
 {
     int kind = 0, tier = 0;
     if (!item_tool(held, &kind, &tier)) return 0.45f;
@@ -127,7 +127,7 @@ combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *
     c->cooldown[who] -= dt;
     if (c->cooldown[who] > 0.0f) return o;
     const item_stack *held = inv_held(inv);
-    int id = held->count ? held->id : 0;
+    item_id id = held->count ? held->id : 0;
 
     if (use_click && id == I_RIFLE) {
         if (!inv_take(inv, I_CARTRIDGE, 1)) {
@@ -146,7 +146,7 @@ combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *
         c->cooldown[who] = 1.2f; /* working the action */
         o.fired = 1;
         o.at = eye;
-        int was = held->id;
+        item_id was = held->id;
         if (inv_wear_held(inv, 1)) o.tool_broke = was;
         return o;
     }
@@ -169,7 +169,7 @@ combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *
     o.struck = 1;
     c->cooldown[who] = blow_time(id);
     if (item_durability(id)) {
-        int was = held->id;
+        item_id was = held->id;
         if (inv_wear_held(inv, 1)) o.tool_broke = was;
     }
     return o;
