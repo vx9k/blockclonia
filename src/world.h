@@ -41,11 +41,15 @@ static inline int col_index(int x, int y, int z) { return (y * CHUNK_W + z) * CH
 /* Is block column (x, z) inside the world? Takes 64 bits so callers can
  * pass untrusted or offset values without overflowing first. */
 static inline int world_xz_inside(long long x, long long z)
-{ return x >= -WORLD_LIMIT && x < WORLD_LIMIT && z >= -WORLD_LIMIT && z < WORLD_LIMIT; }
+{
+    return x >= -WORLD_LIMIT && x < WORLD_LIMIT && z >= -WORLD_LIMIT && z < WORLD_LIMIT;
+}
 /* Is column (cx, cz) inside? Those outside never load, so nothing should
  * wait for them. */
 static inline int world_column_inside(int cx, int cz)
-{ return world_xz_inside((long long)cx * CHUNK_W, (long long)cz * CHUNK_W); }
+{
+    return world_xz_inside((long long)cx * CHUNK_W, (long long)cz * CHUNK_W);
+}
 
 /* Water level 1..8 (8 = full block). Stored in meta, with full water stored
  * as 0 so oceans need no meta array at all. */

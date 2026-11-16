@@ -333,7 +333,9 @@ size_t player_encode(const player *p, uint8_t *out, size_t cap)
 }
 
 static int pos_sane(dvec3 v)
-{ return fabs(v.x) <= WORLD_LIMIT && fabs(v.z) <= WORLD_LIMIT && v.y > -1024.0 && v.y < WORLD_H + 4096.0; }
+{
+    return fabs(v.x) <= WORLD_LIMIT && fabs(v.z) <= WORLD_LIMIT && v.y > -1024.0 && v.y < WORLD_H + 4096.0;
+}
 
 int player_decode(player *p, const uint8_t *in, size_t len)
 {
