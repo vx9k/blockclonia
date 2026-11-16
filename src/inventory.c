@@ -15,10 +15,16 @@ void inv_starting_kit(inventory *inv)
     inv_add(inv, I_APPLE, 3);
     inv_add(inv, I_DEFIBRILLATOR, 1);
     inv_add(inv, I_ADRENALINE, 1);
-    /* The kit lives in the backpack; the hand starts empty. */
+    inv_add(inv, I_MORPHINE, 2);
+    inv_add(inv, I_NALOXONE, 1);
+    /* The kit lives in the backpack; the hand starts empty. Stacks past the
+     * ninth are already there, so each one moves to the first free slot. */
+    int to = INV_HOTBAR;
     for (int i = 0; i < INV_HOTBAR; i++) {
         if (!inv->slot[i].count) continue;
-        inv->slot[INV_HOTBAR + i] = inv->slot[i];
+        while (to < INV_SLOTS && inv->slot[to].count) to++;
+        if (to == INV_SLOTS) break;
+        inv->slot[to] = inv->slot[i];
         inv->slot[i] = (item_stack){0, 0, 0};
     }
 }
@@ -173,6 +179,9 @@ const recipe g_recipes[] = {
     {{I_CARTRIDGE, 4}, {{I_COPPER_INGOT, 1}, {I_GUNPOWDER, 1}}, 0},
     {{I_RIFLE, 1}, {{I_IRON_INGOT, 4}, {B_PLANKS, 2}}, STATION_FURNACE},
     {{B_FURNACE, 1}, {{B_STONE, 8}}, 0},
+    /* Crushed apples ferment to cider; boiled over a fire, the vapour
+     * condensed into a glass bottle is a ~40% brandy. */
+    {{I_SPIRITS, 1}, {{I_APPLE, 4}, {B_GLASS, 1}}, STATION_FIRE},
     /* A campfire cannot reach the 1085-1540 C these metals need; a
      * furnace burning the coal can. */
     {{I_COPPER_INGOT, 1}, {{I_RAW_COPPER, 1}, {I_COAL, 1}}, STATION_FURNACE},

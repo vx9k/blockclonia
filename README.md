@@ -98,8 +98,9 @@ drop what you are holding.
 **Health panel**: click a body part (or 1–7, ↑/↓), then a treatment
 button or its key: B bandage, S splint, D disinfect, P painkiller, A
 antibiotics, C cool a burn, X reduce a dislocation, N adrenaline
-injector, J shock now (defibrillator override), and Pads to put the
-defibrillator on or off. Hovering a button says what it does and what it
+injector, J shock now (defibrillator override), M morphine, O naloxone
+spray, L a drink of spirits, and Pads to put the defibrillator on or
+off. Hovering a button says what it does and what it
 risks: some treatments harm when they are the wrong thing. More than 4
 painkillers a day damage the liver a day later; antibiotics with no
 infection upset the gut; adrenaline on a beating heart races it and can
@@ -109,6 +110,15 @@ adrenaline rush (pain dulled, a little more strength, tunnel vision) and
 a shaky, tired crash after it. Damaged organs are felt: a weak heart
 caps exertion, a failing liver tires and turns the view yellow, failing
 kidneys let potassium climb, a hurt brain makes the view drift.
+Morphine (two in the starting kit) takes the edge off pain that a
+painkiller can't, but slows breathing: six at once bring it near a
+stop, more stop it, and alcohol lowers the dose that does. Naloxone
+reverses it for about an hour, which can be less than the morphine
+lasts. Spirits (4 apples and a glass over a fire) clean a wound when the
+antiseptic runs out, or warm you up as a drink: alcohol opens the skin's
+vessels, so heat leaves faster in the cold; it dulls pain, sways the
+view, makes you vomit past ~2 g/L (and breathe it in if you are out
+cold), and days of heavy drinking halve the painkiller the liver takes.
 
 **Menus**: mouse, or arrows and Enter; ←/→ change a setting; Esc goes back.
 

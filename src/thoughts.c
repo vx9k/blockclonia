@@ -159,6 +159,20 @@ static const line LINES[] = {
 
     {FEEL_CRASH, 1, B, "You feel shaky and drained."},
     {FEEL_CRASH, 2, I, "I'm so tired. My hands won't stop shaking."},
+
+    {FEEL_DRUNK, 1, B, "A warm glow spreads through you."},
+    {FEEL_DRUNK, 1, I, "Mm. That's warming."},
+    {FEEL_DRUNK, 2, I, "Whoa. The ground's moving."},
+    {FEEL_DRUNK, 2, B, "Your feet don't quite go where you put them."},
+    {FEEL_DRUNK, 3, I, "I've had way too much..."},
+    {FEEL_DRUNK, 3, B, "The world spins and your stomach heaves."},
+    {FEEL_DRUNK, 0, I, "Ugh. My head."},
+
+    {FEEL_DOPED, 1, B, "A warm, heavy calm settles over you."},
+    {FEEL_DOPED, 2, I, "So... sleepy..."},
+    {FEEL_DOPED, 2, B, "Your eyelids are heavy and your breathing slow."},
+    {FEEL_DOPED, 3, B, "Each breath comes later than the last."},
+    {FEEL_DOPED, 0, B, "The heaviness lifts."},
 };
 #undef I
 #undef B
@@ -277,6 +291,8 @@ static int level_inside(const health *h, int f)
     case FEEL_TIRED: return grade(0.2f - health_stamina(h), 0.05f, 0.15f, 9.0f);
     case FEEL_RUSH: return grade(h->catechol, 0.6f, 2.0f, 1e9f);
     case FEEL_CRASH: return h->catechol < 0.3f ? grade(h->crash, 0.35f, 0.7f, 9.0f) : 0;
+    case FEEL_DRUNK: return grade(h->bac, 0.4f, 1.2f, 2.2f);
+    case FEEL_DOPED: return grade(h->naloxone > 0.0f ? 0.03f * h->opioid : h->opioid, 4.0f, 15.0f, 30.0f);
     default: return 0;
     }
 }

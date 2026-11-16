@@ -137,6 +137,27 @@ static const item_def ITEMS[I_TOOL_FIRST - ITEM_FIRST] = {
                                    .density = 1100.0f},
 };
 
+static const item_def LATER[ITEM_END - I_TOOL_END] = {
+    [I_MORPHINE - I_TOOL_END] = {.name = "Morphine",
+                                 .stack = 16,
+                                 .block = B_AIR,
+                                 .tex = T_ITEM_MORPHINE,
+                                 .desc = "10 mg. Strong pain relief (H, then M). Slows breathing.",
+                                 .density = 1200.0f},
+    [I_NALOXONE - I_TOOL_END] = {.name = "Naloxone spray",
+                                 .stack = 4,
+                                 .block = B_AIR,
+                                 .tex = T_ITEM_NALOXONE,
+                                 .desc = "Reverses opioids for about an hour (H, then O).",
+                                 .density = 1000.0f},
+    [I_SPIRITS - I_TOOL_END] = {.name = "Spirits",
+                                .stack = 8,
+                                .block = B_AIR,
+                                .tex = T_ITEM_SPIRITS,
+                                .desc = "Apple brandy. A drink (H, then L), or to clean wounds.",
+                                .density = 950.0f},
+};
+
 static const item_def UNKNOWN = {
     .name = "?", .desc = "", .density = 1000.0f, .stack = 1, .block = B_AIR, .tex = T_STONE};
 
@@ -292,7 +313,8 @@ const item_def *item_get(int id)
         built = 1;
     }
     if (item_is_block(id) && id < B_COUNT) return &blocks[id];
-    if (id >= I_TOOL_FIRST && id < ITEM_END) return &g_tools[id - I_TOOL_FIRST];
+    if (id >= I_TOOL_FIRST && id < I_TOOL_END) return &g_tools[id - I_TOOL_FIRST];
+    if (id >= I_TOOL_END && id < ITEM_END) return &LATER[id - I_TOOL_END];
     if (id >= ITEM_FIRST && id < I_TOOL_FIRST) return &ITEMS[id - ITEM_FIRST];
     return &UNKNOWN;
 }

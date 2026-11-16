@@ -112,6 +112,8 @@ static void test_each_kind_persists(void)
         else if (pulsed_rhythm) ok = h->rhythm != RHYTHM_SINUS;
         else if (!strcmp(k->name, "crisis")) ok = h->catechol > 1.0f && h->surge > 0.0f && h->sbp > 160.0f;
         else if (!strcmp(k->name, "strain")) ok = h->strain > 5.0f;
+        else if (!strcmp(k->name, "drunk")) ok = h->bac > 1.5f && h->conscious != CONS_ALERT;
+        else if (!strcmp(k->name, "overdose")) ok = h->opioid > 30.0f && h->rr < 10.0f;
         else
             ok = 0; /* an entry was added without teaching this test about it */
         CHECK(ok);

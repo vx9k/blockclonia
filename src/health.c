@@ -38,6 +38,23 @@
 #define PVT_RATE 210.0f      /* bpm: faster VT fills too little to eject; above AED VT cut-offs (~180) */
 #define ESCAPE_RATE 36.0f    /* bpm, ventricular escape below a complete AV block */
 
+/* Drugs. Oral morphine: 10 mg absorbed over about half an hour, a 3 h
+ * half-life (longer when the liver fails), analgesia from a few mg, and
+ * breathing held down by a sigmoid that halves the rate near 30 mg; alcohol
+ * shifts it left. Ethanol spreads through the body's water (Widmark, r =
+ * 0.68): 14 g, one drink, raises a 75 kg adult ~0.27 g/L, and the liver
+ * clears ~0.15 g/L an hour whatever the level. The breathing curve is
+ * steep (Hill 3): a tablet does little, six bring the rate near apnoea. */
+#define MORPHINE_MG 10.0f
+#define OPI_ABS_H 0.5f
+#define OPI_HALF_H 3.0f
+#define OPI_PAIN_EC50 8.0f
+#define OPI_RESP_EC50 30.0f
+#define DRINK_G 14.0f
+#define WIDMARK (0.68f * 75.0f)
+#define ALC_ELIM 0.15f
+#define NALOXONE_H 1.0f /* shorter than morphine lasts: it can wear off first */
+
 static const float PAIN_SCALE = 10.0f;
 #define DEG "\x7f" /* the UI font's degree sign */
 
@@ -166,6 +183,23 @@ static float hct(const health *h) { return h->blood > 0.05f ? h->rbc / h->blood 
 float health_hb(const health *h) { return hct(h) * 33.3f; }
 static float vo2max_l(float metab_gain) { return VO2MAX_W * metab_gain / J_PER_ML_O2 * 0.06f; }
 
+/* Opioid the brain sees: naloxone takes its receptors while it lasts. */
+static float opioid_free(const health *h) { return h->naloxone > 0.0f ? 0.03f * h->opioid : h->opioid; }
+
+float health_resp_depression(const health *h)
+{
+    float o = opioid_free(h), ec = OPI_RESP_EC50 / (1.0f + h->bac / 0.8f);
+    float o3 = o * o * o, d_o = o3 / (o3 + ec * ec * ec);
+    float d_a = 0.9f * ramp(h->bac, 2.5f, 5.0f);
+    return 1.0f - (1.0f - d_o) * (1.0f - d_a);
+}
+
+float health_sedation(const health *h)
+{
+    float o = opioid_free(h);
+    return o / (o + 40.0f) + h->bac / 3.5f;
+}
+
 static int is_limb(int part) { return part >= BP_LARM; }
 static int is_leg(int part) { return part == BP_LLEG || part == BP_RLEG; }
 static int is_arm(int part) { return part == BP_LARM || part == BP_RARM; }
@@ -235,6 +269,7 @@ const char *health_death_text(int cause)
     case DEATH_HYPERTHERMIA: return "Heat stroke";
     case DEATH_TRAUMA: return "Crushed";
     case DEATH_BURNS: return "Burns (burn shock)";
+    case DEATH_OVERDOSE: return "Overdose: breathing stopped";
     default: return "Alive";
     }
 }
@@ -678,6 +713,57 @@ static int treat_adrenaline(health *h, inventory *inv, char *msg, size_t msg_siz
     return 1;
 }
 
+/* Morphine, naloxone and a drink. */
+static int treat_drug(health *h, inventory *inv, int what, char *msg, size_t msg_size)
+{
+    if (what == TREAT_MORPHINE) {
+        if (!inv_take(inv, I_MORPHINE, 1)) {
+            snprintf(msg, msg_size, "No morphine left");
+            return 0;
+        }
+        h->opioid_gut += MORPHINE_MG;
+        float total = h->opioid + h->opioid_gut;
+        snprintf(msg, msg_size,
+                 total > 25.0f ? (h->bac > 0.5f ? "Morphine on top of drink: breathing may stop"
+                                                : "More morphine (%.0f mg): breathing will slow")
+                               : "Took 10 mg of morphine: relief in half an hour",
+                 (double)total);
+        return 1;
+    }
+    if (what == TREAT_NALOXONE) {
+        if (!inv_take(inv, I_NALOXONE, 1)) {
+            snprintf(msg, msg_size, "No naloxone");
+            return 0;
+        }
+        /* Snatching the receptors back all at once: the pain returns, and
+         * with it a surge of adrenaline. */
+        float was = opioid_free(h);
+        h->naloxone = NALOXONE_H;
+        if (was > 5.0f) {
+            h->surge = maxf(h->surge, 15.0f);
+            health_log(h, "Naloxone: the opioid lets go");
+            snprintf(msg, msg_size, "Naloxone: breathing returns. It wears off in an hour; morphine may not");
+        } else {
+            snprintf(msg, msg_size, "Naloxone: no opioid to reverse");
+        }
+        return 1;
+    }
+    if (h->stomach_water > 1.5f) {
+        snprintf(msg, msg_size, "Too full to drink");
+        return 0;
+    }
+    if (!inv_take(inv, I_SPIRITS, 1)) {
+        snprintf(msg, msg_size, "No spirits (4 apples and glass over a fire)");
+        return 0;
+    }
+    h->alcohol_gut += DRINK_G;
+    h->stomach_water += 0.04f;
+    float bac = h->bac + h->alcohol_gut / WIDMARK;
+    snprintf(msg, msg_size,
+             bac > 2.0f ? "Another drink: that's far too much" : (bac > 0.8f ? "Another drink" : "A drink of brandy"));
+    return 1;
+}
+
 static int treat_shock(health *h, char *msg, size_t msg_size)
 {
     if (h->defib.phase == DEFIB_OFF) {
@@ -692,6 +778,10 @@ static int treat_shock(health *h, char *msg, size_t msg_size)
     snprintf(msg, msg_size, health_rhythm_perfusing(h->rhythm) ? "Shocked a beating heart" : "Shock delivered");
     return 1;
 }
+
+/* Doses of the painkiller (1 g each) the liver takes in a day: 4, down to
+ * 2 after days of heavy drinking. */
+static float pk_limit(const health *h) { return 4.0f - 2.0f * ramp(h->drink_load, 60.0f, 200.0f); }
 
 int health_treat(health *h, inventory *inv, int part, int what, int water_nearby, char *msg, size_t msg_size)
 {
@@ -776,11 +866,16 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
         if (inv_take(inv, I_ANTISEPTIC, 1)) {
             c_mul = 0.15f;
             i_mul = 0.5f;
+        } else if (inv_take(inv, I_SPIRITS, 1)) {
+            /* 40% ethanol kills bacteria on contact, though less surely
+             * than a 70% antiseptic. */
+            c_mul = 0.3f;
+            i_mul = 0.7f;
         } else if (water_nearby) {
             c_mul = 0.5f;
             i_mul = 1.0f;
         } else {
-            snprintf(msg, msg_size, "No antiseptic, and no water to rinse with");
+            snprintf(msg, msg_size, "No antiseptic or spirits, and no water to rinse with");
             return 0;
         }
         for (int i = 0; i < h->wound_count; i++) {
@@ -792,10 +887,13 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
         }
         h->part[part].pain = minf(PAIN_SCALE, h->part[part].pain + 2.0f);
         snprintf(msg, msg_size,
-                 c_mul < 0.2f ? "Cleaned the %s wounds with antiseptic" : "Rinsed the %s wounds with water", pn);
+                 c_mul < 0.2f
+                     ? "Cleaned the %s wounds with antiseptic"
+                     : (c_mul < 0.4f ? "Cleaned the %s wounds with spirits" : "Rinsed the %s wounds with water"),
+                 pn);
         return 1;
     }
-    case TREAT_PAINKILLER:
+    case TREAT_PAINKILLER: {
         if (!inv_take(inv, I_PAINKILLER, 1)) {
             snprintf(msg, msg_size, "No painkillers left");
             return 0;
@@ -804,14 +902,19 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
          * glutathione runs out and a toxic metabolite kills its cells, a day
          * or two later, not at once. */
         h->pk_load += 1.0f;
-        if (h->pk_load > 4.0f) {
-            h->hepatotox = minf(1.0f, h->hepatotox + 0.12f * (h->pk_load - 4.0f));
-            health_log(h, "Over 4 g of painkiller in a day: the liver will suffer");
+        /* Steady drinking induces the enzyme (CYP2E1) that makes the toxic
+         * metabolite and drains glutathione: the safe dose halves. */
+        float limit = pk_limit(h);
+        if (h->pk_load > limit) {
+            h->hepatotox = minf(1.0f, h->hepatotox + 0.12f * (h->pk_load - limit));
+            health_log(h, limit < 4.0f ? "Painkiller on top of heavy drinking: the liver will suffer"
+                                       : "Over 4 g of painkiller in a day: the liver will suffer");
         }
         h->painkiller = 6.0f;
         snprintf(msg, msg_size,
-                 h->pk_load > 4.0f ? "Took a painkiller (6 h). Too many today" : "Took a painkiller (6 h)");
+                 h->pk_load > limit ? "Took a painkiller (6 h). Too many today" : "Took a painkiller (6 h)");
         return 1;
+    }
     case TREAT_ANTIBIOTIC: {
         if (!inv_take(inv, I_ANTIBIOTIC, 1)) {
             snprintf(msg, msg_size, "No antibiotics left");
@@ -927,6 +1030,9 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
         return 1;
     case TREAT_ADRENALINE: return treat_adrenaline(h, inv, msg, msg_size);
     case TREAT_SHOCK: return treat_shock(h, msg, msg_size);
+    case TREAT_MORPHINE:
+    case TREAT_NALOXONE:
+    case TREAT_SPIRITS: return treat_drug(h, inv, what, msg, msg_size);
     default: snprintf(msg, msg_size, "?"); return 0;
     }
 }
@@ -1098,6 +1204,7 @@ static int arrest_cause(const health *h, int airway)
     if (h->temp > 41.5f) return DEATH_HYPERTHERMIA;
     if (dehydration(h) > 0.12f) return DEATH_DEHYDRATION;
     if (h->lung_water > 0.3f) return DEATH_DROWNING;
+    if (health_resp_depression(h) > 0.5f) return DEATH_OVERDOSE;
     return DEATH_CARDIAC;
 }
 
@@ -1401,7 +1508,10 @@ static float step_heat(health *h, const health_env *e, double dt, float gh, floa
 
     /* Thermoregulation: skin vessels open as the core warms and close as it
      * or the skin cools; sweating starts just above the set point. */
-    float vaso_t = fclamp(0.1f + 2.5f * (tc - set) + 0.06f * (tsk - 32.0f), 0.0f, 1.0f);
+    /* Alcohol opens the skin's vessels whatever the core needs: the warm
+     * glow of a drink is heat leaving the body. */
+    float vaso_t = fclamp(0.1f + 2.5f * (tc - set) + 0.06f * (tsk - 32.0f) + 0.8f * ramp(h->bac, 0.2f, 1.0f), 0.0f,
+                          1.0f);
     h->vaso = lag(h->vaso, vaso_t, dt, 20.0);
     float sweat = fclamp(800.0f * (tc - set - 0.1f + 0.1f * (tsk - 34.0f)), 0.0f, 900.0f) * (1.0f - sub);
     h->sweat_w = sweat;
@@ -1644,6 +1754,10 @@ static void step_parts(health *h, const health_env *e, double dt, float gh, int 
         sum2 += h->part[i].pain * h->part[i].pain;
     }
     float pain = minf(PAIN_SCALE, sqrtf(sum2) * h->base.pain_gain) * (h->painkiller > 0.0f ? 0.45f : 1.0f);
+    /* Opioids work on top of the painkiller (as in co-codamol); drink
+     * dulls a little. */
+    float opi = opioid_free(h);
+    pain *= (1.0f - 0.7f * opi / (opi + OPI_PAIN_EC50)) * (1.0f - 0.3f * ramp(h->bac, 0.0f, 1.5f));
     /* A sudden jump in pain sets off fight-or-flight: a short adrenaline
      * surge, longer the worse the jump, which then dulls the pain itself
      * (stress-induced analgesia). */
@@ -1912,6 +2026,41 @@ static void step_catechol(health *h, double dt)
     else if (beta < 0.15f) h->crash = maxf(0.0f, h->crash - (float)dt / 240.0f);
 }
 
+/* Absorption and clearance of morphine and alcohol, on the survival clock
+ * like the painkiller, and the vomiting they bring on: in someone out
+ * cold, what comes up can go down into the lungs. */
+static void step_drugs(health *h, float fdt, float gh, int awake)
+{
+    float a = h->opioid_gut * (1.0f - expf(-gh / OPI_ABS_H));
+    h->opioid_gut -= a;
+    float half = OPI_HALF_H / maxf(h->organ[ORG_LIVER], 0.2f);
+    h->opioid = (h->opioid + a) * expf(-gh * 0.6931472f / half);
+    h->naloxone = maxf(0.0f, h->naloxone - gh);
+    /* Food in the stomach slows alcohol on its way to the gut. */
+    float tau = h->stomach_kcal > 200.0f ? 1.0f : 0.5f;
+    float e = h->alcohol_gut * (1.0f - expf(-gh / tau));
+    h->alcohol_gut -= e;
+    h->bac += e / WIDMARK;
+    h->water -= 0.01f * e; /* alcohol holds back ADH: ~10 mL more urine a gram */
+    h->drink_load = (h->drink_load + e) * expf(-gh / 48.0f);
+    h->bac = maxf(0.0f, h->bac - ALC_ELIM * gh * maxf(h->organ[ORG_LIVER], 0.2f));
+    if (h->opioid < 1e-3f && h->opioid_gut < 1e-3f) h->opioid = h->opioid_gut = 0.0f;
+
+    float p = 0.05f * ramp(h->bac, 1.8f, 3.0f) + 0.01f * ramp(opioid_free(h), 15.0f, 40.0f);
+    int full = h->stomach_kcal > 20.0f || h->stomach_water > 0.1f || h->alcohol_gut > 1.0f;
+    if (p <= 0.0f || !full || frand(h) >= p * fdt) return;
+    h->stomach_kcal *= 0.3f;
+    h->stomach_water *= 0.3f;
+    h->alcohol_gut *= 0.3f;
+    if (awake) {
+        health_log(h, "You vomit");
+        return;
+    }
+    h->lung_water += 0.12f;
+    h->organ[ORG_LUNGS] = maxf(0.0f, h->organ[ORG_LUNGS] - 0.08f);
+    health_log(h, "Vomited while unconscious and breathed it in");
+}
+
 /* The ventricles out of sinus control: AF passes a fast, irregular share
  * of 350-600 atrial impulses a minute through the AV node; VT and a
  * ventricular escape beat at their own rates, which catecholamines push
@@ -2037,6 +2186,7 @@ void health_step(health *h, const health_env *e, double dt)
         h->glycogen = 0.0f;
     }
 
+    step_drugs(h, fdt, gh, awake);
     step_burns(h, gh);
     step_crush(h, gh, dehyd);
     step_bleeding(h, e, dt, gh, dehyd);
@@ -2162,6 +2312,7 @@ void health_step(health *h, const health_env *e, double dt)
     int can_air = e->airway == AIRWAY_AIR && vent > 0.08f;
     /* Tissues extract less as the store runs dry and the brain shuts down. */
     h->o2_store = maxf(0.0f, h->o2_store - h->vo2 * fclamp(h->pao2 / 25.0f, 0.3f, 1.0f) / 60.0f * fdt);
+    const float dep = health_resp_depression(h), rr_floor = 4.0f * (1.0f - dep);
     if (can_air && drive_ok) {
         h->breathing = 1;
         float rr_need = 12.0f + 26.0f * vo2_frac;
@@ -2172,15 +2323,20 @@ void health_step(health *h, const health_env *e, double dt)
                      (h->lactate > 4.0f ? 0.9f * (h->lactate - 4.0f) : 0.0f) + 2.0f * maxf(0.0f, h->temp - 37.5f);
         if (!awake) rr_t = minf(rr_t, 24.0f);
         if (h->organ[ORG_BRAIN] < 0.3f) rr_t *= h->organ[ORG_BRAIN] / 0.3f;
+        /* Opioids and alcohol damp the brainstem's answer to CO2 and to low
+         * oxygen alike: the rate falls whatever the blood gases say. Past
+         * ~80 mmHg CO2 itself sedates the brainstem (CO2 narcosis), so a
+         * depressed drive spirals down instead of being rescued. */
+        rr_t *= (1.0f - dep) * (1.0f - (dep > 0.0f ? 0.8f * ramp(h->paco2, 80.0f, 110.0f) : 0.0f));
         if (h->base.vary) {
             h->rr_noise = wander(&h->vrng, h->rr_noise, dt, 6.0, 1.0f); /* breaths/min, breath-to-breath jitter */
             rr_t += h->rr_noise;
         }
-        h->rr = lag(h->rr, fclamp(rr_t, 4.0f, 55.0f), dt, 4.0);
+        h->rr = lag(h->rr, fclamp(rr_t, rr_floor, 55.0f), dt, 4.0);
         float pao2_target = maxf(0.0f, 0.21f * 713.0f - h->paco2 / 0.8f);
         float store_t = O2_VOL * pao2_target / 713.0f;
         h->o2_store = lag(h->o2_store, store_t, dt, 6.0 * 14.0 / (double)maxf(h->rr * vent, 1.0f));
-        float alveolar = maxf(h->rr - 0.6f * minf(shallow, maxf(h->rr - rr_need, 0.0f)), 4.0f) * vent;
+        float alveolar = maxf(h->rr - 0.6f * minf(shallow, maxf(h->rr - rr_need, 0.0f)), maxf(rr_floor, 0.5f)) * vent;
         h->paco2 = lag(h->paco2, 40.0f * rr_need / alveolar, dt, 20.0);
         h->apnea_time = 0.0f;
         h->gasp_timer = 0.0f;
@@ -2233,11 +2389,14 @@ void health_step(health *h, const health_env *e, double dt)
      * oxygen, though: oxygen has to diffuse into the tissue, and acute
      * hypoxaemia blacks people out near SaO2 50% whatever the flow. */
     float bo = h->brain_o2;
+    const float sed = health_sedation(h);
     int cons = CONS_ALERT;
     if (bo < 0.55f || h->sao2 < 0.7f || h->blood < 0.7f * BLOOD_NORMAL || h->confusion > 0.0f || h->temp < 33.0f ||
-        h->temp > 40.0f || h->sepsis > 0.7f || h->organ[ORG_BRAIN] < 0.6f || dehyd > 0.1f || h->fat < 2000.0f)
+        h->temp > 40.0f || h->sepsis > 0.7f || h->organ[ORG_BRAIN] < 0.6f || dehyd > 0.1f || h->fat < 2000.0f ||
+        sed > 0.45f)
         cons = CONS_CONFUSED;
     int out = h->conscious == CONS_UNCONSCIOUS; /* hysteresis */
+    if (sed > (out ? 0.8f : 0.85f)) cons = CONS_UNCONSCIOUS;
     if (bo < (out ? 0.45f : 0.4f) || h->sao2 < (out ? 0.55f : 0.5f) || h->concussion > 0.0f || h->temp < 30.0f ||
         h->temp > 41.5f || h->organ[ORG_BRAIN] < 0.3f || h->icp > 35.0f || h->sepsis > 0.92f || arrest)
         cons = CONS_UNCONSCIOUS;
@@ -2298,7 +2457,8 @@ health_senses health_get_senses(const health *h)
                            maxf(0.5f * ramp(150.0f - h->glycogen, 0.0f, 150.0f), ramp(36.0f - h->temp, 0.0f, 2.0f))),
                       0.0f, 1.0f);
     v.sway = fclamp(1.4f * (1.0f - h->organ[ORG_BRAIN]) + (h->confusion > 0.0f ? 0.5f : 0.0f) +
-                        (h->concussion > 0.0f ? 0.3f : 0.0f),
+                        (h->concussion > 0.0f ? 0.3f : 0.0f) + 0.8f * ramp(h->bac, 0.5f, 2.5f) +
+                        0.4f * ramp(opioid_free(h), 15.0f, 40.0f),
                     0.0f, 1.0f);
     v.tunnel = ramp(beta, 0.6f, 0.95f);
     v.jaundice = fclamp((0.6f - h->organ[ORG_LIVER]) / 0.4f, 0.0f, 1.0f);
@@ -2339,6 +2499,7 @@ health_limits health_get_limits(const health *h)
     float heart = h->organ[ORG_HEART], beta = catechol_beta(h);
     sys *= 0.5f + 0.5f * heart;
     if (h->organ[ORG_LIVER] < 0.5f) sys *= 0.85f;
+    sys *= (1.0f - 0.3f * ramp(h->bac, 0.8f, 3.0f)) * (1.0f - 0.3f * ramp(opioid_free(h), 15.0f, 40.0f));
     sys *= 1.0f + 0.12f * beta - 0.2f * h->crash * (1.0f - fclamp(beta / 0.4f, 0.0f, 1.0f));
     l.move_scale = mob * sys;
     l.can_jump = leg[0] >= 0.6f && leg[1] >= 0.6f && h->wbal > 1500.0f && l.move_scale > 0.5f;
@@ -2389,6 +2550,8 @@ const health_debug_kind HEALTH_DEBUG_KINDS[HEALTH_DEBUG_COUNT] = {
     {"heart-block", "Complete heart block", HDBG_SYSTEMIC, BP_HEAD},
     {"crisis", "Hypertensive crisis (10 min)", HDBG_SYSTEMIC, BP_HEAD},
     {"strain", "Strained heart (long crisis)", HDBG_SYSTEMIC, BP_HEAD},
+    {"drunk", "Drunk (2 g/L)", HDBG_SYSTEMIC, BP_HEAD},
+    {"overdose", "Opioid overdose (60 mg)", HDBG_SYSTEMIC, BP_HEAD},
 };
 
 int health_debug_find(const char *name)
@@ -2470,6 +2633,14 @@ void health_injure(health *h, int kind, int part)
     case 28: /* strain: the dose of about ten minutes of crisis */
         h->strain = maxf(h->strain, 10.0f);
         health_log(h, "Debug: strained heart");
+        break;
+    case 29: /* drunk: about seven drinks, absorbed */
+        h->bac = maxf(h->bac, 2.0f);
+        health_log(h, "Debug: drunk");
+        break;
+    case 30: /* overdose: six tablets' worth in the blood at once */
+        h->opioid = maxf(h->opioid, 60.0f);
+        health_log(h, "Debug: opioid overdose");
         break;
     default: break;
     }
@@ -2778,11 +2949,17 @@ static const wire_field HEALTH_FIELDS[] = {
     H(gut_upset),
     H(crash),
     H(pain_ref),
+    H(opioid_gut),
+    H(opioid),
+    H(naloxone),
+    H(alcohol_gut),
+    H(bac),
+    H(drink_load),
     H(antibiotic),
     H(sepsis),
     WIRE_I32R(health, conscious, CONS_UNCONSCIOUS, CONS_ALERT),
     HI(dead),
-    WIRE_I32R(health, cause, DEATH_NONE, DEATH_BURNS),
+    WIRE_I32R(health, cause, DEATH_NONE, DEATH_OVERDOSE),
     H(hurt_flash),
     HD(t),
     WIRE_U32(health, rng),

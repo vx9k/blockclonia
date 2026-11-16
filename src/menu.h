@@ -67,7 +67,7 @@ typedef struct {
     int playable;
 } menu_world;
 
-#define MENU_MAX_ITEMS 32
+#define MENU_MAX_ITEMS 40
 #define SETTINGS_TABS 4 /* the debug health screen lists every HEALTH_DEBUG_KINDS entry */
 
 typedef struct {
