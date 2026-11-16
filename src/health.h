@@ -368,9 +368,11 @@ health_limits health_get_limits(const health *h);
  * sugar, cold), a sway (a hurt brain, concussion, confusion, drink and
  * opioids), tunnel
  * vision (an adrenaline rush) and the yellow of jaundice (a failing
- * liver). */
+ * liver), blurred vision (the confusion after a concussion, a hurt brain,
+ * heavy drinking) and double vision (a fresh concussion, very heavy
+ * drinking). */
 typedef struct {
-    float tremor, sway, tunnel, jaundice;
+    float tremor, sway, tunnel, jaundice, blur, doubled;
 } health_senses;
 health_senses health_get_senses(const health *h);
 

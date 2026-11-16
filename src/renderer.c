@@ -60,6 +60,12 @@ static const uint32_t SPV_UI_VERT[] =
 static const uint32_t SPV_UI_FRAG[] =
 #include "ui.frag.inc"
     ;
+static const uint32_t SPV_POST_VERT[] =
+#include "post.vert.inc"
+    ;
+static const uint32_t SPV_POST_FRAG[] =
+#include "post.frag.inc"
+    ;
 
 #define VK_CHECK(x)                                                              \
     do {                                                                         \
@@ -134,6 +140,11 @@ typedef struct {
     float linear_out, pad[3];
 } push_ui;
 
+typedef struct {
+    float texel[2];
+    float radius, ghost; /* pixels */
+} push_post;
+
 #define PUSH_FRAG_OFFSET 96u
 _Static_assert(sizeof(push_vert) == PUSH_FRAG_OFFSET, "push_vert must end where push_frag starts");
 _Static_assert(MAX_VIS * 16u + (MAX_BODIES + RENDER_MAX_ENTS + 16) * sizeof(entity_instance) + DYN_LINES_BYTES + 64 <=
@@ -171,9 +182,24 @@ struct renderer {
     int shot_usage, shot_supported, swap_has_src;
 
     VkFormat depth_fmt;
+    int scene_ok; /* the swapchain format can be drawn to and sampled linearly, as the blur needs */
     VkImage depth;
     VkDeviceMemory depth_mem;
     VkImageView depth_view;
+
+    /* Blurred vision: the world is drawn into `scene`, then filtered onto
+     * the swapchain image under a sharp overlay. The image is made on the
+     * first blurred frame and dropped with the swapchain, so clear eyes
+     * cost no memory. */
+    VkImage scene;
+    VkDeviceMemory scene_mem;
+    VkImageView scene_view;
+    VkFramebuffer scene_fb;
+    VkRenderPass scene_pass;     /* VkRenderPass path: as `pass`, but left SHADER_READ_ONLY */
+    VkSampler sampler_linear;
+    VkDescriptorSet post_dset;   /* from ui_dpool */
+    VkPipelineLayout post_layout;
+    VkPipeline p_post;
 
     VkRenderPass pass;
     VkDescriptorSetLayout dsl;
@@ -878,6 +904,69 @@ static void destroy_swap_resources(renderer *r)
     r->depth_view = VK_NULL_HANDLE;
     r->depth = VK_NULL_HANDLE;
     r->depth_mem = VK_NULL_HANDLE;
+    vkDestroyFramebuffer(r->dev, r->scene_fb, r->ac);
+    vkDestroyImageView(r->dev, r->scene_view, r->ac);
+    vkDestroyImage(r->dev, r->scene, r->ac);
+    vkFreeMemory(r->dev, r->scene_mem, r->ac);
+    r->scene_fb = VK_NULL_HANDLE;
+    r->scene_view = VK_NULL_HANDLE;
+    r->scene = VK_NULL_HANDLE;
+    r->scene_mem = VK_NULL_HANDLE;
+}
+
+/* Makes the blur's scene image at the swapchain's size, on the first frame
+ * that needs it (one allocation, a one-off cost while play goes on). The
+ * device is idle whenever it was last dropped, so rewriting post_dset
+ * cannot touch a frame in flight. Returns 0 where the format can't do it. */
+static int scene_ready(renderer *r)
+{
+    if (!r->scene_ok) return 0;
+    if (r->scene) return 1;
+    VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                            .imageType = VK_IMAGE_TYPE_2D,
+                            .format = r->swap_fmt,
+                            .extent = {r->extent.width, r->extent.height, 1},
+                            .mipLevels = 1,
+                            .arrayLayers = 1,
+                            .samples = VK_SAMPLE_COUNT_1_BIT,
+                            .tiling = VK_IMAGE_TILING_OPTIMAL,
+                            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+    VK_CHECK(vkCreateImage(r->dev, &ii, r->ac, &r->scene));
+    VkMemoryRequirements req = {0};
+    vkGetImageMemoryRequirements(r->dev, r->scene, &req);
+    VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                               .allocationSize = req.size,
+                               .memoryTypeIndex = find_memtype(r, req.memoryTypeBits,
+                                                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0)};
+    VK_CHECK(vkAllocateMemory(r->dev, &ai, r->ac, &r->scene_mem));
+    VK_CHECK(vkBindImageMemory(r->dev, r->scene, r->scene_mem, 0));
+    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                .image = r->scene,
+                                .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                                .format = r->swap_fmt,
+                                .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    VK_CHECK(vkCreateImageView(r->dev, &vi, r->ac, &r->scene_view));
+    if (r->scene_pass) {
+        VkImageView att[2] = {r->scene_view, r->depth_view};
+        VkFramebufferCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+                                      .renderPass = r->scene_pass,
+                                      .attachmentCount = 2,
+                                      .pAttachments = att,
+                                      .width = r->extent.width,
+                                      .height = r->extent.height,
+                                      .layers = 1};
+        VK_CHECK(vkCreateFramebuffer(r->dev, &fi, r->ac, &r->scene_fb));
+    }
+    VkDescriptorImageInfo dii = {r->sampler_linear, r->scene_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet w = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                              .dstSet = r->post_dset,
+                              .dstBinding = 0,
+                              .descriptorCount = 1,
+                              .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                              .pImageInfo = &dii};
+    vkUpdateDescriptorSets(r->dev, 1, &w, 0, NULL);
+    return 1;
 }
 
 static void choose_surface_format(renderer *r)
@@ -1042,33 +1131,62 @@ static int recreate_swapchain(renderer *r)
 
 /* ------------------------------------------------------------ pipelines */
 
-static void create_render_pass(renderer *r)
+/* The swapchain pass, or with `scene` the blur's scene pass, which leaves
+ * its colour ready to sample. The world pipelines are built against the
+ * swapchain pass and run in both, so the two must stay compatible: they
+ * differ only in a final layout, and share their dependencies (the spec
+ * allows no other difference). The first also covers the previous frame's
+ * reads of the scene image; the second makes this pass's writes visible
+ * to the blur that samples them. */
+static VkRenderPass create_render_pass(renderer *r, int scene)
 {
     VkAttachmentDescription att[2] = {
-        {.format = r->swap_fmt, .samples = VK_SAMPLE_COUNT_1_BIT, .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-         .storeOp = VK_ATTACHMENT_STORE_OP_STORE, .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-         .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-         .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR},
+        {.format = r->swap_fmt,
+         .samples = VK_SAMPLE_COUNT_1_BIT,
+         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+         .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+         .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+         .finalLayout = scene ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR},
         /* Depth is never stored: saves a full-screen write-back on tilers. */
-        {.format = r->depth_fmt, .samples = VK_SAMPLE_COUNT_1_BIT, .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-         .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE, .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-         .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        {.format = r->depth_fmt,
+         .samples = VK_SAMPLE_COUNT_1_BIT,
+         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+         .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+         .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+         .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
          .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL},
     };
     VkAttachmentReference cref = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
     VkAttachmentReference dref = {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
     VkSubpassDescription sub = {.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS, .colorAttachmentCount = 1,
                                 .pColorAttachments = &cref, .pDepthStencilAttachment = &dref};
-    VkSubpassDependency dep = {
-        .srcSubpass = VK_SUBPASS_EXTERNAL, .dstSubpass = 0,
-        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
-        .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT};
-    VkRenderPassCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, .attachmentCount = 2,
-                                 .pAttachments = att, .subpassCount = 1, .pSubpasses = &sub,
-                                 .dependencyCount = 1, .pDependencies = &dep};
-    VK_CHECK(vkCreateRenderPass(r->dev, &ci, r->ac, &r->pass));
+    VkSubpassDependency dep[2] = {
+        {.srcSubpass = VK_SUBPASS_EXTERNAL,
+         .dstSubpass = 0,
+         .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+         .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+         .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+         .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT},
+        {.srcSubpass = 0,
+         .dstSubpass = VK_SUBPASS_EXTERNAL,
+         .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+         .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+         .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+         .dstAccessMask = VK_ACCESS_SHADER_READ_BIT}};
+    VkRenderPassCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+                                 .attachmentCount = 2,
+                                 .pAttachments = att,
+                                 .subpassCount = 1,
+                                 .pSubpasses = &sub,
+                                 .dependencyCount = 2,
+                                 .pDependencies = dep};
+    VkRenderPass p = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateRenderPass(r->dev, &ci, r->ac, &p));
+    return p;
 }
 
 /* Pipelines build from the cache file of the last run where it was written
@@ -1320,6 +1438,19 @@ static void create_ui_pipeline(renderer *r)
     r->p_ui = make_pipeline(r, &d);
     vkDestroyShaderModule(r->dev, vs, r->ac);
     vkDestroyShaderModule(r->dev, fs, r->ac);
+
+    /* The blur: one image-sampler set, like the font's, and its own
+     * fragment-stage constants; no vertex input. */
+    VkPushConstantRange ppr = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push_post)};
+    pl.pPushConstantRanges = &ppr;
+    VK_CHECK(vkCreatePipelineLayout(r->dev, &pl, r->ac, &r->post_layout));
+    vs = make_module(r, SPV_POST_VERT, sizeof SPV_POST_VERT);
+    fs = make_module(r, SPV_POST_FRAG, sizeof SPV_POST_FRAG);
+    pipe_desc p = {
+        vs, fs, NULL, 0, NULL, 0, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, 0, 0, VK_CULL_MODE_NONE, r->post_layout};
+    r->p_post = make_pipeline(r, &p);
+    vkDestroyShaderModule(r->dev, vs, r->ac);
+    vkDestroyShaderModule(r->dev, fs, r->ac);
 }
 
 /* ------------------------------------------------------------- resources */
@@ -1452,17 +1583,31 @@ static void create_font(renderer *r)
                                 .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
     VK_CHECK(vkCreateImageView(r->dev, &vi, r->ac, &r->font_view));
 
-    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+    /* Two sets: the font, and the blur's scene image (written by scene_ready). */
+    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2};
     VkDescriptorPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-                                     .maxSets = 1,
+                                     .maxSets = 2,
                                      .poolSizeCount = 1,
                                      .pPoolSizes = &ps};
     VK_CHECK(vkCreateDescriptorPool(r->dev, &pi, r->ac, &r->ui_dpool));
+    VkDescriptorSetLayout layouts[2] = {r->ui_dsl, r->ui_dsl};
+    VkDescriptorSet sets[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
     VkDescriptorSetAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                                        .descriptorPool = r->ui_dpool,
-                                       .descriptorSetCount = 1,
-                                       .pSetLayouts = &r->ui_dsl};
-    VK_CHECK(vkAllocateDescriptorSets(r->dev, &dai, &r->ui_dset));
+                                       .descriptorSetCount = 2,
+                                       .pSetLayouts = layouts};
+    VK_CHECK(vkAllocateDescriptorSets(r->dev, &dai, sets));
+    r->ui_dset = sets[0];
+    r->post_dset = sets[1];
+    /* The blur samples between pixels and must not wrap at the screen's edges. */
+    VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                              .magFilter = VK_FILTER_LINEAR,
+                              .minFilter = VK_FILTER_LINEAR,
+                              .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+                              .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                              .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                              .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE};
+    VK_CHECK(vkCreateSampler(r->dev, &si, r->ac, &r->sampler_linear));
     /* The world sampler is nearest-filtered, which is what pixel text wants. */
     VkDescriptorImageInfo dii = {r->sampler, r->font_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkWriteDescriptorSet w = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -1873,7 +2018,15 @@ renderer *renderer_create(GLFWwindow *win, const render_opts *o)
     create_device(r);
     choose_surface_format(r);
     r->depth_fmt = pick_depth_format(r);
-    if (!r->begin_rendering) create_render_pass(r);
+    if (!r->begin_rendering) {
+        r->pass = create_render_pass(r, 0);
+        r->scene_pass = create_render_pass(r, 1);
+    }
+    VkFormatProperties fp = {0};
+    vkGetPhysicalDeviceFormatProperties(r->pd, r->swap_fmt, &fp);
+    VkFormatFeatureFlags need = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                                VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    r->scene_ok = (fp.optimalTilingFeatures & need) == need;
     if (!create_swapchain(r)) log_fatal("window has zero size at startup");
     size_t cache_size = 0;
     void *cache = create_pipeline_cache(r, o, &cache_size);
@@ -1939,6 +2092,9 @@ void renderer_destroy(renderer *r)
     vkDestroyDescriptorPool(r->dev, r->ui_dpool, r->ac);
     vkDestroyPipeline(r->dev, r->p_ui, r->ac);
     vkDestroyPipelineLayout(r->dev, r->ui_layout, r->ac);
+    vkDestroyPipeline(r->dev, r->p_post, r->ac);
+    vkDestroyPipelineLayout(r->dev, r->post_layout, r->ac);
+    vkDestroySampler(r->dev, r->sampler_linear, r->ac);
     vkDestroyDescriptorSetLayout(r->dev, r->ui_dsl, r->ac);
     vkDestroyPipeline(r->dev, r->p_opaque, r->ac);
     vkDestroyPipeline(r->dev, r->p_trans, r->ac);
@@ -1954,6 +2110,7 @@ void renderer_destroy(renderer *r)
     destroy_swap_resources(r);
     vkDestroySwapchainKHR(r->dev, r->swap, r->ac);
     vkDestroyRenderPass(r->dev, r->pass, r->ac);
+    vkDestroyRenderPass(r->dev, r->scene_pass, r->ac);
     vkDestroyPipelineCache(r->dev, r->pcache, r->ac);
     vkDestroyDevice(r->dev, r->ac);
     vkDestroySurfaceKHR(r->inst, r->surf, r->ac);
@@ -2176,12 +2333,12 @@ static int collect_visible(renderer *r, const world *w, const render_view *v, co
  * pass made implicitly. Colour waits at the stage the acquire semaphore is
  * waited at; depth, shared by the frames in flight, waits for the previous
  * frame's depth writes, as the render pass's external dependency did. */
-static void begin_pass(const renderer *r, VkCommandBuffer cmd, const VkClearValue clears[2])
+static void begin_pass(const renderer *r, VkCommandBuffer cmd, const VkClearValue clears[2], int scene)
 {
     if (!r->begin_rendering) {
         VkRenderPassBeginInfo rp = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-                                    .renderPass = r->pass,
-                                    .framebuffer = r->fbs[r->image_index],
+                                    .renderPass = scene ? r->scene_pass : r->pass,
+                                    .framebuffer = scene ? r->scene_fb : r->fbs[r->image_index],
                                     .renderArea = {{0, 0}, r->extent},
                                     .clearValueCount = 2,
                                     .pClearValues = clears};
@@ -2192,15 +2349,18 @@ static void begin_pass(const renderer *r, VkCommandBuffer cmd, const VkClearValu
     VkImageAspectFlags depth_aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
     if (r->depth_fmt == VK_FORMAT_D32_SFLOAT_S8_UINT || r->depth_fmt == VK_FORMAT_D24_UNORM_S8_UINT)
         depth_aspect |= VK_IMAGE_ASPECT_STENCIL_BIT; /* layouts cover both aspects */
-    image_barrier(r, cmd, r->images[r->image_index], VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_UNDEFINED,
-                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+    /* The scene image also waits for the last frame's blur to finish reading it. */
+    image_barrier(r, cmd, scene ? r->scene : r->images[r->image_index], VK_IMAGE_ASPECT_COLOR_BIT, 1, 1,
+                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0,
+                  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | (scene ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : 0),
+                  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
     image_barrier(r, cmd, r->depth, depth_aspect, 1, 1, VK_IMAGE_LAYOUT_UNDEFINED,
                   VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                   VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, tests,
                   tests);
     VkRenderingAttachmentInfo color = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                                       .imageView = r->views[r->image_index],
+                                       .imageView = scene ? r->scene_view : r->views[r->image_index],
                                        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                                        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -2221,14 +2381,22 @@ static void begin_pass(const renderer *r, VkCommandBuffer cmd, const VkClearValu
     r->begin_rendering(cmd, &ri);
 }
 
-/* Ends drawing; the image is left in PRESENT_SRC either way. */
-static void end_pass(const renderer *r, VkCommandBuffer cmd)
+/* Ends drawing; the image is left in PRESENT_SRC either way, or the scene
+ * image ready for the blur's fragment shader. */
+static void end_pass(const renderer *r, VkCommandBuffer cmd, int scene)
 {
     if (!r->end_rendering) {
         vkCmdEndRenderPass(cmd);
         return;
     }
     r->end_rendering(cmd);
+    if (scene) {
+        image_barrier(r, cmd, r->scene, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                      VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        return;
+    }
     image_barrier(r, cmd, r->images[r->image_index], VK_IMAGE_ASPECT_COLOR_BIT, 1, 1,
                   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                   VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -2362,7 +2530,8 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     VkClearValue clears[2] = {0};
     clears[0].color = (VkClearColorValue){{pf.color[0], pf.color[1], pf.color[2], 1.0f}};
     clears[1].depthStencil = (VkClearDepthStencilValue){0.0f, 0}; /* reversed Z */
-    begin_pass(r, cmd, clears);
+    int post = (v->blur > 0.01f || v->doubled > 0.01f) && scene_ready(r);
+    begin_pass(r, cmd, clears, post);
     VkViewport viewport = {0, 0, (float)r->extent.width, (float)r->extent.height, 0.0f, 1.0f};
     VkRect2D scissor = {{0, 0}, r->extent};
     vkCmdSetViewport(cmd, 0, 1, &viewport);
@@ -2541,6 +2710,25 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         }
         vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buf, &line_off); /* the crosshair's vertices */
     }
+    /* Blurred vision: the world so far, filtered onto the screen. The
+     * crosshair and the overlay come after it and stay sharp: they stand
+     * for the game, not the eyes. Bound vertex buffers and dynamic state
+     * carry over into the new pass. The defocus scales with the height so
+     * it looks the same at any resolution; the two images drift slowly
+     * apart and together as the eyes try to fuse them. */
+    if (post) {
+        end_pass(r, cmd, 1);
+        begin_pass(r, cmd, clears, 0);
+        float px = (float)r->extent.height / 1080.0f;
+        push_post pp = {{1.0f / (float)r->extent.width, 1.0f / (float)r->extent.height},
+                        clampf(v->blur, 0.0f, 1.0f) * 7.0f * px,
+                        clampf(v->doubled, 0.0f, 1.0f) * 40.0f * px * (0.8f + 0.2f * sinf(v->time * 0.9f))};
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_post);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->post_layout, 0, 1, &r->post_dset, 0, NULL);
+        vkCmdPushConstants(cmd, r->post_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pp, &pp);
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+        st.draw_calls++;
+    }
     if (!v->hide_crosshair) {
         push_vert cp = {0};
         memset(&cp, 0, sizeof cp);
@@ -2571,7 +2759,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         st.draw_calls++;
     }
 
-    end_pass(r, cmd);
+    end_pass(r, cmd, 0);
 
     int shot = r->shot_pending && r->swap_has_src;
     gbuf shot_buf = {0};

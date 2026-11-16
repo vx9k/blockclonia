@@ -110,12 +110,12 @@ feels. One pull request per item below.
       drunk or drugged, glitching text when the body is failing (#53)
 - [x] Adrenaline from fear: a wolf hunting nearby startles the body
       into a rush and keeps the adrenaline up while it closes in (#55)
+- [x] Blurred and double vision after a concussion, with a hurt brain
+      or heavy drinking: a renderer post-process (Vulkan 1.0 and up)
+      under a sharp crosshair and HUD (#61)
 
 **To do:**
 
-- [ ] A blur or double-vision effect for concussion (needs a renderer
-      post-process with a Vulkan 1.0 path; the view sway is the
-      stand-in)
 - [ ] The panel by mouse all the way: a clickable organ list and
       supplies, and dragging an item from the inventory onto a body part
       (part of the character panel under User interface)
