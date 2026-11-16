@@ -646,8 +646,8 @@ The unit tests (about 2400 checks, no window or GPU needed) cover:
   pull requests.
 - [SECURITY.md](SECURITY.md): what counts as a vulnerability and how to
   report one.
-- [TODO.md](TODO.md): larger work deliberately deferred, and what would
-  make it worth doing.
+- [TODO.md](TODO.md): what is being built, what comes next and what is
+  planned, with the design notes in [docs/design/](docs/design/README.md).
 - Each header in `src/` starts with a description of its module.
 
 ## Layout
