@@ -257,7 +257,7 @@ if(MC_BUILD_TESTS)
                           tests/test_health_debug.c tests/test_thoughts.c tests/test_drugs.c tests/test_faint.c tests/test_fear.c tests/test_mobmodel.c tests/test_defib.c tests/test_paths.c
                           tests/test_save_db.c tests/test_worlds.c tests/test_hud.c tests/test_cardio.c
                           tests/test_discord.c tests/test_netcrypto.c tests/test_wire.c tests/test_net.c tests/test_mp.c
-                          tests/test_worldgen.c tests/test_tools.c
+                          tests/test_worldgen.c tests/test_edge.c tests/test_tools.c
                           tests/test_combat.c tests/test_invui.c
                           tests/test_body_risks.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)

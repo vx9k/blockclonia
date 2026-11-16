@@ -1951,6 +1951,7 @@ int main(void)
     test_net_all();
     test_mp_all();
     test_worldgen_all();
+    test_edge_all();
     test_tools_all();
     test_combat_all();
     test_invui_all();

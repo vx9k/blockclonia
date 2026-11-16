@@ -13,12 +13,57 @@
  * ceiling so the terrain they make does not change with WORLD_H. */
 #define GEN_H WORLD_H_V1
 
+/* Every world so far was made within 8,000,000 blocks of the origin (plus
+ * the 33 columns loaded around a player), its noise sampled at float
+ * coordinates. Up to 2^23, past anything an older build could generate,
+ * that stays as it was, bit for bit. Beyond it the float coordinates would
+ * quantise the finer octaves and, near the edge, the terrain itself into
+ * 128-block terraces, so the same noise is sampled exactly there. The two
+ * differ by a fraction of a block (a height one block apart at 2 % of
+ * places); blending over a 256-block band keeps even that from drawing a
+ * straight ledge along the line where they meet. */
+#define FLOAT_NOISE_LIMIT (1 << 23)
+#define EXACT_BLEND 256
+
+/* 0 inside the float region, rising to 1 across the band. */
+static float exact_share(int x, int z)
+{
+    long long ax = llabs((long long)x), az = llabs((long long)z);
+    long long d = (ax > az ? ax : az) - FLOAT_NOISE_LIMIT;
+    return d <= 0 ? 0.0f : (d >= EXACT_BLEND ? 1.0f : (float)d / EXACT_BLEND);
+}
+
+static float blend(float t, float old, float exact) { return t <= 0.0f ? old : old + t * (exact - old); }
+
+static float fbm_at(uint32_t seed, int x, int z, float scale, int octaves)
+{
+    float t = exact_share(x, z), old = 0.0f, exact = 0.0f;
+    if (t < 1.0f) old = fbm2(seed, (float)x / scale, (float)z / scale, octaves);
+    if (t > 0.0f) exact = fbm2i(seed, x, z, (double)scale, octaves);
+    return blend(t, old, exact);
+}
+
+static float noise_at(uint32_t seed, int x, int z, float scale)
+{
+    float t = exact_share(x, z), old = 0.0f, exact = 0.0f;
+    if (t < 1.0f) old = noise2(seed, (float)x / scale, (float)z / scale);
+    if (t > 0.0f) exact = noise2i(seed, x, z, (double)scale);
+    return blend(t, old, exact);
+}
+
+static float noise3_at(uint32_t seed, int x, int y, int z, float scale_xz, float scale_y)
+{
+    float t = exact_share(x, z), old = 0.0f, exact = 0.0f;
+    if (t < 1.0f) old = noise3(seed, (float)x / scale_xz, (float)y / scale_y, (float)z / scale_xz);
+    if (t > 0.0f) exact = noise3i(seed, x, y, z, (double)scale_xz, (double)scale_y);
+    return blend(t, old, exact);
+}
+
 static int height_v1(uint32_t seed, int x, int z)
 {
-    float fx = (float)x, fz = (float)z;
-    float continent = fbm2(seed, fx / 700.0f, fz / 700.0f, 3);
-    float hills = fbm2(seed + 17, fx / 110.0f, fz / 110.0f, 4);
-    float ridge = 1.0f - fabsf(noise2(seed + 31, fx / 260.0f, fz / 260.0f));
+    float continent = fbm_at(seed, x, z, 700.0f, 3);
+    float hills = fbm_at(seed + 17, x, z, 110.0f, 4);
+    float ridge = 1.0f - fabsf(noise_at(seed + 31, x, z, 260.0f));
     float mountain = fmaxf(0.0f, continent + 0.15f) * ridge * ridge * ridge;
     float h = 51.0f + continent * 24.0f + hills * 8.0f + mountain * 60.0f;
     return clampi((int)h, 4, GEN_H - 12);
@@ -26,15 +71,14 @@ static int height_v1(uint32_t seed, int x, int z)
 
 int worldgen_height(uint32_t seed, int x, int z)
 {
-    float fx = (float)x, fz = (float)z;
-    float continent = fbm2(seed, fx / 700.0f, fz / 700.0f, 3);
-    float hills = fbm2(seed + 17, fx / 110.0f, fz / 110.0f, 4);
+    float continent = fbm_at(seed, x, z, 700.0f, 3);
+    float hills = fbm_at(seed + 17, x, z, 110.0f, 4);
     /* Ranges: a slow mask decides where mountains rise at all, and two
      * octaves of ridged noise give them sharp crests and steep flanks. */
-    float range = fbm2(seed + 43, fx / 1300.0f, fz / 1300.0f, 2);
+    float range = fbm_at(seed + 43, x, z, 1300.0f, 2);
     float mask = fminf(1.0f, fmaxf(0.0f, (range + continent * 0.5f + 0.05f) * 2.5f));
-    float r1 = 1.0f - fabsf(noise2(seed + 31, fx / 260.0f, fz / 260.0f));
-    float r2 = 1.0f - fabsf(noise2(seed + 37, fx / 90.0f, fz / 90.0f));
+    float r1 = 1.0f - fabsf(noise_at(seed + 31, x, z, 260.0f));
+    float r2 = 1.0f - fabsf(noise_at(seed + 37, x, z, 90.0f));
     float ridge = r1 * r1 * r1 * (0.75f + 0.25f * r2 * r2);
     float h = 51.0f + continent * 24.0f + hills * 8.0f + mask * ridge * 78.0f;
     /* Ease into the build limit instead of flattening peaks against it. */
@@ -93,9 +137,9 @@ static void carve_caves(uint32_t seed, column *c, const int hm[CHUNK_W + 2][CHUN
         for (int j = 0; j < ny; j++)
             for (int k = 0; k < CAVE_NX; k++)
                 for (int i = 0; i < CAVE_NX; i++) {
-                    float x = (float)(bx + i * CAVE_STEP), y = (float)(j * CAVE_STEP), z = (float)(bz + k * CAVE_STEP);
-                    g[f][j][k][i] = f < 2 ? noise3(seed + 71u + (uint32_t)f * 2u, x / 44.0f, y / 22.0f, z / 44.0f)
-                                          : noise3(seed + 79u, x / 90.0f, y / 45.0f, z / 90.0f);
+                    int x = bx + i * CAVE_STEP, y = j * CAVE_STEP, z = bz + k * CAVE_STEP;
+                    g[f][j][k][i] = f < 2 ? noise3_at(seed + 71u + (uint32_t)f * 2u, x, y, z, 44.0f, 22.0f)
+                                          : noise3_at(seed + 79u, x, y, z, 90.0f, 45.0f);
                 }
 
     for (int z = 0; z < CHUNK_W; z++)

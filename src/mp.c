@@ -652,14 +652,15 @@ int mp_anchors(const mp *m, int (*at)[2], int max)
 }
 
 /* The terrain a player could touch this step is loaded: their column and
- * its neighbours. Until then they wait where they are (unloaded cells
- * count as solid, and the body would be stuck inside one). */
+ * its neighbours, those past the world's edge aside. Until then they wait
+ * where they are (unloaded cells count as solid, and the body would be
+ * stuck inside one). */
 static int terrain_ready(const world *w, const player *p)
 {
     int cx = chunk_of((int)floor(p->pos.x)), cz = chunk_of((int)floor(p->pos.z));
     for (int dz = -1; dz <= 1; dz++)
         for (int dx = -1; dx <= 1; dx++)
-            if (!world_column(w, cx + dx, cz + dz)) return 0;
+            if (!world_column(w, cx + dx, cz + dz) && world_column_inside(cx + dx, cz + dz)) return 0;
     return 1;
 }
 
@@ -882,8 +883,7 @@ static void client_edits(mp *m, wire_r *rd)
     for (int i = 0; i < count && !rd->bad; i++) {
         int x = wire_get_i32(rd), y = wire_get_u16(rd), z = wire_get_i32(rd);
         uint8_t id = wire_get_u8(rd), meta = wire_get_u8(rd);
-        if (rd->bad || id >= B_COUNT || meta > 7 || y >= WORLD_H || llabs((long long)x) >= WORLD_LIMIT ||
-            llabs((long long)z) >= WORLD_LIMIT) {
+        if (rd->bad || id >= B_COUNT || meta > 7 || y >= WORLD_H || !world_xz_inside(x, z)) {
             rd->bad = 1;
             return;
         }
@@ -928,7 +928,7 @@ static void client_snapshot(mp *m, wire_r *rd)
         o[i].yaw = wire_get_f32(rd);
         o[i].pitch = wire_get_f32(rd);
         o[i].flags = wire_get_u8(rd);
-        if (o[i].id >= NET_MAX_PLAYERS || fabs(o[i].pos.x) >= WORLD_LIMIT || fabs(o[i].pos.z) >= WORLD_LIMIT ||
+        if (o[i].id >= NET_MAX_PLAYERS || fabs(o[i].pos.x) > WORLD_LIMIT || fabs(o[i].pos.z) > WORLD_LIMIT ||
             fabs(o[i].pos.y) > 1e5)
             rd->bad = 1;
     }
@@ -942,8 +942,7 @@ static void client_snapshot(mp *m, wire_r *rd)
         for (int k = 0; k < 4; k++) b->rot[k] = wire_get_f32(rd);
         b->block = wire_get_u8(rd);
         b->prev_pos = b->pos;
-        if (b->block >= B_COUNT || fabs(b->pos.x) >= WORLD_LIMIT || fabs(b->pos.z) >= WORLD_LIMIT ||
-            fabs(b->pos.y) > 1e5)
+        if (b->block >= B_COUNT || fabs(b->pos.x) > WORLD_LIMIT || fabs(b->pos.z) > WORLD_LIMIT || fabs(b->pos.y) > 1e5)
             rd->bad = 1;
     }
     int ni = wire_get_u8(rd);
@@ -956,7 +955,7 @@ static void client_snapshot(mp *m, wire_r *rd)
         it->id = wire_get_u8(rd);
         it->count = wire_get_u8(rd);
         it->prev_pos = it->pos;
-        if (!item_valid(it->id) || fabs(it->pos.x) >= WORLD_LIMIT || fabs(it->pos.z) >= WORLD_LIMIT ||
+        if (!item_valid(it->id) || fabs(it->pos.x) > WORLD_LIMIT || fabs(it->pos.z) > WORLD_LIMIT ||
             fabs(it->pos.y) > 1e5)
             rd->bad = 1;
     }
@@ -973,7 +972,7 @@ static void client_snapshot(mp *m, wire_r *rd)
         mb->kind = wire_get_u8(rd);
         mb->hurt_t = wire_get_u8(rd) ? 0.1f : 0.0f;
         mb->body.prev_pos = mb->body.pos;
-        if (mb->kind >= MOB_KINDS || fabs(mb->body.pos.x) >= WORLD_LIMIT || fabs(mb->body.pos.z) >= WORLD_LIMIT ||
+        if (mb->kind >= MOB_KINDS || fabs(mb->body.pos.x) > WORLD_LIMIT || fabs(mb->body.pos.z) > WORLD_LIMIT ||
             fabs(mb->body.pos.y) > 1e5 || !(fabsf(mb->body.yaw) < 1e4f) || !(fabsf(mb->stride) < 1e7f) ||
             !(fabsf(mb->look) <= 1.0f) || !(fabsf(mb->nod) <= 1.0f))
             rd->bad = 1;

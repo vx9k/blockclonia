@@ -245,8 +245,10 @@ int survival_decode_player(player *p, inventory *inv, double *day, const uint8_t
     if (!ok_len || memcmp(in, "MCPL", 4) != 0 || in[5] || in[6] || in[7] || in[40] > 1 || in[41]) return -1;
     double x = get64(in + 8), y = get64(in + 16), z = get64(in + 24);
     float yaw = get32f(in + 32), pitch = get32f(in + 36);
-    /* NaN fails every comparison, so these also reject it. */
-    if (!(fabs(x) <= WORLD_LIMIT - 64) || !(fabs(z) <= WORLD_LIMIT - 64) || !(y >= -64.0 && y <= WORLD_H + 64.0) ||
+    /* NaN fails every comparison, so these also reject it. x and z may be
+     * anywhere physics can put the player (it clamps to +-WORLD_LIMIT), or
+     * one saved at the edge would be thrown away as corrupt. */
+    if (!(fabs(x) <= WORLD_LIMIT) || !(fabs(z) <= WORLD_LIMIT) || !(y >= -64.0 && y <= WORLD_H + 64.0) ||
         !(fabsf(yaw) <= 100.0f) || !(fabsf(pitch) <= 1.6f))
         return -1;
     inventory t = {0};
