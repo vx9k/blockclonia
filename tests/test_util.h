@@ -76,5 +76,6 @@ void test_tools_all(void);
 void test_combat_all(void);
 void test_invui_all(void);
 void test_body_risks_all(void);
+void test_thoughts_all(void);
 
 #endif

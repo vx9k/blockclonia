@@ -178,6 +178,13 @@ thirst, hunger) run on the survival clock.
   strip, bars for blood, water, food and stamina, the air temperature and
   whether you are wet, and alerts that slide in and fade out. Failing
   brain oxygen narrows vision; fainting blacks the screen out.
+- **An inner voice** puts what the body feels into words above the
+  hotbar: thoughts ("That hurts.", "I don't feel well.", "I need air!")
+  and sensations ("You feel cold.", "Your fingers are going numb."). It
+  speaks when a feeling sets in or worsens, again now and then while it
+  lasts, with relief when a bad one clears, and cries out at a fresh
+  injury. It goes quiet while you are out cold. Settings, Controls, Inner
+  voice turns it off.
 - **The H panel** has a body diagram and the status of each of the seven
   parts, advice for the selected one, the organs (brain, heart, lungs,
   liver, kidneys, gut), needs, lab-style numbers (Hb, lactate, cardiac
@@ -313,6 +320,7 @@ starts with the defaults and doesn't save changes over it.
 | Display | GUI scale | automatic, or 1–4 |
 | Controls | Mouse sensitivity | 10–300% |
 | Controls | Invert Y, sprint toggle, key hints | on/off |
+| Controls | Inner voice | on (default)/off: thoughts and body sensations above the hotbar |
 | Controls | Discord status | off (default)/on: shows Discord friends how the body is doing ("Badly hurt (Bleeding 40 mL/min)", "Dead man walking"), the world's name and the time played, or "In the menus". Only in builds made with `MC_DISCORD_APP_ID` (see BUILDING.md); needs the Discord app running on the same machine |
 | Audio | Master, effects, ambience volume | 0–100% |
 | Audio | Interface, body (heartbeat, breathing) volume | 0–100%, on top of effects |
