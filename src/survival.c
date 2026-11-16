@@ -24,6 +24,7 @@ void survival_env(const world *w, const player *p, const survival_before *b, int
     e->jumped = b->on_ground && !p->on_ground && p->vel.y > 3.0;
     e->actions = actions;
     e->invulnerable = p->flying;
+    e->crouched = p->sneaking && p->on_ground;
     e->water_temp = SURVIVAL_WATER_TEMP;
     e->air_temp = e->contact_temp = SURVIVAL_AIR_TEMP;
     /* Standing on a burning campfire (or in one) puts the legs in flames. */

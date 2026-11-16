@@ -278,6 +278,7 @@ static void alerts_needs(const health *h, alert_list *l)
     else if (inf > 0.3f) add_alert(l, KEY, 2, "Infected wound");
     if (h->pain > 6.0f) add_alert(l, KEY, 2, "Severe pain");
     if (health_stamina(h) < 0.1f) add_alert(l, KEY, 1, "Exhausted");
+    if (h->vagal > 0.15f && h->conscious != CONS_UNCONSCIOUS) add_alert(l, KEY, 2, "Fainting: crouch (Shift)");
     float dep = health_resp_depression(h);
     if (dep > 0.35f) add_alert(l, KEY, 3, "Overdose: breathing %.0f/min", (double)h->rr);
     else if (h->opioid > 3.0f && h->naloxone <= 0.0f) add_alert(l, KEY, 1, "Morphine");
