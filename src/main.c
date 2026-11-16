@@ -74,6 +74,7 @@ typedef struct {
     const char *screen;  /* open this screen at start (screenshots) */
     int debug;           /* start with F3 on */
     const char *give;    /* items to start with: "stone:32,apple:3" */
+    const char *mobs;    /* creatures to stand in front of the player: "wolf,boar" */
     int no_sound;
     int have_time;       /* --time */
     double time_of_day;  /* 0..1 */
@@ -215,6 +216,7 @@ static void usage(void)
            "                    controls or debug-health at start\n"
            "  --debug           start with the F3 overlay on\n"
            "  --give LIST       start with items, e.g. log:8,sand:4 (names as shown in game)\n"
+           "  --mobs LIST       stand creatures 4 m in front of you, e.g. wolf,boar\n"
            "  --time HH         start at this hour of the day (0-23)\n"
            "  --demo            scripted structural-collapse demo\n"
            "  --health-panel    start with the health panel (H) open\n"
@@ -349,6 +351,8 @@ static int parse_value_option(options *o, const char *a, const char *v, int *ok)
         o->screenshot = v;
     } else if (strcmp(a, "--give") == 0) {
         o->give = v;
+    } else if (strcmp(a, "--mobs") == 0) {
+        o->mobs = v;
     } else if (strcmp(a, "--hurt") == 0) {
         o->hurt = v;
     } else if (strcmp(a, "--join") == 0) {
@@ -712,6 +716,21 @@ static void give_items(inventory *inv, const char *list)
         }
         if (!found) log_warn("--give: no item called '%s'", t);
     }
+}
+
+/* --mobs: a comma list of creatures, side by side 4 m in front. */
+static void place_mobs(mobs *ms, const world *w, const player *p, const char *list)
+{
+    char buf[256] = {0};
+    snprintf(buf, sizeof buf, "%s", list);
+    char *save = NULL;
+    int kinds[MOB_MAX] = {0}, n = 0;
+    for (const char *t = strtok_r(buf, ",", &save); t && n < MOB_MAX; t = strtok_r(NULL, ",", &save)) {
+        int k = mobs_kind_named(t);
+        if (k < 0) log_warn("--mobs: no creature called '%s'", t);
+        else kinds[n++] = k;
+    }
+    for (int i = 0; i < n; i++) mobs_add_ahead(ms, w, p, kinds[i], 4.0, 2.5 * (i - (n - 1) * 0.5));
 }
 
 static void find_spawn(uint32_t seed, double *sx, double *sz)
@@ -1273,6 +1292,7 @@ static void open_world(game *g, const char *dir, int backdrop)
 
     fx_init(g->fx, g->seed);
     mobs_init(&g->mobs, g->seed ^ 0x5EEDB0A5u);
+    if (o->mobs && !backdrop) place_mobs(&g->mobs, &g->w, &g->pl, o->mobs);
     combat_init(&g->cb, g->seed ^ 0xC0BA7u);
     interact_init(&g->ia, g->seed ^ 0xA5A5u);
     viewmodel_init(&g->vm);
@@ -1916,7 +1936,7 @@ static void add_players(game *g, dvec3 eye, double alpha, double now, float ligh
 
 /* Creatures as figures among the opaque entities: the ones simulated here,
  * or on a client the ones the host last sent. */
-static void add_mobs(game *g, dvec3 eye, double alpha, float light, int *n_op, int n_tr)
+static void add_mobs(game *g, dvec3 eye, double alpha, float light, double now, int *n_op, int n_tr)
 {
     const mobs *ms = g->client ? mp_client_mobs(g->mp) : &g->mobs;
     for (int i = 0; ms && i < ms->count; i++) {
@@ -1927,7 +1947,11 @@ static void add_mobs(game *g, dvec3 eye, double alpha, float light, int *n_op, i
         if (dv3_len(dv3(p.x - eye.x, p.y - eye.y, p.z - eye.z)) > 160.0) continue;
         memmove(g->ents + *n_op + MOB_FIGURE, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
         const float feet[3] = {(float)(p.x - eye.x), (float)(p.y - eye.y), (float)(p.z - eye.z)};
-        *n_op += mob_figure(m, feet, light, g->ents + *n_op, MOB_FIGURE);
+        int k = mob_figure(m, feet, light, (float)fmod(now, 3600.0), g->ents + *n_op, MOB_FIGURE);
+        /* Close the gap if the figure came out short. */
+        if (k < MOB_FIGURE)
+            memmove(g->ents + *n_op + k, g->ents + *n_op + MOB_FIGURE, sizeof g->ents[0] * (size_t)n_tr);
+        *n_op += k;
     }
 }
 
@@ -2000,7 +2024,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     int n_op = 0, n_tr = 0;
     fx_build_entities(g->fx, &g->ph, &g->crack, v.eye, alpha, v.time, g->ents, RENDER_MAX_ENTS, &n_op, &n_tr);
     if (g->mp) add_players(g, v.eye, alpha, now, v.daylight, &n_op, n_tr);
-    if (!on_title) add_mobs(g, v.eye, alpha, v.daylight, &n_op, n_tr);
+    if (!on_title) add_mobs(g, v.eye, alpha, v.daylight, now, &n_op, n_tr);
     v.ents = g->ents;
     v.ent_opaque = n_op;
     v.ent_trans = n_tr;

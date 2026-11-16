@@ -1,6 +1,7 @@
 #include "texgen.h"
 #include "block.h"
 #include "item.h"
+#include "mobskin.h"
 #include "noise.h"
 
 #include <math.h>
@@ -349,6 +350,8 @@ static rgba texel(int layer, int x, int y)
     int n = px_noise(layer, x, y, 12);
     rgba sp = {0};
     if (sprite_texel(layer, x, y, &sp)) return sp;
+    uint8_t px[4] = {0};
+    if (mobskin_texel(layer, x, y, px)) return (rgba){px[0], px[1], px[2], px[3]};
     if (layer >= T_CRACK0 && layer <= T_CRACK3) return crack(layer - T_CRACK0, x, y);
     if (layer >= T_FIRE0 && layer <= T_FIRE3) return flame(layer - T_FIRE0, x, y);
     switch (layer) {
@@ -365,8 +368,6 @@ static rgba texel(int layer, int x, int y)
     }
     case T_ASH: return shade(110, 106, 102, 255, px_noise(layer, x, y, 20));
     case T_STONE: return shade(125, 125, 125, 255, n);
-    case T_FUR_BOAR: return shade(92, 66, 44, 255, px_noise(layer, x, y, 26) + (y % 3 == 0 ? -10 : 0)); /* bristles */
-    case T_FUR_WOLF: return shade(128, 124, 118, 255, px_noise(layer, x / 2, y, 22));
     case T_COAL_ORE:
     case T_COPPER_ORE:
     case T_IRON_ORE: {

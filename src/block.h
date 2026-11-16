@@ -106,8 +106,38 @@ typedef enum {
     T_ITEM_RAW_IRON,
     T_ITEM_RAW_MEAT,
     T_ITEM_COOKED_MEAT,
-    T_FUR_BOAR,
-    T_FUR_WOLF,
+    /* The creatures' pixel art (mobskin.c), one layer per kind of face. */
+    T_WOLF_BODY_SIDE,
+    T_WOLF_BODY_TOP,
+    T_WOLF_BELLY,
+    T_WOLF_MANE_SIDE,
+    T_WOLF_MANE_FRONT,
+    T_WOLF_HEAD_SIDE,
+    T_WOLF_HEAD_FRONT,
+    T_WOLF_HEAD_TOP,
+    T_WOLF_SNOUT_SIDE,
+    T_WOLF_SNOUT_FRONT,
+    T_WOLF_EAR,
+    T_WOLF_TAIL_SIDE,
+    T_WOLF_TAIL_TOP,
+    T_WOLF_LEG_UPPER,
+    T_WOLF_LEG_LOWER,
+    T_WOLF_FUR,
+    T_BOAR_BODY_SIDE,
+    T_BOAR_BODY_TOP,
+    T_BOAR_BELLY,
+    T_BOAR_RIDGE,
+    T_BOAR_HEAD_SIDE,
+    T_BOAR_HEAD_FRONT,
+    T_BOAR_HEAD_TOP,
+    T_BOAR_SNOUT_SIDE,
+    T_BOAR_SNOUT_FRONT,
+    T_BOAR_EAR,
+    T_BOAR_TAIL,
+    T_BOAR_LEG_UPPER,
+    T_BOAR_LEG_LOWER,
+    T_BOAR_FUR,
+    T_MOB_SOLE, /* paw and hoof undersides */
     T_ITEM_GUNPOWDER,
     T_ITEM_CARTRIDGE,
     T_ITEM_RIFLE,
@@ -119,6 +149,8 @@ typedef enum {
 } tex_id;
 
 #define T_COUNT (T_TOOL_FIRST + 5 * 4) /* item.h checks the 5 kinds x 4 tiers */
+#define T_MOB_FIRST T_WOLF_BODY_SIDE
+#define T_MOB_LAST T_MOB_SOLE
 
 #define T_FIRE_FRAMES 4
 

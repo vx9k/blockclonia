@@ -9,11 +9,25 @@
 
 typedef struct {
     float pos[3];        /* centre relative to the camera (view space for the view model) */
-    uint32_t tex;        /* texture layers: side | top << 8 | bottom << 16 */
+    uint32_t tex;        /* texture layers: side | top << 8 | bottom << 16 | front << 24 | ENTITY_TEX_METRIC */
     float rot[4];        /* unit quaternion x, y, z, w */
     float scale[3];      /* size in metres along the cube's own axes */
     float light;         /* brightness multiplier */
 } entity_instance;
+
+/* Pixel art drawn to a box's size, as the creatures are. Without it every
+ * face stretches its whole 16-texel layer, which suits items and blocks.
+ * With it a face shows the top-left (size in metres x 16) texels of its
+ * layer, so texels are 1/16 m on every box, and art is drawn with its
+ * first column at the front (-z) and its first row at the top. Boxes stay
+ * within 1 m along each axis, the size of one layer. */
+#define ENTITY_TEX_METRIC 0x80000000u
+#define ENTITY_TEX_FRONT_MAX 127 /* the front layer has 7 bits; 0 = the side layer */
+
+/* Layers for a box: sides, top, bottom, and the front (-z) face, which
+ * takes the side layer when front is 0. */
+static inline uint32_t entity_tex(int side, int top, int bottom, int front)
+{ return (uint32_t)side | (uint32_t)top << 8 | (uint32_t)bottom << 16 | (uint32_t)front << 24; }
 
 typedef struct {
     float x, y, z, w;
