@@ -101,18 +101,14 @@ feels. One pull request per item below.
       vasodilation, sway, vomiting and aspiration) and their
       interactions: alcohol deepens the opioid's hold on breathing, and
       steady drinking lowers the painkiller limit (#50)
-
-**In progress:**
-
-- [ ] Fainting from a vasovagal reflex (a sudden pain, a fresh rush of
-      blood), with crouching to head it off
-      (`feat/vasovagal-faint`)
+- [x] Fainting from a vasovagal reflex (a sudden pain, a fresh rush of
+      blood), with crouching to head it off (#52)
+- [x] A styled inner voice: each line coloured by what it is about
+      (icy blue for cold, orange for heat, red for pain), wavy text when
+      drunk or drugged, glitching text when the body is failing (#53)
 
 **To do:**
 
-- [ ] A styled inner voice: each line coloured by what it is about
-      (icy blue for cold, orange for heat, red for pain), wavy text when
-      drunk or drugged, glitching text when the body is failing
 - [ ] Adrenaline from fear (a wolf or boar hunting nearby), not only
       from pain
 - [ ] A blur or double-vision effect for concussion (needs a renderer
