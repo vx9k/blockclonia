@@ -27,7 +27,10 @@ typedef struct {
 /* Layers for a box: sides, top, bottom, and the front (-z) face, which
  * takes the side layer when front is 0. */
 static inline uint32_t entity_tex(int side, int top, int bottom, int front)
-{ return (uint32_t)side | (uint32_t)top << 8 | (uint32_t)bottom << 16 | (uint32_t)front << 24; }
+{
+    uint32_t faces = (uint32_t)side | (uint32_t)top << 8 | (uint32_t)bottom << 16;
+    return faces | (uint32_t)front << 24;
+}
 
 typedef struct {
     float x, y, z, w;
