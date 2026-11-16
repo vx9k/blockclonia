@@ -1,0 +1,22 @@
+# Update checks for the GitHub Actions in .github/workflows. The C
+# dependencies are pinned in cmake/Dependencies.cmake (with SHA256s) and
+# updated by hand, together with BUILDING.md and ci.yml; see AGENTS.md.
+# The prefix gives pull request titles in Conventional Commits form, which
+# the pull request rules require.
+#
+# Routine updates arrive as one grouped pull request, and only once a release
+# is a few days old (`cooldown`), so a compromised or broken release has time
+# to be pulled before it reaches us. Security updates are not delayed.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
