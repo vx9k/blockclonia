@@ -2,10 +2,10 @@
 #
 # Every build uses LLVM (clang, lld, llvm-ar; cmake/toolchains/llvm.cmake).
 #
-#   linux     Ubuntu 26.04, Release flags with ThinLTO and BOLT, -Werror,
-#             system packages only; unit tests, --bench, and a 120-frame
-#             render on Mesa lavapipe (software Vulkan) under Xvfb with
-#             validation, all on the BOLT-optimised binary.
+#   linux     Ubuntu 26.04, Release flags with ThinLTO, PGO and BOLT,
+#             -Werror, system packages only; unit tests, --bench, and a
+#             120-frame render on Mesa lavapipe (software Vulkan) under Xvfb
+#             with validation, all on the optimised binary.
 #   old-vulkan-ubuntu, old-vulkan-debian
 #             the build and tests against the oldest Vulkan headers the
 #             code supports: 1.3.275 (Ubuntu 24.04, system packages) and
@@ -64,11 +64,12 @@ jobs:
             clang lld llvm \
             ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev libminiupnpc-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
-          # BOLT comes per LLVM version (bolt-21 for clang 21).
+          # BOLT and clang's profile runtime (for PGO) come per LLVM version
+          # (bolt-21 and libclang-rt-21-dev for clang 21).
           v=$(clang --version | sed -n 's/.*clang version \([0-9]*\).*/\1/p' | head -n 1)
-          sudo apt-get install -y --no-install-recommends "bolt-$v"
-      # MC_BOLT=ON: fail here, not quietly skip, if BOLT cannot run.
-      - run: cmake --preset ci -DMC_BOLT=ON
+          sudo apt-get install -y --no-install-recommends "bolt-$v" "libclang-rt-$v-dev"
+      # ON: fail here, not quietly skip, if PGO or BOLT cannot run.
+      - run: cmake --preset ci -DMC_PGO=ON -DMC_BOLT=ON
       - run: cmake --build --preset ci
       - run: ctest --preset ci
 

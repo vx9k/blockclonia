@@ -52,9 +52,10 @@ jobs:
           # dpkg-dev is for dpkg-shlibdeps, which writes the package's exact
           # Depends: from the binary (it pulls in GNU binutils for its own
           # objdump; the build itself never uses them).
-          # BOLT comes per LLVM version (bolt-19 for trixie's clang 19).
+          # BOLT and clang's profile runtime (for PGO) come per LLVM version
+          # (bolt-19 and libclang-rt-19-dev for trixie's clang 19).
           v=$(clang --version | sed -n 's/.*clang version \([0-9]*\).*/\1/p' | head -n 1)
-          apt-get install -y --no-install-recommends "bolt-$v"
+          apt-get install -y --no-install-recommends "bolt-$v" "libclang-rt-$v-dev"
       - name: Version the package
         env:
           RELEASE: ${{ inputs.release }}
@@ -67,8 +68,8 @@ jobs:
       # trixie ships mimalloc 3.0.x and GLFW 3.4, both older than the
       # pinned 3.5 series, so MC_DEPS=AUTO builds mimalloc 3.5.3 and GLFW
       # 3.5.1 from source here (GLFW needs the X11 and Wayland headers).
-      # MC_BOLT=ON: a package without BOLT fails the build instead of shipping.
-      - run: cmake --preset release -DMC_CPU=pi4 -DMC_DEPS=AUTO -DMC_WERROR=ON -DMC_BOLT=ON -DMC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}"
+      # ON: a package without PGO or BOLT fails the build instead of shipping.
+      - run: cmake --preset release -DMC_CPU=pi4 -DMC_DEPS=AUTO -DMC_WERROR=ON -DMC_PGO=ON -DMC_BOLT=ON -DMC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}"
       - run: cmake --build --preset release
       - run: ctest --preset release
       - run: cd build/release && cpack -G DEB

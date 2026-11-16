@@ -413,8 +413,8 @@ on older Mesa takes.
 
 [BUILDING.md](BUILDING.md) has the requirements, the steps for Debian,
 Ubuntu, Arch, the Raspberry Pi and macOS, the build presets, and
-troubleshooting. The build uses LLVM throughout (clang, lld, and BOLT
-for release builds when it is installed). In short, on Debian or Ubuntu:
+troubleshooting. The build uses LLVM throughout (clang, lld, and PGO
+and BOLT for release builds when they are installed). In short, on Debian or Ubuntu:
 
 ```sh
 sudo apt install clang lld llvm cmake ninja-build glslc libvulkan-dev \

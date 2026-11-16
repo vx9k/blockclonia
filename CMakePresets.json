@@ -22,12 +22,13 @@
     },
     {
       "name": "release",
-      "displayName": "Release: -O2 + ThinLTO + BOLT (where it can run), portable CPU baseline",
+      "displayName": "Release: -O2 + ThinLTO + PGO + BOLT (where they can run), portable CPU baseline",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_FLAGS_RELEASE": "-O2 -DNDEBUG",
         "MC_LTO": "ON",
+        "MC_PGO": "AUTO",
         "MC_BOLT": "AUTO"
       }
     },
@@ -71,7 +72,7 @@
     },
     {
       "name": "ci",
-      "displayName": "CI: Release + BOLT, -Werror, system dependencies",
+      "displayName": "CI: Release + PGO + BOLT, -Werror, system dependencies",
       "inherits": ["release", "linux-only"],
       "cacheVariables": { "MC_WERROR": "ON", "MC_DEPS": "SYSTEM" }
     },
