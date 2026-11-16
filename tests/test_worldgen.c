@@ -159,6 +159,25 @@ static void test_generators(void)
 
 /* The noise stays in its range, gives the same value for the same input
  * and a different field for a different seed. */
+/* The finer octaves at the world's edge sample lattice cells past INT_MAX.
+ * Cells count modulo 2^32, so the noise repeats there instead of
+ * overflowing an int. */
+static void test_noise_wrap(void)
+{
+    const double wrap = 4294967296.0;
+    for (int i = 0; i < 64; i++) {
+        double x = i * 0.375 - 12.0, z = i * 0.625 + 3.0, y = i * 0.125; /* exact at 2^32 too */
+        float gx = 0.0f, gz = 0.0f, hx = 0.0f, hz = 0.0f;
+        CHECK(noise2d(5, x, z) == noise2d(5, x + wrap, z - wrap));
+        CHECK(noise3d(5, x, y, z) == noise3d(5, x - wrap, y + wrap, z + wrap));
+        CHECK(noise2d_grad(5, x, z, &gx, &gz) == noise2d_grad(5, x + 2.0 * wrap, z, &hx, &hz));
+        CHECK(gx == hx && gz == hz);
+    }
+    /* 2e9 blocks out at a 90-block scale, 12 octaves reach 2^42 cells. */
+    float e = eroded2d(5, 2e9 / 90.0, -2e9 / 90.0, 12), f = fbm2d(5, 2e9 / 90.0, 2e9 / 90.0, 12);
+    CHECK(e >= -1.0f && e <= 1.0f && f >= -1.0f && f <= 1.0f);
+}
+
 static void test_noise_ranges(void)
 {
     float lo2 = 0.0f, hi2 = 0.0f, lo3 = 0.0f, hi3 = 0.0f, fbm = 0.0f, ero = 0.0f;
@@ -492,6 +511,7 @@ static void test_smelting(void)
 void test_worldgen_all(void)
 {
     test_noise_grad();
+    test_noise_wrap();
     test_noise_ranges();
     test_climate();
     test_generators();

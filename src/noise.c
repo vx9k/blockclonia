@@ -12,20 +12,28 @@ static const float GRAD[8][2] = {
 
 static inline float fade(float t) { return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f); }
 
-static inline float grad_dot(uint32_t seed, int ix, int iz, float fx, float fz)
+/* hash2i on lattice cells counted modulo 2^32: the octaves of fbm2d run
+ * past INT_MAX near the world's edge, and wrapping is free there since
+ * hash2i only ever looks at the low 32 bits. */
+static inline uint32_t hash2u(uint32_t seed, uint32_t x, uint32_t z)
 {
-    const float *g = GRAD[hash2i(seed, ix, iz) & 7];
+    return hash_u32(seed ^ hash_u32(x * 0x9E3779B1U ^ hash_u32(z + 0x632BE5ABU)));
+}
+
+static inline float grad_dot(uint32_t seed, uint32_t ix, uint32_t iz, float fx, float fz)
+{
+    const float *g = GRAD[hash2u(seed, ix, iz) & 7];
     return g[0] * fx + g[1] * fz;
 }
 
 /* Lattice cell (ix, iz) and the offset into it, 0 <= f < 1. */
-static float noise2_cell(uint32_t seed, int ix, int iz, float fx, float fz)
+static float noise2_cell(uint32_t seed, uint32_t ix, uint32_t iz, float fx, float fz)
 {
     float u = fade(fx), v = fade(fz);
     float n00 = grad_dot(seed, ix, iz, fx, fz);
-    float n10 = grad_dot(seed, ix + 1, iz, fx - 1.0f, fz);
-    float n01 = grad_dot(seed, ix, iz + 1, fx, fz - 1.0f);
-    float n11 = grad_dot(seed, ix + 1, iz + 1, fx - 1.0f, fz - 1.0f);
+    float n10 = grad_dot(seed, ix + 1U, iz, fx - 1.0f, fz);
+    float n01 = grad_dot(seed, ix, iz + 1U, fx, fz - 1.0f);
+    float n11 = grad_dot(seed, ix + 1U, iz + 1U, fx - 1.0f, fz - 1.0f);
     float nx0 = n00 + u * (n10 - n00);
     float nx1 = n01 + u * (n11 - n01);
     /* Scale so the output roughly spans [-1, 1]. */
@@ -37,18 +45,19 @@ static float noise2_cell(uint32_t seed, int ix, int iz, float fx, float fz)
  * rounding to float, 6e-8 of a cell, is lost, even 2e9 blocks out where a
  * float alone would hold a coordinate only to the nearest 128 blocks. A
  * fraction rounded up to 1 is harmless: the noise is continuous across
- * cells. */
-static int cell_of(double x, float *frac)
+ * cells. The cell is counted modulo 2^32 (exact in double), the same bits
+ * an int cast gives wherever it fits. */
+static uint32_t cell_of(double x, float *frac)
 {
     double fl = floor(x);
     *frac = (float)(x - fl);
-    return (int)fl;
+    return (uint32_t)(fl - 4294967296.0 * floor(fl / 4294967296.0));
 }
 
 float noise2d(uint32_t seed, double x, double z)
 {
     float fx = 0.0f, fz = 0.0f;
-    int ix = cell_of(x, &fx), iz = cell_of(z, &fz);
+    uint32_t ix = cell_of(x, &fx), iz = cell_of(z, &fz);
     return noise2_cell(seed, ix, iz, fx, fz);
 }
 
@@ -74,9 +83,9 @@ static inline float fade_d(float t) { return 30.0f * t * t * (t - 1.0f) * (t - 1
 float noise2d_grad(uint32_t seed, double x, double z, float *dx, float *dz)
 {
     float fx = 0.0f, fz = 0.0f;
-    int ix = cell_of(x, &fx), iz = cell_of(z, &fz);
-    const float *g00 = GRAD[hash2i(seed, ix, iz) & 7], *g10 = GRAD[hash2i(seed, ix + 1, iz) & 7];
-    const float *g01 = GRAD[hash2i(seed, ix, iz + 1) & 7], *g11 = GRAD[hash2i(seed, ix + 1, iz + 1) & 7];
+    uint32_t ix = cell_of(x, &fx), iz = cell_of(z, &fz);
+    const float *g00 = GRAD[hash2u(seed, ix, iz) & 7], *g10 = GRAD[hash2u(seed, ix + 1U, iz) & 7];
+    const float *g01 = GRAD[hash2u(seed, ix, iz + 1U) & 7], *g11 = GRAD[hash2u(seed, ix + 1U, iz + 1U) & 7];
     float u = fade(fx), v = fade(fz), du = fade_d(fx), dv = fade_d(fz);
     float n00 = g00[0] * fx + g00[1] * fz, n10 = g10[0] * (fx - 1.0f) + g10[1] * fz;
     float n01 = g01[0] * fx + g01[1] * (fz - 1.0f), n11 = g11[0] * (fx - 1.0f) + g11[1] * (fz - 1.0f);
@@ -115,20 +124,20 @@ static const float GRAD3[12][3] = {
     {1, 0, -1}, {-1, 0, -1}, {0, 1, 1},  {0, -1, 1},  {0, 1, -1}, {0, -1, -1},
 };
 
-static inline float grad3_dot(uint32_t seed, int ix, int iy, int iz, float fx, float fy, float fz)
+static inline float grad3_dot(uint32_t seed, uint32_t ix, uint32_t iy, uint32_t iz, float fx, float fy, float fz)
 {
-    const float *g = GRAD3[hash2i(seed ^ hash_u32((uint32_t)iy * 0x85EBCA77U), ix, iz) % 12u];
+    const float *g = GRAD3[hash2u(seed ^ hash_u32(iy * 0x85EBCA77U), ix, iz) % 12u];
     return g[0] * fx + g[1] * fy + g[2] * fz;
 }
 
-static float noise3_cell(uint32_t seed, int ix, int iy, int iz, float fx, float fy, float fz)
+static float noise3_cell(uint32_t seed, uint32_t ix, uint32_t iy, uint32_t iz, float fx, float fy, float fz)
 {
     float u = fade(fx), v = fade(fy), w = fade(fz);
     float c[2][2] = {{0}};
-    for (int dy = 0; dy < 2; dy++)
-        for (int dz = 0; dz < 2; dz++) {
+    for (uint32_t dy = 0; dy < 2; dy++)
+        for (uint32_t dz = 0; dz < 2; dz++) {
             float a = grad3_dot(seed, ix, iy + dy, iz + dz, fx, fy - (float)dy, fz - (float)dz);
-            float b = grad3_dot(seed, ix + 1, iy + dy, iz + dz, fx - 1.0f, fy - (float)dy, fz - (float)dz);
+            float b = grad3_dot(seed, ix + 1U, iy + dy, iz + dz, fx - 1.0f, fy - (float)dy, fz - (float)dz);
             c[dy][dz] = a + u * (b - a);
         }
     float y0 = c[0][0] + w * (c[0][1] - c[0][0]);
@@ -139,6 +148,6 @@ static float noise3_cell(uint32_t seed, int ix, int iy, int iz, float fx, float 
 float noise3d(uint32_t seed, double x, double y, double z)
 {
     float fx = 0.0f, fy = 0.0f, fz = 0.0f;
-    int ix = cell_of(x, &fx), iy = cell_of(y, &fy), iz = cell_of(z, &fz);
+    uint32_t ix = cell_of(x, &fx), iy = cell_of(y, &fy), iz = cell_of(z, &fz);
     return noise3_cell(seed, ix, iy, iz, fx, fy, fz);
 }

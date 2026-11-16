@@ -20,7 +20,7 @@ static inline uint32_t hash2i(uint32_t seed, int x, int z)
 
 /* Coordinates are block positions divided by the feature size, in double
  * (noise2d(s, x / 90.0, z / 90.0) has hills ~90 blocks across), so they
- * stay exact out to the world's edge. The lattice cell must fit an int. */
+ * stay exact out to the world's edge, at any octave. */
 float noise2d(uint32_t seed, double x, double z);            /* [-1, 1] */
 float fbm2d(uint32_t seed, double x, double z, int octaves); /* ~[-1, 1] */
 float noise3d(uint32_t seed, double x, double y, double z);  /* ~[-1, 1] */
