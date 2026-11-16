@@ -241,30 +241,12 @@ static synth_clip finish_loop(synth_bank *b, float *buf, int n, int xf, float ga
 
 synth_material synth_material_of(uint8_t block)
 {
-    switch (block) {
-    case B_GRASS: return MAT_GRASS;
-    case B_DIRT:
-    case B_ASH: return MAT_DIRT;
-    case B_STONE:
-    case B_BEDROCK:
-    case B_BRICK:
-    case B_COAL_ORE:
-    case B_COPPER_ORE:
-    case B_IRON_ORE:
-    case B_ROCK:
-    case B_FURNACE: return MAT_STONE;
-    case B_LOG:
-    case B_PLANKS:
-    case B_CAMPFIRE: return MAT_WOOD;
-    case B_SAND: return MAT_SAND;
-    case B_GRAVEL: return MAT_GRAVEL;
-    case B_SNOW: return MAT_SNOW;
-    case B_LEAVES: return MAT_LEAVES;
-    case B_GLASS:
-    case B_ICE: return MAT_GLASS;
-    case B_WATER: return MAT_WATER;
-    default: return MAT_GENERIC;
-    }
+    static const synth_material BY_MAT[] = {
+        [BM_NONE] = MAT_GENERIC,  [BM_GRASS] = MAT_GRASS, [BM_DIRT] = MAT_DIRT,     [BM_STONE] = MAT_STONE,
+        [BM_WOOD] = MAT_WOOD,     [BM_SAND] = MAT_SAND,   [BM_GRAVEL] = MAT_GRAVEL, [BM_SNOW] = MAT_SNOW,
+        [BM_LEAVES] = MAT_LEAVES, [BM_GLASS] = MAT_GLASS, [BM_ICE] = MAT_GLASS,     [BM_WATER] = MAT_WATER,
+    };
+    return block < B_COUNT ? BY_MAT[block_get(block)->mat] : MAT_GENERIC;
 }
 
 int synth_has_materials(int id)

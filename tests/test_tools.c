@@ -4,6 +4,7 @@
 #include "inventory.h"
 #include "item.h"
 #include "mem.h"
+#include "sound_synth.h"
 #include "survival.h"
 #include "test_util.h"
 
@@ -163,8 +164,108 @@ static void test_breaking(void)
     tw_free(&t);
 }
 
+/* The lowest pickaxe tier that gets anything out of a block, -1 when bare
+ * hands do. */
+static int tier_needed(uint8_t b)
+{
+    if (item_harvests(0, b)) return -1;
+    for (int t = 0; t < TIER_COUNT; t++)
+        if (item_harvests(item_tool_id(TOOL_PICKAXE, t), b)) return t;
+    return TIER_COUNT;
+}
+
+/* What each block is made of decides the tool, the tier, the sound and
+ * how it treats a falling or sliding body; pinned for every block. */
+static void test_materials(void)
+{
+    static const struct {
+        int tool, tier;
+        synth_material sound;
+        float cushion, grit;
+    } WANT[B_COUNT] = {
+        [B_AIR] = {-1, -1, MAT_GENERIC, 1.0f, 0.0f},
+        [B_BEDROCK] = {-1, -1, MAT_STONE, 1.0f, 0.4f},
+        [B_STONE] = {TOOL_PICKAXE, TIER_WOOD, MAT_STONE, 1.0f, 0.4f},
+        [B_DIRT] = {TOOL_SHOVEL, -1, MAT_DIRT, 0.92f, 0.55f},
+        [B_GRASS] = {TOOL_SHOVEL, -1, MAT_GRASS, 0.92f, 0.55f},
+        [B_SAND] = {TOOL_SHOVEL, -1, MAT_SAND, 0.85f, 0.6f},
+        [B_GRAVEL] = {TOOL_SHOVEL, -1, MAT_GRAVEL, 0.85f, 0.85f},
+        [B_LOG] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.3f},
+        [B_LEAVES] = {-1, -1, MAT_LEAVES, 0.35f, 0.0f},
+        [B_PLANKS] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.3f},
+        [B_GLASS] = {-1, -1, MAT_GLASS, 1.0f, 0.0f},
+        [B_BRICK] = {TOOL_PICKAXE, TIER_WOOD, MAT_STONE, 1.0f, 0.4f},
+        [B_SNOW] = {TOOL_SHOVEL, -1, MAT_SNOW, 0.6f, 0.0f},
+        [B_ICE] = {TOOL_PICKAXE, -1, MAT_GLASS, 1.0f, 0.0f},
+        [B_WATER] = {-1, -1, MAT_WATER, 1.0f, 0.0f},
+        [B_CAMPFIRE] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.0f},
+        [B_ASH] = {TOOL_SHOVEL, -1, MAT_DIRT, 1.0f, 0.55f},
+        [B_COAL_ORE] = {TOOL_PICKAXE, TIER_WOOD, MAT_STONE, 1.0f, 0.4f},
+        [B_COPPER_ORE] = {TOOL_PICKAXE, TIER_STONE, MAT_STONE, 1.0f, 0.4f},
+        [B_IRON_ORE] = {TOOL_PICKAXE, TIER_STONE, MAT_STONE, 1.0f, 0.4f},
+        [B_FURNACE] = {TOOL_PICKAXE, TIER_WOOD, MAT_STONE, 1.0f, 0.4f},
+        [B_ROCK] = {TOOL_PICKAXE, TIER_WOOD, MAT_STONE, 1.0f, 0.4f},
+    };
+    int bad = 0;
+    for (int b = 0; b < B_COUNT; b++) {
+        uint8_t id = (uint8_t)b;
+        int ok = block_tool(id) == WANT[b].tool && tier_needed(id) == WANT[b].tier &&
+                 synth_material_of(id) == WANT[b].sound && block_get(id)->cushion == WANT[b].cushion &&
+                 block_get(id)->grit == WANT[b].grit && block_get(id)->mat <= BM_WATER;
+        if (!ok) fprintf(stderr, "  block %d (%s) differs\n", b, block_get(id)->name);
+        bad += !ok;
+    }
+    CHECK(bad == 0);
+}
+
+/* One touchdown on a block at vel: what the legs lost, and the grit in the
+ * dirtiest scrape (0 for none). */
+static void land_on(uint8_t ground, dvec3 vel, float *leg_loss, float *grit)
+{
+    test_world t = {0};
+    tw_init(&t);
+    world_set(&t.w, 4, GROUND - 1, 4, ground, 0);
+    player p = {0};
+    player_spawn(&p, &t.w, 4.5, 4.5);
+    p.pos.y = GROUND;
+    p.on_ground = 1;
+    p.submerged = 0.0;
+    health *h = new_body(3);
+    float before = h->part[BP_LLEG].integrity + h->part[BP_RLEG].integrity;
+    survival_before b = {vel, 0, 0.0};
+    survival_impacts(h, &t.w, &t.ph.contact[0], &p, &b);
+    *leg_loss = before - (h->part[BP_LLEG].integrity + h->part[BP_RLEG].integrity);
+    *grit = 0.0f;
+    for (int i = 0; i < h->wound_count; i++)
+        if (h->wounds[i].kind == WOUND_ABRASION && h->wounds[i].contamination > *grit)
+            *grit = h->wounds[i].contamination;
+    mem_free(h);
+    tw_free(&t);
+}
+
+/* The table's cushion and grit reach the body: leaves break a fall that
+ * rock does not, and a slide on gravel grinds in more than one on rock,
+ * while snow takes no skin off at all. */
+static void test_ground(void)
+{
+    float leaves = 0.0f, rock = 0.0f, grit = 0.0f;
+    land_on(B_LEAVES, dv3(0.0, -14.0, 0.0), &leaves, &grit);
+    land_on(B_ROCK, dv3(0.0, -14.0, 0.0), &rock, &grit);
+    CHECK(rock > 0.0f && leaves < rock);
+    float gravel = 0.0f, stone = 0.0f, snow = 0.0f, legs = 0.0f;
+    land_on(B_GRAVEL, dv3(10.0, -3.0, 0.0), &legs, &gravel);
+    land_on(B_ROCK, dv3(10.0, -3.0, 0.0), &legs, &stone);
+    land_on(B_SNOW, dv3(10.0, -3.0, 0.0), &legs, &snow);
+    CHECK(gravel > stone && stone > 0.0f && snow == 0.0f);
+    /* Ids past the table (the unloaded sentinel) take no tool and make the
+     * plain sound, rather than reading as the stone block_get falls back to. */
+    CHECK(block_tool(B_UNLOADED) == -1 && synth_material_of(B_UNLOADED) == MAT_GENERIC);
+}
+
 void test_tools_all(void)
 {
+    test_ground();
+    test_materials();
     test_rules();
     test_wear();
     test_formats();

@@ -45,52 +45,13 @@ void survival_env_thermal(health_env *e, double air_temp, double radiant, double
     e->in_fire |= in_fire != 0;
 }
 
-/* How much of a landing's speed the ground takes out gently. */
-static double cushion_under(const world *w, const player *p)
-{
-    uint8_t id = block_at(w, dv3(p->pos.x, p->pos.y - 0.05, p->pos.z));
-    switch (id) {
-    case B_LEAVES: return 0.35; /* mostly air and springy twigs */
-    case B_SNOW: return 0.6;
-    case B_SAND:
-    case B_GRAVEL: return 0.85;
-    case B_DIRT:
-    case B_GRASS: return 0.92;
-    default: return 1.0;
-    }
-}
-
-/* How much grit a surface grinds into scraped skin: 0 for surfaces that
- * do not take skin off (snow, ice, leaves, water). */
-static float grit_under(const world *w, const player *p)
-{
-    uint8_t id = block_at(w, dv3(p->pos.x, p->pos.y - 0.05, p->pos.z));
-    switch (id) {
-    case B_GRAVEL: return 0.85f;
-    case B_SAND: return 0.6f;
-    case B_DIRT:
-    case B_GRASS:
-    case B_ASH: return 0.55f;
-    case B_STONE:
-    case B_BEDROCK:
-    case B_BRICK:
-    case B_COAL_ORE:
-    case B_COPPER_ORE:
-    case B_IRON_ORE:
-    case B_ROCK:
-    case B_FURNACE: return 0.4f;
-    case B_PLANKS:
-    case B_LOG: return 0.3f;
-    default: return 0.0f;
-    }
-}
-
 void survival_impacts(health *h, const world *w, const player_contact *c, const player *p, const survival_before *b)
 {
     if (p->flying || h->dead) return;
+    const block_def *ground = block_get(block_at(w, dv3(p->pos.x, p->pos.y - 0.05, p->pos.z)));
     /* Landing on ground: the whole downward speed goes in one stop. */
     int landed = !b->on_ground && p->on_ground;
-    if (landed && b->vel.y < -5.0) health_fall(h, -b->vel.y, cushion_under(w, p));
+    if (landed && b->vel.y < -5.0) health_fall(h, -b->vel.y, (double)ground->cushion);
     /* Hitting water from height: water is soft only when entered slowly. */
     if (b->submerged < 0.25 && p->submerged >= 0.25 && b->vel.y < -12.0) health_fall(h, -b->vel.y, 0.55);
     /* Touching down with more sideways speed than legs can run out (a
@@ -98,8 +59,8 @@ void survival_impacts(health *h, const world *w, const player_contact *c, const 
      * feet by a hard landing: the body slides and rough ground takes the
      * skin off the legs, a hand and the hip (road rash). */
     double vh = hypot(b->vel.x, b->vel.z);
-    float grit = p->submerged < 0.3 ? grit_under(w, p) : 0.0f;
-    if (landed && vh > 6.0 && grit > 0.0f && (vh > 9.0 || -b->vel.y * cushion_under(w, p) > 7.0)) {
+    float grit = p->submerged < 0.3 ? ground->grit : 0.0f;
+    if (landed && vh > 6.0 && grit > 0.0f && (vh > 9.0 || -b->vel.y * (double)ground->cushion > 7.0)) {
         float area = 0.1f + 0.3f * (float)fmin((vh - 6.0) / 10.0, 1.0);
         health_abrasion(h, BP_LLEG, area, grit);
         health_abrasion(h, BP_RLEG, area, grit);
