@@ -207,7 +207,7 @@ static void usage(void)
            "  --no-save         do not load or save the world\n"
            "  --validate        enable Vulkan validation layers\n"
            "  --frames N        quit after N frames\n"
-           "  --screenshot F    write a PPM of the last frame to F\n"
+           "  --screenshot F    write a PNG of the last frame to F\n"
            "  --look YAW,PITCH  initial view angles in degrees\n"
            "  --spawn X,Z       spawn position (default: nearest dry land)\n"
            USAGE_CONFIG
@@ -2448,7 +2448,7 @@ static int draw_overlay(game *g, double dt, double alpha)
 static void frame_render(game *g, double now, double dt)
 {
     if (g_in.want_shot) {
-        renderer_request_screenshot(g->rd, "screenshot.ppm");
+        renderer_request_screenshot(g->rd, "screenshot.png");
         g_in.want_shot = 0;
     }
     if (g->o.screenshot && g->o.frames && g->frame == g->o.frames - 1)

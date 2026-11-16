@@ -83,7 +83,7 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
 | Tab or I | Inventory and crafting |
 | H | Health panel |
 | E / R | Eat an apple / drink (standing in or facing water, or holding a water bucket) |
-| F2 | Screenshot (`screenshot.ppm`) |
+| F2 | Screenshot (`screenshot.png`) |
 | F11 | Fullscreen on or off |
 | F3 | Debug overlay |
 | K (with F3 on) | Debug health menu: trigger any injury, or heal |
@@ -464,7 +464,7 @@ Headless (no GPU), with Mesa's software rasterizer:
 
 ```sh
 xvfb-run -a env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
-  ./build/native/blockclonia --frames 300 --screenshot shot.ppm --no-save --no-sound
+  ./build/native/blockclonia --frames 300 --screenshot shot.png --no-save --no-sound
 ```
 
 ## Multiplayer

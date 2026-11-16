@@ -1938,6 +1938,7 @@ int main(void)
     test_visual_all();
     test_sound_all();
     test_gpucaps_all();
+    test_png_all();
     test_health_debug_all();
     test_defib_all();
     // test_cardio_all(); TODO: broken

@@ -167,9 +167,9 @@ Out of scope:
 
 ## Supply chain
 
-The build downloads pinned releases of mimalloc, GLFW, miniaudio, SQLite
-and ENet when the system copies are missing or too old
-(`cmake/Dependencies.cmake`). SQLite and ENet archives are checked
+The build downloads pinned releases of mimalloc, GLFW, miniaudio, SQLite,
+ENet and zlib-ng when the system copies are missing or too old
+(`cmake/Dependencies.cmake`). SQLite, ENet and zlib-ng archives are checked
 against a SHA-256 in the build files; for the others the version is
 pinned, but the archive hash is only checked if you set it. libsodium is
 never downloaded: it comes from the system, like Vulkan. For a
