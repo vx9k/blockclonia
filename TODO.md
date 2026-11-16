@@ -345,6 +345,59 @@ formula against the colour the element actually sits on.
    item and by dragging, the vitals readout.
 6. The Bone, Organs and Blood layers.
 
+## Items, objects and crafting (planned 2026-11-16)
+
+Today every item but the tools is a card: its 16x16 sprite on a thin
+slab, dropped (`fx.c`) or held (`viewmodel.c`). Blocks that do something,
+like the furnace, are plain cubes with a static texture. Crafting is a
+list on the inventory screen: pick a recipe and the inputs turn into the
+output at once. This becomes a world of solid objects that you make by
+hand. It follows the underground materials, so the new metals, minerals
+and ingots get models from the start.
+
+- **3D models for every item.** Each item becomes a small model of
+  pixel-art boxes, like the creatures (`ENTITY_TEX_METRIC`, 1/16 m
+  texels, generated in code; still no image files). Models include an
+  ingot as a tapered bar, a raw ore as a lumpy nugget, a bucket with a
+  handle, a bandage roll, a bottle and a rifle. The same model is used
+  for the dropped item, the held item and the inventory icon (rendered
+  once at start-up), so the three always match. Models are kept small
+  for weak GPUs: about a dozen boxes, instanced as the creatures are.
+- **Animated objects.**
+  - The furnace shows its state: the door glows, flames and embers
+    animate behind it, smoke rises from the top while it burns, and it
+    cools from orange to dark after the fire goes out. Its temperature
+    comes from `thermo`, not a timer.
+  - A campfire settles as its fuel burns down.
+  - Other objects come later: a forge and bellows, a crucible, a quench
+    trough, a workbench, a chest lid, and a door that swings.
+  - Animation is driven by the frame `dt` and looks the same at 30 and
+    144 fps. Object state stays deterministic and is saved with the
+    world.
+- **Hands-on crafting instead of a list.** Making something happens in
+  the world, at a station, in steps you do yourself:
+  - **Workbench:** lay parts out on its top (a head and a handle) and
+    work them with the right tool (hammer, knife).
+  - **Furnace:** load ore and fuel into the slots you see on the model,
+    then wait while it heats; ore that is too cold doesn't smelt. Pour
+    the melt into a mould and take the ingot out once it has cooled.
+  - **Alloys:** bronze and brass come from ingots melted together in a
+    crucible, in the right ratio.
+  - **Forging:** heat a bar, hammer it on an anvil with a strike count
+    and rhythm, and quench it.
+
+  Every step uses real quantities: temperatures in °C, masses in kg,
+  times in s. Recipes stay a data table and only stop being a menu:
+  the list becomes a recipe book you read, not one you click. Simple
+  hand recipes (planks, sticks, a splint) stay instant.
+- **Multiplayer:** station contents and progress live in the world, so
+  every player sees the same furnace fill and the same ingot cooling.
+  This raises the protocol version.
+- **Tests:** models stay within a box budget and inside 1 m. Stations
+  turn the same inputs and steps into the same output, also at
+  different frame rates. A furnace below an ore's smelting temperature
+  leaves the ore as it is.
+
 ## Native Metal renderer (macOS)
 
 **Status:** deferred. macOS runs the Vulkan renderer through MoltenVK
