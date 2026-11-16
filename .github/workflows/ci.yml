@@ -1,14 +1,17 @@
 # Builds, tests and releases blockclonia.
 #
-#   linux     Ubuntu 26.04, gcc and clang, Release flags, -Werror, system
-#             packages only; unit tests, --bench, and a 120-frame render on
-#             Mesa lavapipe (software Vulkan) under Xvfb with validation.
+# Every build uses LLVM (clang, lld, llvm-ar; cmake/toolchains/llvm.cmake).
+#
+#   linux     Ubuntu 26.04, Release flags with ThinLTO and BOLT, -Werror,
+#             system packages only; unit tests, --bench, and a 120-frame
+#             render on Mesa lavapipe (software Vulkan) under Xvfb with
+#             validation, all on the BOLT-optimised binary.
 #   old-vulkan-ubuntu, old-vulkan-debian
 #             the build and tests against the oldest Vulkan headers the
 #             code supports: 1.3.275 (Ubuntu 24.04, system packages) and
 #             1.3.239 (Debian bookworm), so the VK_API_VERSION_1_4 guards
 #             keep compiling.
-#   sanitize  ASan + UBSan (gcc).
+#   sanitize  ASan + UBSan.
 #   lint      tools/lint.sh: clang-tidy, cppcheck, shader checks, and
 #             clang-format on the lines this change touches; and the tests
 #             of the CI and release tools.
@@ -49,10 +52,6 @@ jobs:
   linux:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        compiler: [gcc, clang]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -62,11 +61,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            clang lld llvm \
             ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev libminiupnpc-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
-      - run: cmake --preset ci-${{ matrix.compiler }}
-      - run: cmake --build --preset ci-${{ matrix.compiler }}
-      - run: ctest --preset ci-${{ matrix.compiler }}
+          # BOLT comes per LLVM version (bolt-21 for clang 21).
+          v=$(clang --version | sed -n 's/.*clang version \([0-9]*\).*/\1/p' | head -n 1)
+          sudo apt-get install -y --no-install-recommends "bolt-$v"
+      # MC_BOLT=ON: fail here, not quietly skip, if BOLT cannot run.
+      - run: cmake --preset ci -DMC_BOLT=ON
+      - run: cmake --build --preset ci
+      - run: ctest --preset ci
 
   old-vulkan-ubuntu:
     runs-on: ubuntu-24.04 # Vulkan headers 1.3.275, GLFW 3.3, mimalloc 2.1
@@ -80,11 +84,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            clang lld llvm \
             ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev libminiupnpc-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
-      - run: cmake --preset ci-gcc
-      - run: cmake --build --preset ci-gcc
-      - run: ctest --preset ci-gcc
+      - run: cmake --preset ci
+      - run: cmake --build --preset ci
+      - run: ctest --preset ci
 
   old-vulkan-debian:
     runs-on: ubuntu-26.04
@@ -100,7 +105,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build ca-certificates glslc \
+            clang lld llvm libc6-dev cmake ninja-build ca-certificates glslc \
             libvulkan-dev libsqlite3-dev libsodium-dev pkg-config \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev libwayland-bin libxkbcommon-dev \
@@ -124,6 +129,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            clang lld llvm \
             ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
@@ -149,7 +155,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             ninja-build glslc glslang-tools libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev \
-            clang clang-tidy clang-format cppcheck \
+            clang lld llvm clang-tidy clang-format cppcheck \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev libwayland-bin libxkbcommon-dev # GLFW from source, as in sanitize
       - name: tools/lint.sh
