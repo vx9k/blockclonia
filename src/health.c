@@ -54,6 +54,10 @@
 #define WIDMARK (0.68f * 75.0f)
 #define ALC_ELIM 0.15f
 #define NALOXONE_H 1.0f /* shorter than morphine lasts: it can wear off first */
+/* A vasovagal spell: ~20 s of warning (pallor, sweat, nausea, greying),
+ * then the faint if the head stays up. Falling flat brings the blood back
+ * to the brain, so the reflex fades within seconds of fainting. */
+#define FAINT_S 20.0f
 
 static const float PAIN_SCALE = 10.0f;
 #define DEG "\x7f" /* the UI font's degree sign */
@@ -1269,6 +1273,33 @@ static float solve_output(float hr, float contract, float pms, float rvr, float 
 
 /* Wounds bleed (less as they clot and when dressed), broken bones and torn
  * organs bleed inside, and plasma and red cells are replaced. */
+/* Crouching keeps the head near the heart and squeezes the leg veins: it
+ * eases the reflex. Lying flat (out cold) ends it. */
+static void step_vagal(health *h, const health_env *e, double dt, int awake)
+{
+    float vagal_t = 0.0f;
+    if (h->faint_drive > 0.0f && awake) vagal_t = e->crouched ? 0.45f : 1.0f;
+    h->vagal = lag(h->vagal, vagal_t, dt, vagal_t > h->vagal ? 6.0 : 5.0);
+    h->faint_drive = maxf(0.0f, h->faint_drive - (float)dt);
+}
+
+/* Standing, the brain sits ~25 cm above the heart: ~18 mmHg less to push
+ * blood up. Why faints happen on one's feet, and why crouching or falling
+ * flat ends them. */
+static float head_height_mmhg(const health_env *e, int awake)
+{
+    return awake && !e->crouched && e->submerged < 0.5 ? 18.0f : 0.0f;
+}
+
+/* Sets off the vasovagal reflex unless it is already running. Returns 1
+ * if it started. */
+static int start_faint(health *h)
+{
+    if (h->faint_drive > 0.0f || h->vagal > 0.1f) return 0;
+    h->faint_drive = FAINT_S;
+    return 1;
+}
+
 static void step_bleeding(health *h, const health_env *e, double dt, float gh, float dehyd)
 {
     const float fdt = (float)dt;
@@ -1293,6 +1324,13 @@ static void step_bleeding(health *h, const health_env *e, double dt, float gh, f
         w->bleed = w->bleed0 * (1.0f - w->clot) * bf * pressure * (1.0f - w->closure);
         ext += w->bleed;
     }
+    /* A fresh rush of blood is what sets off the blood-injury faint; blood
+     * that has been running a while no longer does. */
+    if (h->conscious != CONS_UNCONSCIOUS && ext > h->blood_seen + 30.0f) {
+        if (frand(h) < 0.15f && start_faint(h)) health_log(h, "The sight of the blood makes you woozy");
+        h->blood_seen = ext;
+    }
+    h->blood_seen = maxf(ext, h->blood_seen * expf(-gh / 0.5f));
     float internal = 0.0f;
     for (int i = 0; i < BP_COUNT; i++) {
         body_part *bp = &h->part[i];
@@ -1764,6 +1802,13 @@ static void step_parts(health *h, const health_env *e, double dt, float gh, int 
     if (awake && pain - h->pain_ref > 3.0f && h->surge < 5.0f) {
         h->surge = minf(60.0f, 10.0f + 5.0f * (pain - h->pain_ref));
         health_log(h, "Adrenaline rush");
+        /* In some, the rush overshoots into the opposite reflex: the vagus
+         * takes over within seconds and the rush is cut short. */
+        if (frand(h) < 0.2f * ramp(pain - h->pain_ref, 4.0f, 8.0f) && start_faint(h)) {
+            h->surge = minf(h->surge, 5.0f);
+            h->pain_ref = pain; /* spent: the short rush must not fire again for the same jump */
+            health_log(h, "The pain turns your stomach; you go pale");
+        }
     }
     h->pain_ref = lag(h->pain_ref, pain, dt, 20.0);
     pain *= 1.0f - 0.4f * catechol_beta(h);
@@ -2205,8 +2250,9 @@ void health_step(health *h, const health_env *e, double dt)
     h->icp = 10.0f + 0.8f * h->ich + 0.012f * h->ich * h->ich;
     int cushing = h->icp > 30.0f;
 
+    step_vagal(h, e, dt, awake);
     float symp_t = 0.15f + 1.0f * maxf(b, 0.0f) + 0.4f * chemo + 0.03f * h->pain + (diving ? 0.2f : 0.0f) +
-                   (cushing ? 0.5f : 0.0f) - 0.45f * maxf(-b, 0.0f);
+                   (cushing ? 0.5f : 0.0f) - 0.45f * maxf(-b, 0.0f) - 1.5f * h->vagal;
     if (h->organ[ORG_BRAIN] < 0.15f) symp_t = 0.05f; /* autonomic failure */
     h->symp = lag(h->symp, fclamp(symp_t, 0.0f, 1.0f), dt, 4.0);
 
@@ -2215,13 +2261,14 @@ void health_step(health *h, const health_env *e, double dt)
      * apnoea the same reflex slows it (the diving response). */
     float drive = 0.95f * ex + 0.85f * maxf(b, 0.0f) + (h->breathing ? 0.5f : -0.2f) * chemo + 0.025f * h->pain +
                   0.07f * maxf(0.0f, h->temp - 37.0f) + 0.25f * h->sepsis - 0.4f * maxf(-b, 0.0f) +
-                  (h->lactate > 4.0f ? 0.02f * (h->lactate - 4.0f) : 0.0f) + 0.9f * beta;
+                  (h->lactate > 4.0f ? 0.02f * (h->lactate - 4.0f) : 0.0f) + 0.9f * beta - 1.2f * h->vagal;
     float hr_rest = h->base.hr_rest * (h->temp < 35.0f ? fclamp(1.0f - (35.0f - h->temp) * 0.08f, 0.3f, 1.0f) : 1.0f);
     /* Above rest the drive spends the heart-rate reserve; below it, vagal
      * slowing scales the resting rate. */
     float hr_t = drive >= 0.0f ? hr_rest + (hr_max - hr_rest) * minf(drive, 1.0f)
                                : hr_rest * (1.0f + 0.8f * maxf(drive, -0.6f));
     if (diving && awake) hr_t *= 0.85f;                       /* diving reflex */
+    hr_t *= 1.0f - 0.5f * h->vagal;                           /* the vagus brakes the sinus node */
     if (cushing) hr_t = minf(hr_t, 50.0f);                     /* Cushing reflex */
     if (h->sao2 < 0.5f) hr_t *= 0.35f + 0.65f * h->sao2 / 0.5f; /* hypoxic bradycardia */
     if (h->organ[ORG_BRAIN] < 0.15f) hr_t = minf(hr_t, 50.0f);
@@ -2241,7 +2288,8 @@ void health_step(health *h, const health_env *e, double dt)
     contract /= 1.0f + 0.25f * h->shock_debt * h->shock_debt;
     /* Inotropy; a stunned, strained myocardium; the rhythm. */
     contract *= (1.0f + 0.35f * beta) / (1.0f + 0.02f * h->strain) * rhythm_pump(h->rhythm);
-    float vu = 4.05f - 1.3f * h->symp + 0.5f * h->sepsis - 0.3f * alpha; /* unstressed volume, venoconstriction */
+    float vu = 4.05f - 1.3f * h->symp + 0.5f * h->sepsis - 0.3f * alpha +
+               1.0f * h->vagal; /* unstressed volume, venoconstriction; blood pooling in the legs */
     float pms = maxf(0.0f, (veff - vu) / CSYS) * (1.0f + 1.3f * ex); /* muscle pump */
     float rap = 0.0f, co = 0.0f;
     if (!arrest) {
@@ -2371,7 +2419,7 @@ void health_step(health *h, const health_env *e, double dt)
     h->etco2 = h->breathing ? maxf(0.0f, h->paco2 - 3.0f - 25.0f * maxf(0.0f, 1.0f - h->co / 4.0f)) : 0.0f;
 
     /* ---- brain */
-    float cpp = h->map - h->icp;
+    float cpp = h->map - h->icp - head_height_mmhg(e, awake);
     float cbf = cpp >= 55.0f ? 1.0f : maxf(0.0f, cpp / 55.0f);
     cbf *= fclamp(1.0f + 0.025f * (h->paco2 - 40.0f), 0.6f, 1.6f) * (1.0f + 0.5f * maxf(0.0f, 0.9f - h->sao2));
     cbf *= fclamp(powf(15.0f / maxf(hb, 3.0f), 0.8f), 1.0f, 1.8f); /* thinner blood flows faster */
@@ -2460,7 +2508,8 @@ health_senses health_get_senses(const health *h)
                         (h->concussion > 0.0f ? 0.3f : 0.0f) + 0.8f * ramp(h->bac, 0.5f, 2.5f) +
                         0.4f * ramp(opioid_free(h), 15.0f, 40.0f),
                     0.0f, 1.0f);
-    v.tunnel = ramp(beta, 0.6f, 0.95f);
+    v.tunnel = maxf(ramp(beta, 0.6f, 0.95f), ramp(h->vagal, 0.3f, 0.8f)); /* greying out */
+    v.sway = minf(1.0f, v.sway + 0.4f * h->vagal);
     v.jaundice = fclamp((0.6f - h->organ[ORG_LIVER]) / 0.4f, 0.0f, 1.0f);
     return v;
 }
@@ -2552,6 +2601,7 @@ const health_debug_kind HEALTH_DEBUG_KINDS[HEALTH_DEBUG_COUNT] = {
     {"strain", "Strained heart (long crisis)", HDBG_SYSTEMIC, BP_HEAD},
     {"drunk", "Drunk (2 g/L)", HDBG_SYSTEMIC, BP_HEAD},
     {"overdose", "Opioid overdose (60 mg)", HDBG_SYSTEMIC, BP_HEAD},
+    {"faint", "Vasovagal faint", HDBG_SYSTEMIC, BP_HEAD},
 };
 
 int health_debug_find(const char *name)
@@ -2641,6 +2691,10 @@ void health_injure(health *h, int kind, int part)
     case 30: /* overdose: six tablets' worth in the blood at once */
         h->opioid = maxf(h->opioid, 60.0f);
         health_log(h, "Debug: opioid overdose");
+        break;
+    case 31: /* faint */
+        h->faint_drive = FAINT_S;
+        health_log(h, "Debug: vasovagal reflex");
         break;
     default: break;
     }
@@ -2955,6 +3009,9 @@ static const wire_field HEALTH_FIELDS[] = {
     H(alcohol_gut),
     H(bac),
     H(drink_load),
+    H(vagal),
+    H(faint_drive),
+    H(blood_seen),
     H(antibiotic),
     H(sepsis),
     WIRE_I32R(health, conscious, CONS_UNCONSCIOUS, CONS_ALERT),

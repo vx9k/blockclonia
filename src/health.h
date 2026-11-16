@@ -211,6 +211,7 @@ typedef struct {
     double contact_temp;  /* degrees C of the surface under the feet */
     int in_fire;          /* the body is standing in flames */
     double wind;          /* m/s of air moving past besides the body's own speed */
+    int crouched;         /* crouching (sneak): the head nearer the heart */
 } health_env;
 
 typedef struct health {
@@ -294,6 +295,12 @@ typedef struct health {
     float alcohol_gut; /* g of ethanol in the stomach */
     float bac; /* g/L of alcohol in the blood (about per mille) */
     float drink_load; /* g of ethanol drunk over the last few days: steady drinking */
+    /* The vasovagal reflex: a sudden pain or the sight of blood can turn the
+     * nervous system the wrong way, dropping the pulse and the vessels' tone
+     * together until the brain runs short and the body faints. */
+    float vagal; /* 0..1 strength of the reflex now */
+    float faint_drive; /* s left of what set it off */
+    float blood_seen; /* mL/min of bleeding the eyes have got used to */
     float sepsis;                     /* 0..1 */
     int conscious;                    /* consciousness */
 
@@ -448,7 +455,7 @@ typedef struct {
 } health_debug_kind;
 
 extern const health_debug_kind HEALTH_DEBUG_KINDS[];
-#define HEALTH_DEBUG_COUNT 31
+#define HEALTH_DEBUG_COUNT 32
 
 /* Looks a --hurt token up in HEALTH_DEBUG_KINDS; returns -1 if there is
  * no such name. */

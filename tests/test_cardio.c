@@ -98,6 +98,7 @@ static void test_hypotension_strain(void)
 {
     health *h = new_body(5);
     health_env e = calm_env();
+    h->blood_seen = 1e4f; /* used to blood: no faint at the sight of it, only the bleeding */
     health_cut(h, BP_LLEG, 0.7f, 1, 0.2f);
     for (int s = 0; s < 900 && h->dbp >= 40.0f && !h->dead; s++) live(h, &e, 1.0);
     CHECK(h->dbp < 40.0f && health_rhythm_perfusing(h->rhythm));

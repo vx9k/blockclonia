@@ -119,6 +119,11 @@ antiseptic runs out, or warm you up as a drink: alcohol opens the skin's
 vessels, so heat leaves faster in the cold; it dulls pain, sways the
 view, makes you vomit past ~2 g/L (and breathe it in if you are out
 cold), and days of heavy drinking halve the painkiller the liver takes.
+A sudden severe pain or a fresh rush of blood can set off a vasovagal
+faint: a cold sweat, ringing ears and greying vision for a few seconds,
+then the pulse and blood pressure drop together and you go down.
+Crouching (Shift) as soon as you feel it keeps the head near the heart
+and heads it off; once down, you come round within seconds.
 
 **Menus**: mouse, or arrows and Enter; ←/→ change a setting; Esc goes back.
 

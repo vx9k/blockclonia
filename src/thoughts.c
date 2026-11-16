@@ -173,6 +173,14 @@ static const line LINES[] = {
     {FEEL_DOPED, 2, B, "Your eyelids are heavy and your breathing slow."},
     {FEEL_DOPED, 3, B, "Each breath comes later than the last."},
     {FEEL_DOPED, 0, B, "The heaviness lifts."},
+
+    {FEEL_SWOON, 1, B, "You break out in a cold sweat."},
+    {FEEL_SWOON, 1, I, "Oh. I don't feel right."},
+    {FEEL_SWOON, 2, B, "Your ears ring and your stomach turns."},
+    {FEEL_SWOON, 2, I, "I need to get down. Now."},
+    {FEEL_SWOON, 3, B, "The world drains of colour."},
+    {FEEL_SWOON, 3, I, "Going... down..."},
+    {FEEL_SWOON, 0, B, "The colour comes back to the world."},
 };
 #undef I
 #undef B
@@ -292,6 +300,7 @@ static int level_inside(const health *h, int f)
     case FEEL_RUSH: return grade(h->catechol, 0.6f, 2.0f, 1e9f);
     case FEEL_CRASH: return h->catechol < 0.3f ? grade(h->crash, 0.35f, 0.7f, 9.0f) : 0;
     case FEEL_DRUNK: return grade(h->bac, 0.4f, 1.2f, 2.2f);
+    case FEEL_SWOON: return grade(h->vagal, 0.08f, 0.3f, 0.6f);
     case FEEL_DOPED: return grade(h->naloxone > 0.0f ? 0.03f * h->opioid : h->opioid, 4.0f, 15.0f, 30.0f);
     default: return 0;
     }
