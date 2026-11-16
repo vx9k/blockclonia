@@ -727,7 +727,11 @@ static void punch_tick(net *n)
 {
     if (!n->h || n->now >= n->punch_until || n->now - n->punch_t < 0.2) return;
     n->punch_t = n->now;
-    ENetBuffer b = {.data = (void *)(uintptr_t)PUNCH_MAGIC, .dataLength = sizeof PUNCH_MAGIC};
+    // ENetBuffer takes a non-const pointer; a copy keeps the table read-only
+    // without casting const away through an integer.
+    uint8_t magic[sizeof PUNCH_MAGIC] = {0};
+    memcpy(magic, PUNCH_MAGIC, sizeof magic);
+    ENetBuffer b = {.data = magic, .dataLength = sizeof magic};
     enet_socket_send(n->h->socket, &n->punch_to, &b, 1);
 }
 

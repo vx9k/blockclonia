@@ -387,6 +387,26 @@ static void test_nat(void)
     char addr[32] = {0};
     CHECK(!net_public_addr(p[0].n, addr, sizeof addr));
     CHECK(net_punch(p[0].n, "nonsense") == -1 && net_punch(p[0].n, "127.0.0.1:0") == -1);
+    /* A punch is the eight magic bytes the receiving game recognises and
+     * drops; anything else would reach ENet as a malformed packet. */
+    ENetSocket s = enet_socket_create(ENET_SOCKET_TYPE_DATAGRAM);
+    ENetAddress sa = {.host = ENET_HOST_ANY, .port = 0};
+    enet_address_set_host_ip(&sa, "127.0.0.1");
+    CHECK(s != ENET_SOCKET_NULL && enet_socket_bind(s, &sa) == 0 && enet_socket_get_address(s, &sa) == 0);
+    snprintf(addr, sizeof addr, "127.0.0.1:%u", (unsigned)sa.port);
+    CHECK(net_punch(p[0].n, addr) == 0);
+    uint8_t got[16] = {0};
+    ENetBuffer rb = {.data = got, .dataLength = sizeof got};
+    ENetAddress from = {0};
+    int len = 0;
+    for (int tries = 0; tries < 100 && len <= 0; tries++) {
+        enet_uint32 cond = ENET_SOCKET_WAIT_RECEIVE;
+        if (enet_socket_wait(s, &cond, 10) == 0 && (cond & ENET_SOCKET_WAIT_RECEIVE)) {
+            len = enet_socket_receive(s, &from, &rb, 1);
+        }
+    }
+    CHECK(len == 8 && memcmp(got, "BCPUNCH1", 8) == 0);
+    enet_socket_destroy(s);
     p[1].n = net_join(&ka, "Alice", "127.0.0.1", hp, 0, NULL);
     CHECK(wait_for(p, 2, &p[1], NET_EV_JOINED, 1) != NULL);
     snprintf(addr, sizeof addr, "127.0.0.1:%u", (unsigned)net_port(p[1].n));
