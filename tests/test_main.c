@@ -1864,6 +1864,7 @@ int main(void)
     test_thoughts_all();
     test_drugs_all();
     test_faint_all();
+    test_fear_all();
     test_cardio_all();
     printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);
     return g_failed ? 1 : 0;

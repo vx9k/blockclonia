@@ -182,6 +182,14 @@ static const line LINES[] = {
     {FEEL_SWOON, 3, B, "The world drains of colour."},
     {FEEL_SWOON, 3, I, "Going... down..."},
     {FEEL_SWOON, 0, B, "The colour comes back to the world."},
+
+    {FEEL_FEAR, 1, B, "Something is moving out there."},
+    {FEEL_FEAR, 1, I, "Was that a growl?"},
+    {FEEL_FEAR, 2, B, "The hair on your neck stands up."},
+    {FEEL_FEAR, 2, I, "It's following me."},
+    {FEEL_FEAR, 3, B, "Teeth, and closing fast."},
+    {FEEL_FEAR, 3, I, "It's coming for me!"},
+    {FEEL_FEAR, 0, B, "Whatever it was, it's gone."},
 };
 #undef I
 #undef B
@@ -302,6 +310,7 @@ static int level_inside(const health *h, int f)
     case FEEL_CRASH: return h->catechol < 0.3f ? grade(h->crash, 0.35f, 0.7f, 9.0f) : 0;
     case FEEL_DRUNK: return grade(h->bac, 0.4f, 1.2f, 2.2f);
     case FEEL_SWOON: return grade(h->vagal, 0.08f, 0.3f, 0.6f);
+    case FEEL_FEAR: return grade(h->fear, 0.15f, 0.45f, 0.75f);
     case FEEL_DOPED: return grade(h->naloxone > 0.0f ? 0.03f * h->opioid : h->opioid, 4.0f, 15.0f, 30.0f);
     default: return 0;
     }
@@ -439,6 +448,7 @@ static const uint8_t TINT[FEEL_COUNT][3] = {
     [FEEL_COLD] = {150, 210, 255},  [FEEL_NUMB] = {170, 200, 240},  [FEEL_SICK] = {185, 215, 130},
     [FEEL_DRUNK] = {240, 200, 110}, [FEEL_DOPED] = {200, 170, 255}, [FEEL_SWOON] = {195, 195, 200},
     [FEEL_FAINT] = {195, 195, 200}, [FEEL_AIR] = {150, 225, 235},   [FEEL_BREATH] = {150, 225, 235},
+    [FEEL_FEAR] = {225, 160, 215},
 };
 
 thought_style thoughts_style(const thought *t, const health *h)

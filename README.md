@@ -105,9 +105,10 @@ risks: some treatments harm when they are the wrong thing. More than 4
 painkillers a day damage the liver a day later; antibiotics with no
 infection upset the gut; adrenaline on a beating heart races it and can
 derail the rhythm (in arrest it can turn a flat line shockable); a shock
-on a beating heart can stop it. A sudden bad injury sets off an
-adrenaline rush (pain dulled, a little more strength, tunnel vision) and
-a shaky, tired crash after it. Damaged organs are felt: a weak heart
+on a beating heart can stop it. A sudden bad injury, or a wolf hunting
+you, sets off an adrenaline rush (pain dulled, a little more strength,
+tunnel vision) and a shaky, tired crash after it; the nearer the wolf,
+and the more of them, the harder the heart pounds. Damaged organs are felt: a weak heart
 caps exertion, a failing liver tires and turns the view yellow, failing
 kidneys let potassium climb, a hurt brain makes the view drift.
 Morphine (two in the starting kit) takes the edge off pain that a

@@ -186,6 +186,23 @@ void mobs_step(mobs *s, physics *ph, player *const *players, int n, float daylig
     }
 }
 
+float mobs_fear(const mobs *s, const player *p, float daylight)
+{
+    /* Wolves combine like independent odds of staying calm, so a pack is
+     * worse than its nearest member. Only a hunting wolf counts: one
+     * wandering by day is no threat until it is hurt. */
+    float calm = 1.0f;
+    for (int i = 0; i < s->count; i++) {
+        const mob *m = &s->m[i];
+        if (m->kind != MOB_WOLF || !(daylight < NIGHT || m->angry_t > 0.0f)) continue;
+        double d = dv3_len(sub(m->body.pos, p->pos));
+        if (d >= HUNT_RANGE) continue;
+        double f = (HUNT_RANGE - d) / (HUNT_RANGE - BITE_RANGE);
+        calm *= 1.0f - (float)(f < 1.0 ? f : 1.0);
+    }
+    return 1.0f - calm;
+}
+
 int mobs_raycast(const mobs *s, dvec3 o, vec3 dir, double max_dist, double *dist)
 {
     int best = -1;

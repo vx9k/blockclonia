@@ -1739,6 +1739,7 @@ static void frame_simulate(game *g, const player_input *raw, double dt)
         health_env env = {0};
         survival_env(&g->w, &g->pl, &sb, g->actions, &env);
         survival_thermal(g->th, &g->w, &g->pl, &env);
+        env.fear = mobs_fear(&g->mobs, &g->pl, thermo_daylight(g->th));
         g->actions = 0;
         survival_impacts(&g->hl, &g->w, &g->ph.contact[0], &g->pl, &sb);
         /* Per-step physics events, cleared by the next step. */
