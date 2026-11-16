@@ -226,41 +226,27 @@ int item_durability(int id)
 
 int block_tool(uint8_t block)
 {
-    switch (block) {
-    case B_STONE:
-    case B_ROCK:
-    case B_BRICK:
-    case B_FURNACE:
-    case B_COAL_ORE:
-    case B_COPPER_ORE:
-    case B_IRON_ORE:
-    case B_ICE: return TOOL_PICKAXE;
-    case B_LOG:
-    case B_PLANKS:
-    case B_CAMPFIRE: return TOOL_AXE;
-    case B_DIRT:
-    case B_GRASS:
-    case B_SAND:
-    case B_GRAVEL:
-    case B_SNOW:
-    case B_ASH: return TOOL_SHOVEL;
+    const block_def *d = block_get(block);
+    if (block >= B_COUNT || d->hardness < 0.0f) return -1; /* nothing digs bedrock */
+    switch (d->mat) {
+    case BM_STONE:
+    case BM_ICE: return TOOL_PICKAXE;
+    case BM_WOOD: return TOOL_AXE;
+    case BM_GRASS:
+    case BM_DIRT:
+    case BM_SAND:
+    case BM_GRAVEL:
+    case BM_SNOW: return TOOL_SHOVEL;
     default: return -1;
     }
 }
 
-/* The pickaxe tier a block needs before it yields anything, -1 for none. */
+/* The pickaxe tier a block needs before it yields anything, -1 for none:
+ * any pickaxe for stone, a stone one for the metal ores. */
 static int pick_tier(uint8_t block)
 {
-    switch (block) {
-    case B_STONE:
-    case B_ROCK:
-    case B_BRICK:
-    case B_FURNACE:
-    case B_COAL_ORE: return TIER_WOOD;
-    case B_COPPER_ORE:
-    case B_IRON_ORE: return TIER_STONE;
-    default: return -1;
-    }
+    if (block == B_COPPER_ORE || block == B_IRON_ORE) return TIER_STONE;
+    return block_tool(block) == TOOL_PICKAXE && block_get(block)->mat == BM_STONE ? TIER_WOOD : -1;
 }
 
 int item_harvests(int held, uint8_t block)

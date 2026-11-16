@@ -14,10 +14,8 @@
 #define CHUNK_W 16
 #define CHUNK_SHIFT 4
 /* 384 m: room for mountains above a sea at 48 and for towers on top of
- * them. Worlds from before were 128 high (WORLD_H_V1); their columns load
- * with air above. */
+ * them. */
 #define WORLD_H 384
-#define WORLD_H_V1 128
 #define SECTION_H 16
 #define SECTIONS (WORLD_H / SECTION_H)
 #define COL_AREA (CHUNK_W * CHUNK_W)
@@ -233,14 +231,11 @@ size_t world_column_encode(world *w, int cx, int cz, uint8_t *out, size_t cap);
 
 /* Worker-side entry point for generating one column (also used by bench). */
 void worldgen_column(uint32_t seed, column *c);
-/* The first generator (no caves or ores, lower mountains), kept so worlds
- * made with it go on growing without seams. */
-void worldgen_column_v1(uint32_t seed, column *c);
 /* Bump when worldgen_column makes different terrain for the same seed:
  * worlds record the version they were made with, and a build refuses a
- * world from a newer generator instead of joining new terrain onto it. */
-#define WORLDGEN_VERSION 2
-/* Terrain surface height before trees/water; cheap, needs nothing loaded. */
+ * world from any other generator instead of joining new terrain onto it. */
+#define WORLDGEN_VERSION 3
+/* Terrain surface height before trees/water; needs nothing loaded. */
 int worldgen_height(uint32_t seed, int x, int z);
 
 /* Column lifetime. alloc returns a COL_LOADING column whose blocks are

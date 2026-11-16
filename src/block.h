@@ -154,6 +154,23 @@ typedef enum {
 
 #define T_FIRE_FRAMES 4
 
+/* What a block is made of, as far as tools and sound care: the tool that
+ * digs it and the noise it makes. */
+typedef enum {
+    BM_NONE,
+    BM_GRASS,
+    BM_DIRT,
+    BM_STONE, /* dug with a pickaxe, which it needs a tier of */
+    BM_WOOD,
+    BM_SAND,
+    BM_GRAVEL,
+    BM_SNOW,
+    BM_LEAVES,
+    BM_GLASS,
+    BM_ICE,
+    BM_WATER,
+} block_mat;
+
 typedef struct {
     const char *name;
     uint8_t flags;
@@ -165,6 +182,9 @@ typedef struct {
     float hardness;     /* s to break by hand; < 0: unbreakable */
     float heat_capacity;/* J/(kg K) */
     float conductivity; /* W/(m K) */
+    uint8_t mat;        /* block_mat */
+    float cushion;      /* share of a landing's speed that counts; soft ground is < 1 */
+    float grit;         /* how much grit it grinds into scraped skin, 0..1 */
 } block_def;
 
 extern const block_def g_blocks[B_COUNT];
