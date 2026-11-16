@@ -33,6 +33,12 @@ check_c_compiler_flag(-Wformat-signedness MC_HAS_WFORMAT_SIGNEDNESS)
 if(NOT MC_HAS_WFORMAT_SIGNEDNESS)
   list(REMOVE_ITEM MC_WARNINGS -Wformat-signedness)
 endif()
+# ASan pads every stack object with redzones, so its frames say nothing
+# about the real ones (clang 18 puts the test runner's main at 117 KB);
+# every other build still holds the limit.
+if(MC_SANITIZE)
+  list(REMOVE_ITEM MC_WARNINGS -Wframe-larger-than=65536)
+endif()
 
 if(MC_WERROR)
   list(APPEND MC_WARNINGS -Werror)
