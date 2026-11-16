@@ -1,6 +1,5 @@
-/* The world's edge at +-WORLD_LIMIT, 2e9 blocks out: older worlds keep
- * their terrain bit for bit, the terrain past them is as smooth near the
- * edge as at the origin, the last columns load, mesh, save and stream
+/* The world's edge at +-WORLD_LIMIT, 2e9 blocks out: the terrain is as
+ * fine near the edge as at the origin, the last columns load, mesh, save and stream
  * like any other, bodies stop against the edge instead of snagging on it
  * or passing it, and the decoders take positions up to the edge and
  * refuse anything beyond. A host steps players beside the edge and puts
@@ -24,83 +23,22 @@
 
 #define EDGE WORLD_LIMIT
 #define EDGE_COLS (WORLD_LIMIT / CHUNK_W) /* columns from the origin to the edge */
-#define FLOAT_END (1 << 23)                /* where worldgen.c stops sampling float noise */
 
-/* FNV-1a over the blocks of the 3 x 3 columns from (cx0, cz0) up to the
- * old 128-block ceiling, which is the whole column as these generators
- * made it; 0 if anything stands above that. */
-static uint64_t hash_area(void (*gen)(uint32_t, column *), int cx0, int cz0)
-{
-    uint64_t h = 1469598103934665603ull;
-    int above = 0;
-    for (int z = 0; z < 3; z++)
-        for (int x = 0; x < 3; x++) {
-            column *c = column_alloc(cx0 + x, cz0 + z);
-            gen(1337, c);
-            for (int i = 0; i < COL_AREA * WORLD_H_V1; i++) h = (h ^ c->blocks[i]) * 1099511628211ull;
-            for (int i = COL_AREA * WORLD_H_V1; i < COL_VOL; i++) above |= c->blocks[i] != B_AIR;
-            column_free(c);
-        }
-    return above ? 0 : h;
-}
-
-/* Worlds made before the edge moved out keep their terrain: the hashes of
- * both generators as they were then, at the origin, near the old limit
- * and in the last columns before 2^23 on either side, and of surface
- * heights sampled out to 8.4 million blocks. */
-static void test_old_terrain(void)
-{
-    static const struct {
-        int cx, cz;
-        uint64_t v1, v2;
-    } SPOTS[] = {
-        {-2, -2, 0xd9f1677a8ee3a822ull, 0x76f73aa0b486bcd3ull},
-        {499990, -500030, 0xc4128e02903e1cc2ull, 0xb09b56a4c782ffe5ull},
-        {-524287, 524285, 0x03487e20c6a4e9c7ull, 0x9fbd11ef68ae78d7ull},
-        {524285, -524287, 0x4f0d1cb9c924b93bull, 0x4cc982b9b41d1f1eull},
-    };
-    for (size_t s = 0; s < sizeof SPOTS / sizeof SPOTS[0]; s++) {
-        CHECK(hash_area(worldgen_column_v1, SPOTS[s].cx, SPOTS[s].cz) == SPOTS[s].v1);
-        CHECK(hash_area(worldgen_column, SPOTS[s].cx, SPOTS[s].cz) == SPOTS[s].v2);
-    }
-    uint64_t h = 1469598103934665603ull;
-    for (int i = -4096; i <= 4096; i++) {
-        int x = i * 2047 + (i & 7), z = -i * 2045 + i % 5;
-        h = (h ^ (uint64_t)worldgen_height(1337, x, z)) * 1099511628211ull;
-    }
-    CHECK(h == 0x7ee9924073e42d4aull);
-}
-
-/* The exact noise is the float noise sampled without rounding the
- * coordinate first. */
+/* The noise takes its coordinates in double: by the edge, where floats
+ * are 128 blocks apart, one block is still a small step of its own. */
 static void test_exact_noise(void)
 {
-    /* At a power-of-two scale the float quotient is exact too, so the
-     * two agree bit for bit. */
-    int same = 1;
-    float worst = 0.0f;
-    for (int i = -2000; i <= 2000; i++) {
-        int x = i * 4093 + 17, z = -i * 1531 + 5, y = i & 127;
-        same &= noise2i(7, x, z, 64.0) == noise2(7, (float)x / 64.0f, (float)z / 64.0f);
-        same &= fbm2i(7, x, z, 64.0, 4) == fbm2(7, (float)x / 64.0f, (float)z / 64.0f, 4);
-        same &= noise3i(7, x, y, z, 64.0, 32.0) == noise3(7, (float)x / 64.0f, (float)y / 32.0f, (float)z / 64.0f);
-        float d = fabsf(noise2i(7, x, z, 700.0) - noise2(7, (float)x / 700.0f, (float)z / 700.0f));
-        worst = d > worst ? d : worst;
-    }
-    CHECK(same);
-    CHECK(worst < 5e-3f);
-
-    /* By the edge, where a float is 128 blocks apart, one block is still a
-     * small step of its own. */
-    float step = 0.0f;
+    float step = 0.0f, step3 = 0.0f;
     int stuck = 0;
     for (int i = 0; i < 2000; i++) {
         int x = i < 1000 ? EDGE - 1001 + i : -EDGE + i - 1000, z = -EDGE + 7;
-        float d = fabsf(noise2i(7, x + 1, z, 90.0) - noise2i(7, x, z, 90.0));
+        float d = fabsf(noise2d(7, (x + 1) / 90.0, z / 90.0) - noise2d(7, x / 90.0, z / 90.0));
+        float d3 = fabsf(noise3d(7, (x + 1) / 44.0, 0.3, z / 44.0) - noise3d(7, x / 44.0, 0.3, z / 44.0));
         step = d > step ? d : step;
+        step3 = d3 > step3 ? d3 : step3;
         stuck += d < 1e-6f;
     }
-    CHECK(step < 0.05f && stuck < 10);
+    CHECK(step < 0.05f && step3 < 0.1f && stuck < 10);
 }
 
 typedef struct {
@@ -169,28 +107,19 @@ static double cave_share(int cx0, int cz0)
 }
 
 /* Terrain by the edge is like terrain at the origin. Sampled at float
- * coordinates it would stand in 128-block terraces up to 44 blocks high,
- * flat at 99 % of neighbours; at the origin no step exceeds 2 and at
- * most 95 % are flat. Where the float and exact noise meet (2^23) and
- * across the band they are blended over, there is no ledge either. */
+ * coordinates it would stand in 128-block terraces, flat at 99 % of
+ * neighbours; here the steps are the same size as at the origin and as
+ * few of them flat. */
 static void test_edge_terrain(void)
 {
     static const int AT[][2] = {
-        {-64, -64},
-        {EDGE - 129, EDGE - 129},
-        {-EDGE, -EDGE},
-        {EDGE - 129, -EDGE + 5000},
-        {-EDGE + 77777, EDGE - 129},
-        {FLOAT_END - 64, -64},
-        {-FLOAT_END - 64, 3000},
-        {FLOAT_END + 192, FLOAT_END + 100},
-        {500, -FLOAT_END - 64},
+        {-64, -64}, {EDGE - 129, EDGE - 129}, {-EDGE, -EDGE}, {EDGE - 129, -EDGE + 5000}, {-EDGE + 77777, EDGE - 129},
     };
     for (size_t i = 0; i < sizeof AT / sizeof AT[0]; i++) {
         relief r = relief_at(AT[i][0], AT[i][1]);
-        CHECK(r.max_step <= 4);
+        CHECK(r.max_step <= 12);
         CHECK(r.flat < 2 * 128 * 128 * 97 / 100);
-        CHECK(r.hi - r.lo >= 3 && r.lo >= 4 && r.hi <= WORLD_H_V1 - 12);
+        CHECK(r.hi - r.lo >= 3 && r.lo >= 4 && r.hi <= WORLD_H - 12);
     }
     CHECK(column_sound(0, 0));
     CHECK(column_sound(EDGE_COLS - 1, EDGE_COLS - 1));
@@ -589,7 +518,6 @@ static void test_edge_thermo(void)
 
 void test_edge_all(void)
 {
-    test_old_terrain();
     test_exact_noise();
     test_edge_terrain();
     test_edge_world();

@@ -36,6 +36,10 @@ typedef struct thermo thermo;
 /* The clock at THERMO_DAY_START and no local heat anywhere. */
 thermo *thermo_create(uint32_t seed);
 void thermo_destroy(thermo *t);
+/* With the climate on, the air follows the world's climate at the seed
+ * thermo was made with (worldgen.h): colder to the north and up high,
+ * hot in the south. Off (the start), it is 14 C at sea level everywhere. */
+void thermo_set_climate(thermo *t, int on);
 
 /* ---------------------------------------------------------- the sun */
 

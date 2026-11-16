@@ -18,20 +18,17 @@ static inline uint32_t hash2i(uint32_t seed, int x, int z)
     return hash_u32(seed ^ hash_u32((uint32_t)x * 0x9E3779B1U ^ hash_u32((uint32_t)z + 0x632BE5ABU)));
 }
 
-float noise2(uint32_t seed, float x, float z);                  /* [-1, 1] */
-float fbm2(uint32_t seed, float x, float z, int octaves);       /* ~[-1, 1] */
-float noise3(uint32_t seed, float x, float y, float z);         /* ~[-1, 1] */
-
-/* The same noise at block coordinates divided by a scale (noise2i(s, x, z,
- * 90) is noise2(s, x / 90, z / 90)), for any int coordinate. A float holds
- * a coordinate near 2e9 only to the nearest 128 blocks; here the quotient
- * is split into lattice cell and fraction in double, good to a few
- * micrometres, before the float arithmetic. The results differ from the
- * float versions in the last bits, so generators keep those where worlds
- * were made with them. The lattice cell must fit an int: |x| / scale *
- * 2^(octaves - 1) < 2^31. */
-float noise2i(uint32_t seed, int x, int z, double scale);
-float fbm2i(uint32_t seed, int x, int z, double scale, int octaves);
-float noise3i(uint32_t seed, int x, int y, int z, double scale_xz, double scale_y);
+/* Coordinates are block positions divided by the feature size, in double
+ * (noise2d(s, x / 90.0, z / 90.0) has hills ~90 blocks across), so they
+ * stay exact out to the world's edge, at any octave. */
+float noise2d(uint32_t seed, double x, double z);            /* [-1, 1] */
+float fbm2d(uint32_t seed, double x, double z, int octaves); /* ~[-1, 1] */
+float noise3d(uint32_t seed, double x, double y, double z);  /* ~[-1, 1] */
+/* noise2d and its gradient, d/dx and d/dz per unit of x and z. */
+float noise2d_grad(uint32_t seed, double x, double z, float *dx, float *dz);
+/* fbm whose finer octaves fade where the coarser ones are already steep,
+ * the way erosion leaves sharp peaks over smooth valleys (instead of
+ * ridged noise's thin worms). */
+float eroded2d(uint32_t seed, double x, double z, int octaves);
 
 #endif
