@@ -7,8 +7,10 @@ what would make it worth doing.
 
 One branch and pull request per item, in this order:
 
-1. **World generation** (#29, `feat/worldgen-caves-ores`): merged. The
-   next steps (villages and towns) are under World generation below.
+1. **World generation** (#29, `feat/worldgen-caves-ores`): merged. Next
+   is the overhaul (a taller world, climate, landforms, rivers, tree
+   species, plants, then villages and towns) under World generation
+   below.
 2. **Tools, weapons and mobs** (`feat/tools-weapons-mobs`, stacked on
    #29): tool tiers, wear (INV2), knife and sword, a rifle with
    bullets and cartridges, boars and wolves. Left for later: creatures
@@ -40,7 +42,102 @@ Worlds record the generator version they were made with
 (`WORLDGEN_VERSION`, `worldgen_column_v1`), so old worlds keep their
 terrain.
 
-**Next: villages, houses and towns.** Settlements in the generated
+### The overhaul (planned 2026-11-16)
+
+**Why.** A 2 km map of seed 1337 shows one landscape everywhere: even
+grass with an even sprinkle of one kind of tree, mountains drawn as
+thin white "worms" by ridged noise with a hard snow line at y = 92,
+lakes that all wear the same ring of sand, no rivers, and hundreds of
+cave mouths per square kilometre. The air is 14 C at sea level
+everywhere, so there is no north, south, wet or dry. The goal is land
+that reads as natural, from a climate down to single plants, while
+still being worth exploring: every few hundred metres something
+should look different for a reason you could explain.
+
+**Principles.**
+
+- *Cause before look.* Climate decides biomes, biomes decide soil and
+  plants; nothing is coloured by a noise field that means nothing.
+  Variety comes from that chain (a cold valley floor next to a warm
+  south slope), not from random patches.
+- *Real habits, game scale.* Shapes follow the real thing (a spruce is
+  a narrow cone of whorls, a river widens downstream, scree gathers at
+  the foot of a cliff), squeezed to the world's height the way
+  `thermo.c` squeezes the lapse rate.
+- *One climate for everything.* The terrain, the plants and the
+  survival model (`thermo_air`) read the same field, so a tundra is
+  cold to stand in, not only white.
+- *Streaming rules stay.* Each column is generated on its own on a
+  worker thread from the seed and integer-exact maths, with no shared
+  state and no second pass; anything that crosses a column border
+  (trees, rivers, houses) is re-derived from the seed on both sides.
+  Budget: within 2x today's 1.15 ms per column (`--bench`), measured
+  on the Raspberry Pi 4 too.
+- *Old worlds keep their terrain.* The new generator is version 3,
+  built behind `--worldgen 3` (new worlds only) while it grows, and
+  becomes the default once steps 2 to 5 are in. Versions 1 and 2 stay
+  as they are.
+
+**Steps, one pull request each:**
+
+1. **A 256-block world** (breaking). `WORLD_H` 128 to 256 (16
+   sections). The vertex format already packs y per section, so the
+   mesher is untouched; the column blob in `world.db` grows, so the
+   column format gets a new tag and old 128-high rows are read padded
+   with air; `NET_PROTOCOL` bumps; per-column memory doubles, so the
+   column caches and default view distance in `sys_plan` are re-checked
+   (Raspberry Pi 4 with 4 GB as the floor). `SEA_LEVEL` stays 48 so
+   versions 1 and 2 generate unchanged; the new generator puts its
+   land between them and the new ceiling (about 200 m of relief).
+2. **Climate.** `worldgen_climate(seed, x, z)`: a mean temperature
+   offset and a yearly rainfall, from slow (several km) warped noise,
+   with rain shadows behind high ground and cooler, wetter air near
+   the sea. `thermo_air` adds the temperature offset to its lapse, so
+   the snow line becomes the 0 C isotherm rather than a fixed y.
+   Biomes come from temperature and rainfall (a Whittaker diagram):
+   tundra, boreal (taiga), temperate mixed forest, meadow, steppe, dry
+   scrub, wetland, alpine. Edges blend over tens of metres. Tests:
+   the field is continuous, every biome occurs within a few km of
+   most seeds, and `thermo_air` agrees with the biome it stands in.
+3. **Landforms.** Domain-warped continents and coasts; mountain ranges
+   with foothills, made from eroded-style noise (octaves damped by the
+   slope so peaks are sharp and valleys smooth, not worms); plateaus
+   and mesas in dry country; cliffs where layers outcrop; scree at
+   their feet; beaches of sand, gravel or bare rock by slope and
+   exposure. Caves: far fewer surface mouths, some large chambers,
+   ore bands rescaled to the deeper ground.
+4. **Rock and soil.** New blocks (procedural textures, like all
+   blocks): granite, sandstone, limestone, clay, mud, podzol and dry
+   cracked soil, plus layered strata in cliffs. Each gets real
+   density, hardness and thermal values for physics and `thermo`.
+5. **Rivers and lakes.** A river network from the highlands to the
+   sea: valleys carved along warped noise zero lines, whose beds fall
+   monotonically downstream so the water is level and stable the
+   moment it is generated (fluid physics would otherwise drain it);
+   narrow streams in steep cuts up high, wide meanders and estuaries
+   near the coast, lakes in closed basins with an outflow. Riverbeds
+   of gravel and clay, reeds along slow banks. Tests: no generated
+   water flows on the first tick, rivers reach the sea, a river
+   crossing a column border matches on both sides.
+6. **Trees, redone.** Species by climate, each with its real growth
+   habit and its own bark and leaf textures: oak (broad, irregular
+   crown, furrowed grey-brown bark), birch (slender, white bark with
+   dark lenticels, light canopy), spruce (narrow cone of drooping
+   whorls, dark needles), Scots pine (bare trunk, flat crown high up,
+   orange plated bark above), and a dry-country tree (juniper or a
+   twisted pine). Far more variance: age classes from sapling to old
+   giant, crown shape and lean from seeded parameters, dead snags and
+   fallen trunks in old forest, forests as stands with clearings and
+   edges rather than a uniform sprinkle. Leaves still obey the
+   3-block support span. Textures reviewed against reference photos.
+7. **Ground plants.** Cross-shaped plant quads in the mesher (two
+   crossed planes, no collision, broken by hand), then tall grass,
+   ferns in forest, flowers by biome and season, reeds in wetlands,
+   bushes, heather on moors, dry shrubs in scrub. Density from
+   rainfall and light under the canopy.
+8. **Settlements**, as designed below, on top of the new terrain.
+
+**Settlements: villages, houses and towns.** Settlements in the generated
 world: houses, for now entirely empty (walls, floor, roof, a doorway
 and windows; no furniture, loot or villagers), grouped into villages
 and, in larger flat areas, towns with streets.
