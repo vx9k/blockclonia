@@ -26,16 +26,17 @@
   up-to-date `main` as `<type>/<short-description>`, commit there, push
   the branch and open the pull request with `gh pr create`. Use a
   Conventional Commits title and fill in every section of the template.
-  Never push to `main` or force-push a branch under review, and don't
-  merge. The maintainer merges.
-- End the pull request description with the attribution line Claude Code
-  adds, below the checklist.
+  Open it ready for review, not as a draft, and turn on auto-merge with
+  `gh pr merge --auto --squash`: it lands when the required checks pass.
+  Never push to `main`, force-push a branch under review, or merge by
+  hand.
+- Add no AI attribution anywhere: no "Generated with Claude Code" line
+  in pull requests, issues or comments, and no `Co-Authored-By: Claude`
+  or similar trailer in commits.
 - Write every commit message in the Conventional Commits 1.0.0 form that
   AGENTS.md (Git) describes: `<type>[optional scope][!]: <description>`.
-  The attribution trailer Claude Code adds (`Co-Authored-By: ...`) is a
-  footer: put it last, after a blank line following the body, with no
-  other text below it. Before committing, check the header against the
-  allowed types and the 72-column limit.
+  Before committing, check the header against the allowed types and the
+  72-column limit.
 - Subagents live in `.claude/agents/` (see its `README.md`), in four
   tiers: `scout` (Haiku 5.5, low effort) for read-only lookups,
   `docs-writer` (Haiku 5.5, medium effort) for prose-only work,
