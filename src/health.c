@@ -34,6 +34,7 @@
 #define ADR_BETA_EC50 0.5f   /* ng/mL: heart rate and contractility respond to low levels */
 #define ADR_ALPHA_EC50 2.0f  /* ng/mL: vasoconstriction needs higher ones, pressor doses */
 #define SURGE_NG_S 0.02f     /* ng/mL/s released in a surge: holds ~4 ng/mL, a phaeochromocytoma crisis */
+#define FEAR_NG_S 0.006f     /* ng/mL/s at full fear: holds ~1.3 ng/mL, the range of acute terror */
 #define VT_RATE 165.0f       /* bpm, monomorphic VT that still ejects */
 #define PVT_RATE 210.0f      /* bpm: faster VT fills too little to eject; above AED VT cut-offs (~180) */
 #define ESCAPE_RATE 36.0f    /* bpm, ventricular escape below a complete AV block */
@@ -218,8 +219,7 @@ void health_log(health *h, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(h->log[0], sizeof h->log[0], fmt, ap);
     va_end(ap);
-    h->log_age[0] = 0.0f;
-}
+    h->log_age[0] = 0.0f;}
 
 static const char *const PART_NAMES[BP_COUNT] = {"Head",      "Chest",    "Abdomen",  "Left arm",
                                                  "Right arm", "Left leg", "Right leg"};
@@ -1811,6 +1811,20 @@ static void step_parts(health *h, const health_env *e, double dt, float gh, int 
         }
     }
     h->pain_ref = lag(h->pain_ref, pain, dt, 20.0);
+    /* Fear does the same without a wound: a predator closing in fast
+     * startles a short rush out of the adrenal glands, and as long as it
+     * keeps hunting they keep releasing (step_catechol). A sleeper or an
+     * unconscious body feels nothing. */
+    const float threat = awake ? fclamp(e->fear, 0.0f, 1.0f) : 0.0f;
+    h->fear = lag(h->fear, threat, dt, 1.0);
+    if (h->fear - h->fear_ref > 0.3f && h->surge < 5.0f) {
+        /* Sized by what was seen, not by how far the feeling has caught up. */
+        h->surge = minf(30.0f, 10.0f + 25.0f * (threat - h->fear_ref));
+        health_log(h, "Adrenaline rush: something is hunting you");
+    }
+    /* One startle per fright: while a rush lasts, the fear still climbing
+     * as the wolf closes in is part of it. */
+    h->fear_ref = h->surge > 0.0f ? maxf(h->fear_ref, h->fear) : lag(h->fear_ref, h->fear, dt, 30.0);
     pain *= 1.0f - 0.4f * catechol_beta(h);
     h->pain = awake ? lag(h->pain, pain, dt, 1.0) : 0.0f;
     h->painkiller = maxf(0.0f, h->painkiller - gh);
@@ -2063,6 +2077,7 @@ static void step_catechol(health *h, double dt)
         h->surge = maxf(0.0f, h->surge - (float)dt);
         h->catechol += SURGE_NG_S * (float)dt;
     }
+    h->catechol += FEAR_NG_S * h->fear * (float)dt;
     h->catechol *= (float)exp(-dt * 0.6931472 / (double)ADR_HALF_S);
     /* A rush is paid for afterwards: the longer it ran high, the longer the
      * shaky, tired spell once it wears off. */
@@ -3017,6 +3032,8 @@ static const wire_field HEALTH_FIELDS[] = {
     H(vagal),
     H(faint_drive),
     H(blood_seen),
+    H(fear),
+    H(fear_ref),
     H(antibiotic),
     H(sepsis),
     WIRE_I32R(health, conscious, CONS_UNCONSCIOUS, CONS_ALERT),

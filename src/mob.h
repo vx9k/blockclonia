@@ -70,6 +70,11 @@ int mobs_raycast(const mobs *s, dvec3 o, vec3 dir, double max_dist, double *dist
  * i shift down). Returns 1 if it died. */
 int mobs_hurt(mobs *s, physics *ph, int i, float damage, dvec3 from);
 
+/* How frightening the creatures hunting near player p are, 0..1, for
+ * health_env.fear: nothing beyond a wolf's hunting range, rising to 1 as
+ * one closes to biting distance. daylight is thermo_daylight. */
+float mobs_fear(const mobs *s, const player *p, float daylight);
+
 /* Adds a mob standing at pos (tests, and the spawner). Returns its index,
  * -1 if full. */
 int mobs_add(mobs *s, int kind, dvec3 pos);

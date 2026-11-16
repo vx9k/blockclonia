@@ -712,6 +712,7 @@ void mp_host_step(mp *m, const player_input *local_in)
         health_env env = {0};
         survival_env(m->ctx.w, &r->pl, &sb[k], r->actions, &env);
         survival_thermal(m->ctx.th, m->ctx.w, &r->pl, &env);
+        if (m->ctx.mobs) env.fear = mobs_fear(m->ctx.mobs, &r->pl, thermo_daylight(m->ctx.th));
         r->actions = 0;
         survival_impacts(r->hl, m->ctx.w, &m->ctx.ph->contact[k], &r->pl, &sb[k]);
         health_step(r->hl, &env, PHYS_DT);
