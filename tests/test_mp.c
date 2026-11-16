@@ -72,6 +72,14 @@ static const mp_chat_line *last_chat(const mp *m)
     return n ? &l[n - 1] : &NONE;
 }
 
+/* A block the host sets reaches the client within 200 frames. */
+static int edit_follows(host_side *h, client_side *c, int x, int y, int z, uint8_t id)
+{
+    if (!world_set(&h->t.w, x, y, z, id, 0)) return 0;
+    for (int i = 0; i < 200 && world_get(&c->w, x, y, z) != id; i++) frame(h, c, NULL);
+    return world_get(&c->w, x, y, z) == id;
+}
+
 static int avatar(const mp *m, int id, mp_avatar *out)
 {
     mp_avatar a[NET_MAX_PLAYERS];
@@ -304,9 +312,11 @@ void test_mp_all(void)
     check_safety(&h, &c);
 
     /* An edit made now follows. */
-    CHECK(world_set(&h.t.w, 4, GROUND, 4, B_STONE, 0));
-    for (int i = 0; i < 200 && world_get(&c.w, 4, GROUND, 4) != B_STONE; i++) frame(&h, &c, NULL);
-    CHECK(world_get(&c.w, 4, GROUND, 4) == B_STONE);
+    CHECK(edit_follows(&h, &c, 4, GROUND, 4, B_STONE));
+    /* So does one above the old 255 a byte could carry (bedrock: anchored,
+     * so the host's physics leaves it hanging there). */
+    CHECK(edit_follows(&h, &c, 5, WORLD_H - 1, 5, B_BEDROCK));
+    CHECK(world_get(&c.w, 5, (WORLD_H - 1) & 0xff, 5) != B_BEDROCK);
 
     /* Walking: the client predicts, the host simulates, they agree. */
     for (int i = 0; i < 30; i++) frame(&h, &c, NULL); /* settle on the ground */

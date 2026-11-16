@@ -11,7 +11,7 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
 
 ## What's in it
 
-- **Infinite terrain** streamed around the player in 16×128×16 columns:
+- **Infinite terrain** streamed around the player in 16×384×16 columns:
   continents, hills, mountain ranges with bare rock and snow caps, beaches,
   oceans and trees, cave tunnels winding through the rock and opening onto
   the surface, and veins of coal, copper and iron ore.

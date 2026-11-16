@@ -9,6 +9,8 @@
 
 #include <stdlib.h>
 
+/* The bottom WORLD_H_V1 layers, where the old generators build; above them
+ * there must be only air, or the hash is spoiled. */
 static uint64_t hash_columns(void (*gen)(uint32_t, column *), uint32_t seed)
 {
     uint64_t h = 1469598103934665603ull;
@@ -16,7 +18,8 @@ static uint64_t hash_columns(void (*gen)(uint32_t, column *), uint32_t seed)
         for (int x = 0; x < 16; x++) {
             column *c = column_alloc(x - 8, z - 8);
             gen(seed, c);
-            for (int i = 0; i < COL_VOL; i++) h = (h ^ c->blocks[i]) * 1099511628211ull;
+            for (int i = 0; i < COL_AREA * WORLD_H_V1; i++) h = (h ^ c->blocks[i]) * 1099511628211ull;
+            for (int i = COL_AREA * WORLD_H_V1; i < COL_VOL; i++) h = c->blocks[i] == B_AIR ? h : h + 1;
             column_free(c);
         }
     return h;
@@ -36,7 +39,8 @@ static void test_generators(void)
     /* Worlds made before caves keep growing exactly as they began: this is
      * the hash of the generator as it was before version 2. */
     CHECK(hash_columns(worldgen_column_v1, 1337) == 0x34b58b19e1292375ull);
-    CHECK(hash_columns(worldgen_column, 1337) != 0x34b58b19e1292375ull);
+    /* And version 2 as it was in the 128-block world. */
+    CHECK(hash_columns(worldgen_column, 1337) == 0xcb3f3e6c79e5a7f0ull);
 
     long ore[3] = {0}, cave = 0, under = 0, bad_band = 0, hanging = 0, mouths = 0, no_bedrock = 0;
     for (int cz = -3; cz < 3; cz++)

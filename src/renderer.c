@@ -29,7 +29,7 @@
 #define QUADS_PER_DRAW 16384u /* 16-bit indices address 65536 vertices */
 #define UI_MAX_QUADS QUADS_PER_DRAW /* the overlay is always a single draw */
 #define MAX_VIS (65 * 65 * SECTIONS) /* every section at the largest radius (32) */
-#define DYN_SIZE (1u << 20)
+#define DYN_SIZE (1u << 21)
 #define DYN_LINES_BYTES 1024u
 /* Terrain draws per frame queued for multi-draw indirect (20 bytes each):
  * several times what radius 32 needs; beyond it draws are issued directly. */

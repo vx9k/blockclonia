@@ -97,6 +97,85 @@ static void reseal_column(uint8_t *buf, size_t len)
     }
 }
 
+/* Columns from the 128-block world still load, with air above; columns
+ * that fit under that ceiling are still written so old builds read them;
+ * taller ones carry their height, and bad heights are refused. */
+static void test_save_heights(void)
+{
+    /* A version 1 file as the old builds wrote it: 128 layers of stone
+     * runs (256 blocks per run, one layer), at column (2, -1). */
+    uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
+    memset(buf, 0, 24);
+    memcpy(buf, "MCCL", 4);
+    buf[4] = 1;
+    buf[8] = 2;
+    memset(buf + 12, 0xff, 4);
+    size_t len = 24;
+    for (int y = 0; y < 128; y++) {
+        buf[len++] = 255;
+        buf[len++] = y == 0 ? B_BEDROCK : B_STONE;
+    }
+    reseal_column(buf, len);
+    column *d = column_alloc(2, -1);
+    memset(d->blocks, B_WATER, COL_VOL);
+    CHECK(save_decode_column(d, buf, len) == 0);
+    CHECK(d->blocks[col_index(5, 0, 5)] == B_BEDROCK && d->blocks[col_index(5, 127, 5)] == B_STONE);
+    int air = 1;
+    for (int i = COL_AREA * 128; i < COL_VOL; i++) air &= d->blocks[i] == B_AIR;
+    CHECK(air);
+
+    /* Re-encoded, it is version 1 again, byte for byte. */
+    uint8_t *again = mem_alloc(SAVE_MAX_FILE);
+    CHECK(save_encode_column(d, again, SAVE_MAX_FILE) == len && memcmp(again, buf, len) == 0);
+
+    /* A block at the top makes a version 2 file with the full height. */
+    d->blocks[col_index(1, WORLD_H - 1, 2)] = B_PLANKS;
+    d->blocks[col_index(1, 200, 2)] = B_WATER;
+    d->meta = mem_calloc(COL_VOL, 1);
+    d->meta[col_index(1, 200, 2)] = 3;
+    len = save_encode_column(d, buf, SAVE_MAX_FILE);
+    CHECK(len > 24 && buf[4] == 2 && (buf[6] | buf[7] << 8) == WORLD_H);
+    column *e = column_alloc(2, -1);
+    CHECK(save_decode_column(e, buf, len) == 0);
+    CHECK(memcmp(e->blocks, d->blocks, COL_VOL) == 0 && e->meta && e->meta[col_index(1, 200, 2)] == 3);
+    /* One just over the old ceiling stores only the sections it needs. */
+    d->blocks[col_index(1, WORLD_H - 1, 2)] = B_AIR;
+    d->blocks[col_index(1, 200, 2)] = B_AIR;
+    d->blocks[col_index(0, 128, 0)] = B_PLANKS;
+    mem_free(d->meta);
+    d->meta = NULL;
+    len = save_encode_column(d, buf, SAVE_MAX_FILE);
+    CHECK(buf[4] == 2 && (buf[6] | buf[7] << 8) == 128 + SECTION_H);
+    CHECK(save_decode_column(e, buf, len) == 0 && memcmp(e->blocks, d->blocks, COL_VOL) == 0 && !e->meta);
+    /* The counts that let meshing skip sections: the sky is empty, the
+     * plank found in its section. */
+    column_recount(e);
+    CHECK(e->solid_count[0] == SECTION_H * COL_AREA && e->opaque_count[0] == SECTION_H * COL_AREA);
+    CHECK(e->solid_count[128 / SECTION_H] == 1 && e->opaque_count[128 / SECTION_H] == 1);
+    CHECK(e->solid_count[SECTIONS - 1] == 0 && e->opaque_count[SECTIONS - 1] == 0);
+
+    /* Heights that are zero, too tall or not whole sections are refused,
+     * as is a height in a version 1 header. */
+    const int bad[] = {0, WORLD_H + SECTION_H, 136, 0x10000 - SECTION_H};
+    for (int i = 0; i < 4; i++) {
+        buf[6] = (uint8_t)bad[i];
+        buf[7] = (uint8_t)(bad[i] >> 8);
+        CHECK(save_decode_column(e, buf, len) == -1);
+    }
+    buf[4] = 1;
+    buf[6] = 128 + SECTION_H;
+    buf[7] = 0;
+    CHECK(save_decode_column(e, buf, len) == -1);
+    buf[6] = 0;
+    CHECK(save_decode_column(e, buf, len) == -1); /* v1 is 128 layers: this payload is longer */
+    CHECK(memcmp(e->blocks, d->blocks, COL_VOL) == 0); /* untouched */
+
+    column_free(d);
+    column_free(e);
+    mem_free(buf);
+    mem_free(again);
+}
+
 /* A rejected column leaves the destination exactly as it was: valid blocks
  * ahead of a bad meta pass, or of trailing bytes, are not half-applied. */
 static void test_save_reject_untouched(void)
@@ -449,6 +528,20 @@ static void test_player_physics(void)
     p.vel = dv3(0, -60, 0);
     run_steps(&t, &p, &idle, 300);
     CHECK(fabs(p.pos.y - 41.0) < 1e-6);
+    /* High in the 384-block world (bedrock: anchored, so it hangs): a fall
+     * from near the top lands on it, and spawning finds it as the surface. */
+    world_set(&t.w, 3, 300, 3, B_BEDROCK, 0);
+    p.pos = dv3(3.5, WORLD_H - 2.0, 3.5);
+    p.vel = dv3(0, 0, 0);
+    run_steps(&t, &p, &idle, 300);
+    CHECK(p.on_ground && fabs(p.pos.y - 301.0) < 1e-6);
+    CHECK(world_surface_y(&t.w, 3, 3) == 301);
+    player_spawn(&p, &t.w, 3.5, 3.5);
+    CHECK(fabs(p.pos.y - 301.0) < 1e-9);
+    CHECK(world_set(&t.w, 3, WORLD_H - 1, 3, B_BEDROCK, 0) && !world_set(&t.w, 3, WORLD_H, 3, B_BEDROCK, 0));
+    CHECK(world_get(&t.w, 3, WORLD_H - 1, 3) == B_BEDROCK && world_get(&t.w, 3, WORLD_H, 3) == B_AIR);
+    world_set(&t.w, 3, WORLD_H - 1, 3, B_AIR, 0);
+    world_set(&t.w, 3, 300, 3, B_AIR, 0);
 
     /* Walls stop horizontal motion. */
     player_spawn(&p, &t.w, 8.5, 8.5);
@@ -1804,6 +1897,7 @@ int main(void)
     mesher_init();
     test_gpupool();
     test_save_roundtrip();
+    test_save_heights();
     test_save_reject_untouched();
     test_save_files();
     test_mesher();

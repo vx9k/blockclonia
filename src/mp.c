@@ -510,7 +510,7 @@ static void host_snapshot(mp *m, int id)
     wire_bytes(&w, pb, pn);
     wire_u8(&w, (uint8_t)r->cracking);
     wire_i32(&w, r->crack.x);
-    wire_u8(&w, (uint8_t)(r->crack.y < 0 ? 0 : r->crack.y > 255 ? 255 : r->crack.y));
+    wire_u16(&w, (uint16_t)(r->crack.y < 0 ? 0 : r->crack.y >= WORLD_H ? WORLD_H - 1 : r->crack.y));
     wire_i32(&w, r->crack.z);
     wire_f32(&w, r->crack_p);
 
@@ -741,14 +741,14 @@ static void host_flush(mp *m)
     /* Edits: the final block and meta at each changed cell. */
     for (int from = 0; from < m->edit_n;) {
         int count = m->edit_n - from > 1000 ? 1000 : m->edit_n - from;
-        uint8_t *buf = scratch(m, 3 + (size_t)count * 11);
-        wire_w w = wire_writer(buf, 3 + (size_t)count * 11);
+        uint8_t *buf = scratch(m, 3 + (size_t)count * 12);
+        wire_w w = wire_writer(buf, 3 + (size_t)count * 12);
         wire_u8(&w, H_EDITS);
         wire_u16(&w, (uint16_t)count);
         for (int i = from; i < from + count; i++) {
             ipos e = m->edits[i];
             wire_i32(&w, e.x);
-            wire_u8(&w, (uint8_t)e.y);
+            wire_u16(&w, (uint16_t)e.y);
             wire_i32(&w, e.z);
             wire_u8(&w, world_get(m->ctx.w, e.x, e.y, e.z));
             wire_u8(&w, world_get_meta(m->ctx.w, e.x, e.y, e.z));
@@ -880,7 +880,7 @@ static void client_edits(mp *m, wire_r *rd)
 {
     int count = wire_get_u16(rd);
     for (int i = 0; i < count && !rd->bad; i++) {
-        int x = wire_get_i32(rd), y = wire_get_u8(rd), z = wire_get_i32(rd);
+        int x = wire_get_i32(rd), y = wire_get_u16(rd), z = wire_get_i32(rd);
         uint8_t id = wire_get_u8(rd), meta = wire_get_u8(rd);
         if (rd->bad || id >= B_COUNT || meta > 7 || y >= WORLD_H || llabs((long long)x) >= WORLD_LIMIT ||
             llabs((long long)z) >= WORLD_LIMIT) {
@@ -904,7 +904,12 @@ static void client_snapshot(mp *m, wire_r *rd)
     player auth = *m->ctx.pl;
     if (rd->bad || player_decode(&auth, pb, pn) != 0) return;
     int cracking = wire_get_u8(rd);
-    ipos crack = {wire_get_i32(rd), wire_get_u8(rd), wire_get_i32(rd)};
+    /* Separate statements: the order an initializer list is evaluated in
+     * is unspecified, and the reads must happen in wire order. */
+    ipos crack = {0};
+    crack.x = wire_get_i32(rd);
+    crack.y = wire_get_u16(rd);
+    crack.z = wire_get_i32(rd);
     float crack_p = fminf(fmaxf(wire_get_f32(rd), 0.0f), 1.0f);
 
     struct {
