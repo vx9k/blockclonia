@@ -161,9 +161,9 @@ from a job.
   with `mkdtemp`.
 - A bug fix comes with a test that fails without it.
 - A pull request adds at least one line of tests for every line of code
-  it adds. `tools/pr_check.py` (the `Pull request rules` check) counts the
-  added lines that are neither blank nor comments: `tests/` and
-  `tools/tests/` against `src/` and `tools/*.py`. `main.c`, `renderer.c`,
+  it adds. `tools/pr_check.py` (the `Title and 1:1 test ratio` check)
+  counts the added lines that are neither blank nor comments: `tests/`
+  and `tools/tests/` against `src/` and `tools/*.py`. `main.c`, `renderer.c`,
   `audio_device.c` and `shaders/` count for neither side, since only a
   window, GPU or audio device runs them; check those by running the game.
 - The release and pull request tools have Python tests in `tools/tests`
@@ -218,14 +218,20 @@ from a job.
 
   Put any breaking change and anything the reviewer should look at first
   at the top, and link the issue with `Closes #N`.
-- Open the pull request as a draft while work is in progress. Mark it
-  ready when CI passes and the checklist is done. Two checks gate the
-  merge: `CI passed`, which stands for every CI job but the experimental
-  macOS one, and `Pull request rules` (the title and the test ratio).
-- Before review starts you may rebase your own branch on `main` and push
+- Open the pull request ready for review and turn on auto-merge
+  (`gh pr merge --auto --squash`). It lands by itself, squashed under its
+  title, once the two checks the `main` ruleset requires pass:
+  `CI passed`, which stands for every CI job but the experimental macOS
+  one, and `Title and 1:1 test ratio` (from `pr.yml`). Open a draft only
+  for work that is not meant to land yet.
+- The ruleset merges only a branch that holds `main`'s newest commit, so
+  bring a waiting pull request up to date ("Update branch", or rebase).
+  Before review starts you may rebase your own branch on `main` and push
   with `--force-with-lease`. Once review has started, add commits instead
   of rewriting them.
-- The maintainer reviews and merges. Don't merge your own pull request.
+- The maintainer can review a pull request while its checks run, and
+  turns auto-merge off to hold one back. Never merge by hand or around
+  the required checks.
 
 ### Commit messages
 
