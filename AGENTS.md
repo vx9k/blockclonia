@@ -328,8 +328,10 @@ a `fix(security):` commit, or when the weekly release was missed. "Run
 workflow" on the CI workflow releases by hand. Every green push to `main`
 also publishes a `nightly-<date>-<commit>` prerelease and deletes the
 older ones; its packages are versioned `<release>+git.<date>.<commit>`.
-Every nightly has its own tag because a tag an immutable release has used
-can never be used again.
+The repository publishes immutable releases: once published, a release's
+tag and packages can't change, so `tools/release.sh` attaches the packages
+to a draft and publishes it last. Every nightly has its own tag because a
+tag an immutable release has used can never be used again.
 
 So write commit headers for the changelog: `feat` lands under Added, `fix`
 under Fixed, `perf` under Performance, the rest under Maintenance, and a
