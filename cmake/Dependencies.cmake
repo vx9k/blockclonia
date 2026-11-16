@@ -13,7 +13,7 @@
 # autotools, and every platform the game runs on packages it.
 #
 # Provides the interface targets mc::mimalloc, mc::sqlite, mc::enet,
-# mc::upnp, mc::sodium and mc::glfw.
+# mc::upnp, mc::zlibng, mc::sodium and mc::glfw.
 
 include(FetchContent)
 
@@ -37,6 +37,9 @@ set(MC_ENET_SHA256 "28603c895f9ed24a846478180ee72c7376b39b4bb1287b73877e5eae7d96
 set(MC_MINIUPNPC_VERSION 2_3_3 CACHE STRING "miniupnpc release (tag suffix) used when fetching")
 set(MC_MINIUPNPC_SHA256 "8cf2c833b3e76fc4893ff29c2a376e3394962449e5970e373c0a91421724d222"
     CACHE STRING "SHA256 of the miniupnp archive")
+set(MC_ZLIBNG_VERSION 2.3.3 CACHE STRING "zlib-ng release used when fetching")
+set(MC_ZLIBNG_SHA256 "f9c65aa9c852eb8255b636fd9f07ce1c406f061ec19a2e7d508b318ca0c907d1"
+    CACHE STRING "SHA256 of the zlib-ng archive")
 
 if(POLICY CMP0135) # CMake 3.24+: extracted files get the extraction time
   cmake_policy(SET CMP0135 NEW)
@@ -240,6 +243,53 @@ else()
   target_compile_options(mc_enet_impl PRIVATE -w)
   target_link_libraries(mc_enet INTERFACE mc_enet_impl)
   message(STATUS "blockclonia: ENet ${MC_ENET_VERSION} (built from source)")
+endif()
+
+# ---------------------------------------------------------------- zlib-ng
+# Deflate for PNG screenshots (png.c), through zlib-ng's own zng_ API, so
+# it never clashes with a zlib something else links; the API has been
+# stable since 2.0. Arch and Fedora package it, Debian and Ubuntu do not,
+# so AUTO builds the pinned release there. SYSTEM, which never downloads,
+# falls back to the stock zlib instead: the same PNGs, two or three times
+# slower to write. MC_ZLIBNG tells png.c which one it has.
+add_library(mc_zlibng INTERFACE)
+add_library(mc::zlibng ALIAS mc_zlibng)
+if(NOT MC_DEPS STREQUAL "FETCH")
+  find_path(MC_ZLIBNG_INCLUDE_DIR zlib-ng.h)
+  find_library(MC_ZLIBNG_LIBRARY NAMES z-ng)
+endif()
+if(MC_ZLIBNG_INCLUDE_DIR AND MC_ZLIBNG_LIBRARY)
+  target_include_directories(mc_zlibng SYSTEM INTERFACE "${MC_ZLIBNG_INCLUDE_DIR}")
+  target_link_libraries(mc_zlibng INTERFACE "${MC_ZLIBNG_LIBRARY}")
+  target_compile_definitions(mc_zlibng INTERFACE MC_ZLIBNG=1)
+  message(STATUS "blockclonia: zlib-ng ${MC_ZLIBNG_LIBRARY} (system)")
+elseif(MC_DEPS STREQUAL "SYSTEM")
+  find_package(ZLIB REQUIRED)
+  target_link_libraries(mc_zlibng INTERFACE ZLIB::ZLIB)
+  message(STATUS "blockclonia: zlib ${ZLIB_VERSION_STRING} (system; no zlib-ng found)")
+else()
+  # Static, without its tests or install rules (which would end up in the
+  # game's packages). Its SIMD paths are chosen at run time, so the Pi
+  # builds stay safe on any ARM core.
+  function(_mc_fetch_zlibng)
+    set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+    set(BUILD_SHARED_LIBS OFF)
+    set(BUILD_TESTING OFF)
+    set(ZLIB_COMPAT OFF)
+    set(WITH_GZFILEOP OFF)
+    set(WITH_NATIVE_INSTRUCTIONS OFF)
+    set(SKIP_INSTALL_ALL ON)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    _mc_hash_arg(hash "${MC_ZLIBNG_SHA256}")
+    FetchContent_Declare(zlibng
+      URL https://github.com/zlib-ng/zlib-ng/archive/refs/tags/${MC_ZLIBNG_VERSION}.tar.gz
+      ${hash})
+    FetchContent_MakeAvailable(zlibng)
+  endfunction()
+  _mc_fetch_zlibng()
+  target_link_libraries(mc_zlibng INTERFACE zlib-ng)
+  target_compile_definitions(mc_zlibng INTERFACE MC_ZLIBNG=1)
+  message(STATUS "blockclonia: zlib-ng ${MC_ZLIBNG_VERSION} (built from source)")
 endif()
 
 # ---------------------------------------------------------------- miniupnpc

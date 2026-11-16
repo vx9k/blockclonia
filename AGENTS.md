@@ -27,14 +27,14 @@ tools/lint.sh                                      # the CI lint gate; run it be
   or audio needed); the unit tests only link against the core library.
 - Run the game with `./build/dev/blockclonia --play`. Useful flags for
   checking changes: `--validate` (Vulkan validation layers), `--no-save`,
-  `--seed 1337`, `--frames N --screenshot out.ppm`, `--debug` (F3 on),
+  `--seed 1337`, `--frames N --screenshot out.png`, `--debug` (F3 on),
   `--screen settings|pause|inventory|...`, `--give log:8`, `--hurt fracture`,
   `--time 21`, `--no-sound`. `--help` lists all of them.
 - No GPU (CI, containers): `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`
   selects Mesa's software rasterizer; under a headless session wrap the
   command in `xvfb-run -a`.
 - Offline: point `FETCHCONTENT_SOURCE_DIR_MIMALLOC`, `..._GLFW`,
-  `..._MINIAUDIO` and `..._SQLITE` at an existing `build/*/_deps/*-src`
+  `..._MINIAUDIO`, `..._SQLITE` and `..._ZLIBNG` at an existing `build/*/_deps/*-src`
   checkout.
 - The toolchain is LLVM only: clang, lld and LLVM's binutils, picked by
   `cmake/toolchains/llvm.cmake` with or without a preset. gcc is refused

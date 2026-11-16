@@ -62,7 +62,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang lld llvm \
-            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev libminiupnpc-dev \
+            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev libminiupnpc-dev zlib1g-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
           # BOLT and clang's profile runtime (for PGO) come per LLVM version
           # (bolt-21 and libclang-rt-21-dev for clang 21).
@@ -86,7 +86,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang lld llvm \
-            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev libminiupnpc-dev \
+            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev libminiupnpc-dev zlib1g-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
       - run: cmake --preset ci
       - run: cmake --build --preset ci

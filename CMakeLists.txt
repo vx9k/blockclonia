@@ -174,6 +174,7 @@ set(MC_CORE_SOURCES
   src/os.c
   src/paths.c
   src/physics.c
+  src/png.c
   src/save.c
   src/save_db.c
   src/settings.c
@@ -203,7 +204,7 @@ endif()
 function(mc_add_core name)
   add_library(${name} STATIC ${MC_CORE_SOURCES})
   target_include_directories(${name} PUBLIC src)
-  target_link_libraries(${name} PUBLIC Threads::Threads mc::sqlite mc::sodium mc::enet mc::upnp PRIVATE mc_warnings)
+  target_link_libraries(${name} PUBLIC Threads::Threads mc::sqlite mc::sodium mc::enet mc::upnp mc::zlibng PRIVATE mc_warnings)
   if(MC_MEM_LIBC)
     target_compile_definitions(${name} PUBLIC MC_MEM_LIBC)
   else()
@@ -259,7 +260,7 @@ if(MC_BUILD_TESTS)
                           tests/test_discord.c tests/test_netcrypto.c tests/test_wire.c tests/test_net.c tests/test_mp.c
                           tests/test_worldgen.c tests/test_edge.c tests/test_tools.c
                           tests/test_combat.c tests/test_invui.c
-                          tests/test_body_risks.c)
+                          tests/test_body_risks.c tests/test_png.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)
   # Under qemu user emulation (cross builds) the suite runs several times

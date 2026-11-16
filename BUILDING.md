@@ -32,13 +32,15 @@ lavapipe, slowly (see [No GPU](#no-gpu)).
 - the Vulkan headers and loader, and `glslc` (from shaderc) to compile
   the shaders;
 - libsodium 1.0.18 or newer (multiplayer encryption);
-- GLFW 3.5, mimalloc 3.5, miniaudio 0.11, SQLite 3.31 and ENet 1.3 or
-  newer.
+- GLFW 3.5, mimalloc 3.5, miniaudio 0.11, SQLite 3.31, ENet 1.3 and
+  zlib-ng 2.0 (PNG screenshots) or newer.
 
-You don't have to install the last five yourself: when a system copy is
+You don't have to install the last six yourself: when a system copy is
 missing or older than the build wants, the build downloads and compiles
 a pinned release (GLFW 3.5.1, mimalloc 3.5.3, miniaudio 0.11.25, SQLite
-3.53.4, ENet 1.3.18). See [Dependencies](#dependencies) to control that.
+3.53.4, ENet 1.3.18, zlib-ng 2.3.3). Debian and Ubuntu don't package
+zlib-ng, so there it is always built. See [Dependencies](#dependencies)
+to control that.
 
 ## Linux
 
@@ -70,7 +72,7 @@ Arch packages are recent enough that nothing has to be downloaded:
 
 ```sh
 sudo pacman -S --needed clang lld llvm cmake ninja shaderc vulkan-icd-loader \
-                        vulkan-headers glfw mimalloc sqlite miniaudio libsodium enet miniupnpc
+                        vulkan-headers glfw mimalloc sqlite miniaudio libsodium enet miniupnpc zlib-ng
 cmake --preset native
 cmake --build --preset native
 ./build/native/blockclonia
@@ -173,24 +175,26 @@ BOLT, which has no 32-bit ARM support.
 
 ## Dependencies
 
-`MC_DEPS` decides where GLFW, mimalloc, miniaudio, SQLite, ENet and miniupnpc come from:
+`MC_DEPS` decides where GLFW, mimalloc, miniaudio, SQLite, ENet, miniupnpc and zlib-ng come from:
 
 - `AUTO` (the default) uses the system's copy when it is new enough and
   downloads the pinned release otherwise. On macOS it always builds the
   pinned SQLite: Apple's own libsqlite3 is a modified build that cannot
   read worlds the way the game needs.
 - `SYSTEM` never downloads. It also accepts GLFW 3.3 and mimalloc 2.1,
-  for distribution packages, and builds a silent game when miniaudio is
-  missing.
+  for distribution packages, builds a silent game when miniaudio is
+  missing, and writes screenshots with the stock zlib (the same PNGs,
+  two or three times slower) when zlib-ng is.
 - `FETCH` always uses the pinned releases.
 
 For a reproducible build, set `MC_MIMALLOC_SHA256`, `MC_GLFW_SHA256`,
-`MC_MINIAUDIO_SHA256`, `MC_SQLITE_SHA256` and `MC_ENET_SHA256`; see
+`MC_MINIAUDIO_SHA256`, `MC_SQLITE_SHA256` and `MC_ENET_SHA256`
+(`MC_ZLIBNG_SHA256` is set already); see
 [SECURITY.md](SECURITY.md#supply-chain). `MC_SQLITE_VERSION` and
 `MC_SQLITE_YEAR` select a different pinned SQLite release.
 
 **Offline:** point `FETCHCONTENT_SOURCE_DIR_MIMALLOC`, `..._GLFW`,
-`..._MINIAUDIO` and `..._SQLITE` at the `_deps/*-src` folders of an
+`..._MINIAUDIO`, `..._SQLITE` and `..._ZLIBNG` at the `_deps/*-src` folders of an
 earlier build, e.g.
 `-DFETCHCONTENT_SOURCE_DIR_GLFW=$PWD/build/native/_deps/glfw-src`.
 

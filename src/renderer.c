@@ -5,6 +5,7 @@
 #include "mem.h"
 #include "mesher.h"
 #include "paths.h"
+#include "png.h"
 #include "save.h"
 #include "texgen.h"
 
@@ -2186,19 +2187,13 @@ int renderer_begin_frame(renderer *r)
     return 1;
 }
 
-/* Written whole through save_write_file: mode 0644 whatever the umask
- * (fopen asks for 0666), no symlink followed, and no half-written file if
- * the game dies mid-write. */
+/* A PNG, written whole through save_write_file: mode 0644 whatever the
+ * umask (fopen asks for 0666), no symlink followed, and no half-written
+ * file if the game dies mid-write. */
 static void write_screenshot(renderer *r, const gbuf *b)
 {
     uint32_t w = r->extent.width, h = r->extent.height;
-    char head[32] = {0};
-    int hn = snprintf(head, sizeof head, "P6\n%u %u\n255\n", w, h);
-    if (hn <= 0 || (size_t)hn >= sizeof head) return;
-    size_t len = (size_t)hn + mem_array_size((size_t)w * h, 3);
-    uint8_t *out = mem_alloc(len);
-    memcpy(out, head, (size_t)hn);
-    uint8_t *o = out + hn;
+    uint8_t *rgb = mem_alloc(mem_array_size((size_t)w * h, 3)), *o = rgb;
     const uint8_t *px = b->map;
     int bgr = r->swap_fmt == VK_FORMAT_B8G8R8A8_SRGB || r->swap_fmt == VK_FORMAT_B8G8R8A8_UNORM;
     for (size_t i = 0; i < (size_t)w * h; i++, o += 3) {
@@ -2207,7 +2202,10 @@ static void write_screenshot(renderer *r, const gbuf *b)
         o[1] = p[1];
         o[2] = bgr ? p[0] : p[2];
     }
-    int ok = save_write_file(r->shot_path, out, len) == 0;
+    uint8_t *out = NULL;
+    size_t len = png_encode(rgb, w, h, &out);
+    mem_free(rgb);
+    int ok = len > 0 && save_write_file(r->shot_path, out, len) == 0;
     mem_free(out);
     if (ok) log_info("screenshot saved to %s", r->shot_path);
     else log_error("writing screenshot %s failed", r->shot_path);
