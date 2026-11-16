@@ -8,11 +8,12 @@
 #define MC_VIEWMODEL_H
 
 #include "entity.h"
+#include "item.h"
 
 #define VIEWMODEL_MAX 8
 
 typedef struct {
-    int held_id;          /* item in hand, 0 for the bare hand */
+    item_id held_id;      /* item in hand, 0 for the bare hand */
     float swing;          /* interact.swing: 1 right after an action, easing to 0 */
     int swinging;         /* the attack button is held on a block (repeat swings) */
     float stride;         /* camera_anim.stride: step phase, radians */
@@ -26,7 +27,7 @@ typedef struct {
 
 typedef struct {
     float equip;          /* 0 lowered .. 1 raised */
-    int shown_id;         /* the item drawn (changes while lowered) */
+    item_id shown_id;     /* the item drawn (changes while lowered) */
     float lag_x, lag_y;   /* smoothed mouse lag */
     float swing_t;        /* 0..1 progress of the current swing */
     float time;

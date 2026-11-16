@@ -21,8 +21,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     inventory inv = {0};
     double day = 0.0;
     memset(&p, 0, sizeof p);
-    /* The current formats round-trip byte for byte; the older ones (INV1,
-     * player version 1) are read and written back as the current. */
+    /* The formats round-trip byte for byte. */
     if (survival_decode_player(&p, &inv, &day, data, size) == 0 && size == PLAYER_FILE_SIZE &&
         (survival_encode_player(&p, &inv, day, out, sizeof out) != size || memcmp(out, data, size) != 0))
         abort();

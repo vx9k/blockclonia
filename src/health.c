@@ -940,9 +940,9 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
     }
     case TREAT_EAT: {
         /* The food in hand, else the best there is. */
-        static const int PREF[] = {I_COOKED_MEAT, I_APPLE, I_RAW_MEAT};
+        static const item_id PREF[] = {I_COOKED_MEAT, I_APPLE, I_RAW_MEAT};
         const item_stack *held = inv_held(inv);
-        int food = held->count && item_food(held->id, NULL) > 0.0f ? held->id : 0;
+        item_id food = held->count && item_food(held->id, NULL) > 0.0f ? held->id : 0;
         for (size_t k = 0; !food && k < sizeof PREF / sizeof PREF[0]; k++)
             if (inv_count(inv, PREF[k]) > 0) food = PREF[k];
         if (!food) {

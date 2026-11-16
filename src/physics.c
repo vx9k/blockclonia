@@ -919,27 +919,32 @@ void physics_on_column_unload(void *user, const column *c) { physics_settle_bodi
 
 /* ---------------------------------------------------------------- items */
 
-static double item_density(int id)
+static double item_density(item_id id)
 { return item_is_block(id) ? (double)block_get((uint8_t)id)->density : (double)item_get(id)->density; }
 
-static double item_restitution(int id) { return item_is_block(id) ? (double)block_get((uint8_t)id)->restitution : 0.3; }
+static double item_restitution(item_id id)
+{
+    if (!item_is_block(id)) return 0.3;
+    return (double)block_get((uint8_t)id)->restitution;
+}
 
-int physics_drop_item(physics *ph, dvec3 pos, dvec3 vel, int id, int count, float delay)
+int physics_drop_item(physics *ph, dvec3 pos, dvec3 vel, item_id id, int count, float delay)
 {
     if (!item_valid(id) || count <= 0) return 1;
-    return physics_drop_stack(ph, pos, vel, (item_stack){(uint8_t)id, (uint8_t)(count > 255 ? 255 : count), 0}, delay);
+    return physics_drop_stack(ph, pos, vel, (item_stack){id, (uint8_t)(count > 255 ? 255 : count), 0}, delay);
 }
 
 int physics_drop_stack(physics *ph, dvec3 pos, dvec3 vel, item_stack s, float delay)
 {
-    int id = s.id, count = s.count;
+    item_id id = s.id;
+    int count = s.count;
     if (!item_valid(id) || count <= 0) return 1;
     if (ph->item_count >= MAX_ITEMS) return 0;
     item_ent *it = &ph->items[ph->item_count++];
     memset(it, 0, sizeof *it);
     it->pos = it->prev_pos = pos;
     it->vel = vel;
-    it->id = (uint8_t)id;
+    it->id = id;
     it->count = (uint8_t)count;
     it->wear = s.wear;
     it->delay = delay;

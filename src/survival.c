@@ -175,7 +175,7 @@ static float get32f(const uint8_t *p)
     return v;
 }
 
-/* "MCPL", u8 version (2; 1 held an INV1 inventory), 3 reserved, x y z (f64), yaw pitch (f32), u8
+/* "MCPL", u8 version (3, with an INV3 inventory), 3 reserved, x y z (f64), yaw pitch (f32), u8
  * flying, 1 reserved, u16 time of day (1/65536 day), then the inventory
  * block. */
 size_t survival_encode_player(const player *p, const inventory *inv, double day, uint8_t *out, size_t cap)
@@ -184,7 +184,7 @@ size_t survival_encode_player(const player *p, const inventory *inv, double day,
     static const uint8_t MAGIC[4] = {'M', 'C', 'P', 'L'};
     memset(out, 0, PLAYER_FILE_SIZE);
     memcpy(out, MAGIC, sizeof MAGIC);
-    out[4] = 2;
+    out[4] = 3;
     put64(out + 8, p->pos.x);
     put64(out + 16, p->pos.y);
     put64(out + 24, p->pos.z);
@@ -202,7 +202,7 @@ size_t survival_encode_player(const player *p, const inventory *inv, double day,
 int survival_decode_player(player *p, inventory *inv, double *day, const uint8_t *in, size_t len)
 {
     /* Reserved bytes are zero in every file written. */
-    int ok_len = (in && len == PLAYER_FILE_SIZE && in[4] == 2) || (in && len == PLAYER_FILE_SIZE_V1 && in[4] == 1);
+    int ok_len = in && len == PLAYER_FILE_SIZE && in[4] == 3;
     if (!ok_len || memcmp(in, "MCPL", 4) != 0 || in[5] || in[6] || in[7] || in[40] > 1 || in[41]) return -1;
     double x = get64(in + 8), y = get64(in + 16), z = get64(in + 24);
     float yaw = get32f(in + 32), pitch = get32f(in + 36);

@@ -135,22 +135,19 @@ static const item_def ITEMS[I_TOOL_FIRST - ITEM_FIRST] = {
                                    .tex = T_ITEM_ADRENALINE,
                                    .desc = "0.3 mg. For a stopped heart (H, then N); risky on a beating one.",
                                    .density = 1100.0f},
-};
-
-static const item_def LATER[ITEM_END - I_TOOL_END] = {
-    [I_MORPHINE - I_TOOL_END] = {.name = "Morphine",
+    [I_MORPHINE - ITEM_FIRST] = {.name = "Morphine",
                                  .stack = 16,
                                  .block = B_AIR,
                                  .tex = T_ITEM_MORPHINE,
                                  .desc = "10 mg. Strong pain relief (H, then M). Slows breathing.",
                                  .density = 1200.0f},
-    [I_NALOXONE - I_TOOL_END] = {.name = "Naloxone spray",
+    [I_NALOXONE - ITEM_FIRST] = {.name = "Naloxone spray",
                                  .stack = 4,
                                  .block = B_AIR,
                                  .tex = T_ITEM_NALOXONE,
                                  .desc = "Reverses opioids for about an hour (H, then O).",
                                  .density = 1000.0f},
-    [I_SPIRITS - I_TOOL_END] = {.name = "Spirits",
+    [I_SPIRITS - ITEM_FIRST] = {.name = "Spirits",
                                 .stack = 8,
                                 .block = B_AIR,
                                 .tex = T_ITEM_SPIRITS,
@@ -193,7 +190,7 @@ static void build_tools(void)
         }
 }
 
-float item_food(int id, float *water)
+float item_food(item_id id, float *water)
 {
     /* A 180 g apple, and about 150 g of pork: cooking drives off water
      * but makes more of the energy digestible. */
@@ -217,7 +214,7 @@ float item_food(int id, float *water)
     return kcal;
 }
 
-int item_durability(int id)
+int item_durability(item_id id)
 {
     int kind = 0, tier = 0;
     if (id == I_RIFLE) return 250; /* shots before the barrel is shot out (wear is a byte) */
@@ -249,14 +246,14 @@ static int pick_tier(uint8_t block)
     return block_tool(block) == TOOL_PICKAXE && block_get(block)->mat == BM_STONE ? TIER_WOOD : -1;
 }
 
-int item_harvests(int held, uint8_t block)
+int item_harvests(item_id held, uint8_t block)
 {
     int need = pick_tier(block), kind = 0, tier = 0;
     if (need < 0) return 1;
     return item_tool(held, &kind, &tier) && kind == TOOL_PICKAXE && tier >= need;
 }
 
-float item_dig_speed(int held, uint8_t block)
+float item_dig_speed(item_id held, uint8_t block)
 {
     int kind = 0, tier = 0;
     if (item_tool(held, &kind, &tier) && kind == block_tool(block)) return TIER_SPEED[tier];
@@ -265,7 +262,7 @@ float item_dig_speed(int held, uint8_t block)
     return pick_tier(block) >= 0 ? 1.0f / 3.0f : 1.0f;
 }
 
-int item_valid(int id)
+int item_valid(item_id id)
 {
     /* Rock and ore only exist in place: breaking them gives stone, coal or
      * raw metal, so they never become building blocks. */
@@ -275,7 +272,7 @@ int item_valid(int id)
     return id >= ITEM_FIRST && id < ITEM_END;
 }
 
-const item_def *item_get(int id)
+const item_def *item_get(item_id id)
 {
     static item_def blocks[B_COUNT];
     static int built;
@@ -300,7 +297,6 @@ const item_def *item_get(int id)
     }
     if (item_is_block(id) && id < B_COUNT) return &blocks[id];
     if (id >= I_TOOL_FIRST && id < I_TOOL_END) return &g_tools[id - I_TOOL_FIRST];
-    if (id >= I_TOOL_END && id < ITEM_END) return &LATER[id - I_TOOL_END];
     if (id >= ITEM_FIRST && id < I_TOOL_FIRST) return &ITEMS[id - ITEM_FIRST];
     return &UNKNOWN;
 }

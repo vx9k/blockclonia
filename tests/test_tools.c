@@ -12,8 +12,8 @@
 
 static void test_rules(void)
 {
-    int wood_pick = item_tool_id(TOOL_PICKAXE, TIER_WOOD), iron_pick = item_tool_id(TOOL_PICKAXE, TIER_IRON);
-    int stone_pick = item_tool_id(TOOL_PICKAXE, TIER_STONE), axe = item_tool_id(TOOL_AXE, TIER_STONE);
+    item_id wood_pick = item_tool_id(TOOL_PICKAXE, TIER_WOOD), iron_pick = item_tool_id(TOOL_PICKAXE, TIER_IRON);
+    item_id stone_pick = item_tool_id(TOOL_PICKAXE, TIER_STONE), axe = item_tool_id(TOOL_AXE, TIER_STONE);
     int kind = 0, tier = 0;
     CHECK(item_tool(iron_pick, &kind, &tier) && kind == TOOL_PICKAXE && tier == TIER_IRON);
     CHECK(!item_tool(I_APPLE, &kind, &tier) && !item_durability(I_APPLE) && !item_durability(B_STONE));
@@ -42,7 +42,8 @@ static void test_rules(void)
 
 static void test_wear(void)
 {
-    int pick = item_tool_id(TOOL_PICKAXE, TIER_WOOD), uses = item_durability(pick);
+    item_id pick = item_tool_id(TOOL_PICKAXE, TIER_WOOD);
+    int uses = item_durability(pick);
     inventory inv = {0};
     inv_init(&inv);
     inv_add(&inv, pick, 1);
@@ -55,7 +56,7 @@ static void test_wear(void)
 
     /* Moving a worn tool never mends it: pick up, put down, split, place one. */
     inv_init(&inv);
-    inv_add_stack(&inv, (item_stack){(uint8_t)pick, 1, 20});
+    inv_add_stack(&inv, (item_stack){pick, 1, 20});
     CHECK(inv.slot[0].wear == 20);
     inv_click(&inv, 0, 0, 0);
     inv_click(&inv, 5, 0, 0);
@@ -72,58 +73,56 @@ static void test_wear(void)
     /* Dropped and picked up again, it keeps its wear. */
     test_world t = {0};
     tw_init(&t);
-    CHECK(
-        physics_drop_stack(&t.ph, dv3(5.5, GROUND + 0.5, 5.5), dv3(0, 0, 0), (item_stack){(uint8_t)pick, 1, 33}, 0.0f));
+    CHECK(physics_drop_stack(&t.ph, dv3(5.5, GROUND + 0.5, 5.5), dv3(0, 0, 0), (item_stack){pick, 1, 33}, 0.0f));
     CHECK(t.ph.item_count == 1 && t.ph.items[0].wear == 33);
     inventory got = {0};
     inv_init(&got);
-    CHECK(inv_accept(&got, (item_stack){(uint8_t)pick, 1, 33}) == 1 && got.slot[0].wear == 33);
+    CHECK(inv_accept(&got, (item_stack){pick, 1, 33}) == 1 && got.slot[0].wear == 33);
     tw_free(&t);
 }
 
 static void test_formats(void)
 {
-    int pick = item_tool_id(TOOL_PICKAXE, TIER_STONE);
+    item_id pick = item_tool_id(TOOL_PICKAXE, TIER_STONE);
     inventory inv = {0};
     inv_init(&inv);
     inv_add(&inv, B_LOG, 5);
-    inv_add_stack(&inv, (item_stack){(uint8_t)pick, 1, 40});
+    inv_add_stack(&inv, (item_stack){pick, 1, 40});
     uint8_t buf[INV_ENCODED_SIZE] = {0};
-    CHECK(inv_encode(&inv, buf, sizeof buf) == INV_ENCODED_SIZE && !memcmp(buf, "INV2", 4));
+    CHECK(inv_encode(&inv, buf, sizeof buf) == INV_ENCODED_SIZE && !memcmp(buf, "INV3", 4));
+    /* Slot 0 is (u32 id little-endian, count, wear); every item id is past
+     * the 255 one byte held, so slot 1 shows all four bytes in use. */
+    CHECK(buf[8] == B_LOG && !buf[9] && !buf[10] && !buf[11] && buf[12] == 5 && !buf[13]);
+    CHECK(pick > 255 && buf[14] == (uint8_t)pick && buf[15] == (uint8_t)(pick >> 8) && !buf[16] && !buf[17]);
     inventory back = {0};
     CHECK(inv_decode(&back, buf, sizeof buf) == 0 && back.slot[1].id == pick && back.slot[1].wear == 40);
+    CHECK(inv_count(&back, B_LOG) == 5 && inv_count(&back, pick) == 1);
     /* Wear on something that does not wear, or past worn out, is refused. */
-    buf[8 + 2] = 1;
+    buf[8 + 5] = 1;
     CHECK(inv_decode(&back, buf, sizeof buf) == -1);
     inv_encode(&inv, buf, sizeof buf);
-    buf[8 + 3 + 2] = (uint8_t)item_durability(pick);
+    buf[14 + 5] = (uint8_t)item_durability(pick);
     CHECK(inv_decode(&back, buf, sizeof buf) == -1);
+    /* An id in the high bytes that names no item is refused. */
+    inv_encode(&inv, buf, sizeof buf);
+    buf[14 + 3] = 1;
+    CHECK(inv_decode(&back, buf, sizeof buf) == -1);
+    /* Older layouts are not read: no compatibility kept before release. */
+    inv_encode(&inv, buf, sizeof buf);
+    buf[3] = '2';
+    CHECK(inv_decode(&back, buf, sizeof buf) == -1);
+    CHECK(inv_decode(&back, buf, sizeof buf - 1) == -1);
 
-    /* An INV1 inventory from an older build still loads, without wear. */
-    uint8_t v1[INV1_ENCODED_SIZE] = {'I', 'N', 'V', '1', 2, 0, 0, 0};
-    v1[8] = B_LOG;
-    v1[9] = 5;
-    v1[8 + 2 * 36] = I_APPLE; /* the cursor */
-    v1[8 + 2 * 36 + 1] = 2;
-    CHECK(inv_decode(&back, v1, sizeof v1) == 0 && back.selected == 2 && inv_count(&back, B_LOG) == 5 &&
-          back.cursor.id == I_APPLE && back.cursor.count == 2);
-    CHECK(inv_decode(&back, v1, sizeof v1 - 1) == -1);
-
-    /* A version 1 player record (INV1 inside) still loads; version 2 is
-     * what is written now. */
+    /* The player record is version 3, with an INV3 inventory inside. */
     player p = {0};
     p.pos = dv3(10.5, 70.0, -3.5);
     uint8_t pf[PLAYER_FILE_SIZE] = {0};
-    CHECK(survival_encode_player(&p, &inv, 0.5, pf, sizeof pf) == PLAYER_FILE_SIZE && pf[4] == 2);
-    uint8_t old[PLAYER_FILE_SIZE_V1] = {0};
-    memcpy(old, pf, 44);
-    old[4] = 1;
-    memcpy(old + 44, v1, sizeof v1);
+    CHECK(survival_encode_player(&p, &inv, 0.5, pf, sizeof pf) == PLAYER_FILE_SIZE && pf[4] == 3);
     player q = {0};
     inventory qi = {0};
-    CHECK(survival_decode_player(&q, &qi, NULL, old, sizeof old) == 0 && q.pos.x == 10.5 && inv_count(&qi, B_LOG) == 5);
-    old[4] = 2; /* a version that does not match its length */
-    CHECK(survival_decode_player(&q, &qi, NULL, old, sizeof old) == -1);
+    CHECK(survival_decode_player(&q, &qi, NULL, pf, sizeof pf) == 0 && q.pos.x == 10.5 && inv_count(&qi, pick) == 1);
+    pf[4] = 2;
+    CHECK(survival_decode_player(&q, &qi, NULL, pf, sizeof pf) == -1);
 }
 
 /* Breaking rock: slow and fruitless by hand, faster with a pickaxe, which
@@ -150,7 +149,7 @@ static void test_breaking(void)
         interact_frame(&ia, &t.w, &t.ph, NULL, &pl, &inv, fx, pl.pos, dir, hit, &in);
     CHECK(world_get(&t.w, 4, GROUND, 4) == B_AIR && t.ph.item_count == 0); /* nothing to show for it */
 
-    int pick = item_tool_id(TOOL_PICKAXE, TIER_IRON);
+    item_id pick = item_tool_id(TOOL_PICKAXE, TIER_IRON);
     inv_add(&inv, pick, 1);
     hit.block = (ipos){6, GROUND, 4};
     hit.before = (ipos){6, GROUND, 3};

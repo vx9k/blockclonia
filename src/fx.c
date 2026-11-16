@@ -189,8 +189,9 @@ void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *cra
                 put_trans(&l, cube_at(pk, eye, same_tex(item_get(it->id)->tex), q, 0.32f, 0.32f, 0.02f, 1.1f));
                 continue;
             }
-            entity_instance e = cube_at(pk, eye, block_tex(it->id), q, 0.25f, 0.25f, 0.25f, 1.0f);
-            if (block_get(it->id)->flags & BF_TRANSLUCENT) put_trans(&l, e);
+            uint8_t b = (uint8_t)it->id; /* a block item's id is its block */
+            entity_instance e = cube_at(pk, eye, block_tex(b), q, 0.25f, 0.25f, 0.25f, 1.0f);
+            if (block_get(b)->flags & BF_TRANSLUCENT) put_trans(&l, e);
             else put_opaque(&l, e);
         }
     }

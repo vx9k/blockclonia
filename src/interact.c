@@ -21,7 +21,7 @@ static float frand(interact *s)
 int interact_box_hits_cell(aabb b, int x, int y, int z)
 { return b.min.x < x + 1 && b.max.x > x && b.min.y < y + 1 && b.max.y > y && b.min.z < z + 1 && b.max.z > z; }
 
-static void spill_drops(interact *s, physics *ph, uint8_t block, int held, ipos at)
+static void spill_drops(interact *s, physics *ph, uint8_t block, item_id held, ipos at)
 {
     item_stack drops[3] = {0};
     int n = item_harvests(held, block) ? item_drops(block, &s->rng, drops) : 0;
@@ -66,7 +66,7 @@ static void do_break(interact *s, world *w, physics *ph, const player *pl, inven
         o->broke = 1;
         o->broken_id = id;
         if (held->count && item_durability(held->id)) {
-            int was = held->id;
+            item_id was = held->id;
             if (inv_wear_held(inv, 1)) {
                 o->tool_broke = was;
                 o->msg = "Your tool wore out";
@@ -79,7 +79,7 @@ static void do_break(interact *s, world *w, physics *ph, const player *pl, inven
 }
 
 /* Fuel units a campfire gets from an item: a stick 1, planks 2, a log 4. */
-static int fuel_units(int id)
+static int fuel_units(item_id id)
 {
     switch (id) {
     case I_STICK: return 1;
@@ -166,7 +166,7 @@ static void use_item(interact *s, world *w, const physics *ph, thermo *th, const
 
 static void pick(inventory *inv, const player *pl, uint8_t id)
 {
-    int want = id;
+    item_id want = id;
     if (!item_valid(want)) return;
     for (int i = 0; i < INV_HOTBAR; i++)
         if (inv->slot[i].count && inv->slot[i].id == want) {
@@ -245,7 +245,7 @@ interact_out interact_frame(interact *s, world *w, physics *ph, thermo *th, cons
             dvec3 v = dv3(pl->vel.x + (double)dir.x * 4.5, pl->vel.y + (double)dir.y * 4.5 + 1.0,
                           pl->vel.z + (double)dir.z * 4.5);
             if (physics_drop_stack(ph, p, v, (item_stack){held->id, (uint8_t)n, held->wear}, 1.2f)) {
-                emit(&o, IE_DROP, item_is_block(held->id) ? held->id : 0, p);
+                emit(&o, IE_DROP, item_is_block(held->id) ? (uint8_t)held->id : 0, p);
                 inv_use_held(inv, n);
             }
             s->swing = 1.0f;

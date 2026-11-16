@@ -43,7 +43,7 @@ typedef struct {
     int struck;          /* a blow landed (on a mob or a player) */
     int fired;           /* a shot went off */
     int killed;          /* a mob died this frame */
-    int tool_broke;      /* item id that wore out, else 0 */
+    item_id tool_broke;  /* item id that wore out, else 0 */
     dvec3 at;            /* where a blow landed or the shot left */
     const char *msg;     /* feedback, or NULL */
 } combat_out;
@@ -69,6 +69,6 @@ int combat_step(combat *c, mobs *ms, physics *ph, const combat_targets *t);
 int combat_creatures(combat *c, mobs *ms, physics *ph, const combat_targets *t, float daylight);
 
 /* The damage a blow does with this item in hand (hit points; a fist is 1). */
-float combat_blow(int held);
+float combat_blow(item_id held);
 
 #endif

@@ -134,7 +134,8 @@ typedef struct {
     float age;                    /* s since dropped */
     float delay;                  /* s before it can be picked up */
     float spin;                   /* radians, for drawing */
-    uint8_t id, count;
+    item_id id;
+    uint8_t count;
     uint8_t wear;                 /* a tool keeps its wear on the ground */
     uint8_t on_ground;
     uint8_t touching;             /* reached a player this step: their index + 1 */
@@ -232,7 +233,7 @@ void physics_fluid_tick(physics *ph);
 /* Drops an item stack at pos (centre) with an initial velocity. delay is
  * how long before it can be picked up (a thrown item flies clear first).
  * Returns 0 if there is no room for more items. */
-int physics_drop_item(physics *ph, dvec3 pos, dvec3 vel, int id, int count, float delay);
+int physics_drop_item(physics *ph, dvec3 pos, dvec3 vel, item_id id, int count, float delay);
 /* physics_drop_item for a stack that may carry wear (a used tool). */
 int physics_drop_stack(physics *ph, dvec3 pos, dvec3 vel, item_stack s, float delay);
 /* Hands items that reached player `who` (an index into the last step's

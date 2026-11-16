@@ -13,14 +13,15 @@ typedef struct {
     float open_t;        /* s since the screen opened */
     float sel_x;         /* animated hotbar highlight, slot units */
     float name_age;      /* s since the item in hand changed */
-    int last_sel, last_id;
+    int last_sel;
+    item_id last_id;
     float pop[INV_SLOTS];/* per-slot pulse when a stack grows (pickup) */
     int recipe_top;      /* first crafting row shown (the list scrolls) */
     uint32_t cat_open;   /* bit per recipe category: expanded */
     int only_craftable;  /* hide recipes that cannot be made right now */
     int opened;          /* shown once already (the defaults are applied) */
     uint8_t last_count[INV_SLOTS];
-    uint8_t last_slot_id[INV_SLOTS];
+    item_id last_slot_id[INV_SLOTS];
 } invui;
 
 typedef struct {
@@ -45,7 +46,7 @@ typedef struct {
 void invui_init(invui *s);
 
 /* One item icon, size x size logical pixels (16 is native). */
-void invui_icon(ui *u, int id, float x, float y, float size, float alpha);
+void invui_icon(ui *u, item_id id, float x, float y, float size, float alpha);
 
 /* The hotbar, the held item's name after switching, and pickup pulses. */
 void invui_hotbar(ui *u, invui *s, const inventory *inv, float dt);
