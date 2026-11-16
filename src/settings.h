@@ -26,6 +26,7 @@ typedef struct {
     int volume_body;      /* percent: heartbeat and laboured breathing */
     int mute_unfocused;   /* silence while the window is in the background */
     int discord;          /* show what the player is doing as their Discord status */
+    int inner_voice;      /* thoughts and body sensations on the HUD */
 } settings;
 
 #define SETTINGS_FOV_MIN 50

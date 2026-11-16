@@ -2368,6 +2368,7 @@ static int draw_overlay(game *g, double dt, double alpha)
     hs->debug = g_in.debug;
     hs->inv = &g->inv;
     hs->hide_hints = !g->st.show_hints;
+    hs->hide_thoughts = !g->st.inner_voice;
     hs->chat = g->mp != NULL;
     hud_update(hs, &g->hl, g->in_menu ? 0.0f : (float)dt);
     float mx = 0.0f, my = 0.0f;

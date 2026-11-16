@@ -357,6 +357,23 @@ void hud_update(hud_state *s, const health *h, float dt)
         if (a->live || a->alpha > 0.0f) s->alerts[s->alert_count++] = *a;
     }
     s->animated = 1;
+    if (dt > 0.0f) thoughts_step(&s->voice, h, dt);
+}
+
+/* The inner voice, above the hotbar: thoughts in quotes, what the body
+ * feels in a cooler, plainer colour. */
+static void draw_thought(ui *u, const hud_state *s, float y)
+{
+    float a = thoughts_alpha(&s->voice);
+    if (s->hide_thoughts || a <= 0.0f) return;
+    char buf[THOUGHT_LEN + 2] = {0};
+    const thought *t = &s->voice.now;
+    if (t->voice == VOICE_INNER) snprintf(buf, sizeof buf, "\"%s\"", t->text);
+    else snprintf(buf, sizeof buf, "%s", t->text);
+    uint32_t col = t->voice == VOICE_INNER ? ui_rgba(255, 244, 220, 255) : ui_rgba(175, 200, 225, 255);
+    float w = ui_text_width(buf, 1);
+    ui_rect(u, (u->w - w) * 0.5f - 4, y - 2, w + 8, 12, ui_rgba(0, 0, 0, (int)(90.0f * a)));
+    ui_text_shadow(u, (u->w - w) * 0.5f, y, 1, ui_alpha(col, a), buf);
 }
 
 /* Heart rate, pressure, SpO2, a live ECG strip, the four needs bars, and
@@ -458,6 +475,7 @@ static void hud(ui *u, const health *h, const hud_state *s)
 
     /* The hotbar owns the bottom 28 px. */
     float by = u->h - 14;
+    draw_thought(u, s, by - 58);
     if (s->held) ui_text(u, (u->w - ui_text_width(s->held, 1)) * 0.5f, by - 30, 1, C_TEXT, s->held);
     if (s->flying) {
         const char *t = "Flying: no injuries, instant building";

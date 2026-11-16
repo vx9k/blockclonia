@@ -11,6 +11,7 @@
 #define MC_HUD_H
 
 #include "health.h"
+#include "thoughts.h"
 #include "ui.h"
 
 #define HUD_ALERTS 12
@@ -35,6 +36,8 @@ typedef struct {
     int debug;              /* F3 overlay is up: keep clear of its left column */
     const inventory *inv;   /* supplies for the panel, and the hotbar */
     int hide_hints;         /* the key hints setting is off */
+    int hide_thoughts;      /* the inner voice setting is off */
+    thoughts voice;         /* the inner voice, stepped by hud_update */
     int chat;               /* in a multiplayer game: T opens the chat */
     /* The panel takes the mouse: where it is and a click this frame in,
      * what was clicked out (-1 for nothing). */
@@ -47,7 +50,8 @@ typedef struct {
     int animated;           /* hud_update has run: draw the animated list */
 } hud_state;
 
-/* Advances the alert animation by dt seconds of real time. */
+/* Advances the alert animation and the inner voice by dt seconds of real
+ * time. */
 void hud_update(hud_state *s, const health *h, float dt);
 
 /* The HUD, plus the H panel or the death screen when they are showing. */
