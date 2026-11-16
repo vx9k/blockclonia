@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # blockclonia lint gate: warnings-as-errors builds (clang + gcc), unit tests,
-# clang-tidy, cppcheck, shader checks, clang-format on the working-tree diff.
+# clang-tidy, cppcheck, shader checks, the CI and release tools' tests,
+# clang-format on the working-tree diff.
 # Usage: [MC_FORMAT_BASE=<commit>] tools/lint.sh [build-root]   (default: ./build-lint)
 # Needs: cmake, ninja, gcc, clang, clang-tidy 18, cppcheck 2.13+, glslc,
-#        glslangValidator (optional), clang-format 18, git (for the format step).
+#        glslangValidator (optional), clang-format 18, git (for the format step),
+#        python3 3.8+.
 set -euo pipefail
 src=$(cd "$(dirname "$0")/.." && pwd)
 out=${1:-$src/build-lint}
@@ -46,6 +48,9 @@ if command -v glslangValidator >/dev/null; then
       || { echo "link failed: $pair"; fail=1; }
   done
 fi
+
+step "CI and release tools (tools/tests)"
+python3 -m unittest discover -s "$src/tools/tests" || fail=1
 
 base=${MC_FORMAT_BASE:-HEAD}   # in CI: the merge base with the main branch
 step "clang-format (lines changed since $base only)"

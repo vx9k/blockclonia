@@ -14,6 +14,6 @@ Branch: `<type>/<short-description>`. See AGENTS.md (Git).
 ## Checklist
 
 - [ ] `tools/lint.sh` passes (gcc and clang with `-Werror`, unit tests, clang-tidy, cppcheck, shaders, format)
-- [ ] A test covers the change (bug fixes: one that fails without the fix)
+- [ ] A test covers the change (bug fixes: one that fails without the fix), at least one test line per added code line
 - [ ] Renderer changes run with `--validate` without `vulkan:` warnings, also at `MC_VK_API=1.0`
 - [ ] Docs updated where behaviour changed (README controls/options/settings, the controls screen in `menu.c`, `usage()`); see AGENTS.md

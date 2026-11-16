@@ -160,6 +160,15 @@ from a job.
   directory: make a directory under `$TMPDIR` (falling back to `/tmp`)
   with `mkdtemp`.
 - A bug fix comes with a test that fails without it.
+- A pull request adds at least one line of tests for every line of code
+  it adds. `tools/pr_check.py` (the `Pull request rules` check) counts the
+  added lines that are neither blank nor comments: `tests/` and
+  `tools/tests/` against `src/` and `tools/*.py`. `main.c`, `renderer.c`,
+  `audio_device.c` and `shaders/` count for neither side, since only a
+  window, GPU or audio device runs them; check those by running the game.
+- The release and pull request tools have Python tests in `tools/tests`
+  (`python3 -m unittest discover -s tools/tests`); `tools/lint.sh` runs
+  them.
 
 ## When behaviour changes, update
 

@@ -1,0 +1,35 @@
+name: Pull request rules
+
+# Runs on every pull request, and again when its title is edited: the title
+# becomes the merge's subject on main and its changelog line.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+# A new push or title edit cancels the pull request's older check.
+concurrency:
+  group: pr-rules-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  rules:
+    name: Title and 1:1 test ratio
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Nothing here pushes: keep the token out of .git/config.
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check the title and the ratio of test lines to code lines
+        env:
+          # Through the environment, so a title cannot inject shell code.
+          TITLE: ${{ github.event.pull_request.title }}
+        # The checkout is GitHub's merge of the pull request into main, so its
+        # first parent is main as it is now. pull_request.base.sha can predate
+        # later merges to main, whose lines would count for this pull request.
+        run: python3 tools/pr_check.py --base HEAD^1 --title "$TITLE"
