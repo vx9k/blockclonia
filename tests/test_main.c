@@ -97,9 +97,9 @@ static void reseal_column(uint8_t *buf, size_t len)
     }
 }
 
-/* Columns from the 128-block world still load, with air above; columns
- * that fit under that ceiling are still written so old builds read them;
- * taller ones carry their height, and bad heights are refused. */
+/* Columns store only the sections up to their highest block, with air
+ * above; rows from the 128-block world (version 1) and bad heights are
+ * refused. */
 static void test_save_heights(void)
 {
     /* A version 1 file as the old builds wrote it: 128 layers of stone
@@ -118,15 +118,22 @@ static void test_save_heights(void)
     reseal_column(buf, len);
     column *d = column_alloc(2, -1);
     memset(d->blocks, B_WATER, COL_VOL);
-    CHECK(save_decode_column(d, buf, len) == 0);
-    CHECK(d->blocks[col_index(5, 0, 5)] == B_BEDROCK && d->blocks[col_index(5, 127, 5)] == B_STONE);
-    int air = 1;
-    for (int i = COL_AREA * 128; i < COL_VOL; i++) air &= d->blocks[i] == B_AIR;
-    CHECK(air);
+    CHECK(save_decode_column(d, buf, len) == -1);
+    CHECK(d->blocks[col_index(5, 0, 5)] == B_WATER); /* untouched */
 
-    /* Re-encoded, it is version 1 again, byte for byte. */
+    /* The same ground written now: version 2, 128 layers. */
+    memset(d->blocks, B_AIR, COL_VOL);
+    for (int y = 0; y < 128; y++)
+        for (int i = 0; i < COL_AREA; i++) d->blocks[y * COL_AREA + i] = y == 0 ? B_BEDROCK : B_STONE;
     uint8_t *again = mem_alloc(SAVE_MAX_FILE);
-    CHECK(save_encode_column(d, again, SAVE_MAX_FILE) == len && memcmp(again, buf, len) == 0);
+    size_t n = save_encode_column(d, again, SAVE_MAX_FILE);
+    CHECK(n > 24 && again[4] == 2 && (again[6] | again[7] << 8) == 128);
+    /* An empty column still stores one section. */
+    column *empty = column_alloc(0, 0);
+    memset(empty->blocks, B_AIR, COL_VOL);
+    n = save_encode_column(empty, again, SAVE_MAX_FILE);
+    CHECK(n > 24 && (again[6] | again[7] << 8) == SECTION_H && save_decode_column(empty, again, n) == 0);
+    column_free(empty);
 
     /* A block at the top makes a version 2 file with the full height. */
     d->blocks[col_index(1, WORLD_H - 1, 2)] = B_PLANKS;
@@ -155,7 +162,7 @@ static void test_save_heights(void)
     CHECK(e->solid_count[SECTIONS - 1] == 0 && e->opaque_count[SECTIONS - 1] == 0);
 
     /* Heights that are zero, too tall or not whole sections are refused,
-     * as is a height in a version 1 header. */
+     * as is a version 1 header, whatever its height. */
     const int bad[] = {0, WORLD_H + SECTION_H, 136, 0x10000 - SECTION_H};
     for (int i = 0; i < 4; i++) {
         buf[6] = (uint8_t)bad[i];
@@ -167,7 +174,7 @@ static void test_save_heights(void)
     buf[7] = 0;
     CHECK(save_decode_column(e, buf, len) == -1);
     buf[6] = 0;
-    CHECK(save_decode_column(e, buf, len) == -1); /* v1 is 128 layers: this payload is longer */
+    CHECK(save_decode_column(e, buf, len) == -1);
     CHECK(memcmp(e->blocks, d->blocks, COL_VOL) == 0); /* untouched */
 
     column_free(d);

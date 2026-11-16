@@ -1146,9 +1146,19 @@ static uint32_t choose_seed(options *o, save_db **db)
     int got = save_db_get_seed(*db, &saved);
     if (got == 0) {
         if (o->have_seed && saved != o->seed) log_warn("--seed ignored: world '%s' uses seed %u", o->world_dir, saved);
-        /* A world saved before generators were recorded was made by the first. */
-        int64_t gen = 0;
-        if (save_db_get_meta(*db, "generator", &gen) == -1) save_db_set_meta(*db, "generator", 1);
+        /* Another generator's terrain would not join this one's without
+         * seams, so such a world is left as it is (a world saved before
+         * generators were recorded was made by the first). */
+        int64_t gen = 1;
+        save_db_get_meta(*db, "generator", &gen);
+        if (gen != WORLDGEN_VERSION) {
+            log_error("world '%s' was made by terrain generator %d, this build has only %d; saving disabled",
+                      o->world_dir, (int)gen, WORLDGEN_VERSION);
+            save_db_close(*db);
+            *db = NULL;
+            o->world_dir = NULL;
+            return seed;
+        }
         return saved;
     }
     if (got != -1) {
@@ -1238,11 +1248,9 @@ static void open_world(game *g, const char *dir, int backdrop)
     log_info("%s, seed %u", backdrop ? "menu backdrop" : (o->world_dir ? o->world_dir : "unsaved world"), g->seed);
 
     world_init(&g->w, g->seed, o->radius, g->js, g->db);
-    int64_t gen = WORLDGEN_VERSION;
-    if (g->db) save_db_get_meta(g->db, "generator", &gen);
-    if (gen == 1) g->w.generator = worldgen_column_v1; /* no seams against what is saved */
     physics_init(&g->ph, &g->w);
     g->th = thermo_create(g->seed);
+    thermo_set_climate(g->th, 1);
     g->hooks = (world_hooks){&g->ph, g->th, &g->w, NULL, 0, g->snd, g->fx};
     g->w.edit_user = &g->hooks;
     g->w.on_block_changed = on_block_changed;
@@ -1398,6 +1406,7 @@ static void open_remote_world(game *g, uint32_t seed)
     world_init(&g->w, seed, o->radius, g->js, NULL);
     physics_init(&g->ph, &g->w);
     g->th = thermo_create(seed);
+    thermo_set_climate(g->th, 1);
     g->hooks = (world_hooks){&g->ph, g->th, &g->w, g->mp, 1, g->snd, g->fx};
     g->w.edit_user = &g->hooks;
     g->w.on_block_changed = on_block_changed;
@@ -2120,14 +2129,18 @@ static void refresh_worlds(game *g)
         }
         switch (e->info.status) {
         case SAVE_PEEK_OK:
-            if (e->info.generator > WORLDGEN_VERSION) {
-                snprintf(r->detail, sizeof r->detail, "made by a newer version of the game");
+            if (e->info.generator != WORLDGEN_VERSION) {
+                snprintf(r->detail, sizeof r->detail, "made by %s version of the game",
+                         e->info.generator > WORLDGEN_VERSION ? "a newer" : "an older");
                 r->playable = 0;
             } else {
                 snprintf(r->detail, sizeof r->detail, "seed %u   %s", e->info.seed, when);
             }
             break;
-        case SAVE_PEEK_LEGACY: snprintf(r->detail, sizeof r->detail, "older format: converted when played"); break;
+        case SAVE_PEEK_LEGACY:
+            snprintf(r->detail, sizeof r->detail, "made by an older version of the game");
+            r->playable = 0;
+            break;
         case SAVE_PEEK_IN_USE:
             snprintf(r->detail, sizeof r->detail, "open in another game");
             r->playable = 0;

@@ -1,4 +1,5 @@
 #include "thermo.h"
+#include "worldgen.h"
 /* Thermodynamics: the day clock, ambient air, the heat field, campfires,
  * melting and freezing (thermo.c). */
 #include "inventory.h"
@@ -95,16 +96,16 @@ static void test_ambient(void)
     thermo *th = thermo_create(2);
     world *w = &tw.w;
     thermo_set_day_time(th, 0.375); /* 09:00: the diurnal swing crosses zero */
-    CHECK(fabsf(thermo_ambient(th, w, 0.5, 92.0, 0.5)) < 0.1f);
+    CHECK(fabsf(thermo_ambient(th, w, 0.5, SEA_LEVEL + 100.0, 0.5) - 3.0f) < 0.1f); /* 0.11 K/m */
     CHECK(fabsf(thermo_ambient(th, w, 0.5, SEA_LEVEL, 0.5) - 14.0f) < 0.1f);
     CHECK(thermo_ambient(th, w, 0.5, 70.0, 0.5) > thermo_ambient(th, w, 0.5, 110.0, 0.5));
-    /* Above the old ceiling only towers stand: the real 6.5 K/km, so the
-     * top of the world is cold but survivable, and there is no jump. */
-    float ceiling = thermo_ambient(th, w, 0.5, WORLD_H_V1, 0.5);
+    /* Above the terrain only towers stand: the real 6.5 K/km, so the top
+     * of the world is cold but survivable, and there is no jump. */
+    float ceiling = thermo_ambient(th, w, 0.5, CLIMATE_TOP, 0.5);
     float top = thermo_ambient(th, w, 0.5, WORLD_H, 0.5);
-    CHECK(fabsf(ceiling - (14.0f - 14.0f / 44.0f * (WORLD_H_V1 - SEA_LEVEL))) < 0.1f);
-    CHECK(fabsf(thermo_ambient(th, w, 0.5, WORLD_H_V1 - 0.01, 0.5) - ceiling) < 0.01f);
-    CHECK(top < ceiling && fabsf(top - (ceiling - 0.0065f * (WORLD_H - WORLD_H_V1))) < 0.05f);
+    CHECK(fabsf(ceiling - (14.0f - 0.11f * (CLIMATE_TOP - SEA_LEVEL))) < 0.1f);
+    CHECK(fabsf(thermo_ambient(th, w, 0.5, CLIMATE_TOP - 0.01, 0.5) - ceiling) < 0.01f);
+    CHECK(top < ceiling && fabsf(top - (ceiling - 0.0065f * (WORLD_H - CLIMATE_TOP))) < 0.05f);
     thermo_set_day_time(th, 15.0 / 24.0);
     float warm = thermo_ambient(th, w, 0.5, SEA_LEVEL, 0.5);
     thermo_set_day_time(th, 3.0 / 24.0);
@@ -311,7 +312,7 @@ static void test_freezing(void)
     tw_init(&tw);
     thermo *th = thermo_create(7);
     world *w = &tw.w;
-    const int y = 115; /* ambient -7.5 C +/- 5: always freezing */
+    const int y = 243; /* ambient -7.5 C +/- 5: always freezing */
     int ponds[2][2] = {{0, 0}, {20, 0}}; /* one by the player, one out of range */
     for (int p = 0; p < 2; p++) {
         int x = ponds[p][0], z = ponds[p][1];
@@ -408,10 +409,51 @@ static void test_limits(void)
     tw_free(&tw);
 }
 
+/* With the climate on, the air is the world's: its sea-level mean from
+ * worldgen, cold in the north, hot in the south, cooling with height at
+ * the same rate the generator puts the snow by. */
+static void test_climate_air(void)
+{
+    test_world tw = {0};
+    tw_init(&tw);
+    thermo *th = thermo_create(1337);
+    const world *w = &tw.w;
+    thermo_set_day_time(th, 0.375); /* no diurnal swing */
+    const double far = 3000.0;     /* unloaded: open air */
+    CHECK(fabsf(thermo_ambient(th, w, far, SEA_LEVEL, far) - 14.0f) < 0.1f);
+    thermo_set_climate(th, 1);
+    for (int i = 0; i < 40; i++) {
+        int x = i * 7919 - 150000, z = i * 6151 - 120000;
+        float sea = worldgen_sea_temp(1337, x, z);
+        CHECK(fabsf(thermo_ambient(th, w, x + 0.5, SEA_LEVEL, z + 0.5) - sea) < 0.01f);
+        float high = thermo_ambient(th, w, x + 0.5, SEA_LEVEL + 100.0, z + 0.5);
+        CHECK(fabsf(high - (sea - 11.0f)) < 0.01f);
+    }
+    float north = 0.0f, south = 0.0f;
+    for (int i = 0; i < 16; i++) {
+        north += thermo_ambient(th, w, i * 500.0, SEA_LEVEL, -6000.0) / 16.0f;
+        south += thermo_ambient(th, w, i * 500.0, SEA_LEVEL, 6000.0) / 16.0f;
+    }
+    CHECK(north < 6.0f && south > 17.0f);
+    /* Over the terrain's top the squeezed lapse gives way to the real one,
+     * 0.65 K per 100 m. */
+    float sea = worldgen_sea_temp(1337, 0, 0);
+    float top = thermo_ambient(th, w, 0.5, CLIMATE_TOP, 0.5);
+    float above = thermo_ambient(th, w, 0.5, CLIMATE_TOP + 100.0, 0.5);
+    CHECK(fabsf(top - (sea - (float)CLIMATE_LAPSE * (CLIMATE_TOP - SEA_LEVEL))) < 0.01f);
+    CHECK(fabsf(above - (top - 0.65f)) < 0.01f);
+    /* Off again, the air is the fixed sea temperature everywhere. */
+    thermo_set_climate(th, 0);
+    CHECK(fabsf(thermo_ambient(th, w, far, SEA_LEVEL, -far) - 14.0f) < 0.1f);
+    thermo_destroy(th);
+    tw_free(&tw);
+}
+
 void test_thermo_all(void)
 {
     test_sun();
     test_ambient();
+    test_climate_air();
     test_fire_air_and_radiation();
     test_fuel();
     test_melting();

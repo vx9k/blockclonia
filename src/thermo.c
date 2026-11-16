@@ -2,6 +2,7 @@
 #include "health.h"
 #include "inventory.h"
 #include "mem.h"
+#include "worldgen.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -14,30 +15,26 @@
  * 18:00. Light fades in from civil twilight (sun 6 degrees below the
  * horizon) and is full once the sun is 20 degrees up.
  *
- * Air temperature: 14 C at sea level (the ISA's 15 C, a little cooler for a
- * temperate climate). The real lapse rate is 6.5 K/km, but the terrain is
- * squeezed into 128 m of height, so it is scaled to put 0 C at the snow line
- * (y = 92, 44 m above the sea): 14/44 = 0.32 K/m, about 49 times the real
- * rate. Above the old 128 m ceiling, which terrain never passes, there
- * are only towers, and the air cools at the real 6.5 K/km: the scaled rate
- * would put -93 C on top of a 384 m tower. Below sea level only pits and
- * caves have air, so the lapse is not extrapolated down. The day swings +/-5 C around the mean, peaking at 15:00:
- * the ground stores the morning sun and the air lags it by about 3 hours.
- * Under a roof or in a cave (an opaque block within 8 m above) the air
- * follows the ground instead, whose mean is ~10 C in a temperate climate,
- * and the diurnal swing mostly disappears. */
+ * Air temperature: the world's climate gives the mean at sea level
+ * (worldgen.h; with no climate set, 14 C everywhere, the ISA's 15 C a
+ * little cooler for a temperate climate). It falls by CLIMATE_LAPSE with
+ * height, the real 6.5 K/km squeezed like the terrain, up to CLIMATE_TOP,
+ * which terrain never passes; above it there are only towers, and the air
+ * cools at the real rate. Below sea level only pits and caves have air, so
+ * the lapse is not extrapolated down. The day swings +/-5 C around the
+ * mean, peaking at 15:00: the ground stores the morning sun and the air
+ * lags it by about 3 hours. Under a roof or in a cave (an opaque block
+ * within 8 m above) the air follows the ground instead, whose mean is 4 C
+ * below the sea-level air's, and the diurnal swing mostly disappears. */
 #define SUN_LAT_COS 0.766           /* cos(40 degrees) */
 #define TWILIGHT_SIN (-0.105)       /* sin(-6 degrees): civil twilight */
 #define FULL_DAY_SIN 0.35           /* sin(20 degrees) */
 #define NIGHT_LIGHT 0.18
 #define T_SEA 14.0                  /* C */
-#define SNOW_LINE 92
-#define LAPSE (T_SEA / (double)(SNOW_LINE - SEA_LEVEL)) /* K/m, scaled */
-#define LAPSE_TOP ((double)WORLD_H_V1)  /* m: the scaled lapse stops here */
 #define LAPSE_REAL 0.0065           /* K/m */
 #define DIURNAL_K 5.0               /* K amplitude */
 #define PEAK_DAY (15.0 / 24.0)      /* warmest at 15:00 */
-#define GROUND_MEAN 10.0            /* C */
+#define GROUND_BELOW 4.0            /* K: the ground's mean under the sea-level air's */
 #define SHELTER_REACH 8             /* m of roof search */
 #define SHELTER_PULL 0.6            /* fraction pulled toward the ground mean */
 #define SHELTER_SWING 0.2           /* fraction of the diurnal swing left inside */
@@ -156,6 +153,7 @@ enum { K_GAS, K_SOLID, K_MELT, K_WATER };
 typedef struct {
     int x, y, z;
     double dev;        /* K above the ambient air at the cell centre */
+    double sea;        /* C: the climate's mean air at sea level over the cell */
     double lat;        /* J of phase progress: melted (ice, snow) or frozen (water) */
     uint32_t keep;     /* stamp of the last housekeeping that needed it */
     /* Rebuilt at housekeeping (amb every call). */
@@ -177,7 +175,8 @@ typedef struct {
 } block_edit;
 
 struct thermo {
-    uint32_t seed;     /* nothing is random yet; kept for weather */
+    uint32_t seed;     /* for the climate, and later the weather */
+    int climate;       /* 1: the air follows the world's climate (worldgen_sea_temp) */
     double day;
     uint32_t stamp;
     cell *cells;
@@ -270,28 +269,35 @@ static int sheltered(const world *w, int x, int y, int z)
     return 0;
 }
 
-/* swing: the diurnal term, computed once per call. */
-static double ambient(double y, int shelter, double swing)
+static double sea_temp(const thermo *t, int x, int z)
 {
-    double up = fmax(y - (double)SEA_LEVEL, 0.0), high = fmax(y - LAPSE_TOP, 0.0);
-    double open = T_SEA - LAPSE * (up - high) - LAPSE_REAL * high;
+    return t->climate ? (double)worldgen_sea_temp(t->seed, x, z) : T_SEA;
+}
+
+/* sea: the mean at sea level here; swing: the diurnal term, computed once
+ * per call. */
+static double ambient(double sea, double y, int shelter, double swing)
+{
+    double up = fmax(y - (double)SEA_LEVEL, 0.0), high = fmax(y - (double)CLIMATE_TOP, 0.0);
+    double open = sea - CLIMATE_LAPSE * (up - high) - LAPSE_REAL * high;
     if (!shelter) return open + swing;
-    return GROUND_MEAN + (1.0 - SHELTER_PULL) * (open - GROUND_MEAN) + SHELTER_SWING * swing;
+    double ground = sea - GROUND_BELOW;
+    return ground + (1.0 - SHELTER_PULL) * (open - ground) + SHELTER_SWING * swing;
 }
 
 static double cell_ambient(const thermo *t, const world *w, int x, int y, int z, int *shelter)
 {
     int s = sheltered(w, x, y, z);
     if (shelter) *shelter = s;
-    return ambient((double)y + 0.5, s, diurnal(t));
+    return ambient(sea_temp(t, x, z), (double)y + 0.5, s, diurnal(t));
 }
 
 float thermo_ambient(const thermo *t, const world *w, double x, double y, double z)
 {
     double yy = (y == y) ? clampd(y, -1.0, (double)WORLD_H) : (double)SEA_LEVEL;
-    int s = sheltered(w, coord(x, -WORLD_LIMIT, WORLD_LIMIT), coord(yy, -1, WORLD_H),
-                      coord(z, -WORLD_LIMIT, WORLD_LIMIT));
-    return (float)ambient(yy, s, diurnal(t));
+    int bx = coord(x, -WORLD_LIMIT, WORLD_LIMIT), bz = coord(z, -WORLD_LIMIT, WORLD_LIMIT);
+    int s = sheltered(w, bx, coord(yy, -1, WORLD_H), bz);
+    return (float)ambient(sea_temp(t, bx, bz), yy, s, diurnal(t));
 }
 
 /* ---- the cell table: open addressing, linear probing, backward-shift
@@ -356,6 +362,7 @@ static int ensure(thermo *t, const world *w, int x, int y, int z)
     c->mat = id;
     c->kind = (uint8_t)kind_of(id);
     int shelter = 0;
+    c->sea = sea_temp(t, x, z);
     c->amb = cell_ambient(t, w, x, y, z, &shelter);
     c->shelter = (uint8_t)shelter;
     c->dev = initial_dev(id, c->amb);
@@ -502,8 +509,7 @@ static void scan_fires(thermo *t, const world *w, dvec3 player)
 }
 
 /* Still, full water under open air near the player joins the field when
- * the air is freezing, so ponds can ice over (the ocean never freezes: it
- * lies where the air is above 0 C). */
+ * the air is freezing, so ponds and cold seas can ice over. */
 static void scan_ponds(thermo *t, const world *w, dvec3 player)
 {
     int side = 2 * POND_R + 1;
@@ -511,7 +517,7 @@ static void scan_ponds(thermo *t, const world *w, dvec3 player)
     int py = coord(player.y, 0, WORLD_H - 1);
     /* Nothing can freeze if the open air at the top of the range, the
      * coldest there, is thawing: sheltered air is then above 3 C. */
-    if (ambient((double)(py + POND_R) + 0.5, 0, diurnal(t)) >= 0.0) return;
+    if (ambient(sea_temp(t, px, pz), (double)(py + POND_R) + 0.5, 0, diurnal(t)) >= 0.0) return;
     for (int n = 0; n < POND_COLS; n++) {
         int k = t->pond_cursor;
         t->pond_cursor = (k + 1) % (side * side);
@@ -615,7 +621,7 @@ static void refresh_ambient(thermo *t)
     double swing = diurnal(t);
     for (int i = 0; i < t->linked; i++) {
         cell *c = &t->cells[i];
-        c->amb = ambient((double)c->y + 0.5, c->shelter, swing);
+        c->amb = ambient(c->sea, (double)c->y + 0.5, c->shelter, swing);
         double temp = c->amb + c->dev;
         if (c->kind == K_WATER && (c->lat > 0.0 || temp < 0.0)) c->dev = -c->amb;
         if (c->kind == K_MELT && (c->lat > 0.0 || temp > 0.0)) c->dev = -c->amb;
@@ -770,6 +776,8 @@ thermo *thermo_create(uint32_t seed)
     for (int i = 0; i < HASH_SIZE; i++) t->table[i] = -1;
     return t;
 }
+
+void thermo_set_climate(thermo *t, int on) { t->climate = on != 0; }
 
 void thermo_destroy(thermo *t)
 {

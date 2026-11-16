@@ -36,11 +36,11 @@ One branch and pull request per item, in this order:
 
 ## World generation
 
-**Status:** heightmap terrain with beaches, snowy peaks and trees,
-mountain ranges, cave tunnels and coal, copper and iron ore (#29).
-Worlds record the generator version they were made with
-(`WORLDGEN_VERSION`, `worldgen_column_v1`), so old worlds keep their
-terrain.
+**Status:** generator 3 (steps 1 to 3 below): terrain grown from a
+climate, with biomes, landforms, caves and ore. Worlds record the
+generator version they were made with (`WORLDGEN_VERSION`); a build
+refuses worlds from any other generator. Generators 1 and 2 were
+deleted with step 2, since nobody's worlds depended on them yet.
 
 ### The overhaul (planned 2026-11-16)
 
@@ -73,10 +73,9 @@ should look different for a reason you could explain.
   (trees, rivers, houses) is re-derived from the seed on both sides.
   Budget: within 2x today's 1.15 ms per column (`--bench`), measured
   on the Raspberry Pi 4 too.
-- *Old worlds keep their terrain.* The new generator is version 3,
-  built behind `--worldgen 3` (new worlds only) while it grows, and
-  becomes the default once steps 2 to 5 are in. Versions 1 and 2 stay
-  as they are.
+- *One generator.* There are no players' worlds to keep yet, so the
+  game carries one generator and refuses worlds from any other. Each
+  step that changes the terrain bumps `WORLDGEN_VERSION`.
 
 **Steps, one pull request each:**
 
@@ -88,8 +87,12 @@ should look different for a reason you could explain.
    and 2 generate unchanged; the new generator puts its land between
    the sea and about 250 m. Follow-up: store all-air sections sparsely,
    which wins back the +224 MB the sky costs at radius 32.
-2. **Climate.** `worldgen_climate(seed, x, z)`: a mean temperature
-   offset and a yearly rainfall, from slow (several km) warped noise,
+2. [x] **Climate** (breaking, with step 3). Done as
+   `worldgen_sample(seed, x, z)` (height, temperature, rainfall,
+   biome) and `worldgen_sea_temp`, which `thermo` reads once
+   `thermo_set_climate` turns it on. Planned as
+   `worldgen_climate(seed, x, z)`: a mean temperature offset and a
+   yearly rainfall, from slow (several km) warped noise,
    with rain shadows behind high ground and cooler, wetter air near
    the sea. `thermo_air` adds the temperature offset to its lapse, so
    the snow line becomes the 0 C isotherm rather than a fixed y.
@@ -98,7 +101,9 @@ should look different for a reason you could explain.
    scrub, wetland, alpine. Edges blend over tens of metres. Tests:
    the field is continuous, every biome occurs within a few km of
    most seeds, and `thermo_air` agrees with the biome it stands in.
-3. **Landforms.** Domain-warped continents and coasts; mountain ranges
+3. [x] **Landforms** (breaking, with step 2). Within budget:
+   1.85 ms per column against 1.22 ms before (`--bench`, Debug, x86).
+   Planned as: domain-warped continents and coasts; mountain ranges
    with foothills, made from eroded-style noise (octaves damped by the
    slope so peaks are sharp and valleys smooth, not worms); plateaus
    and mesas in dry country; cliffs where layers outcrop; scree at

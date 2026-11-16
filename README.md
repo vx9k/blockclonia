@@ -11,11 +11,17 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
 
 ## What's in it
 
-- **Infinite terrain** streamed around the player in 16×384×16 columns:
-  continents, hills, mountain ranges with bare rock and snow caps, beaches,
-  oceans and trees, cave tunnels winding through the rock and opening onto
-  the surface, and veins of coal, copper and iron ore. It goes on for 2
-  billion blocks in every direction, as detailed at the edge as at spawn.
+- **Infinite terrain** streamed around the player in 16×384×16 columns,
+  grown from a climate: it gets colder to the north (−z) and warmer to the
+  south, wetter by the sea and drier in the rain shadow behind mountains,
+  and the biomes follow from temperature and rainfall: tundra, taiga,
+  forest, meadow, steppe, scrub, desert, wetland, alpine meadows, bare rock
+  and snow. Warped continents and coasts, eroded mountain ranges up to
+  about 250 m with foothills and scree, terraced mesas in dry country,
+  dunes, beaches of sand or gravel, cave tunnels and chambers that only
+  seldom open onto the surface, and veins of coal, copper and iron ore. It
+  goes on for 2 billion blocks in every direction, as detailed at the edge
+  as at spawn.
 
   ![mountain ranges with snow caps](docs/mountains.jpg)
 - **Realistic physics** (1 block = 1 m, SI units, fixed 60 Hz step). See
@@ -163,9 +169,10 @@ and heads it off; once down, you come round within seconds.
 
 - **The day** runs on the survival clock (72× real time), so a day lasts
   20 minutes. Daylight and the sky colour follow the sun.
-- **Air temperature** falls with altitude, putting 0 °C at the snow line,
-  swings between day and night, and stays near the ground's mean in
-  enclosed spaces.
+- **Air temperature** follows the terrain's climate (the same field the
+  biomes come from) and falls 1.1 °C per 10 m of altitude, so the snow
+  line is wherever the air reaches 0 °C. It swings between day and night
+  and stays near the ground's mean in enclosed spaces.
 - **Blocks conduct heat** by their conductivity and heat capacity, and air
   carries it upward by convection. Only cells that differ from the
   surrounding air are simulated.
@@ -311,13 +318,11 @@ skips the menus and plays the default world, `worlds/world`, or the one
 Each world is one SQLite database, `world.db`, in its own folder. The
 folder name comes from the world's first name and stays put when you
 rename it. A world records the terrain generator version it was made
-with; a build refuses a world from a newer generator instead of joining
-different terrain onto it, and goes on growing an older world with the
-generator that made it (worlds from before caves and ore stay without
-them, with no seams). A folder written by an older build
-(`level.dat`, `player.dat`, `c.X.Z.bin`) is imported into the database
-the first time it is opened; the old files are left in place but are no
-longer read. Only one running game can hold a world's database open at a
+with, and a build only plays worlds from its own generator: new terrain
+would not join the old without seams. Worlds made by an older or newer
+generator, and folders written by builds from before the database
+(`level.dat`, `player.dat`, `c.X.Z.bin`), are listed but can't be
+played. Only one running game can hold a world's database open at a
 time: the list shows such a world as open in another game, and pointing a
 second instance at the same directory disables saving for it instead of
 touching the world.
