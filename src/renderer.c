@@ -2186,29 +2186,29 @@ int renderer_begin_frame(renderer *r)
     return 1;
 }
 
+/* Written whole through save_write_file: mode 0644 whatever the umask
+ * (fopen asks for 0666), no symlink followed, and no half-written file if
+ * the game dies mid-write. */
 static void write_screenshot(renderer *r, const gbuf *b)
 {
-    FILE *fp = fopen(r->shot_path, "wb");
-    if (!fp) {
-        log_error("cannot write screenshot %s", r->shot_path);
-        return;
-    }
     uint32_t w = r->extent.width, h = r->extent.height;
-    int ok = fprintf(fp, "P6\n%u %u\n255\n", w, h) > 0;
+    char head[32] = {0};
+    int hn = snprintf(head, sizeof head, "P6\n%u %u\n255\n", w, h);
+    if (hn <= 0 || (size_t)hn >= sizeof head) return;
+    size_t len = (size_t)hn + mem_array_size((size_t)w * h, 3);
+    uint8_t *out = mem_alloc(len);
+    memcpy(out, head, (size_t)hn);
+    uint8_t *o = out + hn;
     const uint8_t *px = b->map;
     int bgr = r->swap_fmt == VK_FORMAT_B8G8R8A8_SRGB || r->swap_fmt == VK_FORMAT_B8G8R8A8_UNORM;
-    uint8_t *row = mem_alloc((size_t)w * 3);
-    for (uint32_t y = 0; y < h && ok; y++) {
-        for (uint32_t x = 0; x < w; x++) {
-            const uint8_t *p = px + ((size_t)y * w + x) * 4;
-            row[x * 3 + 0] = bgr ? p[2] : p[0];
-            row[x * 3 + 1] = p[1];
-            row[x * 3 + 2] = bgr ? p[0] : p[2];
-        }
-        ok = fwrite(row, 1, (size_t)w * 3, fp) == (size_t)w * 3;
+    for (size_t i = 0; i < (size_t)w * h; i++, o += 3) {
+        const uint8_t *p = px + i * 4;
+        o[0] = bgr ? p[2] : p[0];
+        o[1] = p[1];
+        o[2] = bgr ? p[0] : p[2];
     }
-    mem_free(row);
-    ok &= fclose(fp) == 0;
+    int ok = save_write_file(r->shot_path, out, len) == 0;
+    mem_free(out);
     if (ok) log_info("screenshot saved to %s", r->shot_path);
     else log_error("writing screenshot %s failed", r->shot_path);
 }
