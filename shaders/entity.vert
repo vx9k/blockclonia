@@ -7,7 +7,7 @@
 // Each instance rotates (quaternion) and scales the cube about its centre.
 layout(location = 0) in uint v_data;
 layout(location = 1) in vec3 i_pos;    // centre relative to the camera
-layout(location = 2) in uint i_tex;    // texture layers: side | top << 8 | bottom << 16
+layout(location = 2) in uint i_tex;    // layers: side | top << 8 | bottom << 16 | front << 24 | metric << 31
 layout(location = 3) in vec4 i_rot;    // unit quaternion
 layout(location = 4) in vec4 i_scale;  // xyz: size in metres, w: brightness
 
@@ -30,6 +30,16 @@ void main()
     gl_Position = pc.view_proj * vec4(rel, 1.0);
     f_uv = face < 2u ? vec2(p.z, -p.y) : (face < 4u ? p.xz : vec2(p.x, -p.y));
     f_layer = face == 2u ? (i_tex >> 8) & 255u : (face == 3u ? (i_tex >> 16) & 255u : i_tex & 255u);
+    // The front (-z) face can have its own layer: a creature's face.
+    uint front = (i_tex >> 24) & 127u;
+    if (face == 5u && front != 0u) f_layer = front;
+    // Metric art (ENTITY_TEX_METRIC): 1 m of face is one 16-texel layer,
+    // read from the layer's top-left, front and top first.
+    if ((i_tex & 0x80000000u) != 0u) {
+        vec2 fp = face < 2u ? vec2(p.z, 1.0 - p.y) : (face < 4u ? p.xz : vec2(p.x, 1.0 - p.y));
+        vec2 size = face < 2u ? i_scale.zy : (face < 4u ? i_scale.xz : i_scale.xy);
+        f_uv = fp * size;
+    }
     // Daylight scales world entities like the blocks around them. The view
     // model pass turns fog off (fog.y = 0) and brings its own brightness
     // in i_scale.w, so it is not darkened twice.

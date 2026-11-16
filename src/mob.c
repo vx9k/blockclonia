@@ -3,6 +3,7 @@
 #include "item.h"
 #include "mathlib.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <string.h>
 
@@ -27,6 +28,7 @@ static const mob_rule RULES[MOB_KINDS] = {
 #define NIGHT 0.35f      /* daylight below this is night for wolves */
 #define CHARGE 8.0       /* m from its prey a stalking wolf breaks into a run */
 #define CALM 45.0f       /* s after a world opens before the first wolf */
+#define LOOK_RANGE 8.0   /* m a creature glances at a player from */
 
 static dvec3 sub(dvec3 a, dvec3 b) { return dv3(a.x - b.x, a.y - b.y, a.z - b.z); }
 
@@ -58,6 +60,30 @@ int mobs_add(mobs *s, int kind, dvec3 pos)
     m->rng = next(&s->rng) | 1u;
     m->body.yaw = frand(&m->rng) * 6.2831853f;
     return s->count++;
+}
+
+int mobs_kind_named(const char *name)
+{
+    static const char *const NAMES[MOB_KINDS] = {[MOB_BOAR] = "boar", [MOB_WOLF] = "wolf"};
+    for (int k = 0; k < MOB_KINDS; k++) {
+        size_t i = 0;
+        while (name[i] && NAMES[k][i] && tolower((unsigned char)name[i]) == NAMES[k][i]) i++;
+        if (!name[i] && !NAMES[k][i]) return k;
+    }
+    return -1;
+}
+
+static float yaw_to(dvec3 from, dvec3 to);
+
+int mobs_add_ahead(mobs *s, const world *w, const player *p, int kind, double ahead, double aside)
+{
+    /* Forward is (sin yaw, -cos yaw), as physics_move_player walks. */
+    double sy = sin((double)p->yaw), cy = cos((double)p->yaw);
+    double x = p->pos.x + sy * ahead + cy * aside, z = p->pos.z - cy * ahead + sy * aside;
+    int y = world_surface_y(w, (int)floor(x), (int)floor(z));
+    int i = mobs_add(s, kind, dv3(x, (double)y, z));
+    if (i >= 0) s->m[i].body.yaw = yaw_to(s->m[i].body.pos, p->pos);
+    return i;
 }
 
 static double dist_xz(dvec3 a, dvec3 b) { return sqrt((a.x - b.x) * (a.x - b.x) + (a.z - b.z) * (a.z - b.z)); }
@@ -156,6 +182,22 @@ static player_input think(mob *m, player *const *players, int n, float daylight,
     /* Up a step or out of water: a jump, as a player would. */
     in.jump = (b->hit_wall && b->on_ground && in.forward > 0.0f) || b->submerged > 0.4;
     const float dt = (float)PHYS_DT;
+    /* Where the head points, for drawing: at a player close by, down to the
+     * grass while a boar stands grazing, low while a wolf stalks. */
+    double near_d = 0.0;
+    int seen = nearest(players, n, b->pos, LOOK_RANGE, &near_d);
+    float look = 0.0f, nod = 0.0f;
+    if (target >= 0) {
+        nod = d >= CHARGE ? 0.3f : 0.0f;
+    } else if (seen >= 0 && m->flee_t <= 0.0f) {
+        float a = yaw_to(b->pos, players[seen]->pos) - b->yaw;
+        a = atan2f(sinf(a), cosf(a));
+        look = a < -0.9f ? -0.9f : (a > 0.9f ? 0.9f : a);
+    } else if (m->kind == MOB_BOAR && m->flee_t <= 0.0f && m->walk == 0.0f) {
+        nod = 0.9f;
+    }
+    m->look += (look - m->look) * 0.08f;
+    m->nod += (nod - m->nod) * 0.05f;
     m->think_t -= dt;
     m->attack_t -= dt;
     m->flee_t -= dt;
@@ -269,50 +311,141 @@ int mobs_hurt(mobs *s, physics *ph, int i, float damage, dvec3 from)
 
 /* ------------------------------------------------------------- drawing */
 
-static entity_instance box(const float feet[3], quat facing, const float at[3], quat own, const float size[3],
-                           int layer, float light)
+/* A creature's shape in texels (1/16 m, the pixel art's scale) from its
+ * feet, front towards -z: every box's size matches its picture in
+ * mobskin.c. The head, snout and ears turn together about the neck, the
+ * tail about the rump, each leg at the hip and again at the knee. */
+typedef struct {
+    float size[3], at[3];
+    int side, top, bottom, front;
+} shape_box;
+
+typedef struct {
+    shape_box body, shoulders;
+    float neck[3];                 /* the head's pivot */
+    shape_box head, snout, ear;    /* at: from the neck; the ear is mirrored to the other side */
+    float rump[3], droop;          /* the tail's pivot, and how far it hangs (rad) */
+    shape_box tail;                /* at: from the rump */
+    float hip[3];                  /* front left hip; the others mirror it */
+    shape_box upper, lower;        /* at: unused, they hang from the hip and the knee */
+    float shift;                   /* texels the figure moves back to centre it on its feet */
+} shape;
+
+/* A grey wolf: ~0.75 m at the shoulder, ~1.3 m nose to rump. */
+static const shape WOLF_SHAPE = {
+    .body = {{6, 6, 13}, {0, 9, 0}, T_WOLF_BODY_SIDE, T_WOLF_BODY_TOP, T_WOLF_BELLY, T_WOLF_FUR},
+    .shoulders = {{7, 7, 5}, {0, 9.5f, -4.5f}, T_WOLF_MANE_SIDE, T_WOLF_FUR, T_WOLF_FUR, T_WOLF_MANE_FRONT},
+    .neck = {0, 11, -7},
+    .head = {{5, 5, 5}, {0, 1.5f, -2.5f}, T_WOLF_HEAD_SIDE, T_WOLF_HEAD_TOP, T_WOLF_FUR, T_WOLF_HEAD_FRONT},
+    .snout = {{3, 2, 3}, {0, 0, -6.5f}, T_WOLF_SNOUT_SIDE, T_WOLF_FUR, T_WOLF_FUR, T_WOLF_SNOUT_FRONT},
+    .ear = {{2, 2, 1}, {-1.5f, 5, -1.5f}, T_WOLF_EAR, T_WOLF_FUR, T_WOLF_FUR, T_WOLF_EAR},
+    .rump = {0, 11.5f, 6.5f},
+    .droop = 0.7f,
+    .tail = {{2, 2, 7}, {0, 0, 3.5f}, T_WOLF_TAIL_SIDE, T_WOLF_TAIL_TOP, T_WOLF_TAIL_TOP, T_WOLF_FUR},
+    .hip = {-2, 6, -4.5f},
+    .upper = {{2, 3, 2}, {0}, T_WOLF_LEG_UPPER, T_WOLF_FUR, T_WOLF_FUR, T_WOLF_LEG_UPPER},
+    .lower = {{2, 3, 2}, {0}, T_WOLF_LEG_LOWER, T_WOLF_FUR, T_MOB_SOLE, T_WOLF_LEG_LOWER},
+    .shift = 3,
+};
+
+/* A wild boar: low-legged and deep-bodied, ~0.85 m at the bristle crest. */
+static const shape BOAR_SHAPE = {
+    .body = {{8, 8, 15}, {0, 9, 0}, T_BOAR_BODY_SIDE, T_BOAR_BODY_TOP, T_BOAR_BELLY, T_BOAR_FUR},
+    .shoulders = {{4, 2, 8}, {0, 14, -3.5f}, T_BOAR_RIDGE, T_BOAR_RIDGE, T_BOAR_RIDGE, T_BOAR_RIDGE},
+    .neck = {0, 10, -7.5f},
+    .head = {{6, 6, 5}, {0, 0, -2.5f}, T_BOAR_HEAD_SIDE, T_BOAR_HEAD_TOP, T_BOAR_FUR, T_BOAR_HEAD_FRONT},
+    .snout = {{4, 3, 3}, {0, -1.5f, -6.5f}, T_BOAR_SNOUT_SIDE, T_BOAR_FUR, T_BOAR_FUR, T_BOAR_SNOUT_FRONT},
+    .ear = {{2, 2, 1}, {-2, 4, -1}, T_BOAR_EAR, T_BOAR_FUR, T_BOAR_FUR, T_BOAR_EAR},
+    .rump = {0, 12, 7.5f},
+    .droop = -0.25f, /* a short tail that hangs, swung a little back */
+    .tail = {{1, 4, 1}, {0, -2, 0.5f}, T_BOAR_TAIL, T_BOAR_TAIL, T_BOAR_TAIL, T_BOAR_TAIL},
+    .hip = {-2.5f, 5, -5.5f},
+    .upper = {{2, 3, 2}, {0}, T_BOAR_LEG_UPPER, T_BOAR_FUR, T_BOAR_FUR, T_BOAR_LEG_UPPER},
+    .lower = {{2, 2, 2}, {0}, T_BOAR_LEG_LOWER, T_BOAR_FUR, T_MOB_SOLE, T_BOAR_LEG_LOWER},
+    .shift = 3,
+};
+
+#define TX (1.0f / 16.0f) /* metres per texel */
+
+typedef struct {
+    entity_instance *out;
+    int n, max;
+    const float *feet;
+    quat facing;
+    float shift, light;
+} figure;
+
+/* One box: centre at `at` (texels, body frame), turned by `own` within the
+ * body. */
+static void put(figure *f, const shape_box *s, const float at[3], quat own)
 {
+    if (f->n >= f->max) return;
     entity_instance e = {0};
+    const float local[3] = {at[0] * TX, at[1] * TX, (at[2] + f->shift) * TX};
     float r[3] = {0};
-    quat_apply(facing, at, r);
-    for (int k = 0; k < 3; k++) e.pos[k] = feet[k] + r[k];
-    e.tex = (uint32_t)layer * 0x010101u;
-    entity_set_rot(&e, quat_norm(quat_mul(facing, own)));
-    memcpy(e.scale, size, sizeof e.scale);
-    e.light = light;
-    return e;
+    quat_apply(f->facing, local, r);
+    for (int k = 0; k < 3; k++) {
+        e.pos[k] = f->feet[k] + r[k];
+        e.scale[k] = s->size[k] * TX;
+    }
+    e.tex = entity_tex(s->side, s->top, s->bottom, s->front) | ENTITY_TEX_METRIC;
+    entity_set_rot(&e, quat_norm(quat_mul(f->facing, own)));
+    e.light = f->light;
+    f->out[f->n++] = e;
 }
 
-int mob_figure(const mob *m, const float feet[3], float light, entity_instance *out, int max)
+/* A child box of a joint: pivot plus the offset turned by q. */
+static void put_from(figure *f, const shape_box *s, const float pivot[3], const float off[3], quat q)
 {
-    const int fur = m->kind == MOB_BOAR ? T_FUR_BOAR : T_FUR_WOLF;
-    const float h = RULES[m->kind].height;
-    quat facing = quat_axis(0.0f, 1.0f, 0.0f, -m->body.yaw);
-    float lit = m->hurt_t > 0.0f ? light * 1.8f : light; /* the hurt flash */
-    float leg = h * 0.45f, len = m->kind == MOB_BOAR ? 1.1f : 1.0f, wide = RULES[m->kind].half_w * 1.6f;
-    float swing = sinf(m->stride) * 0.6f;
-    int n = 0;
-    if (n < max) {
-        float at[3] = {0.0f, leg + (h - leg) * 0.5f, 0.0f}, torso[3] = {wide, h - leg, len};
-        out[n++] = box(feet, facing, at, quat_identity(), torso, fur, lit);
+    float r[3] = {0};
+    quat_apply(q, off, r);
+    const float at[3] = {pivot[0] + r[0], pivot[1] + r[1], pivot[2] + r[2]};
+    put(f, s, at, q);
+}
+
+int mob_figure(const mob *m, const float feet[3], float light, float t, entity_instance *out, int max)
+{
+    const shape *s = m->kind == MOB_BOAR ? &BOAR_SHAPE : &WOLF_SHAPE;
+    figure f = {out,
+                0,
+                max,
+                feet,
+                quat_axis(0.0f, 1.0f, 0.0f, -m->body.yaw),
+                s->shift,
+                m->hurt_t > 0.0f ? light * 1.8f : light}; /* the hurt flash */
+    put(&f, &s->body, s->body.at, quat_identity());
+    put(&f, &s->shoulders, s->shoulders.at, quat_identity());
+
+    /* The head nods a little with each stride. */
+    float nod = m->nod + 0.05f * sinf(2.0f * m->stride);
+    quat head = quat_mul(quat_axis(0.0f, 1.0f, 0.0f, -m->look), quat_axis(1.0f, 0.0f, 0.0f, -nod));
+    put_from(&f, &s->head, s->neck, s->head.at, head);
+    put_from(&f, &s->snout, s->neck, s->snout.at, head);
+    for (int side = 0; side < 2; side++) {
+        const float off[3] = {side ? -s->ear.at[0] : s->ear.at[0], s->ear.at[1], s->ear.at[2]};
+        put_from(&f, &s->ear, s->neck, off, head);
     }
-    if (n < max) {
-        float at[3] = {0.0f, h * 0.8f, -len * 0.5f - 0.15f}, head[3] = {wide * 0.75f, 0.3f, 0.35f};
-        out[n++] = box(feet, facing, at, quat_identity(), head, fur, lit);
+
+    /* A wolf's tail sways slowly; a boar's swishes. */
+    float wag = m->kind == MOB_WOLF ? 0.25f * sinf(t * 2.2f) : 0.3f * sinf(t * 3.1f);
+    quat tail = quat_mul(quat_axis(0.0f, 1.0f, 0.0f, wag), quat_axis(1.0f, 0.0f, 0.0f, s->droop));
+    put_from(&f, &s->tail, s->rump, s->tail.at, tail);
+
+    /* A trot: diagonal legs together. Each leg swings at the hip, and the
+     * lower leg folds back while the foot comes forward. */
+    for (int k = 0; k < 4; k++) {
+        const float hip[3] = {k & 1 ? -s->hip[0] : s->hip[0], s->hip[1], k & 2 ? -s->hip[2] : s->hip[2]};
+        float phase = m->stride + ((k == 0 || k == 3) ? 0.0f : 3.14159265f);
+        quat upper = quat_axis(1.0f, 0.0f, 0.0f, 0.5f * sinf(phase));
+        quat lower = quat_mul(upper, quat_axis(1.0f, 0.0f, 0.0f, -0.7f * fmaxf(0.0f, cosf(phase))));
+        const float half_up[3] = {0.0f, -0.5f * s->upper.size[1], 0.0f};
+        const float knee_off[3] = {0.0f, -s->upper.size[1], 0.0f};
+        const float half_low[3] = {0.0f, -0.5f * s->lower.size[1], 0.0f};
+        float knee[3] = {0};
+        quat_apply(upper, knee_off, knee);
+        for (int i = 0; i < 3; i++) knee[i] += hip[i];
+        put_from(&f, &s->upper, hip, half_up, upper);
+        put_from(&f, &s->lower, knee, half_low, lower);
     }
-    for (int k = 0; k < 4 && n < max; k++) {
-        float x = (k & 1 ? 1.0f : -1.0f) * wide * 0.32f, z = (k & 2 ? 1.0f : -1.0f) * len * 0.36f;
-        float at[3] = {x, leg * 0.5f, z}, size[3] = {0.14f, leg, 0.14f};
-        float a = (k == 0 || k == 3) ? swing : -swing;
-        out[n++] = box(feet, facing, at, quat_axis(1.0f, 0.0f, 0.0f, a), size, fur, lit);
-    }
-    /* A wolf's tail, a boar's snout. */
-    if (n < max) {
-        float at[3] = {0.0f, m->kind == MOB_BOAR ? h * 0.72f : h * 0.75f,
-                       m->kind == MOB_BOAR ? -len * 0.5f - 0.38f : len * 0.5f + 0.2f};
-        float size[3] = {m->kind == MOB_BOAR ? 0.2f : 0.1f, m->kind == MOB_BOAR ? 0.14f : 0.1f, 0.3f};
-        out[n++] = box(feet, facing, at, quat_axis(1.0f, 0.0f, 0.0f, m->kind == MOB_WOLF ? 0.5f : 0.0f), size,
-                       m->kind == MOB_BOAR ? T_SKIN : fur, lit);
-    }
-    return n;
+    return f.n;
 }

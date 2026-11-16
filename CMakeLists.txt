@@ -147,6 +147,7 @@ set(MC_CORE_SOURCES
   src/invui.c
   src/item.c
   src/mob.c
+  src/mobskin.c
   src/combat.c
   src/jobs.c
   src/log.c
@@ -235,7 +236,7 @@ if(MC_BUILD_TESTS)
   enable_testing()
   add_executable(mc_tests tests/test_main.c tests/test_util.c tests/test_thermo.c tests/test_health2.c
                           tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_gpucaps.c
-                          tests/test_health_debug.c tests/test_thoughts.c tests/test_drugs.c tests/test_faint.c tests/test_fear.c tests/test_defib.c tests/test_paths.c
+                          tests/test_health_debug.c tests/test_thoughts.c tests/test_drugs.c tests/test_faint.c tests/test_fear.c tests/test_mobmodel.c tests/test_defib.c tests/test_paths.c
                           tests/test_save_db.c tests/test_worlds.c tests/test_hud.c tests/test_cardio.c
                           tests/test_discord.c tests/test_netcrypto.c tests/test_wire.c tests/test_net.c tests/test_mp.c
                           tests/test_worldgen.c tests/test_tools.c

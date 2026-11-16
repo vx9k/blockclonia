@@ -80,5 +80,6 @@ void test_thoughts_all(void);
 void test_drugs_all(void);
 void test_faint_all(void);
 void test_fear_all(void);
+void test_mobmodel_all(void);
 
 #endif

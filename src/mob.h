@@ -26,6 +26,8 @@ typedef struct {
     float angry_t;       /* s left of hunting by day after being hurt (wolf) */
     float walk;          /* 0 idle, 1 walking (wandering) */
     float stride;        /* leg swing phase, radians (drawing) */
+    float look;          /* head turned from the body, radians, in the sense of yaw (drawing) */
+    float nod;           /* head lowered, radians: grazing, stalking (drawing) */
     uint32_t rng;
     uint8_t kind;
 } mob;
@@ -75,13 +77,22 @@ int mobs_hurt(mobs *s, physics *ph, int i, float damage, dvec3 from);
  * one closes to biting distance. daylight is thermo_daylight. */
 float mobs_fear(const mobs *s, const player *p, float daylight);
 
+/* MOB_BOAR or MOB_WOLF for "boar" or "wolf" (any case); -1 otherwise. */
+int mobs_kind_named(const char *name);
+
+/* Stands a mob on the ground `ahead` m in front of player p and `aside` m
+ * to its right, facing the player (--mobs). Returns its index, -1 if full. */
+int mobs_add_ahead(mobs *s, const world *w, const player *p, int kind, double ahead, double aside);
+
 /* Adds a mob standing at pos (tests, and the spawner). Returns its index,
  * -1 if full. */
 int mobs_add(mobs *s, int kind, dvec3 pos);
 
-/* A mob as boxes: feet relative to the camera. Writes up to max instances
- * and returns how many (MOB_FIGURE at most). */
-#define MOB_FIGURE 7
-int mob_figure(const mob *m, const float feet[3], float light, entity_instance *out, int max);
+/* A mob as boxes covered in its pixel art (mobskin.c): body, shoulders,
+ * head, snout, ears, tail and two-part legs, feet relative to the camera.
+ * t is a clock in seconds for idle motion (a wagging tail). Writes up to
+ * max instances and returns how many (MOB_FIGURE for a full figure). */
+#define MOB_FIGURE 15
+int mob_figure(const mob *m, const float feet[3], float light, float t, entity_instance *out, int max);
 
 #endif

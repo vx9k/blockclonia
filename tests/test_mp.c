@@ -284,9 +284,11 @@ void test_mp_all(void)
     CHECK(client_join(&h, &c, &kc, port));
     CHECK(world_get(&c.w, 3, GROUND, 3) == B_PLANKS);
     /* A creature near the client is drawn there, from the host's snapshot. */
-    mobs_add(&hm, MOB_BOAR, dv3(c.pl.pos.x + 3.0, c.pl.pos.y, c.pl.pos.z));
+    int hb = mobs_add(&hm, MOB_BOAR, dv3(c.pl.pos.x + 3.0, c.pl.pos.y, c.pl.pos.z));
+    hm.m[hb].nod = 0.8f; /* grazing when the client arrives: it fades, but is drawn there */
     for (int i = 0; i < 300 && mp_client_mobs(c.m)->count == 0; i++) frame(&h, &c, NULL);
     CHECK(mp_client_mobs(c.m)->count == 1 && mp_client_mobs(c.m)->m[0].kind == MOB_BOAR);
+    CHECK(mp_client_mobs(c.m)->m[0].nod > 0.0f && mp_client_mobs(c.m)->m[0].nod < 0.8f);
     hm.count = 0;
     /* Joined, with the fingerprint, and a warning that the key changed. */
     const mp_chat_line *lines = NULL;

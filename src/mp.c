@@ -572,6 +572,8 @@ static void host_snapshot(mp *m, int id)
         wire_f64(&w, mb->body.pos.z);
         wire_f32(&w, mb->body.yaw);
         wire_f32(&w, mb->stride);
+        wire_f32(&w, mb->look);
+        wire_f32(&w, mb->nod);
         wire_u8(&w, mb->kind);
         wire_u8(&w, (uint8_t)(mb->hurt_t > 0.0f));
         n++;
@@ -961,11 +963,14 @@ static void client_snapshot(mp *m, wire_r *rd)
         mb->body.pos = dv3(wire_get_f64(rd), wire_get_f64(rd), wire_get_f64(rd));
         mb->body.yaw = wire_get_f32(rd);
         mb->stride = wire_get_f32(rd);
+        mb->look = wire_get_f32(rd);
+        mb->nod = wire_get_f32(rd);
         mb->kind = wire_get_u8(rd);
         mb->hurt_t = wire_get_u8(rd) ? 0.1f : 0.0f;
         mb->body.prev_pos = mb->body.pos;
         if (mb->kind >= MOB_KINDS || fabs(mb->body.pos.x) >= WORLD_LIMIT || fabs(mb->body.pos.z) >= WORLD_LIMIT ||
-            fabs(mb->body.pos.y) > 1e5 || !(fabsf(mb->body.yaw) < 1e4f) || !(fabsf(mb->stride) < 1e7f))
+            fabs(mb->body.pos.y) > 1e5 || !(fabsf(mb->body.yaw) < 1e4f) || !(fabsf(mb->stride) < 1e7f) ||
+            !(fabsf(mb->look) <= 1.0f) || !(fabsf(mb->nod) <= 1.0f))
             rd->bad = 1;
     }
     if (rd->bad || rd->pos != rd->len || day < 0.0 || day > 1.0) return;

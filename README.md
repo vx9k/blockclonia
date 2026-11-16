@@ -262,7 +262,10 @@ they leave 2 to 3 raw meat (200 kcal each, or 350 cooked over a fire).
 Wolves come out at night, at most two near you, stalking at a walk and
 charging the last 8 m; their bites cut arms and legs and are dirty, so
 clean them. A wolf you hurt hunts you by day too. Creatures spawn out
-of sight, 24 to 44 m from a player, and are not saved.
+of sight, 24 to 44 m from a player, and are not saved. They are drawn
+in hand-made pixel art at 16 texels per metre: a creature turns its head
+to look at you when you come within 8 m, a boar standing alone drops
+its snout to graze, and a stalking wolf carries its head low.
 
 **Weapons.** A blow does 1 with a fist, 3 to 5 with a knife, 5 to 9
 with a sword and 3 to 6 with an axe; a boar has 20, a wolf 16. A
@@ -427,7 +430,7 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
             [--threads N] [--pool-mb N] [--gpu N] [--world DIR | --no-save]
             [--config FILE] [--validate] [--no-sound]
             [--play] [--screen title|worlds|create|multiplayer|pause|settings|controls|debug-health|inventory]
-            [--debug] [--time HH] [--give LIST] [--hurt LIST]
+            [--debug] [--time HH] [--give LIST] [--mobs LIST] [--hurt LIST]
             [--frames N] [--screenshot F] [--look YAW,PITCH] [--spawn X,Z]
             [--demo] [--health-panel] [--bench] [--mem-stats]
             [--host [--port N] [--client-server] | --join ADDR[:PORT]] [--name NAME]
@@ -436,6 +439,7 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
 - `--play` skips the menus and plays the default world; `--screen` opens a menu at start and
   `--debug` turns F3 on.
 - `--give log:8,sand:4` starts you with items (names as shown in game).
+  `--mobs wolf,boar` stands creatures side by side 4 m in front of you.
   `--time 21` starts at 21:00.
 - `--hurt` starts you injured, to try treatments or take screenshots: a
   comma list of names (`--help` lists them all: bleeds, fractures, burns
