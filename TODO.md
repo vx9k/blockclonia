@@ -7,9 +7,8 @@ what would make it worth doing.
 
 One branch and pull request per item, in this order:
 
-1. **World generation** (#29, `feat/worldgen-caves-ores`): taller mountains,
-   caves, coal/copper/iron ore, a furnace and smelting. Old worlds keep
-   the generator they were made with.
+1. **World generation** (#29, `feat/worldgen-caves-ores`): merged. The
+   next steps (villages and towns) are under World generation below.
 2. **Tools, weapons and mobs** (`feat/tools-weapons-mobs`, stacked on
    #29): tool tiers, wear (INV2), knife and sword, a rifle with
    bullets and cartridges, boars and wolves. Left for later: creatures
@@ -23,33 +22,107 @@ One branch and pull request per item, in this order:
    density and span, ingredients against what you have) and a short
    cursor tooltip. Left for later: search by name, favourites, dragging
    a stack across slots to spread it.
-4. **Health** (`feat/health-interactive`, stacked on item 3): done: the
-   adrenaline rush on a sudden injury (analgesia, strength, tunnel
-   vision) and the crash after it, an adrenaline auto-injector (one in
-   the starting kit), a manual shock override, painkiller overdose
-   (delayed liver damage, vomiting), antibiotics with nothing to treat
-   (gut upset), organ damage felt in play (heart caps exertion, liver
-   tires and jaundices, kidneys raise potassium, brain makes the view
-   drift), hand tremor and a clickable panel with treatment buttons;
-   morphine with respiratory depression, naloxone, spirits (alcohol:
-   vasodilation, sway, vomiting and aspiration) and their interactions
-   (alcohol deepens the opioid's hold on breathing; steady drinking
-   lowers the painkiller limit).
-   **Not done** (stopped at the token budget, 2026-10-14):
-   - fainting from a vasovagal reflex (pain, blood at the sight) as its
-     own event (unconsciousness from low brain oxygen already exists);
-   - adrenaline from fear (a wolf hunting nearby), not only from pain;
-   - a blur or double-vision effect for concussion (needs a renderer
-     post-process; the view sway is the stand-in);
-   - the panel by mouse only as far as parts and treatments go: the
-     organ list and supplies are not clickable, and there is no drag of
-     an item from the inventory onto a body part.
+4. **Health**: in progress, one pull request per item; see Health below.
 5. **Finish multiplayer** (**not started**): the items under Multiplayer
    below, NAT traversal by UDP hole punching through a rendezvous
    server included. Players chose: client-server mode, a headless
    `--server`, host/join screens in the menus, saving joined players
    with the world, lifting the host view-distance limit, column
    re-requests, `fuzz_net` on host handlers, chat safety numbers.
+
+## World generation
+
+**Status:** heightmap terrain with beaches, snowy peaks and trees,
+mountain ranges, cave tunnels and coal, copper and iron ore (#29).
+Worlds record the generator version they were made with
+(`WORLDGEN_VERSION`, `worldgen_column_v1`), so old worlds keep their
+terrain.
+
+**Next: villages, houses and towns.** Settlements in the generated
+world: houses, for now entirely empty (walls, floor, roof, a doorway
+and windows; no furniture, loot or villagers), grouped into villages
+and, in larger flat areas, towns with streets.
+
+**Shape.**
+
+- *Placement:* a coarse grid of cells (a few hundred metres across),
+  each with one seeded chance of a settlement at a jittered point.
+  Settle only on fairly flat, dry land above the sea and below the
+  snow line: sample `worldgen_height` around the point and reject a
+  slope or water. Towns need a larger flat area than villages.
+- *Layout:* from the settlement's seed, lay out a street plan (a main
+  road, side streets) and house plots along it, then pick a house
+  plan per plot (sizes, one or two storeys, roof shape). Level each
+  plot to the street's height and fill the ground under it, so houses
+  don't float or sink on slopes.
+- *Materials* from blocks that already exist (`B_PLANKS`, `B_LOG`,
+  `B_BRICK`, `B_GLASS`, stone), chosen per settlement and by biome.
+  Doors need a new block (or are left as open doorways at first).
+- *Streaming:* columns are generated one at a time on worker threads
+  (`jobs.c`), so a house that crosses a column border has to come out
+  the same from both sides. Each column asks which settlements could
+  reach it (its cell and the neighbouring ones), re-derives their
+  layouts from the seed, and writes only the blocks inside itself. No
+  shared state between jobs, and no second pass.
+- *Determinism:* layouts come from the seed and integer maths only, so
+  every machine builds the same town (multiplayer sends terrain from
+  the host anyway, but saves and tests rely on it).
+- *Compatibility:* settlements change the terrain, so they bump
+  `WORLDGEN_VERSION`; worlds made before keep generating without them.
+- *Tests:* the same seed gives the same settlement; a house split
+  across a column border matches on both sides; no settlement on
+  water or on steep ground; generation time per column stays within
+  the streaming budget (`--bench`).
+
+**Later:** furniture and loot, villagers, roads between settlements,
+ruins, and settlements on the map or in a `/locate` command.
+
+## Health
+
+**Status:** a lumped physiological model in `health.c` (blood,
+circulation, breathing, heat, organs, wounds, infection, drugs), with
+the H panel for treatment and an inner voice that says what the body
+feels. One pull request per item below.
+
+**Done:**
+
+- [x] The adrenaline rush on a sudden injury (analgesia, strength,
+      tunnel vision) and the crash after it; an adrenaline
+      auto-injector (one in the starting kit); a manual shock override
+- [x] Painkiller overdose (delayed liver damage, vomiting); antibiotics
+      with nothing to treat (gut upset)
+- [x] Organ damage felt in play: heart caps exertion, liver tires and
+      jaundices, kidneys raise potassium, brain makes the view drift;
+      hand tremor
+- [x] A clickable panel with treatment buttons
+- [x] The inner voice and body sensations ("That hurts.", "You feel
+      cold.") (#49)
+- [x] Morphine with respiratory depression, naloxone, spirits (alcohol:
+      vasodilation, sway, vomiting and aspiration) and their
+      interactions: alcohol deepens the opioid's hold on breathing, and
+      steady drinking lowers the painkiller limit (#50)
+
+**In progress:**
+
+- [ ] Fainting from a vasovagal reflex (a sudden pain, a fresh rush of
+      blood), with crouching to head it off
+      (`feat/vasovagal-faint`)
+
+**To do:**
+
+- [ ] A styled inner voice: each line coloured by what it is about
+      (icy blue for cold, orange for heat, red for pain), wavy text when
+      drunk or drugged, glitching text when the body is failing
+- [ ] Adrenaline from fear (a wolf or boar hunting nearby), not only
+      from pain
+- [ ] A blur or double-vision effect for concussion (needs a renderer
+      post-process with a Vulkan 1.0 path; the view sway is the
+      stand-in)
+- [ ] The panel by mouse all the way: a clickable organ list and
+      supplies, and dragging an item from the inventory onto a body part
+- [ ] A more detailed, realistic panel: an anatomical body view with
+      internal organ overlays (heart, lungs, liver, kidneys, brain, gut)
+      coloured by their state
 
 ## Native Metal renderer (macOS)
 
