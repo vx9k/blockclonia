@@ -192,9 +192,9 @@ class Packages(unittest.TestCase):
         self.assertIn('uses: ./.github/workflows/package.yml', job(CI, 'package'))
 
 
-def version_script(name):
-    """The run script of the job's 'Version the package' step, dedented."""
-    body = job(PACKAGE, name).split('- name: Version the package\n', 1)[1]
+def step_script(workflow, name, step):
+    """The run script of the step called `step` in job `name`, dedented."""
+    body = job(workflow, name).split(f'- name: {step}\n', 1)[1]
     script = body.split('run: |\n', 1)[1]
     lines = []
     for line in script.splitlines():
@@ -202,6 +202,10 @@ def version_script(name):
             break
         lines.append(line[10:])
     return '\n'.join(lines) + '\n'
+
+
+def version_script(name):
+    return step_script(PACKAGE, name, 'Version the package')
 
 
 class ContainerShell(unittest.TestCase):
@@ -233,6 +237,82 @@ class ContainerShell(unittest.TestCase):
                                          capture_output=True, text=True)
                     self.assertEqual(run.returncode, 0, run.stderr)
                     self.assertRegex(out.read_text(), expected)
+
+
+# Stands in for `gh release`: $STATE/releases holds one tag per line, a tag
+# listed in $STATE/immutable cannot be deleted, and every call is logged.
+FAKE_GH = """#!/bin/bash
+echo "$*" >> "$STATE/log"
+case "$2" in
+  view) grep -qxF "$3" "$STATE/releases" ;;
+  create) echo "$3" >> "$STATE/releases" ;;
+  list) cat "$STATE/releases" ;;
+  delete)
+    grep -qxF "$3" "$STATE/immutable" && exit 1
+    grep -vxF "$3" "$STATE/releases" > "$STATE/rest"
+    mv "$STATE/rest" "$STATE/releases" ;;
+esac
+"""
+
+
+class Nightly(unittest.TestCase):
+    SHA = 'abcdef0123456789'
+
+    def publish(self, releases, immutable=()):
+        """Run the publish step against a fake gh; return (run, releases, log)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / 'bin').mkdir()
+            (tmp / 'bin/gh').write_text(FAKE_GH)
+            (tmp / 'bin/gh').chmod(0o755)
+            (tmp / 'dist').mkdir()
+            (tmp / 'dist/blockclonia_1_arm64.deb').write_text('')
+            (tmp / 'releases').write_text(''.join(f'{r}\n' for r in releases))
+            (tmp / 'immutable').write_text(''.join(f'{r}\n' for r in immutable))
+            (tmp / 'log').write_text('')
+            env = {'PATH': f"{tmp / 'bin'}:{os.environ['PATH']}", 'STATE': str(tmp), 'GITHUB_SHA': self.SHA}
+            script = step_script(CI, 'nightly', 'Publish the nightly release')
+            run = subprocess.run(['bash', '-e', '-c', script], cwd=tmp, env=env, capture_output=True, text=True)
+            return run, (tmp / 'releases').read_text().split(), (tmp / 'log').read_text().splitlines()
+
+    def test_each_commit_gets_its_own_tag(self):
+        # An immutable release's tag can never be reused, so a fixed tag fails.
+        run, releases, log = self.publish([])
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(len(releases), 1)
+        self.assertRegex(releases[0], r'^nightly-\d{8}-abcdef0$')
+        create = next(line for line in log if line.startswith('release create'))
+        self.assertIn(f'--target {self.SHA}', create)
+        self.assertIn('--prerelease', create)
+        self.assertIn('--latest=false', create)
+        self.assertIn('dist/blockclonia_1_arm64.deb', create)
+
+    def test_older_nightlies_go_and_releases_stay(self):
+        run, releases, log = self.publish(['v26.11.0', 'nightly', 'nightly-20261101-1234567'])
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(releases[0], 'v26.11.0')
+        self.assertEqual(len(releases), 2)
+        self.assertTrue(releases[1].startswith('nightly-'))
+        self.assertIn('release delete nightly --cleanup-tag --yes', log)
+        self.assertNotIn('release delete v26.11.0 --cleanup-tag --yes', log)
+
+    def test_the_new_nightly_is_published_before_the_old_ones_go(self):
+        _, _, log = self.publish(['nightly-20261101-1234567'])
+        verbs = [line.split()[1] for line in log]
+        self.assertLess(verbs.index('create'), verbs.index('delete'))
+
+    def test_a_rerun_does_not_publish_twice(self):
+        _, first, _ = self.publish([])
+        run, releases, log = self.publish(first)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(releases, first)
+        self.assertFalse(any(line.startswith('release create') for line in log))
+
+    def test_an_undeletable_old_nightly_only_warns(self):
+        run, releases, _ = self.publish(['nightly-20261101-1234567'], immutable=['nightly-20261101-1234567'])
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn('::warning::could not fully delete nightly-20261101-1234567', run.stdout)
+        self.assertIn('nightly-20261101-1234567', releases)
 
 
 class Lint(unittest.TestCase):

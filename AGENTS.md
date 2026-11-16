@@ -320,8 +320,10 @@ attested (`gh attestation verify <file> --repo vx9k/blockclonia`) and
 published as the GitHub release. A push to `main` releases at once only for
 a `fix(security):` commit, or when the weekly release was missed. "Run
 workflow" on the CI workflow releases by hand. Every green push to `main`
-also replaces the `nightly` prerelease, whose packages are versioned
-`<release>+git.<date>.<commit>`.
+also publishes a `nightly-<date>-<commit>` prerelease and deletes the
+older ones; its packages are versioned `<release>+git.<date>.<commit>`.
+Every nightly has its own tag because a tag an immutable release has used
+can never be used again.
 
 So write commit headers for the changelog: `feat` lands under Added, `fix`
 under Fixed, `perf` under Performance, the rest under Maintenance, and a
