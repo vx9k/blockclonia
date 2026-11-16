@@ -24,14 +24,32 @@
 #define COL_VOL (COL_AREA * WORLD_H)
 #define SEA_LEVEL 48
 
-/* Horizontal limit on block coordinates. Keeps int arithmetic far from
- * overflow and physics in double precision well inside sub-mm accuracy. */
-#define WORLD_LIMIT 8000000
+/* Horizontal limit on block coordinates: blocks lie in -WORLD_LIMIT ..
+ * WORLD_LIMIT - 1 on x and z, positions within +-WORLD_LIMIT. Just under
+ * 2^31, with 147 million blocks of headroom, so a coordinate plus any reach
+ * the game adds to it (a few thousand blocks at most) still fits an int;
+ * the difference of two may not, and is taken in 64 bits.
+ * Doubles hold positions there to 2^-22 m (0.24 micrometres), inside the
+ * physics tolerance (physics.c, EPS). */
+#define WORLD_LIMIT 2000000000
 
+_Static_assert(WORLD_LIMIT % CHUNK_W == 0, "the world ends at a column boundary");
 _Static_assert((-1 >> 1) == -1, "arithmetic right shift required for chunk coordinates");
 
 static inline int chunk_of(int x) { return x >> CHUNK_SHIFT; }
 static inline int col_index(int x, int y, int z) { return (y * CHUNK_W + z) * CHUNK_W + x; }
+/* Is block column (x, z) inside the world? Takes 64 bits so callers can
+ * pass untrusted or offset values without overflowing first. */
+static inline int world_xz_inside(long long x, long long z)
+{
+    return x >= -WORLD_LIMIT && x < WORLD_LIMIT && z >= -WORLD_LIMIT && z < WORLD_LIMIT;
+}
+/* Is column (cx, cz) inside? Those outside never load, so nothing should
+ * wait for them. */
+static inline int world_column_inside(int cx, int cz)
+{
+    return world_xz_inside((long long)cx * CHUNK_W, (long long)cz * CHUNK_W);
+}
 
 /* Water level 1..8 (8 = full block). Stored in meta, with full water stored
  * as 0 so oceans need no meta array at all. */

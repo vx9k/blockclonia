@@ -14,7 +14,8 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
 - **Infinite terrain** streamed around the player in 16×384×16 columns:
   continents, hills, mountain ranges with bare rock and snow caps, beaches,
   oceans and trees, cave tunnels winding through the rock and opening onto
-  the surface, and veins of coal, copper and iron ore.
+  the surface, and veins of coal, copper and iron ore. It goes on for 2
+  billion blocks in every direction, as detailed at the edge as at spawn.
 
   ![mountain ranges with snow caps](docs/mountains.jpg)
 - **Realistic physics** (1 block = 1 m, SI units, fixed 60 Hz step). See

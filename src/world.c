@@ -60,20 +60,18 @@ static int slot_of(const world *w, int cx, int cz)
     return (cz & w->grid_mask) * w->grid_w + (cx & w->grid_mask);
 }
 
-static int in_limits(int cx, int cz)
-{
-    const int lim = WORLD_LIMIT / CHUNK_W;
-    return cx > -lim && cx < lim && cz > -lim && cz < lim;
-}
+static int in_limits(int cx, int cz) { return world_column_inside(cx, cz); }
 
 /* Columns are loaded one ring beyond the mesh radius so every meshable
- * column has all eight neighbours; `slack` adds unload hysteresis. */
+ * column has all eight neighbours; `slack` adds unload hysteresis. A
+ * column left behind by a teleport can be 250 million columns away, so
+ * the squares are taken in 64 bits. */
 static int in_ring(int dx, int dz, int radius, int slack)
 {
-    int ax = abs(dx) - 1 - slack, az = abs(dz) - 1 - slack;
+    long long ax = llabs((long long)dx) - 1 - slack, az = llabs((long long)dz) - 1 - slack;
     if (ax < 0) ax = 0;
     if (az < 0) az = 0;
-    return ax * ax + az * az <= radius * radius;
+    return ax * ax + az * az <= (long long)radius * radius;
 }
 
 /* ------------------------------------------------------------ far columns */
@@ -513,19 +511,27 @@ static void mesh_done(job *j)
 }
 
 /* Copies the section plus a 1-block border out of up to 9 columns. The
- * worker then meshes a private snapshot, so edits never race with it. */
+ * worker then meshes a private snapshot, so edits never race with it.
+ * Past the world's edge the border repeats the last block column, as if
+ * the terrain went on: no wall is drawn facing out, and the ground along
+ * the edge is not shaded by blocks that are not there. */
 static void gather(const world *w, int cx, int cz, int sy, mesh_input *in)
 {
+    int ox[3] = {0}, oz[3] = {0}; /* neighbour offsets, 0 where that side is past the edge */
+    for (int d = -1; d <= 1; d++) {
+        ox[d + 1] = in_limits(cx + d, cz) ? d : 0;
+        oz[d + 1] = in_limits(cx, cz + d) ? d : 0;
+    }
     const column *cols[3][3] = {0};
-    for (int dz = -1; dz <= 1; dz++)
-        for (int dx = -1; dx <= 1; dx++)
-            cols[dz + 1][dx + 1] = world_column(w, cx + dx, cz + dz);
+    for (int zi = 0; zi < 3; zi++)
+        for (int xi = 0; xi < 3; xi++) cols[zi][xi] = world_column(w, cx + ox[xi], cz + oz[zi]);
+    int edge_x = !ox[0] || !ox[2];
 
     for (int py = -1; py <= SECTION_H; py++) {
         int y = sy * SECTION_H + py;
         for (int pz = -1; pz <= CHUNK_W; pz++) {
             int zi = pz < 0 ? 0 : (pz >= CHUNK_W ? 2 : 1);
-            int lz = pz & (CHUNK_W - 1);
+            int lz = zi == 1 || oz[zi] ? pz & (CHUNK_W - 1) : (zi ? CHUNK_W - 1 : 0);
             uint8_t *dst = &in->blocks[mesh_pidx(-1, py, pz)];
             uint8_t *dstm = &in->meta[mesh_pidx(-1, py, pz)];
             if (y < 0 || y >= WORLD_H) {
@@ -534,7 +540,7 @@ static void gather(const world *w, int cx, int cz, int sy, mesh_input *in)
                 continue;
             }
             const column *cw = cols[zi][0], *cc = cols[zi][1], *ce = cols[zi][2];
-            if (cw && cc && ce) {
+            if (cw && cc && ce && !edge_x) {
                 /* The usual case: one fixed 16-byte row plus two border
                  * bytes, which the compiler turns into plain moves. */
                 size_t row = (size_t)col_index(0, y, lz);
@@ -554,7 +560,7 @@ static void gather(const world *w, int cx, int cz, int sy, mesh_input *in)
             /* x = -1, 0..15, 16 */
             for (int xi = 0; xi < 3; xi++) {
                 const column *c = cols[zi][xi];
-                int x0 = xi == 0 ? CHUNK_W - 1 : 0;
+                int x0 = (xi == 0 && ox[0]) || (xi == 2 && !ox[2]) ? CHUNK_W - 1 : 0;
                 int n = xi == 1 ? CHUNK_W : 1;
                 int off = xi == 0 ? 0 : (xi == 1 ? 1 : CHUNK_W + 1);
                 if (!c) {
@@ -571,11 +577,13 @@ static void gather(const world *w, int cx, int cz, int sy, mesh_input *in)
     }
 }
 
+/* Past the world's edge nothing will ever load: the last column meshes
+ * without that neighbour (gather repeats its own border there). */
 static int neighbours_ready(const world *w, int cx, int cz)
 {
     for (int dz = -1; dz <= 1; dz++)
         for (int dx = -1; dx <= 1; dx++)
-            if (!world_column(w, cx + dx, cz + dz)) return 0;
+            if (!world_column(w, cx + dx, cz + dz) && in_limits(cx + dx, cz + dz)) return 0;
     return 1;
 }
 

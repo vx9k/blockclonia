@@ -699,7 +699,9 @@ static void maintain(thermo *t, const world *w, dvec3 player, int have_player)
         int gone = world_get(w, c->x, c->y, c->z) == B_UNLOADED;
         int kept = c->keep == t->stamp;
         int quiet = fabs(c->dev) < DROP_K && c->lat == 0.0;
-        int far = have_player && (abs(c->x - px) > FIELD_RANGE || abs(c->z - pz) > FIELD_RANGE);
+        /* 64 bits: a host's cells can lie by another player at the far edge. */
+        int far = have_player &&
+                  (llabs((long long)c->x - px) > FIELD_RANGE || llabs((long long)c->z - pz) > FIELD_RANGE);
         if (gone || (!kept && (quiet || far))) remove_cell(t, i);
     }
 }
