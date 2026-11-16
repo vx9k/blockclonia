@@ -55,6 +55,9 @@ set_property(CACHE MC_DEPS PROPERTY STRINGS AUTO SYSTEM FETCH)
 set(MC_BOLT OFF CACHE STRING
   "Optimise the game's layout with LLVM BOLT, trained on --bench: OFF, ON, or AUTO (where it can run)")
 set_property(CACHE MC_BOLT PROPERTY STRINGS OFF ON AUTO)
+set(MC_PGO OFF CACHE STRING
+  "Profile-guided optimisation of the game, trained on --bench: OFF, ON, or AUTO (where it can run)")
+set_property(CACHE MC_PGO PROPERTY STRINGS OFF ON AUTO)
 
 # ---------------------------------------------------------------- CPU flags
 # Applied with add_compile_options so fetched dependencies (mimalloc, GLFW)
@@ -239,6 +242,9 @@ if(MC_BUILD_GAME)
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders
     SOURCES block.vert block.frag entity.vert line.vert line.frag ui.vert ui.frag)
 
+  # PGO compiles the game from a profile; BOLT then lays out the result.
+  include(Pgo)
+  mc_pgo(mccore blockclonia)
   include(Bolt)
   mc_bolt(blockclonia)
 endif()

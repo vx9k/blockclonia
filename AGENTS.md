@@ -38,9 +38,9 @@ tools/lint.sh                                      # the CI lint gate; run it be
   checkout.
 - The toolchain is LLVM only: clang, lld and LLVM's binutils, picked by
   `cmake/toolchains/llvm.cmake` with or without a preset. gcc is refused
-  at configure time. Release builds also run BOLT (`cmake/Bolt.cmake`),
-  trained on `--bench`; a change to what `--bench` exercises changes what
-  BOLT optimises.
+  at configure time. Release builds also use PGO (`cmake/Pgo.cmake`) and
+  BOLT (`cmake/Bolt.cmake`), both trained on `--bench`; a change to what
+  `--bench` exercises changes what they optimise.
 
 A change is done when clang builds it with `-DMC_WERROR=ON`,
 `mc_tests` passes, `tools/lint.sh` is clean, and anything visible has been
