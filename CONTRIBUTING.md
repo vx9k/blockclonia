@@ -45,7 +45,9 @@ in [AGENTS.md](AGENTS.md) (Git). In short:
   uses the title as the commit subject on `main`.
 - Fill in every section of the template: what changed and why, how you
   checked it, and the checklist. Link the issue with `Closes #N`.
-- Open it as a draft until CI passes and the checklist is done.
+- Open it ready for review with auto-merge on (squash): it merges itself
+  once CI passes. Open a draft only for work that is not meant to land
+  yet.
 - Write commit messages in the
   [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)
   form, `<type>[optional scope][!]: <description>`, e.g.
