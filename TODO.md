@@ -106,11 +106,11 @@ feels. One pull request per item below.
 - [x] A styled inner voice: each line coloured by what it is about
       (icy blue for cold, orange for heat, red for pain), wavy text when
       drunk or drugged, glitching text when the body is failing (#53)
+- [x] Adrenaline from fear: a wolf hunting nearby startles the body
+      into a rush and keeps the adrenaline up while it closes in (#55)
 
 **To do:**
 
-- [ ] Adrenaline from fear (a wolf or boar hunting nearby), not only
-      from pain
 - [ ] A blur or double-vision effect for concussion (needs a renderer
       post-process with a Vulkan 1.0 path; the view sway is the
       stand-in)
