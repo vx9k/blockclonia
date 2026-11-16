@@ -301,7 +301,10 @@ const char *biome_name(biome b)
  * chambers (field 3) keep 12 blocks below the surface. */
 static int rows_of(int f, int h) { return (f == 3 ? h - 13 : h - 1) / CAVE_STEP + 1; }
 
-static void carve_caves(uint32_t seed, column *c, const int hm[CHUNK_W + 2][CHUNK_W + 2])
+/* A row of the height map, with the one-block rim on each side. */
+typedef int hm_row[CHUNK_W + 2];
+
+static void carve_caves(uint32_t seed, column *c, const hm_row *hm)
 {
     int bx = c->cx * CHUNK_W, bz = c->cz * CHUNK_W, top = 0;
     for (int z = 0; z < CHUNK_W; z++)
@@ -540,7 +543,7 @@ void worldgen_column(uint32_t seed, column *c)
             c->blocks[(SEA_LEVEL - 1) * COL_AREA + i] = B_ICE;
 
     place_ores(seed, c);
-    carve_caves(seed, c, (const int(*)[CHUNK_W + 2]) hm);
+    carve_caves(seed, c, (const hm_row *)hm);
 
     /* Trees only where the whole canopy fits in this column: avoids needing
      * neighbour data on worker threads, at the cost of no trees on the
