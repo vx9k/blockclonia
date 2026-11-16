@@ -516,6 +516,9 @@ static void key_cb(GLFWwindow *win, int key, int sc, int action, int mods)
         else if (key == GLFW_KEY_X) g_in.treat = TREAT_REDUCE;
         else if (key == GLFW_KEY_N) g_in.treat = TREAT_ADRENALINE;
         else if (key == GLFW_KEY_J) g_in.treat = TREAT_SHOCK;
+        else if (key == GLFW_KEY_M) g_in.treat = TREAT_MORPHINE;
+        else if (key == GLFW_KEY_O) g_in.treat = TREAT_NALOXONE;
+        else if (key == GLFW_KEY_L) g_in.treat = TREAT_SPIRITS;
     } else if (key == GLFW_KEY_T && g_in.mp_active) {
         g_in.chat_open = 2; /* 2: the T itself must not be typed */
         g_in.chat_len = 0;

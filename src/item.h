@@ -33,23 +33,27 @@ enum {
     I_CARTRIDGE,
     I_RIFLE,
     I_ADRENALINE,
-    I_TOOL_FIRST /* then TOOL_KINDS x TIER_COUNT tools, kind-major, to ITEM_END */
+    I_TOOL_FIRST /* then TOOL_KINDS x TIER_COUNT tools, kind-major, to I_TOOL_END */
 };
 
-#define ITEM_END (I_TOOL_FIRST + 5 * 4)
+#define I_TOOL_END (I_TOOL_FIRST + 5 * 4)
+
+/* Items added after the tools, so the ids in saved inventories keep their
+ * meaning. Append only. */
+enum { I_MORPHINE = I_TOOL_END, I_NALOXONE, I_SPIRITS, ITEM_END };
 
 /* Tools and blades come in kinds and tiers; the item id is
  * I_TOOL_FIRST + kind * TIER_COUNT + tier. */
 enum { TOOL_PICKAXE, TOOL_AXE, TOOL_SHOVEL, TOOL_KNIFE, TOOL_SWORD, TOOL_KINDS };
 enum { TIER_WOOD, TIER_STONE, TIER_COPPER, TIER_IRON, TIER_COUNT };
-_Static_assert((TOOL_KINDS * TIER_COUNT) == (ITEM_END - I_TOOL_FIRST), "one item per tool kind and tier");
+_Static_assert((TOOL_KINDS * TIER_COUNT) == (I_TOOL_END - I_TOOL_FIRST), "one item per tool kind and tier");
 _Static_assert((TOOL_KINDS * TIER_COUNT) == (T_COUNT - T_TOOL_FIRST), "one texture per tool kind and tier");
 
 static inline int item_tool_id(int kind, int tier) { return I_TOOL_FIRST + kind * TIER_COUNT + tier; }
 /* 1 if id is a tool or blade, with its kind and tier. */
 static inline int item_tool(int id, int *kind, int *tier)
 {
-    if (id < I_TOOL_FIRST || id >= ITEM_END) return 0;
+    if (id < I_TOOL_FIRST || id >= I_TOOL_END) return 0;
     *kind = (id - I_TOOL_FIRST) / TIER_COUNT;
     *tier = (id - I_TOOL_FIRST) % TIER_COUNT;
     return 1;

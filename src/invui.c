@@ -213,6 +213,7 @@ int invui_recipe_category(int r)
     case I_CARTRIDGE:
     case I_GUNPOWDER: return RCAT_WEAPONS;
     case I_SPLINT:
+    case I_SPIRITS:
     case I_BANDAGE: return RCAT_MEDICAL;
     default: return RCAT_BASICS;
     }

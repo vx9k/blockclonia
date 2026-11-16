@@ -30,10 +30,12 @@ One branch and pull request per item, in this order:
    (delayed liver damage, vomiting), antibiotics with nothing to treat
    (gut upset), organ damage felt in play (heart caps exertion, liver
    tires and jaundices, kidneys raise potassium, brain makes the view
-   drift), hand tremor and a clickable panel with treatment buttons.
+   drift), hand tremor and a clickable panel with treatment buttons;
+   morphine with respiratory depression, naloxone, spirits (alcohol:
+   vasodilation, sway, vomiting and aspiration) and their interactions
+   (alcohol deepens the opioid's hold on breathing; steady drinking
+   lowers the painkiller limit).
    **Not done** (stopped at the token budget, 2026-10-14):
-   - drug interactions (painkiller on top of alcohol or opioids; none
-     exist yet), opioids and their respiratory depression;
    - fainting from a vasovagal reflex (pain, blood at the sight) as its
      own event (unconsciousness from low brain oxygen already exists);
    - adrenaline from fear (a wolf hunting nearby), not only from pain;

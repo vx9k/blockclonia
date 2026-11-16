@@ -278,6 +278,11 @@ static void alerts_needs(const health *h, alert_list *l)
     else if (inf > 0.3f) add_alert(l, KEY, 2, "Infected wound");
     if (h->pain > 6.0f) add_alert(l, KEY, 2, "Severe pain");
     if (health_stamina(h) < 0.1f) add_alert(l, KEY, 1, "Exhausted");
+    float dep = health_resp_depression(h);
+    if (dep > 0.35f) add_alert(l, KEY, 3, "Overdose: breathing %.0f/min", (double)h->rr);
+    else if (h->opioid > 3.0f && h->naloxone <= 0.0f) add_alert(l, KEY, 1, "Morphine");
+    if (h->bac >= 0.5f)
+        add_alert(l, KEY, h->bac > 2.5f ? 3 : (h->bac > 1.2f ? 2 : 1), "Drunk %.1f g/L", (double)h->bac);
     if (h->conscious == CONS_CONFUSED) add_alert(l, KEY, 2, "Confused");
 }
 #undef KEY
@@ -712,6 +717,9 @@ static const struct {
     {"Cool burn", "C", "Under running water, early, so the burn stops deepening.", TREAT_COOL},
     {"Reduce", "X", "Pull a dislocated joint back in. Very painful.", TREAT_REDUCE},
     {"Painkiller", "P", "6 h of relief. Over 4 a day poisons the liver, a day later.", TREAT_PAINKILLER},
+    {"Morphine", "M", "Strong relief. Too much, or with drink, and breathing stops.", TREAT_MORPHINE},
+    {"Naloxone", "O", "Reverses an opioid overdose for about an hour.", TREAT_NALOXONE},
+    {"Spirits", "L", "A drink: warm and numb, but heat and water leave faster.", TREAT_SPIRITS},
     {"Antibiotics", "A", "For infection. With none to treat, they only upset the gut.", TREAT_ANTIBIOTIC},
     {"Eat", "E", "The food in hand, else the best there is.", TREAT_EAT},
     {"Drink", "R", "Standing in or facing water, or a full bucket.", TREAT_DRINK},
@@ -831,20 +839,20 @@ static void panel(ui *u, const health *h, hud_state *s)
     struct {
         const char *name;
         int id;
-    } sup[9] = {
+    } sup[12] = {
         {"Bandages", I_BANDAGE},       {"Splints", I_SPLINT},
         {"Antiseptic", I_ANTISEPTIC},  {"Plant fibre", I_FIBRE},
         {"Sticks", I_STICK},           {"Painkillers", I_PAINKILLER},
         {"Apples", I_APPLE},           {"Water bucket", I_WATER_BUCKET},
-        {"Antibiotics", I_ANTIBIOTIC},
+        {"Antibiotics", I_ANTIBIOTIC}, {"Morphine", I_MORPHINE},
+        {"Naloxone", I_NALOXONE},      {"Spirits", I_SPIRITS},
     };
-    for (int i = 0; i < 9; i++) {
+    for (int i = 0; i < 12; i++) {
         const int col = i % 3, row = i / 3;
         int n = s->inv ? inv_count(s->inv, sup[i].id) : 0;
         ui_textf(u, x0 + 8 + (float)col * 96, by + 11 + (float)row * 10, 1, n ? C_TEXT : C_DIM, "%s %d", sup[i].name,
                  n);
     }
-    ui_text(u, x0 + 8, by + 43, 1, C_DIM, "Leaves give fibre and apples. Craft in the inventory (Tab).");
 
     float ex = x0 + 330;
     ui_text(u, ex, by, 1, C_HEAD, "EVENTS");
@@ -863,7 +871,8 @@ static void panel(ui *u, const health *h, hud_state *s)
     for (int i = 0; i < nb; i++) {
         float bx = x0 + 8 + (float)(i % per_row) * (bw + 2), by2 = y0 + ph - 23 + (i >= per_row ? 11.0f : 0.0f);
         int hot = in_rect(s, bx, by2, bw, 10);
-        int risky = BUTTONS[i].treat == TREAT_SHOCK || BUTTONS[i].treat == TREAT_ADRENALINE;
+        int risky = BUTTONS[i].treat == TREAT_SHOCK || BUTTONS[i].treat == TREAT_ADRENALINE ||
+                    BUTTONS[i].treat == TREAT_MORPHINE;
         ui_rect(u, bx, by2, bw, 10, hot ? ui_rgba(60, 70, 84, 255) : ui_rgba(28, 32, 40, 255));
         ui_frame(u, bx, by2, bw, 10, 1, risky ? ui_alpha(SEV[2], hot ? 1.0f : 0.6f) : (hot ? C_ECG : C_BORDER));
         char lab[24] = {0};

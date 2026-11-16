@@ -100,6 +100,7 @@ typedef enum {
     DEATH_HYPERTHERMIA,
     DEATH_TRAUMA,
     DEATH_BURNS,
+    DEATH_OVERDOSE,
 } death_cause;
 
 typedef enum {
@@ -115,6 +116,9 @@ typedef enum {
     TREAT_DEFIB,          /* defibrillator pads on the chest, or off again */
     TREAT_ADRENALINE,     /* adrenaline auto-injector into the thigh */
     TREAT_SHOCK,          /* manual override: shock now, whatever the rhythm */
+    TREAT_MORPHINE,       /* 10 mg of oral morphine */
+    TREAT_NALOXONE,       /* naloxone nasal spray: blocks opioids for about an hour */
+    TREAT_SPIRITS,        /* a drink of spirits (14 g of ethanol) */
     TREAT_COUNT
 } treatment;
 
@@ -283,6 +287,13 @@ typedef struct health {
     float gut_upset; /* game hours of diarrhoea left (antibiotics with nothing to treat) */
     float crash; /* 0..1 owed after an adrenaline rush: shaky and tired once it wears off */
     float pain_ref; /* slow reference a sudden jump in pain is measured against */
+    /* Drugs. */
+    float opioid_gut; /* mg of swallowed morphine still to absorb */
+    float opioid; /* mg of morphine in the body */
+    float naloxone; /* game hours of opioid blockade left */
+    float alcohol_gut; /* g of ethanol in the stomach */
+    float bac; /* g/L of alcohol in the blood (about per mille) */
+    float drink_load; /* g of ethanol drunk over the last few days: steady drinking */
     float sepsis;                     /* 0..1 */
     int conscious;                    /* consciousness */
 
@@ -343,7 +354,8 @@ health_limits health_get_limits(const health *h);
 
 /* How the body changes what the player sees and feels, 0..1 each, for the
  * screen and the hands: a tremor (adrenaline, the crash after it, low
- * sugar, cold), a sway (a hurt brain, concussion, confusion), tunnel
+ * sugar, cold), a sway (a hurt brain, concussion, confusion, drink and
+ * opioids), tunnel
  * vision (an adrenaline rush) and the yellow of jaundice (a failing
  * liver). */
 typedef struct {
@@ -398,6 +410,13 @@ void health_burn(health *h, int part, double omega);
  * that keep a pulse. */
 void health_arrest(health *h, int rhythm);
 
+/* How far opioids and alcohol hold breathing down (0 none .. 1 apnoea),
+ * and how far they sedate (past ~0.45 confused, ~0.85 out cold). Alcohol
+ * lowers the opioid dose that stops breathing: the two act together on
+ * the brainstem. */
+float health_resp_depression(const health *h);
+float health_sedation(const health *h);
+
 /* 1 for rhythms that pump blood (sinus, AF, VT, heart block). */
 int health_rhythm_perfusing(int rhythm);
 /* 1 for the rhythms an AED shocks: VF and pulseless VT. */
@@ -429,7 +448,7 @@ typedef struct {
 } health_debug_kind;
 
 extern const health_debug_kind HEALTH_DEBUG_KINDS[];
-#define HEALTH_DEBUG_COUNT 29
+#define HEALTH_DEBUG_COUNT 31
 
 /* Looks a --hurt token up in HEALTH_DEBUG_KINDS; returns -1 if there is
  * no such name. */

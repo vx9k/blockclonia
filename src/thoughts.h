@@ -44,6 +44,8 @@ typedef enum {
     FEEL_TIRED,
     FEEL_RUSH,     /* an adrenaline rush */
     FEEL_CRASH,    /* the shaky spell after it */
+    FEEL_DRUNK,
+    FEEL_DOPED,    /* an opioid's warm, heavy calm */
     FEEL_COUNT
 } feeling;
 

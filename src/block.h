@@ -112,6 +112,9 @@ typedef enum {
     T_ITEM_CARTRIDGE,
     T_ITEM_RIFLE,
     T_ITEM_ADRENALINE,
+    T_ITEM_MORPHINE,
+    T_ITEM_NALOXONE,
+    T_ITEM_SPIRITS,
     T_TOOL_FIRST /* then one per tool kind and tier, in item order (T_COUNT) */
 } tex_id;
 
