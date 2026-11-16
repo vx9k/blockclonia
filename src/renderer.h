@@ -56,6 +56,10 @@ typedef struct {
     ipos selection;
     int underwater;
     int hide_crosshair;
+    /* Blurred and double vision, 0..1 (health_senses): the world is drawn
+     * filtered, under a sharp crosshair and overlay; both 0 draws it
+     * straight to the screen. */
+    float blur, doubled;
     int ui_quads;        /* overlay quads written to renderer_ui_buffer() this frame */
 } render_view;
 

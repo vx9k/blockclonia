@@ -117,8 +117,8 @@ stop, more stop it, and alcohol lowers the dose that does. Naloxone
 reverses it for about an hour, which can be less than the morphine
 lasts. Spirits (4 apples and a glass over a fire) clean a wound when the
 antiseptic runs out, or warm you up as a drink: alcohol opens the skin's
-vessels, so heat leaves faster in the cold; it dulls pain, sways the
-view, makes you vomit past ~2 g/L (and breathe it in if you are out
+vessels, so heat leaves faster in the cold; it dulls pain, sways and
+blurs the view, makes you vomit past ~2 g/L (and breathe it in if you are out
 cold), and days of heavy drinking halve the painkiller the liver takes.
 A sudden severe pain or a fresh rush of blood can set off a vasovagal
 faint: a cold sweat, ringing ears and greying vision for a few seconds,
@@ -215,7 +215,8 @@ thirst, hunger) run on the survival clock.
   mass and speed, blocks pinning you down, smashing glass by hand, fire and
   cold. The body can suffer bruises, sprains, closed and open fractures,
   dislocated shoulders and elbows, venous and arterial cuts, abrasions,
-  internal bleeding, concussion and bleeding inside the skull,
+  internal bleeding, concussion (with blurred and double vision while
+  the confusion lasts) and bleeding inside the skull,
   pneumothorax, crush injury and crush syndrome, burns, frostbite,
   infection and sepsis.
 - **Treatment uses supplies** from a starting kit and from the world:

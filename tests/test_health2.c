@@ -659,6 +659,49 @@ static void test_variance_shortterm(void)
     mem_free(ref);
 }
 
+/* Blurred and double vision: strongest just after a knock to the head,
+ * double vision gone first, both clear once the confusion ends. Drink and
+ * a damaged brain blur too; a healthy sober body sees sharp. */
+static void test_vision_blur(void)
+{
+    health *h = new_body(93);
+    health_senses v = health_get_senses(h);
+    CHECK(v.blur == 0.0f && v.doubled == 0.0f);
+
+    h->confusion = 400.0f;
+    v = health_get_senses(h);
+    CHECK(v.blur > 0.6f && v.doubled > 0.7f);
+    h->confusion = 90.0f;
+    v = health_get_senses(h);
+    CHECK(v.blur > 0.4f && v.blur < 0.6f && v.doubled > 0.0f && v.doubled < 0.15f);
+    h->confusion = 30.0f;
+    v = health_get_senses(h);
+    CHECK(v.blur > 0.1f && v.blur < 0.25f && v.doubled == 0.0f);
+
+    /* The confusion counts down in real time and takes the blur with it. */
+    health_env e = calm_env();
+    live(h, &e, 40.0);
+    v = health_get_senses(h);
+    CHECK(h->confusion == 0.0f && v.blur < 0.01f && v.doubled == 0.0f);
+
+    h->bac = 2.0f;
+    v = health_get_senses(h);
+    CHECK(v.blur > 0.2f && v.blur < 0.3f && v.doubled == 0.0f);
+    h->bac = 3.5f;
+    v = health_get_senses(h);
+    CHECK(v.blur > 0.45f && v.doubled > 0.55f);
+    h->bac = 0.0f;
+
+    h->organ[ORG_BRAIN] = 0.5f;
+    v = health_get_senses(h);
+    CHECK(v.blur > 0.55f && v.doubled == 0.0f);
+
+    h->dead = 1;
+    v = health_get_senses(h);
+    CHECK(v.blur == 0.0f && v.doubled == 0.0f);
+    mem_free(h);
+}
+
 void test_health2_all(void)
 {
     test_mild_air();
@@ -675,4 +718,5 @@ void test_health2_all(void)
     test_variance_range();
     test_variance_emergent();
     test_variance_shortterm();
+    test_vision_blur();
 }

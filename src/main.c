@@ -1987,10 +1987,13 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     if (!on_title) {
         /* A hurt brain or a concussion: the view drifts and rolls. Only the
          * view: aiming follows the player's own look. */
-        float sway = health_get_senses(&g->hl).sway;
+        health_senses hs = health_get_senses(&g->hl);
+        float sway = hs.sway;
         v.roll += sway * 0.07f * sinf((float)now * 0.9f);
         v.yaw += sway * 0.03f * sinf((float)now * 0.53f);
         v.pitch += sway * 0.02f * sinf((float)now * 0.71f + 0.5f);
+        v.blur = hs.blur;
+        v.doubled = hs.doubled;
     }
     v.underwater = world_get(&g->w, (int)floor(v.eye.x), (int)floor(v.eye.y), (int)floor(v.eye.z)) == B_WATER;
     v.time = (float)fmod(now, 3600.0);

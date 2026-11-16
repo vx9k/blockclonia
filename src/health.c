@@ -2527,6 +2527,13 @@ health_senses health_get_senses(const health *h)
     v.tunnel = maxf(ramp(beta, 0.6f, 0.95f), ramp(h->vagal, 0.3f, 0.8f)); /* greying out */
     v.sway = minf(1.0f, v.sway + 0.4f * h->vagal);
     v.jaundice = fclamp((0.6f - h->organ[ORG_LIVER]) / 0.4f, 0.0f, 1.0f);
+    /* Post-concussion vision clears over the last two minutes of the
+     * confusion; the eyes stop tracking together (double vision) only in
+     * its first minutes, or once the blood alcohol passes about 2 per mille. */
+    v.blur = fclamp(0.7f * ramp(h->confusion, 0.0f, 120.0f) + 1.2f * (1.0f - h->organ[ORG_BRAIN]) +
+                        0.5f * ramp(h->bac, 1.0f, 3.0f),
+                    0.0f, 1.0f);
+    v.doubled = fclamp(0.8f * ramp(h->confusion, 60.0f, 300.0f) + 0.6f * ramp(h->bac, 2.0f, 3.5f), 0.0f, 1.0f);
     return v;
 }
 
