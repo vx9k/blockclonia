@@ -12,8 +12,8 @@ name: Pi packages
 on:
   workflow_call:
     inputs:
-      ref:
-        description: The tag to build; empty builds the commit under test.
+      release:
+        description: The release version whose tag (v<version>) to build; empty builds the commit under test.
         type: string
         default: ""
       artifact-prefix:
@@ -33,7 +33,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref }}
+          # Only a release tag or the commit under test, never a ref a caller
+          # names: this workflow builds what it is given.
+          ref: ${{ inputs.release != '' && format('refs/tags/v{0}', inputs.release) || '' }}
           # Nothing here pushes: keep the token out of .git/config.
           persist-credentials: false
       - name: Install packages
@@ -47,11 +49,12 @@ jobs:
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
       - name: Version the package
         env:
-          REF: ${{ inputs.ref }}
+          RELEASE: ${{ inputs.release }}
         run: |
           # A release keeps its plain version; anything else names its commit.
-          if [ -z "$REF" ]; then
-            echo "MC_PACKAGE_VERSION_SUFFIX=+git.$(date -u +%Y%m%d).${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          # Container steps run under sh (dash), so no bash substrings.
+          if [ -z "$RELEASE" ]; then
+            echo "MC_PACKAGE_VERSION_SUFFIX=+git.$(date -u +%Y%m%d).$(echo "$GITHUB_SHA" | cut -c1-7)" >> "$GITHUB_ENV"
           fi
       # trixie ships mimalloc 3.0.x and GLFW 3.4, both older than the
       # pinned 3.5 series, so MC_DEPS=AUTO builds mimalloc 3.5.3 and GLFW
@@ -75,7 +78,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref }}
+          # Only a release tag or the commit under test, never a ref a caller
+          # names: this workflow builds what it is given.
+          ref: ${{ inputs.release != '' && format('refs/tags/v{0}', inputs.release) || '' }}
           # Nothing here pushes: keep the token out of .git/config.
           persist-credentials: false
       - name: Install packages
@@ -91,11 +96,12 @@ jobs:
             libwayland-dev:armhf libxkbcommon-dev:armhf
       - name: Version the package
         env:
-          REF: ${{ inputs.ref }}
+          RELEASE: ${{ inputs.release }}
         run: |
           # A release keeps its plain version; anything else names its commit.
-          if [ -z "$REF" ]; then
-            echo "MC_PACKAGE_VERSION_SUFFIX=+git.$(date -u +%Y%m%d).${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          # Container steps run under sh (dash), so no bash substrings.
+          if [ -z "$RELEASE" ]; then
+            echo "MC_PACKAGE_VERSION_SUFFIX=+git.$(date -u +%Y%m%d).$(echo "$GITHUB_SHA" | cut -c1-7)" >> "$GITHUB_ENV"
           fi
       - run: cmake --preset pi4-armhf -DMC_DEPS=AUTO -DMC_WERROR=ON -DMC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}"
       - run: cmake --build --preset pi4-armhf

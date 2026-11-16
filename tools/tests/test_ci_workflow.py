@@ -1,7 +1,11 @@
 """Pin the parts of the workflows that other jobs, the ruleset and people
 rely on."""
+import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -149,7 +153,7 @@ class Release(unittest.TestCase):
     def test_the_packages_are_built_from_the_tag_and_kept_apart_from_the_nightly(self):
         package = job(CI, 'release-package')
         self.assertIn("if: needs.release.outputs.version != ''", package)
-        self.assertIn('ref: v${{ needs.release.outputs.version }}', package)
+        self.assertIn('release: ${{ needs.release.outputs.version }}', package)
         self.assertIn('artifact-prefix: release', package)
         self.assertIn('pattern: blockclonia-*', job(CI, 'nightly'))
         self.assertIn('pattern: release-*', job(CI, 'release-publish'))
@@ -167,7 +171,7 @@ class Release(unittest.TestCase):
 
     def test_release_packages_keep_the_plain_version(self):
         # The suffix goes only on packages built from a commit, not a tag.
-        self.assertEqual(PACKAGE.count('if [ -z "$REF" ]; then'), 2)
+        self.assertEqual(PACKAGE.count('if [ -z "$RELEASE" ]; then'), 2)
         self.assertEqual(PACKAGE.count('-DMC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}"'), 2)
         cmake = (ROOT / 'cmake/Packaging.cmake').read_text()
         self.assertIn('set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}${MC_PACKAGE_VERSION_SUFFIX}")', cmake)
@@ -181,10 +185,54 @@ class Packages(unittest.TestCase):
             body = job(PACKAGE, name)
             self.assertIn(f'name: ${{{{ inputs.artifact-prefix }}}}-{name}', body)
             self.assertIn('if-no-files-found: error', body)
-            self.assertIn('ref: ${{ inputs.ref }}', body)
+            self.assertIn("ref: ${{ inputs.release != '' && format('refs/tags/v{0}', inputs.release) || '' }}",
+                          body)
 
     def test_ci_builds_them_for_every_run(self):
         self.assertIn('uses: ./.github/workflows/package.yml', job(CI, 'package'))
+
+
+def version_script(name):
+    """The run script of the job's 'Version the package' step, dedented."""
+    body = job(PACKAGE, name).split('- name: Version the package\n', 1)[1]
+    script = body.split('run: |\n', 1)[1]
+    lines = []
+    for line in script.splitlines():
+        if line.strip() and not line.startswith(' ' * 10):
+            break
+        lines.append(line[10:])
+    return '\n'.join(lines) + '\n'
+
+
+class ContainerShell(unittest.TestCase):
+    """Steps in a container job run under `sh -e`, which is dash on Debian."""
+
+    BASHISMS = [r'\$\{\w+:[-0-9]*:', r'\$\{\w+/', r'\[\[', r'\$\{\w+\^', r'(?m)^\s*function ']
+
+    def test_container_jobs_use_no_bash_only_syntax(self):
+        for workflow in [CI, PACKAGE]:
+            for name in jobs(workflow):
+                body = job(workflow, name)
+                if '    container:' not in body or 'shell: bash' in body:
+                    continue
+                for bashism in self.BASHISMS:
+                    self.assertNotRegex(body, bashism, f'{name} runs under sh')
+
+    def test_the_bashism_check_catches_a_substring(self):
+        self.assertRegex('${GITHUB_SHA::7}', self.BASHISMS[0])
+
+    @unittest.skipUnless(shutil.which('dash'), 'dash is not installed')
+    def test_dash_writes_the_suffix_for_a_commit_and_none_for_a_tag(self):
+        for name in ['pi-arm64', 'pi-armhf']:
+            with tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / 'env'
+                env = {'PATH': os.environ['PATH'], 'GITHUB_ENV': str(out), 'GITHUB_SHA': 'abcdef0123456789'}
+                for release, expected in [('', r'^MC_PACKAGE_VERSION_SUFFIX=\+git\.\d{8}\.abcdef0\n$'), ('26.11.0', '^$')]:
+                    out.write_text('')
+                    run = subprocess.run(['dash', '-e', '-c', version_script(name)], env={**env, 'RELEASE': release},
+                                         capture_output=True, text=True)
+                    self.assertEqual(run.returncode, 0, run.stderr)
+                    self.assertRegex(out.read_text(), expected)
 
 
 class Lint(unittest.TestCase):
