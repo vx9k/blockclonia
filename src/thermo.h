@@ -53,8 +53,16 @@ void thermo_set_climate(thermo *t, int on);
 
 double thermo_day_time(const thermo *t);   /* 0..1, 0 = midnight, 0.5 = noon */
 void thermo_set_day_time(thermo *t, double day);
-float thermo_daylight(const thermo *t);    /* 0.18 at night .. 1 at noon, smooth at dawn/dusk */
+/* Daylight under a clear night sky: moon and starlight, as dark as it can
+ * be while terrain still reads on a screen (4% of noon is about 20% grey
+ * in sRGB). */
+#define THERMO_NIGHT_LIGHT 0.04f
+float thermo_daylight(const thermo *t);    /* THERMO_NIGHT_LIGHT at night .. 1 at noon, smooth at dawn/dusk */
 void thermo_sky(const thermo *t, float rgb[3]); /* sky/fog colour, sRGB 0..1 */
+/* Unit vector toward the sun: x east, y up, z toward the equator. It
+ * rises in the east at 06:00 and peaks at 50 degrees at noon (latitude
+ * 40, an equinox); below the horizon at night, when the moon is opposite. */
+void thermo_sun(const thermo *t, float dir[3]);
 
 /* ---------------------------------------------------------- queries */
 

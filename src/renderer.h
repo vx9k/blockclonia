@@ -14,8 +14,10 @@
 #define MC_RENDERER_H
 
 #include "entity.h"
+#include "lightfx.h"
 #include "mathlib.h"
 #include "physics.h"
+#include "sky.h"
 #include "ui.h"
 #include "world.h"
 #include <stdint.h>
@@ -52,6 +54,11 @@ typedef struct {
     float time;          /* s, drives animated textures */
     float daylight;      /* 0 night .. 1 noon: scales the light */
     float sky[3];        /* sky and fog colour; all zero: the default day sky */
+    float fog[3];        /* the fog's own colour when it differs from the sky's (lightfx_fog); all zero: the sky's */
+    lightfx_frame lfx;   /* sky colour, sun, held light and floor for the block shaders; all zero: daylight alone */
+    float stars;         /* how much of the night sky shows, 0..1 (sky_visibility); 0 draws no stars or moon */
+    quat star_rot;       /* the star field's orientation (sky_rotation) */
+    sky_star moon;       /* sky_moon */
     int has_selection;
     ipos selection;
     int underwater;

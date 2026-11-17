@@ -2,6 +2,7 @@
 #include "anim.h"
 #include "block.h"
 #include "item.h"
+#include "torch_model.h"
 
 #include <math.h>
 #include <string.h>
@@ -36,6 +37,7 @@ static const float PIVOT[3] = {0.46f, -0.38f, -0.28f};
 #define BLOCK_SIZE 0.18f
 #define CARD_SIZE 0.30f
 #define CARD_THICK 0.02f
+#define TORCH_HELD 0.5f /* the torch model's size in the hand */
 
 /* Timings, s. */
 #define SWING_S 0.29f
@@ -217,7 +219,22 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
 
     item_id id = vm->shown_id;
     quat flick = quat_axis(1.0f, 0.0f, 0.0f, -0.6f * a); /* the wrist leads the swing */
-    if (id > 0 && item_is_block(id)) {
+    if (id == B_TORCH) {
+        /* A torch is gripped upright in the fist, its foot below the hand
+         * and leaning a little away, flame in view. */
+        entity_instance tm[TORCH_PARTS] = {0};
+        const float zero[3] = {0.0f, 0.0f, 0.0f};
+        quat own = quat_mul(flick, quat_mul(quat_axis(0.0f, 0.0f, 1.0f, 0.18f), quat_axis(1.0f, 0.0f, 0.0f, -0.25f)));
+        int k = torch_model(zero, quat_identity(), TORCH_HELD, (double)vm->time, 7u, light, tm);
+        for (int i = 0; i < k; i++) {
+            float off[3] = {0.0f, 0.0f, 0.0f};
+            quat_apply(own, tm[i].pos, off);
+            const float at[3] = {off[0], off[1] - 0.12f, off[2] + HAND_Z - 0.02f};
+            quat pr = {tm[i].rot[0], tm[i].rot[1], tm[i].rot[2], tm[i].rot[3]};
+            parts[n++] = part(lag, base, arm, at, quat_mul(own, pr), tm[i].scale[0], tm[i].scale[1], tm[i].scale[2],
+                              tm[i].tex, tm[i].light);
+        }
+    } else if (id > 0 && item_is_block(id)) {
         /* A block rests on the fingers, turned so the top and two sides
          * face the eye. */
         const block_def *d = block_get((uint8_t)id);

@@ -30,7 +30,7 @@
 #define SUN_LAT_COS 0.766           /* cos(40 degrees) */
 #define TWILIGHT_SIN (-0.105)       /* sin(-6 degrees): civil twilight */
 #define FULL_DAY_SIN 0.35           /* sin(20 degrees) */
-#define NIGHT_LIGHT 0.18
+#define NIGHT_LIGHT ((double)THERMO_NIGHT_LIGHT)
 #define T_SEA 14.0                  /* C */
 #define LAPSE_REAL 0.0065           /* K/m */
 #define DIURNAL_K 5.0               /* K amplitude */
@@ -252,6 +252,14 @@ void thermo_set_day_time(thermo *t, double day)
 }
 
 static double sun_sin(const thermo *t) { return SUN_LAT_COS * cos(2.0 * MC_PI * (t->day - 0.5)); }
+
+void thermo_sun(const thermo *t, float dir[3])
+{
+    double h = 2.0 * MC_PI * (t->day - 0.5);
+    dir[0] = (float)-sin(h);
+    dir[1] = (float)(SUN_LAT_COS * cos(h));
+    dir[2] = (float)(sqrt(1.0 - SUN_LAT_COS * SUN_LAT_COS) * cos(h));
+}
 
 static double daylight_frac(const thermo *t) { return smooth(sun_sin(t), TWILIGHT_SIN, FULL_DAY_SIN); }
 

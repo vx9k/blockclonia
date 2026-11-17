@@ -8,7 +8,9 @@
 #include "paths.h"
 #include "png.h"
 #include "save.h"
+#include "sky.h"
 #include "texgen.h"
+#include "torch_model.h"
 
 /* GLFW_INCLUDE_VULKAN adds vulkan.h on top of the default OpenGL header;
  * GLFW_INCLUDE_NONE drops GL/gl.h, which Pi images without Mesa's GL
@@ -44,7 +46,7 @@
 #define QUADS_PER_DRAW 16384u /* 16-bit indices address 65536 vertices */
 #define UI_MAX_QUADS QUADS_PER_DRAW /* the overlay is always a single draw */
 #define MAX_VIS (65 * 65 * SECTIONS) /* every section at the largest radius (32) */
-#define DYN_SIZE (1u << 21)
+#define DYN_SIZE (3u << 20)
 #define DYN_LINES_BYTES 1024u
 /* Terrain draws per frame queued for multi-draw indirect (20 bytes each):
  * several times what radius 32 needs; beyond it draws are issued directly. */
@@ -80,6 +82,12 @@ static const uint32_t SPV_POST_VERT[] =
     ;
 static const uint32_t SPV_POST_FRAG[] =
 #include "post.frag.inc"
+    ;
+static const uint32_t SPV_STAR_VERT[] =
+#include "star.vert.inc"
+    ;
+static const uint32_t SPV_STAR_FRAG[] =
+#include "star.frag.inc"
     ;
 
 #define VK_CHECK(x)                                                              \
@@ -157,7 +165,8 @@ typedef struct {
 
 typedef struct {
     float color[4];
-    float light[4]; /* x: log2(daylight) / LIGHT_CURVE_K, the sky's level shift */
+    float sky[3];   /* the sky's level shift per channel (lightfx_pack) */
+    uint32_t held;  /* the held light and the floor, packUnorm4x8 */
 } push_frag;
 
 typedef struct {
@@ -173,8 +182,8 @@ typedef struct {
 #define PUSH_FRAG_OFFSET 96u
 _Static_assert(sizeof(push_vert) == PUSH_FRAG_OFFSET, "push_vert must end where push_frag starts");
 _Static_assert(PUSH_FRAG_OFFSET + sizeof(push_frag) <= 128, "maxPushConstantsSize is at least 128");
-_Static_assert(MAX_VIS * 16u + (MAX_BODIES + RENDER_MAX_ENTS + 2 * MAX_PROPS + 16) * sizeof(entity_instance) +
-                       DYN_LINES_BYTES + 64 <=
+_Static_assert(MAX_VIS * 16u + (MAX_BODIES + RENDER_MAX_ENTS + TORCH_PARTS * MAX_PROPS + 16) * sizeof(entity_instance) +
+                       sizeof(sky_star) + 16 + DYN_LINES_BYTES + 64 <=
                    DYN_SIZE,
                "per-frame dynamic buffer too small");
 
@@ -234,6 +243,8 @@ struct renderer {
     VkDescriptorSet dsets[2];     /* the terrain texture with r->sampler, and with sampler_filtered */
     VkPipelineLayout layout;
     VkPipeline p_opaque, p_trans, p_entity, p_entity_trans, p_line_world, p_line_screen;
+    VkPipeline p_star; /* stars and the moon (sky.h), added where the sky shows */
+    gbuf stars;        /* SKY_STARS sky_star instances, device local */
     /* Overlay: its own layout (a 2D font atlas, 2D push constants). */
     VkDescriptorSetLayout ui_dsl;
     VkDescriptorPool ui_dpool;
@@ -1318,7 +1329,7 @@ typedef struct {
     const VkVertexInputAttributeDescription *attrs;
     uint32_t attr_count;
     VkPrimitiveTopology topology;
-    int depth_test, depth_write, blend;
+    int depth_test, depth_write, blend; /* blend 1: alpha, 2: added (light) */
     VkCullModeFlags cull;
     VkPipelineLayout layout;      /* 0: the world layout */
     const VkSpecializationInfo *vspec;
@@ -1357,9 +1368,12 @@ static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
                                                 .depthWriteEnable = (VkBool32)d->depth_write,
                                                 .depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL};
     VkPipelineColorBlendAttachmentState cba = {
-        .blendEnable = (VkBool32)d->blend, .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
-        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, .colorBlendOp = VK_BLEND_OP_ADD,
-        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE, .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .blendEnable = (VkBool32)(d->blend != 0),
+        .srcColorBlendFactor = d->blend == 2 ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = d->blend == 2 ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
         .alphaBlendOp = VK_BLEND_OP_ADD,
         .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
                           VK_COLOR_COMPONENT_A_BIT};
@@ -1501,6 +1515,29 @@ static void create_pipelines(renderer *r)
     r->p_line_world = make_pipeline(r, &l);
     l.depth_test = 0;
     r->p_line_screen = make_pipeline(r, &l);
+    /* Stars: a six-vertex quad per instance, tested against the depth
+     * buffer at the far plane, never written. */
+    VkShaderModule svs = make_module(r, SPV_STAR_VERT, sizeof SPV_STAR_VERT);
+    VkShaderModule sfs = make_module(r, SPV_STAR_FRAG, sizeof SPV_STAR_FRAG);
+    VkVertexInputBindingDescription star_bind = {0, sizeof(sky_star), VK_VERTEX_INPUT_RATE_INSTANCE};
+    VkVertexInputAttributeDescription star_attr[2] = {{0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 0},
+                                                      {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(sky_star, rgb)}};
+    pipe_desc sd = {svs,
+                    sfs,
+                    &star_bind,
+                    1,
+                    star_attr,
+                    2,
+                    VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                    1,
+                    0,
+                    2,
+                    VK_CULL_MODE_NONE,
+                    VK_NULL_HANDLE,
+                    NULL};
+    r->p_star = make_pipeline(r, &sd);
+    vkDestroyShaderModule(r->dev, svs, r->ac);
+    vkDestroyShaderModule(r->dev, sfs, r->ac);
 
     vkDestroyShaderModule(r->dev, bvs, r->ac);
     vkDestroyShaderModule(r->dev, bfs, r->ac);
@@ -1925,7 +1962,7 @@ static void create_light(renderer *r)
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
         f->lcopies = mem_alloc(mem_array_size(per_frame, sizeof *f->lcopies));
     }
-    r->torch_insts = mem_alloc(mem_array_size(MAX_PROPS * 2, sizeof *r->torch_insts));
+    r->torch_insts = mem_alloc(mem_array_size(MAX_PROPS * TORCH_PARTS, sizeof *r->torch_insts));
     log_info("light atlas: %d x %d x %d slots, %.1f MB (%s)", r->light_n[0], r->light_n[1], r->light_n[2],
              (double)req.size / (1024.0 * 1024.0), r->light_texel == 2 ? "4-bit" : "8-bit");
 }
@@ -1943,8 +1980,9 @@ static void create_static_buffers(renderer *r)
      * vertex offset carries the base, so larger sections split in two. */
     VkDeviceSize ibytes = (VkDeviceSize)QUADS_PER_DRAW * 6 * sizeof(uint16_t);
     VkDeviceSize cbytes = 24 * sizeof(uint32_t);
+    VkDeviceSize sbytes = SKY_STARS * sizeof(sky_star);
     gbuf st = {0};
-    buffer_create(r, &st, ibytes + cbytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    buffer_create(r, &st, ibytes + cbytes + sbytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
     uint16_t *idx = st.map;
     for (uint32_t q = 0; q < QUADS_PER_DRAW; q++) {
@@ -1971,14 +2009,18 @@ static void create_static_buffers(renderer *r)
             cube[n++] = pack_cube_vertex(p, f);
         }
     }
+    sky_stars(1u, (sky_star *)((uint8_t *)st.map + ibytes + cbytes));
     buffer_create(r, &r->index, ibytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
+    buffer_create(r, &r->stars, sbytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
     buffer_create(r, &r->cube, cbytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
     VkCommandBuffer cmd = one_shot_begin(r);
-    VkBufferCopy ci = {0, 0, ibytes}, cc = {ibytes, 0, cbytes};
+    VkBufferCopy ci = {0, 0, ibytes}, cc = {ibytes, 0, cbytes}, cs = {ibytes + cbytes, 0, sbytes};
     vkCmdCopyBuffer(cmd, st.buf, r->index.buf, 1, &ci);
     vkCmdCopyBuffer(cmd, st.buf, r->cube.buf, 1, &cc);
+    vkCmdCopyBuffer(cmd, st.buf, r->stars.buf, 1, &cs);
     one_shot_end(r, cmd);
     buffer_destroy(r, &st);
 }
@@ -2373,6 +2415,8 @@ void renderer_destroy(renderer *r)
     vkDestroyPipeline(r->dev, r->p_entity, r->ac);
     vkDestroyPipeline(r->dev, r->p_entity_trans, r->ac);
     vkDestroyPipeline(r->dev, r->p_line_world, r->ac);
+    vkDestroyPipeline(r->dev, r->p_star, r->ac);
+    buffer_destroy(r, &r->stars);
     vkDestroyPipeline(r->dev, r->p_line_screen, r->ac);
     vkDestroyPipelineLayout(r->dev, r->layout, r->ac);
     vkDestroyDescriptorSetLayout(r->dev, r->dsl, r->ac);
@@ -2560,20 +2604,16 @@ static uint32_t facing_groups(vec3 o)
  * height first, so the list is roughly front to back without sorting. Each
  * origin is written to the dynamic buffer as that draw's instance
  * attribute. */
-/* A torch: a stick of planks with a flame on top, in the cell's light. */
+/* A torch (torch_model.h), its handle in the cell's light. */
 static void add_torch(renderer *r, const world *w, const render_view *v, int x, int y, int z, float daylight)
 {
-    if (r->torch_count + 2 > MAX_PROPS * 2) return;
-    float px = (float)((double)x + 0.5 - v->eye.x), py = (float)((double)y - v->eye.y);
-    float pz = (float)((double)z + 0.5 - v->eye.z);
+    if (r->torch_count + TORCH_PARTS > MAX_PROPS * TORCH_PARTS) return;
+    const float at[3] = {(float)((double)x + 0.5 - v->eye.x), (float)((double)y - v->eye.y),
+                         (float)((double)z + 0.5 - v->eye.z)};
     float light = light_brightness(world_light(w, x, y, z), daylight);
-    r->torch_insts[r->torch_count++] = (entity_instance){{px, py + 0.3125f, pz},
-                                                         (uint32_t)T_PLANKS * 0x010101u | ENTITY_TEX_METRIC,
-                                                         {0.0f, 0.0f, 0.0f, 1.0f},
-                                                         {0.125f, 0.625f, 0.125f},
-                                                         light};
-    r->torch_insts[r->torch_count++] = (entity_instance){
-        {px, py + 0.72f, pz}, (uint32_t)T_FIRE0 * 0x010101u, {0.0f, 0.0f, 0.0f, 1.0f}, {0.19f, 0.22f, 0.19f}, 1.0f};
+    uint32_t seed = (uint32_t)x * 73856093u ^ (uint32_t)y * 19349663u ^ (uint32_t)z * 83492791u;
+    r->torch_count += torch_model(at, quat_identity(), 1.0f, (double)v->time, seed, light,
+                                  &r->torch_insts[r->torch_count]);
 }
 
 static int collect_visible(renderer *r, const world *w, const render_view *v, const frustum *fr, float (*origins)[4])
@@ -2804,7 +2844,8 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     /* Lava lights itself; other liquids darken with the day. */
     if (v->underwater && v->under_range >= 1.0f)
         for (int i = 0; i < 3; i++) water_fog[i] *= 0.25f + 0.75f * daylight;
-    const float *fogc = v->underwater ? water_fog : sky;
+    int has_fog = v->fog[0] > 0.0f || v->fog[1] > 0.0f || v->fog[2] > 0.0f;
+    const float *fogc = v->underwater ? water_fog : (has_fog ? v->fog : sky);
     float under_end = v->under_range > 0.0f ? v->under_range : 24.0f;
     float fog_end = v->underwater ? under_end : (float)(r->radius * CHUNK_W) - 8.0f;
     float fog_start = v->underwater ? 0.0f : fog_end * 0.55f;
@@ -2815,18 +2856,21 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     pv.origin[0] = (float)fmod(v->eye.x, 256.0);
     pv.origin[1] = (float)v->eye.y;
     pv.origin[2] = (float)fmod(v->eye.z, 256.0);
-    pv.origin[3] = 0.0f;
+    pv.origin[3] = v->lfx.sun[0]; /* block.vert's sun; its z follows from y */
     pv.fog[0] = fog_start;
     pv.fog[1] = 1.0f / (fog_end - fog_start);
     pv.fog[2] = (float)fmod((double)v->time, 3600.0);
-    pv.fog[3] = daylight;
+    pv.fog[3] = v->lfx.sun[1];
     push_frag pf = {0};
     for (int i = 0; i < 3; i++) pf.color[i] = r->swap_srgb ? srgb_to_linear(fogc[i]) : fogc[i];
     pf.color[3] = r->filtering ? 1.0f : 0.0f; /* block.frag: the filtered set is bound */
-    pf.light[0] = log2f(daylight > 1e-3f ? daylight : 1e-3f) / LIGHT_CURVE_K;
+    pf.held = lightfx_pack(&v->lfx, daylight, pf.sky);
 
     VkClearValue clears[2] = {0};
-    clears[0].color = (VkClearColorValue){{pf.color[0], pf.color[1], pf.color[2], 1.0f}};
+    /* The sky behind everything keeps its colour when the fog darkens in a cave. */
+    for (int i = 0; i < 3; i++) clears[0].color.float32[i] = r->swap_srgb ? srgb_to_linear(sky[i]) : sky[i];
+    if (v->underwater) memcpy(clears[0].color.float32, pf.color, 3 * sizeof(float));
+    clears[0].color.float32[3] = 1.0f;
     clears[1].depthStencil = (VkClearDepthStencilValue){0.0f, 0}; /* reversed Z */
     int post = (v->blur > 0.01f || v->doubled > 0.01f) && scene_ready(r);
     begin_pass(r, cmd, clears, post);
@@ -2907,6 +2951,34 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
             vkCmdDrawIndexed(cmd, 36, (uint32_t)n_opaque, 0, 0, 0);
             st.draw_calls++;
         }
+    }
+
+    /* Stars and the moon, added where the sky was left clear: before
+     * water, which blends over them. */
+    if (v->stars > 0.0f && !v->underwater) {
+        dyn_used = (dyn_used + 15) & ~(VkDeviceSize)15;
+        VkDeviceSize moon_off = dyn_used;
+        memcpy(dyn + moon_off, &v->moon, sizeof v->moon);
+        dyn_used += sizeof v->moon;
+        push_vert sp = pv;
+        const float sky_rot[4] = {v->star_rot.x, v->star_rot.y, v->star_rot.z, v->star_rot.w};
+        memcpy(sp.origin, sky_rot, sizeof sp.origin);
+        sp.fog[0] = v->stars;
+        sp.fog[1] = 1.0f / aspect;
+        sp.fog[3] = 0.0f;
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_star);
+        vkCmdPushConstants(cmd, r->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof sp, &sp);
+        vkCmdBindVertexBuffers(cmd, 0, 1, &r->stars.buf, &zero);
+        vkCmdDraw(cmd, 6, SKY_STARS, 0, 0);
+        /* The moon is placed in the world, not in the turning star field. */
+        const float still[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        memcpy(sp.origin, still, sizeof sp.origin);
+        vkCmdPushConstants(cmd, r->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof sp, &sp);
+        vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buf, &moon_off);
+        vkCmdDraw(cmd, 6, 1, 0, 0);
+        vkCmdPushConstants(cmd, r->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof pv, &pv);
+        st.draw_calls += 2;
+        tp.bound = -1;
     }
 
     /* Translucent, back to front. */

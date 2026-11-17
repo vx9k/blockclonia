@@ -10,7 +10,7 @@
 #include "entity.h"
 #include "item.h"
 
-#define VIEWMODEL_MAX 8
+#define VIEWMODEL_MAX 12 /* the sleeve, the hand and a torch (torch_model.h) */
 
 typedef struct {
     item_id held_id;      /* item in hand, 0 for the bare hand */

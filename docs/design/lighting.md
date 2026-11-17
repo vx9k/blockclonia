@@ -9,8 +9,10 @@ holds the reasoning and the detail.
 ## Where it stands
 
 The light engine is in (`light.c`, the light jobs in `world.c`, the atlas
-in `renderer.c`); the visual polish (sun direction, HDR and tone mapping,
-bloom, a held torch) is next.
+in `renderer.c`), and so is most of the visual polish (`lightfx.c`, `sky.c`,
+`torch_model.c`): the sun and moon's direction and colour, a soft tone
+curve, the held torch's light, light-tinted fog, darker nights (4% of
+noon) and the night sky. Bloom and a smooth-lighting toggle are next.
 
 - **Per cell:** 16 bits, sky in bits 0-3 and red, green and blue in
   4-7, 8-11 and 12-15. That is B4G4R4A4's texel, so the shader reads

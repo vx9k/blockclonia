@@ -10,7 +10,7 @@ layout(set = 0, binding = 0) uniform mediump sampler2DArray u_tex;
 layout(set = 0, binding = 1) uniform mediump sampler3D u_light;
 
 layout(location = 0) in vec2 f_uv;  // highp: values reach 16 and pick exact texels
-layout(location = 1) flat in uint f_layer;
+layout(location = 1) flat in uint f_layer;  // layer | sun shading << 16 (block.vert)
 layout(location = 2) in mediump vec2 f_shade;  // x: shade, y: fog
 layout(location = 3) in vec3 f_luv;            // highp: hundreds of texels across
 
@@ -19,6 +19,13 @@ layout(location = 3) in vec3 f_luv;            // highp: hundreds of texels acro
 // One fused multiply-add and an exp2 per channel, at half precision on
 // GPUs that have it.
 const mediump float LIGHT_K = 4.8289214;
+// lightfx.h: the sun's shading steps, block light's gain of 1.3 as a level
+// shift (log2(1.3) / K), the tone curve's knee. The held light fades a
+// level a metre from the eye, whose distance is ZNEAR / depth (reversed Z).
+const mediump float SUN_STEP = 1.0 / 1024.0;
+const mediump float BLOCK_GAIN = 0.07844;
+const mediump float TONE_KNEE = 0.75;
+const float HELD_FALL = 0.05 / 15.0;
 
 layout(location = 0) out vec4 o_color;
 
@@ -38,12 +45,21 @@ void main()
         vec2 tx = t - 0.5 * box;
         uv = (floor(tx) + 0.5 + clamp((fract(tx) - (1.0 - box)) / box, 0.0, 1.0)) / TEXELS;
     }
-    mediump vec4 c = texture(u_tex, vec3(uv, float(f_layer)));
-    // Coloured block light and white sky light, the brighter per channel.
-    // Daylight scales the sky's brightness, which on this curve is a shift
-    // of its level (pc.light.x = log2(daylight) / K), so the comparison is
-    // made on levels and only three channels pay for an exp2.
+    mediump vec4 c = texture(u_tex, vec3(uv, float(f_layer & 0xFFFFu)));
+    // Coloured block light and sky light, the brighter per channel. The
+    // sky's colour and the sun's shading scale its brightness, which on
+    // this curve shifts its level, and the held light and the floor are
+    // levels too, so everything is compared on levels and only three
+    // channels pay for an exp2.
     mediump vec4 l = texture(u_light, f_luv);
-    mediump vec3 light = exp2(max(l.rgb, vec3(l.a + pc.light.x)) * LIGHT_K - LIGHT_K) * f_shade.x;
-    o_color = vec4(mix(c.rgb * light, pc.color.rgb, f_shade.y), c.a);
+    mediump vec4 held = unpackUnorm4x8(pc.held);
+    mediump vec3 sky = pc.sky + (l.a - float(f_layer >> 16) * SUN_STEP);
+    mediump vec3 blk = max(l.rgb, held.rgb - HELD_FALL / gl_FragCoord.z) + BLOCK_GAIN;
+    mediump vec3 light = exp2(max(max(blk, sky), held.a) * LIGHT_K - LIGHT_K) * f_shade.x;
+    // The tone curve: unchanged up to the knee, then rolling off toward
+    // white, so a lamp-lit wall or lava saturates instead of clipping.
+    mediump vec3 x = c.rgb * light;
+    mediump vec3 u = max(x - TONE_KNEE, 0.0);
+    x = min(x, TONE_KNEE) + u / (1.0 + u * (1.0 / (1.0 - TONE_KNEE)));
+    o_color = vec4(mix(x, pc.color.rgb, f_shade.y), c.a);
 }

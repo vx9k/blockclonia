@@ -2,8 +2,8 @@
 // so a draw that only changes the origin never touches fragment state.
 layout(push_constant) uniform PushVert {
     mat4 view_proj;  // rotation + projection only (camera-relative world)
-    vec4 origin;     // xyz: draw origin relative to the camera (lines)
-    vec4 fog;        // x: fog start, y: 1 / (fog end - fog start), z: time in s, w: daylight 0..1
+    vec4 origin;     // xyz: draw origin relative to the camera (lines); w: the sun's x (block.vert)
+    vec4 fog;        // x: fog start, y: 1 / (fog end - fog start), z: time in s, w: the sun's y
 } pc;
 
 // Texture layers the shaders animate (block.h tex_id; checked by a static

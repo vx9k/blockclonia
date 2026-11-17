@@ -70,7 +70,7 @@ static void test_sun(void)
     thermo_set_day_time(th, 0.0);
     float midnight = thermo_daylight(th), sky_night = sky_sum(th);
     CHECK(fabsf(noon - 1.0f) < 1e-3f);
-    CHECK(fabsf(midnight - 0.18f) < 1e-3f);
+    CHECK(fabsf(midnight - THERMO_NIGHT_LIGHT) < 1e-3f);
     CHECK(noon > dawn && dawn > midnight);
     CHECK(sky_night < 0.2f * sky_noon);
     /* Smooth through dawn and dusk: no jumps between 1-minute samples. */
@@ -81,7 +81,8 @@ static void test_sun(void)
         jump = fmaxf(jump, fabsf(d - prev));
         prev = d;
     }
-    CHECK(jump < 0.01f);
+    /* 0.01 a minute across the old 0.18..1 range; nights are darker now. */
+    CHECK(jump < 0.01f * (1.0f - THERMO_NIGHT_LIGHT) / 0.82f);
     thermo_set_day_time(th, 1.75);
     CHECK(fabs(thermo_day_time(th) - 0.75) < 1e-12);
 
