@@ -184,6 +184,12 @@ and heads it off; once down, you come round within seconds.
   top up by using a log or sticks on them, heat the air around them,
   radiate onto your skin with a Stefan–Boltzmann falloff, and turn to ash
   when the fuel runs out. They enable the glass and brick recipes.
+- **Lava** is held at 1100 °C: it heats the air and rock around it, its
+  open surface radiates tens of kW/m² onto skin above it, wading into it
+  burns through within a second or two, and leaves, planks, logs, peat
+  and crude oil touching it catch fire. Water quenches it to obsidian or
+  basalt and boils away as much of itself. Fire doesn't spread from block
+  to block.
 - **Phase changes with latent heat**: snow and ice near heat melt into
   water (snow gives less), and still surface water freezes in freezing
   air.
