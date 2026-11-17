@@ -52,7 +52,9 @@ void bloom_glow_mask(uint32_t mask[BLOOM_MASK_WORDS])
 }
 
 int bloom_layer_glows(const uint32_t mask[BLOOM_MASK_WORDS], uint32_t layer)
-{ return layer < BLOOM_MASK_WORDS * 32u && (mask[layer >> 5] >> (layer & 31u) & 1u); }
+{
+    return layer < BLOOM_MASK_WORDS * 32u && (mask[layer >> 5] >> (layer & 31u) & 1u);
+}
 
 int bloom_quads_glow(const uint32_t *verts, uint32_t quads, const uint32_t mask[BLOOM_MASK_WORDS])
 {
