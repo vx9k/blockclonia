@@ -28,6 +28,7 @@ typedef struct {
     int discord;          /* show what the player is doing as their Discord status */
     int inner_voice;      /* thoughts and body sensations on the HUD */
     int smooth_light;     /* light blends across faces; off: each face takes its own cell's light, flat */
+    int bloom;            /* BLOOM_OFF, BLOOM_ON or BLOOM_AUTO (bloom.h): glow around light sources */
 } settings;
 
 #define SETTINGS_FOV_MIN 50

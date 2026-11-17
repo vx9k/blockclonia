@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "bloom.h"
 #include "mem.h"
 #include "os.h"
 #include "save.h"
@@ -38,6 +39,7 @@ static const field FIELDS[] = {
     {"discord", 0, 1},
     {"inner_voice", 0, 1},
     {"smooth_light", 0, 1},
+    {"bloom", 0, 2},
 };
 #define NFIELDS ((int)(sizeof FIELDS / sizeof FIELDS[0]))
 _Static_assert(sizeof FIELDS / sizeof FIELDS[0] * sizeof(int) == sizeof(settings), "every setting needs a FIELDS row");
@@ -67,6 +69,7 @@ void settings_default(settings *s)
     s->discord = 0; /* opt-in: nothing leaves the machine unasked */
     s->inner_voice = 1;
     s->smooth_light = 1;
+    s->bloom = BLOOM_AUTO;
 }
 
 static int *field_ptr(settings *s, int i)
@@ -94,7 +97,8 @@ static int *field_ptr(settings *s, int i)
     case 19: return &s->mute_unfocused;
     case 20: return &s->discord;
     case 21: return &s->inner_voice;
-    default: return &s->smooth_light;
+    case 22: return &s->smooth_light;
+    default: return &s->bloom;
     }
 }
 

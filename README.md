@@ -400,6 +400,7 @@ starts with the defaults and doesn't save changes over it.
 | Video | Texture filtering (distance) | on (default): trilinear between mipmaps, with up to 8× anisotropic filtering where the GPU supports it; off: the nearest texel of the nearest mipmap, sharper but shimmering in the distance. Up close textures stay pixel-sharp either way |
 | Video | View bobbing, FOV effects | on/off |
 | Video | Smooth lighting | on (default): light blends across each face from the cells around it; off: each face takes the light of the cell in front of it, in flat steps |
+| Video | Bloom | Auto (default): on where the GPU's timestamps show it costing under 0.3 ms a frame, off without timestamps; On; Off. A soft glow around fire, lava, torches, foxfire and the moon |
 | Video | Brightness (nights) | 0–100% (default 0): a floor under all light, for dark nights and caves; daylight is unchanged |
 | Display | Fullscreen | on/off (also F11): borderless at the monitor's own resolution |
 | Display | VSync | on/off |
@@ -455,6 +456,7 @@ entirely.
 | Host image copy for the block textures and the font (`hostcopy`, 1.4; only where the driver says device access stays optimal) | Textures go straight from the CPU into the image, with no staging buffer or upload command buffer |
 | GPU timestamps around each frame (`timestamps`; reset from the CPU) | F3 shows the GPU time of a frame next to the CPU time spent recording it |
 | Light in a 3D texture of 18³ boxes, one per section, sampled once per pixel; B4G4R4A4 where the GPU filters it (`light4`), RGBA8 otherwise | Smooth coloured light for one texture fetch, with no per-vertex light in the 4-byte vertex; half the memory with `light4` |
+| Bloom from the scene image's alpha, which marks glowing texels, blurred at a quarter of the resolution (9 bilinear fetches a pass) and added in the post pass; Auto keeps it where GPU timestamps measure it under 0.3 ms | Light sources glow without HDR targets or a second colour attachment, and weak GPUs don't pay for it |
 | Pipeline cache kept on disk between runs (`pcache`) | Pipelines build from it where the driver has no shader cache of its own (Intel with Mesa's cache off: 40 ms to 3 ms) |
 
 By default the renderer negotiates the highest API version the loader,

@@ -27,7 +27,31 @@ const mediump float BLOCK_GAIN = 0.07844;
 const mediump float TONE_KNEE = 0.75;
 const float HELD_FALL = 0.05 / 15.0;
 
+// Bloom (bloom.h): a bit per texture layer that glows, and what this
+// pipeline writes to alpha. 0 (opaque): the glow. 1 (blended): the texel's
+// coverage, which the blend uses and which dims the glow behind it.
+// 2 (the glow pass, alpha only, keeping the larger): the glow of the
+// blended pass's own light sources, lava and flames.
+layout(constant_id = 0) const uint GLOW0 = 0u;
+layout(constant_id = 1) const uint GLOW1 = 0u;
+layout(constant_id = 2) const uint GLOW2 = 0u;
+layout(constant_id = 3) const uint GLOW3 = 0u;
+layout(constant_id = 4) const uint GLOW4 = 0u;
+layout(constant_id = 5) const uint GLOW5 = 0u;
+layout(constant_id = 6) const uint GLOW6 = 0u;
+layout(constant_id = 7) const uint GLOW7 = 0u;
+layout(constant_id = 8) const uint ALPHA_MODE = 0u;
+
 layout(location = 0) out vec4 o_color;
+
+// Only a glowing layer's bright texels glow: lava's melt, not its cooled
+// skin; a campfire's embers, not its logs. Fog hides it with the rest.
+mediump float glow(uint layer, mediump vec3 c)
+{
+    const uint words[8] = uint[](GLOW0, GLOW1, GLOW2, GLOW3, GLOW4, GLOW5, GLOW6, GLOW7);
+    if (((words[layer >> 5] >> (layer & 31u)) & 1u) == 0u) return 0.0;
+    return clamp((max(c.r, max(c.g, c.b)) - 0.55) * 3.0, 0.0, 1.0) * (1.0 - f_shade.y);
+}
 
 void main()
 {
@@ -46,6 +70,10 @@ void main()
         uv = (floor(tx) + 0.5 + clamp((fract(tx) - (1.0 - box)) / box, 0.0, 1.0)) / TEXELS;
     }
     mediump vec4 c = texture(u_tex, vec3(uv, float(f_layer & 0xFFFFu)));
+    if (ALPHA_MODE == 2u) {
+        o_color = vec4(0.0, 0.0, 0.0, glow(f_layer & 0xFFFFu, c.rgb) * c.a);
+        return;
+    }
     // Coloured block light and sky light, the brighter per channel. The
     // sky's colour and the sun's shading scale its brightness, which on
     // this curve shifts its level, and the held light and the floor are
@@ -61,5 +89,5 @@ void main()
     mediump vec3 x = c.rgb * light;
     mediump vec3 u = max(x - TONE_KNEE, 0.0);
     x = min(x, TONE_KNEE) + u / (1.0 + u * (1.0 / (1.0 - TONE_KNEE)));
-    o_color = vec4(mix(x, pc.color.rgb, f_shade.y), c.a);
+    o_color = vec4(mix(x, pc.color.rgb, f_shade.y), ALPHA_MODE == 1u ? c.a : glow(f_layer & 0xFFFFu, c.rgb));
 }

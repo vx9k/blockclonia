@@ -311,6 +311,8 @@ static int settings_video(ctx *c, settings *s, float rx, float ry, float rw)
     changed |= cycle(c, rx, ry + 80, rw, "Texture filtering (distance)", &s->filtering, ONOFF, 2);
     changed |= slider(c, rx, ry + 100, rw, "Brightness (nights)", &s->brightness, 0, 100, 5, "%");
     changed |= cycle(c, rx, ry + 120, rw, "Smooth lighting", &s->smooth_light, ONOFF, 2);
+    static const char *const BLOOM[] = {"Off", "On", "Auto"}; /* BLOOM_OFF, BLOOM_ON, BLOOM_AUTO */
+    changed |= cycle(c, rx, ry + 140, rw, "Bloom", &s->bloom, BLOOM, 3);
     return changed;
 }
 
@@ -372,7 +374,7 @@ static void settings_screen(ctx *c, settings *s)
     menu *m = c->m;
     backdrop(c);
     float x = 0.0f, y = 0.0f;
-    const float w = 300, h = 222;
+    const float w = 300, h = 242;
     panel(u, m->age, w, h, &x, &y, "SETTINGS");
     static const char *const TABS[SETTINGS_TABS] = {"Video", "Display", "Controls", "Audio"};
     float tw = (w - 16 - 4.0f * (SETTINGS_TABS - 1)) / (float)SETTINGS_TABS;

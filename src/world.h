@@ -77,6 +77,7 @@ typedef struct {
     uint32_t trans_quads;
     uint16_t face_end[6];  /* opaque quads grouped by face, see mesh_counts */
     uint8_t block;         /* which vertex pool block holds it */
+    uint8_t glow;          /* a translucent quad glows: bloom's glow pass draws it (bloom.h) */
     uint32_t light_slot;   /* the renderer's light texels for it */
     uint16_t *props;       /* models in it (mesh_extra), owned by the renderer */
     uint16_t prop_count;
