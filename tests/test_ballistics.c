@@ -166,10 +166,146 @@ static void test_shot_drift(void)
     tw_free(&t);
 }
 
+/* Rows of the published BRL tables, to catch a mistyped value. */
+static void test_drag_rows(void)
+{
+    /* clang-format off */
+    static const double G1_ROWS[][2] = {{0.0, 0.2629},  {0.5, 0.2032}, {0.8, 0.2546}, {0.9, 0.3415},
+                                        {0.95, 0.4084}, {1.1, 0.5883}, {1.4, 0.6625}, {1.6, 0.6474},
+                                        {2.5, 0.5397},  {3.0, 0.5133}, {4.0, 0.5006}, {5.0, 0.4988}};
+    static const double G7_ROWS[][2] = {{0.0, 0.1198},   {0.5, 0.1194},  {0.8, 0.1242}, {0.9, 0.1464},
+                                        {0.975, 0.2993}, {1.05, 0.4043}, {1.4, 0.3580}, {1.5, 0.3440},
+                                        {2.5, 0.2697},   {3.0, 0.2424},  {4.0, 0.1935}, {5.0, 0.1618}};
+    /* clang-format on */
+    for (int i = 0; i < 12; i++) {
+        CHECK(fabs(ballistics_cd(DRAG_G1, G1_ROWS[i][0]) - G1_ROWS[i][1]) < 1e-9);
+        CHECK(fabs(ballistics_cd(DRAG_G7, G7_ROWS[i][0]) - G7_ROWS[i][1]) < 1e-9);
+    }
+    /* Positive everywhere, and a G7 boat-tail always drags less than a G1
+     * flat base. */
+    int ok = 1;
+    for (int s = 0; s <= 550; s++) {
+        double m = s * 0.01;
+        double g1 = ballistics_cd(DRAG_G1, m), g7 = ballistics_cd(DRAG_G7, m);
+        ok &= g1 > 0.1 && g7 > 0.1 && g7 < g1;
+    }
+    CHECK(ok);
+
+    /* Each round is plausible: its form factor, sectional density over
+     * ballistic coefficient, is near 1 against its own curve (0.4 to 1.6),
+     * and its muzzle velocity is a rifle's. */
+    for (int i = 0; i < AMMO_COUNT; i++) {
+        const ammo_def *a = ammo_get(i);
+        double d_in = (double)a->calibre / 0.0254, m_lb = (double)a->mass / 0.45359237;
+        double form = m_lb / (d_in * d_in) / (double)a->bc;
+        CHECK(a->name && a->name[0] && form > 0.4 && form < 1.6);
+        CHECK(a->muzzle > 300.0f && a->muzzle < 1000.0f && a->drag <= DRAG_G7 && a->build <= BUILD_AP);
+    }
+}
+
+static void test_air_edges(void)
+{
+    /* A bullet let fall settles at the speed where drag equals gravity. */
+    atmos_air air = atmos_at(SEA_LEVEL, 15.0f);
+    const ammo_def *a = ammo_get(AMMO_BLACK_LEAD);
+    dvec3 pos = {0}, vel = {0};
+    for (int i = 0; i < 60 * 120; i++) ballistics_step(a, &air, &pos, &vel, 1.0 / 60.0);
+    double vt = -vel.y;
+    CHECK(vt > 20.0 && fabs(ballistics_drag(a, &air, vt) / GRAVITY - 1.0) < 0.01);
+    CHECK(fabs(vel.x) < 1e-9 && fabs(vel.z) < 1e-9);
+
+    /* A tailwind keeps speed over the ground; a headwind takes it. */
+    atmos_air tail = air, head = air;
+    tail.wind = dv3(8.0, 0.0, 0.0);
+    head.wind = dv3(-8.0, 0.0, 0.0);
+    dvec3 vtail = {0}, vh = {0};
+    fly(AMMO_BLACK_LEAD, &tail, 400.0, 200.0, &pos, &vtail);
+    fly(AMMO_BLACK_LEAD, &head, 400.0, 200.0, &pos, &vh);
+    CHECK(vtail.x > vh.x + 1.0);
+
+    /* Nonsense in, finite air out. */
+    const float temps[] = {-1000.0f, 1e9f, INFINITY, -INFINITY};
+    const double heights[] = {-1e9, 1e9, 0.0};
+    int finite = 1;
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 3; j++) {
+            atmos_air x = atmos_at(heights[j], temps[i]);
+            finite &= isfinite(x.rho) && x.rho > 0.0 && isfinite(x.sound) && x.sound > 0.0;
+        }
+    CHECK(finite);
+}
+
+/* Fires one bullet of `speed` at a boar 10 m east; the hit points it took. */
+static float shot_damage(test_world *t, double speed)
+{
+    mobs ms = {0};
+    mobs_init(&ms, 4);
+    int i = mobs_add(&ms, MOB_BOAR, dv3(18.5, GROUND, 8.5));
+    if (i < 0) return -1.0f;
+    ms.m[i].hp = 1000.0f;
+    combat c = {0};
+    combat_init(&c, 4);
+    combat_targets tg = {NULL, NULL, 0};
+    c.b[0] = (bullet){dv3(8.5, GROUND + 0.6, 8.5), dv3(speed, 0.0, 0.0), 4.0f, 0, AMMO_BLACK_LEAD};
+    c.count = 1;
+    int hits = 0;
+    for (int k = 0; k < 10 && c.count; k++) hits += combat_step(&c, &ms, &t->ph, &tg);
+    float took = 1000.0f - ms.m[i].hp;
+    return hits == 1 ? took : -1.0f;
+}
+
+/* Lobs a bullet at a 6-high glass wall 21.5 m east, recording its x and
+ * y each step; returns the steps it flew, with the panes broken. */
+static int lob(test_world *t, double path[2][120], int *broke)
+{
+    mobs ms = {0};
+    mobs_init(&ms, 5);
+    combat c = {0};
+    combat_init(&c, 5);
+    combat_targets tg = {NULL, NULL, 0};
+    for (int y = GROUND; y < GROUND + 6; y++) world_set(&t->w, 30, y, 8, B_GLASS, 0);
+    c.b[0] = (bullet){dv3(8.5, GROUND + 1.0, 8.5), dv3(60.0, 14.0, 0.0), 4.0f, 0, AMMO_BLACK_LEAD};
+    c.count = 1;
+    int k = 0;
+    for (; k < 120 && c.count; k++) {
+        combat_step(&c, &ms, &t->ph, &tg);
+        path[0][k] = c.count ? c.b[0].pos.x : 0.0;
+        path[1][k] = c.count ? c.b[0].pos.y : 0.0;
+    }
+    *broke = 0;
+    for (int y = GROUND; y < GROUND + 6; y++) *broke += world_get(&t->w, 30, y, 8) == B_AIR;
+    return k;
+}
+
+static void test_shot_energy(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    /* Damage is energy: half the speed, a quarter of the harm. */
+    float fast = shot_damage(&t, 400.0), slow = shot_damage(&t, 200.0);
+    CHECK(fast > 10.0f && slow > 0.0f && fabsf(fast / slow - 4.0f) < 0.3f);
+
+    /* A lobbed shot follows its arc and breaks one pane of a glass wall
+     * where it comes down, the same way twice. */
+    double first[2][120] = {{0}}, second[2][120] = {{0}};
+    int broke[2] = {0, 0}, n[2] = {0, 0};
+    for (int run = 0; run < 2; run++) {
+        n[run] = lob(&t, run ? second : first, &broke[run]);
+        for (int y = GROUND; y < GROUND + 6; y++) world_set(&t.w, 30, y, 8, B_AIR, 0);
+    }
+    int same = n[0] == n[1];
+    for (int k = 0; same && k < n[0]; k++) same = first[0][k] == second[0][k] && first[1][k] == second[1][k];
+    CHECK(n[0] > 0 && n[0] < 120 && broke[0] == 1 && broke[1] == 1 && same);
+    tw_free(&t);
+}
+
 void test_ballistics_all(void)
 {
     test_atmos();
     test_drag_table();
+    test_drag_rows();
+    test_air_edges();
     test_trajectories();
     test_shot_drift();
+    test_shot_energy();
 }
