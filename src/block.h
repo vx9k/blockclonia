@@ -302,9 +302,12 @@ static inline int block_opaque(uint8_t id)
     return id < B_COUNT && (g_blocks[id].flags & BF_OPAQUE);
 }
 
-/* Blocks that keep a 0..7 value in the column's meta array: water (its
+/* Liquids flow and keep their level in the cell's meta (world.h). */
+static inline int block_fluid(uint8_t id) { return id < B_COUNT && (g_blocks[id].flags & BF_FLUID); }
+
+/* Blocks that keep a 0..7 value in the column's meta array: liquids (their
  * level, 0 = full) and campfires (fuel left, 0 = full). */
-static inline int block_has_meta(uint8_t id) { return id == B_WATER || id == B_CAMPFIRE; }
+static inline int block_has_meta(uint8_t id) { return block_fluid(id) || id == B_CAMPFIRE; }
 
 #define CAMPFIRE_FUEL_MAX 8 /* meta 0 = 8 units; one unit burns for a survival-clock hour */
 

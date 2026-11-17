@@ -198,15 +198,21 @@ uint8_t world_get_meta(const world *w, int x, int y, int z)
     return c->meta[col_index(x & (CHUNK_W - 1), y, z & (CHUNK_W - 1))];
 }
 
-int world_water_level(const world *w, int x, int y, int z)
+int world_fluid_level(const world *w, int x, int y, int z)
 {
     if (y < 0 || y >= WORLD_H) return 0;
     const column *c = world_column(w, chunk_of(x), chunk_of(z));
     if (!c) return 0;
     int i = col_index(x & (CHUNK_W - 1), y, z & (CHUNK_W - 1));
-    if (c->blocks[i] != B_WATER) return 0;
+    if (!block_fluid(c->blocks[i])) return 0;
     uint8_t m = c->meta ? c->meta[i] : 0;
-    return m ? m : WATER_FULL;
+    return m ? m : FLUID_FULL;
+}
+
+int world_water_level(const world *w, int x, int y, int z)
+{
+    if (world_get(w, x, y, z) != B_WATER) return 0;
+    return world_fluid_level(w, x, y, z);
 }
 
 static void mark_section(world *w, int cx, int cz, int sy, int urgent)
@@ -234,7 +240,7 @@ static int set_block(world *w, int x, int y, int z, uint8_t id, uint8_t meta, in
     int i = col_index(lx, y, lz);
     uint8_t old = c->blocks[i];
     uint8_t old_meta = c->meta ? c->meta[i] : 0;
-    if (!block_has_meta(id) || meta >= WATER_FULL) meta = 0;
+    if (!block_has_meta(id) || meta >= FLUID_FULL) meta = 0;
     if (old == id && old_meta == meta) return 1;
 
     c->blocks[i] = id;
@@ -290,7 +296,7 @@ int world_surface_y(const world *w, int x, int z)
     int lx = x & (CHUNK_W - 1), lz = z & (CHUNK_W - 1);
     for (int y = WORLD_H - 1; y >= 0; y--) {
         uint8_t b = c->blocks[col_index(lx, y, lz)];
-        if (block_solid(b) || b == B_WATER) return y + 1;
+        if (block_solid(b) || block_fluid(b)) return y + 1;
     }
     return 0;
 }

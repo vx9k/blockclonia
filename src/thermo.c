@@ -524,7 +524,7 @@ static void scan_ponds(thermo *t, const world *w, dvec3 player)
         int x = px + k % side - POND_R, z = pz + k / side - POND_R;
         for (int y = py - POND_R; y <= py + POND_R; y++) {
             if (world_get(w, x, y, z) != B_WATER || world_get(w, x, y + 1, z) != B_AIR) continue;
-            if (world_water_level(w, x, y, z) != WATER_FULL) continue;
+            if (world_water_level(w, x, y, z) != FLUID_FULL) continue;
             if (cell_ambient(t, w, x, y, z, NULL) < 0.0) ensure(t, w, x, y, z);
         }
     }
@@ -568,7 +568,7 @@ static void build_links(thermo *t, const world *w)
             c->cap = RHO_CP_AIR;
             c->vent = c->shelter ? VENT_SHELTER : VENT_OPEN;
         } else if (c->kind == K_WATER) {
-            double frac = (double)world_water_level(w, c->x, c->y, c->z) / WATER_FULL;
+            double frac = (double)world_water_level(w, c->x, c->y, c->z) / FLUID_FULL;
             c->cap = frac * RHO_CP_WATER + (1.0 - frac) * RHO_CP_AIR;
             c->freezable = frac >= 1.0 && world_get(w, c->x, c->y + 1, c->z) == B_AIR;
             if (!c->freezable) c->lat = 0.0;
@@ -721,9 +721,9 @@ static void convert(thermo *t, world *w)
         block_edit *e = &t->edits[n];
         if (c->kind == K_MELT && c->lat >= melt_energy(c->mat)) {
             double rho = (double)block_get(c->mat)->density;
-            int level = (int)clampd(floor(WATER_FULL * rho / 1000.0 + 0.5), 1.0, WATER_FULL);
+            int level = (int)clampd(floor(FLUID_FULL * rho / 1000.0 + 0.5), 1.0, FLUID_FULL);
             e->id = B_WATER;
-            e->meta = (uint8_t)(level >= WATER_FULL ? 0 : level);
+            e->meta = (uint8_t)(level >= FLUID_FULL ? 0 : level);
         } else if (c->kind == K_WATER && c->freezable && c->lat >= FREEZE_SKIN * 1000.0 * L_FUSION) {
             e->id = B_ICE;
             e->meta = 0;
@@ -753,7 +753,7 @@ static void convert(thermo *t, world *w)
             double extra = lat - melt_energy(old);
             c->lat = 0.0;
             c->dev = -c->amb +
-                     fmax(extra, 0.0) / (RHO_CP_WATER * (double)(e->meta ? e->meta : WATER_FULL) / WATER_FULL);
+                     fmax(extra, 0.0) / (RHO_CP_WATER * (double)(e->meta ? e->meta : FLUID_FULL) / FLUID_FULL);
         } else {
             /* Skin over water: the rest of the latent heat is still to go. */
             c->lat = fmax(melt_energy(B_ICE) - lat, 0.0);

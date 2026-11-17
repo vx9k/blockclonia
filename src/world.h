@@ -49,9 +49,26 @@ static inline int world_column_inside(int cx, int cz)
     return world_xz_inside((long long)cx * CHUNK_W, (long long)cz * CHUNK_W);
 }
 
-/* Water level 1..8 (8 = full block). Stored in meta, with full water stored
- * as 0 so oceans need no meta array at all. */
-#define WATER_FULL 8
+/* A cell's integer coordinates. */
+typedef struct {
+    int x, y, z;
+} ipos;
+
+/* A well-mixed hash of a cell, for hash tables and per-cell variety. */
+static inline uint32_t ipos_hash(ipos p)
+{
+    uint32_t h = (uint32_t)p.x * 73856093U ^ (uint32_t)p.y * 19349663U ^ (uint32_t)p.z * 83492791U;
+    h ^= h >> 16; /* the finaliser of hash_u32 (noise.h) */
+    h *= 0x7feb352dU;
+    h ^= h >> 15;
+    h *= 0x846ca68bU;
+    h ^= h >> 16;
+    return h;
+}
+
+/* Liquid level 1..8 (8 = full block). Stored in meta, with a full cell
+ * stored as 0 so oceans need no meta array at all. */
+#define FLUID_FULL 8
 
 typedef struct {
     uint32_t vtx_offset;   /* first vertex in its vertex pool block */
@@ -179,7 +196,9 @@ static inline uint8_t world_get(const world *w, int x, int y, int z)
 
 /* The 0..7 meta value of a cell (see block_has_meta); 0 when unloaded. */
 uint8_t world_get_meta(const world *w, int x, int y, int z);
-/* Water in a cell, 0 (none) .. WATER_FULL. */
+/* Liquid of any kind in a cell, 0 (none) .. FLUID_FULL. */
+int world_fluid_level(const world *w, int x, int y, int z);
+/* The same, counting water only. */
 int world_water_level(const world *w, int x, int y, int z);
 
 /* Raw edit: marks meshes dirty and the column modified, then fires

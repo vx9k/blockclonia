@@ -94,8 +94,8 @@ int bench_run(uint32_t seed)
     int ticks = 0, peak = 0;
     for (; ticks < 200; ticks++) {
         physics_fluid_tick(&ph);
-        if (ph.fluid_updates > peak) peak = ph.fluid_updates;
-        if (!ph.fluid_next.count) break;
+        if (ph.fl.updates > peak) peak = ph.fl.updates;
+        if (!fluid_pending(&ph.fl)) break;
     }
     double ft = os_now() - t0;
     printf("  fluid: %d ticks to settle, peak %d active cells, %.3f ms/tick\n", ticks, peak,
