@@ -14,7 +14,7 @@ unless it says otherwise.
    - [x] 32-bit item ids (#70)
    - [x] Materials: 7 rocks, 4 soils, 15 new ores, raw items, ingots
          and alloys, smelting
-   - [ ] Strata, ores in their host rock, soil depth
+   - [x] Strata, ores in their host rock, soil depth
    - [ ] Liquids: lava, crude oil, brine
    - [ ] Aquifers and cave variety: flooded caves, ice caves,
          dripstone, lava lakes
