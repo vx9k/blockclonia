@@ -5,6 +5,7 @@
 #include "noise.h"
 
 #include <math.h>
+#include <stddef.h>
 
 typedef struct { uint8_t r, g, b, a; } rgba;
 
@@ -280,18 +281,88 @@ static int tool_texel(int layer, int x, int y, rgba *out)
     return 1;
 }
 
+/* The mineral items (from T_ITEM_RAW_TIN, in item order) reuse three
+ * shapes in their own colours: a raw lump, a cast ingot and a heap of
+ * powder. */
+typedef struct {
+    int shape; /* the sprite whose rows it takes */
+    pal_entry pal[6];
+} recolour;
+
+#define C(r, g, b) {r, g, b, 255}
+#define LUMP(o, a, h, m)                             \
+    {                                                \
+        T_ITEM_RAW_IRON,                             \
+        {                                            \
+            {'#', o}, {'a', a}, {'h', h}, { 'm', m } \
+        }                                            \
+    }
+#define INGOT(o, h, m)                     \
+    {                                      \
+        T_ITEM_IRON_INGOT,                 \
+        {                                  \
+            {'#', o}, {'h', h}, { 'm', m } \
+        }                                  \
+    }
+#define HEAP(g, G)               \
+    {                            \
+        T_ITEM_GUNPOWDER,        \
+        {                        \
+            {'g', g}, { 'G', G } \
+        }                        \
+    }
+static const recolour MINERAL_ART[T_ITEM_MINERALS_END - T_ITEM_RAW_TIN] = {
+    LUMP(C(35, 25, 20), C(75, 55, 45), C(130, 100, 80), C(40, 30, 25)), /* raw tin */
+    LUMP(C(60, 40, 20), C(140, 100, 45), C(200, 160, 80), C(90, 60, 30)), /* raw zinc */
+    LUMP(C(50, 52, 58), C(120, 124, 132), C(190, 195, 205), C(85, 88, 95)), /* raw lead */
+    LUMP(C(70, 60, 30), C(165, 145, 85), C(215, 195, 120), C(110, 95, 55)), /* raw nickel */
+    LUMP(C(70, 70, 75), C(175, 175, 180), C(235, 235, 240), C(60, 60, 65)), /* raw silver */
+    LUMP(C(120, 115, 105), C(225, 220, 210), C(240, 200, 60), C(215, 170, 40)), /* raw gold */
+    LUMP(C(90, 40, 20), C(180, 95, 55), C(215, 140, 90), C(150, 70, 40)), /* bauxite */
+    LUMP(C(20, 20, 22), C(55, 55, 60), C(120, 120, 130), C(40, 40, 45)), /* ilmenite */
+    LUMP(C(20, 20, 18), C(50, 50, 45), C(90, 90, 85), C(200, 190, 40)), /* uraninite */
+    LUMP(C(120, 100, 115), C(215, 190, 210), C(240, 225, 240), C(180, 200, 175)), /* spodumene */
+    HEAP(C(220, 200, 40), C(250, 235, 90)), /* sulfur */
+    HEAP(C(210, 210, 200), C(250, 250, 245)), /* saltpeter */
+    HEAP(C(225, 205, 200), C(250, 242, 238)), /* salt */
+    LUMP(C(150, 150, 155), C(225, 225, 230), C(250, 250, 255), C(200, 200, 210)), /* quartz */
+    LUMP(C(30, 30, 34), C(70, 70, 76), C(140, 140, 150), C(50, 50, 55)), /* graphite */
+    INGOT(C(90, 92, 96), C(225, 228, 230), C(185, 188, 192)), /* tin */
+    INGOT(C(80, 90, 95), C(200, 212, 218), C(160, 172, 180)), /* zinc */
+    INGOT(C(45, 48, 58), C(140, 145, 160), C(100, 104, 118)), /* lead */
+    INGOT(C(85, 82, 72), C(215, 210, 195), C(175, 170, 155)), /* nickel */
+    INGOT(C(110, 110, 115), C(245, 245, 250), C(200, 200, 208)), /* silver */
+    INGOT(C(130, 90, 10), C(255, 220, 90), C(220, 170, 40)), /* gold */
+    INGOT(C(95, 60, 25), C(215, 160, 90), C(170, 115, 55)), /* bronze */
+    INGOT(C(120, 95, 30), C(240, 210, 110), C(200, 165, 70)), /* brass */
+    INGOT(C(55, 60, 68), C(200, 206, 214), C(140, 146, 156)), /* steel */
+    LUMP(C(15, 15, 15), C(35, 33, 32), C(80, 78, 76), C(25, 24, 24)), /* charcoal */
+    HEAP(C(215, 213, 205), C(250, 250, 245)), /* quicklime */
+};
+#undef C
+#undef LUMP
+#undef INGOT
+#undef HEAP
+
 static int sprite_texel(int layer, int x, int y, rgba *out)
 {
     if (tool_texel(layer, x, y, out)) return 1;
+    int shape = layer;
+    const pal_entry *pal = NULL;
+    if (layer >= T_ITEM_RAW_TIN && layer < T_ITEM_MINERALS_END) {
+        shape = MINERAL_ART[layer - T_ITEM_RAW_TIN].shape;
+        pal = MINERAL_ART[layer - T_ITEM_RAW_TIN].pal;
+    }
     for (int i = 0; i < (int)(sizeof SPRITES / sizeof SPRITES[0]); i++) {
         const sprite *s = &SPRITES[i];
-        if (s->layer != layer) continue;
+        if (s->layer != shape) continue;
+        if (!pal) pal = s->pal;
         char ch = s->rows[y][x];
         *out = (rgba){0, 0, 0, 0};
         for (int k = 0; k < 6; k++)
-            if (s->pal[k].ch == ch && ch) {
+            if (pal[k].ch == ch && ch) {
                 int n = px_noise(layer, x, y, 6);
-                rgba c = s->pal[k].c;
+                rgba c = pal[k].c;
                 *out = shade(c.r, c.g, c.b, c.a, n);
             }
         return 1;
@@ -345,6 +416,35 @@ static rgba flame(int frame, int x, int y)
     return shade(215, 70, 25, (int)(200.0f * (1.2f - t)), n);
 }
 
+/* Ore blocks: the rock around the mineral, the mineral, and how sparse
+ * its clusters are (higher, fewer). Most sit in plain stone; bauxite and
+ * rock salt are the rock themselves, gold and lithium sit in quartz-rich
+ * rock. */
+static const struct {
+    int layer;
+    rgba rock, mineral;
+    int sparse;
+} ORE_ART[] = {
+    {T_COAL_ORE, {125, 125, 125, 255}, {30, 30, 32, 255}, 55},
+    {T_COPPER_ORE, {125, 125, 125, 255}, {200, 110, 60, 255}, 55},
+    {T_IRON_ORE, {125, 125, 125, 255}, {196, 160, 130, 255}, 55},
+    {T_TIN_ORE, {125, 125, 125, 255}, {45, 35, 30, 255}, 55}, /* cassiterite, near black */
+    {T_ZINC_ORE, {125, 125, 125, 255}, {150, 110, 50, 255}, 55}, /* resinous sphalerite */
+    {T_LEAD_ORE, {125, 125, 125, 255}, {165, 170, 180, 255}, 55}, /* metallic galena */
+    {T_NICKEL_ORE, {125, 125, 125, 255}, {180, 160, 95, 255}, 55}, /* brassy pentlandite */
+    {T_SILVER_ORE, {125, 125, 125, 255}, {220, 220, 228, 255}, 62},
+    {T_GOLD_ORE, {205, 200, 192, 255}, {240, 195, 50, 255}, 65}, /* flecks in white quartz */
+    {T_BAUXITE, {175, 100, 60, 255}, {120, 60, 35, 255}, 40}, /* red earth with darker pisoliths */
+    {T_TITANIUM_ORE, {125, 125, 125, 255}, {35, 35, 40, 255}, 55}, /* black ilmenite */
+    {T_URANIUM_ORE, {125, 125, 125, 255}, {185, 190, 60, 255}, 55}, /* pitchblende's yellow alteration crust */
+    {T_LITHIUM_ORE, {190, 185, 180, 255}, {205, 160, 200, 255}, 50}, /* pink spodumene in pale pegmatite */
+    {T_SULFUR_ORE, {125, 125, 125, 255}, {230, 210, 50, 255}, 50},
+    {T_SALTPETER_ORE, {125, 125, 125, 255}, {240, 240, 235, 255}, 50}, /* a white crust */
+    {T_ROCK_SALT, {225, 205, 200, 255}, {245, 240, 238, 255}, 40}, /* halite, pink-white throughout */
+    {T_QUARTZ_ORE, {125, 125, 125, 255}, {235, 235, 240, 255}, 45},
+    {T_GRAPHITE_ORE, {110, 110, 115, 255}, {50, 50, 55, 255}, 45},
+};
+
 static rgba texel(int layer, int x, int y)
 {
     int n = px_noise(layer, x, y, 12);
@@ -354,6 +454,14 @@ static rgba texel(int layer, int x, int y)
     if (mobskin_texel(layer, x, y, px)) return (rgba){px[0], px[1], px[2], px[3]};
     if (layer >= T_CRACK0 && layer <= T_CRACK3) return crack(layer - T_CRACK0, x, y);
     if (layer >= T_FIRE0 && layer <= T_FIRE3) return flame(layer - T_FIRE0, x, y);
+    for (int i = 0; i < (int)(sizeof ORE_ART / sizeof ORE_ART[0]); i++) {
+        if (ORE_ART[i].layer != layer) continue;
+        /* Rock with clusters of mineral: a texel is ore where a coarse
+         * hash says so and a neighbour agrees, giving blobs, not dust. */
+        rgba r = ORE_ART[i].rock, m = ORE_ART[i].mineral;
+        int ore = px_noise(layer, x / 2, y / 2, 100) > ORE_ART[i].sparse && px_noise(layer, x, y, 100) > -20;
+        return ore ? shade(m.r, m.g, m.b, 255, n / 2) : shade(r.r, r.g, r.b, 255, n);
+    }
     switch (layer) {
     case T_SKIN: return shade(214, 170, 136, 255, n / 3);
     case T_SLEEVE: {
@@ -368,16 +476,44 @@ static rgba texel(int layer, int x, int y)
     }
     case T_ASH: return shade(110, 106, 102, 255, px_noise(layer, x, y, 20));
     case T_STONE: return shade(125, 125, 125, 255, n);
-    case T_COAL_ORE:
-    case T_COPPER_ORE:
-    case T_IRON_ORE: {
-        /* Stone with clusters of mineral: a texel is ore where a coarse
-         * hash says so and a neighbour agrees, giving blobs, not dust. */
-        static const rgba MINERAL[3] = {{30, 30, 32, 255}, {200, 110, 60, 255}, {196, 160, 130, 255}};
-        int k = layer - T_COAL_ORE;
-        int ore = px_noise(layer, x / 2, y / 2, 100) > 55 && px_noise(layer, x, y, 100) > -20;
-        if (!ore) return shade(125, 125, 125, 255, n);
-        return shade(MINERAL[k].r, MINERAL[k].g, MINERAL[k].b, 255, n / 2);
+    case T_GRANITE: {
+        /* Coarse crystals: black mica and pink feldspar in grey quartz. */
+        int v = px_noise(layer, x, y, 100);
+        if (v > 70) return shade(40, 38, 40, 255, n / 3);
+        if (v < -60) return shade(205, 160, 150, 255, n / 2);
+        return shade(170, 162, 158, 255, n / 2);
+    }
+    case T_BASALT: /* fine-grained and dark, with gas bubbles frozen in */
+        if (px_noise(layer, x / 2, y / 2, 100) > 88) return shade(32, 32, 35, 255, n / 4);
+        return shade(62, 62, 66, 255, n / 2);
+    case T_LIMESTONE: /* pale, with a fleck of shell here and there */
+        if (px_noise(layer, x, y, 100) > 88) return shade(160, 150, 125, 255, n / 3);
+        return shade(198, 190, 165, 255, n / 2);
+    case T_SANDSTONE: { /* laid down in beds of slightly different sand */
+        int bed = (y + (px_noise(layer, x / 4, 0, 1) + 1)) % 5 == 0;
+        return shade(bed ? 180 : 205, bed ? 140 : 165, bed ? 95 : 115, 255, n / 2);
+    }
+    case T_SHALE: /* thin laminae of compacted mud */ return shade(82, 84, 90, 255, (y % 3 == 0 ? -14 : 0) + n / 3);
+    case T_MARBLE: { /* white calcite with grey veins running across */
+        int v = ((x + y + px_noise(layer, 0, y / 4, 2)) % 9 + 9) % 9;
+        if (v <= 1) return shade(150, 150, 156, 255, n / 3);
+        return shade(228, 226, 222, 255, n / 4);
+    }
+    case T_OBSIDIAN: /* black glass catching the light along its conchoidal faces */
+        if ((x + y) % 7 == 0 && px_noise(layer, x / 2, y, 100) > 0) return shade(78, 72, 92, 255, n / 3);
+        return shade(28, 22, 36, 255, n / 3);
+    case T_CLAY: return shade(150, 128, 112, 255, n / 3);
+    case T_MUD:
+        if (px_noise(layer, x, y, 100) > 80) return shade(110, 90, 75, 255, n / 3); /* a wet shine */
+        return shade(78, 58, 42, 255, n / 2);
+    case T_PEAT: /* dark, with the fibres of the plants it was */
+        if (px_noise(layer, x, y / 3, 100) > 60) return shade(90, 65, 40, 255, n / 3);
+        return shade(58, 40, 28, 255, n / 2);
+    case T_PODZOL: { /* fallen needles over the dark top of the soil */
+        int v = px_noise(layer, x, y, 100);
+        if (v > 70) return shade(150, 95, 45, 255, n / 3);
+        if (v < -80) return shade(70, 55, 40, 255, n / 3);
+        return shade(100, 75, 48, 255, n / 2);
     }
     case T_FURNACE_TOP: {
         int edge = x == 0 || y == 0 || x == 15 || y == 15;

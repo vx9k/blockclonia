@@ -27,6 +27,42 @@ typedef enum {
     B_IRON_ORE,
     B_FURNACE,   /* a crafting station for smelting; not a heat source itself */
     B_ROCK,      /* stone in place, as generated: one mass, so caves hold up */
+    /* Rocks, each loose (what breaking it gives, and what a builder sets)
+     * and in place (one mass with the ground around it, like B_ROCK). */
+    B_GRANITE,
+    B_GRANITE_ROCK,
+    B_BASALT,
+    B_BASALT_ROCK,
+    B_LIMESTONE,
+    B_LIMESTONE_ROCK,
+    B_SANDSTONE,
+    B_SANDSTONE_ROCK,
+    B_SHALE,
+    B_SHALE_ROCK,
+    B_MARBLE,
+    B_MARBLE_ROCK,
+    B_OBSIDIAN,
+    B_OBSIDIAN_ROCK,
+    B_CLAY,
+    B_MUD,
+    B_PEAT,
+    B_PODZOL,
+    /* Ores and mineral deposits, in place only: they break into items. */
+    B_TIN_ORE,
+    B_ZINC_ORE,
+    B_LEAD_ORE,
+    B_NICKEL_ORE,
+    B_SILVER_ORE,
+    B_GOLD_ORE,
+    B_BAUXITE,
+    B_TITANIUM_ORE,
+    B_URANIUM_ORE,
+    B_LITHIUM_ORE,
+    B_SULFUR_ORE,
+    B_SALTPETER_ORE,
+    B_ROCK_SALT,
+    B_QUARTZ_ORE,
+    B_GRAPHITE_ORE,
     B_COUNT
 } block_id;
 
@@ -145,10 +181,65 @@ typedef enum {
     T_ITEM_MORPHINE,
     T_ITEM_NALOXONE,
     T_ITEM_SPIRITS,
+    T_GRANITE,
+    T_BASALT,
+    T_LIMESTONE,
+    T_SANDSTONE,
+    T_SHALE,
+    T_MARBLE,
+    T_OBSIDIAN,
+    T_CLAY,
+    T_MUD,
+    T_PEAT,
+    T_PODZOL,
+    T_TIN_ORE, /* then one per ore block, in block order, to T_GRAPHITE_ORE */
+    T_ZINC_ORE,
+    T_LEAD_ORE,
+    T_NICKEL_ORE,
+    T_SILVER_ORE,
+    T_GOLD_ORE,
+    T_BAUXITE,
+    T_TITANIUM_ORE,
+    T_URANIUM_ORE,
+    T_LITHIUM_ORE,
+    T_SULFUR_ORE,
+    T_SALTPETER_ORE,
+    T_ROCK_SALT,
+    T_QUARTZ_ORE,
+    T_GRAPHITE_ORE,
+    /* One per item from I_RAW_TIN, in item order (item.h checks). */
+    T_ITEM_RAW_TIN,
+    T_ITEM_RAW_ZINC,
+    T_ITEM_RAW_LEAD,
+    T_ITEM_RAW_NICKEL,
+    T_ITEM_RAW_SILVER,
+    T_ITEM_RAW_GOLD,
+    T_ITEM_BAUXITE,
+    T_ITEM_ILMENITE,
+    T_ITEM_URANINITE,
+    T_ITEM_SPODUMENE,
+    T_ITEM_SULFUR,
+    T_ITEM_SALTPETER,
+    T_ITEM_SALT,
+    T_ITEM_QUARTZ,
+    T_ITEM_GRAPHITE,
+    T_ITEM_TIN_INGOT,
+    T_ITEM_ZINC_INGOT,
+    T_ITEM_LEAD_INGOT,
+    T_ITEM_NICKEL_INGOT,
+    T_ITEM_SILVER_INGOT,
+    T_ITEM_GOLD_INGOT,
+    T_ITEM_BRONZE_INGOT,
+    T_ITEM_BRASS_INGOT,
+    T_ITEM_STEEL_INGOT,
+    T_ITEM_CHARCOAL,
+    T_ITEM_QUICKLIME,
     T_TOOL_FIRST /* then one per tool kind and tier, in item order (T_COUNT) */
 } tex_id;
 
+#define T_ITEM_MINERALS_END (T_ITEM_QUICKLIME + 1)
 #define T_COUNT (T_TOOL_FIRST + 5 * 4) /* item.h checks the 5 kinds x 4 tiers */
+_Static_assert(T_COUNT <= 256, "a texture layer is one byte in block_def, item_def and the vertex");
 #define T_MOB_FIRST T_WOLF_BODY_SIDE
 #define T_MOB_LAST T_MOB_SOLE
 
@@ -185,6 +276,8 @@ typedef struct {
     uint8_t mat;        /* block_mat */
     float cushion;      /* share of a landing's speed that counts; soft ground is < 1 */
     float grit;         /* how much grit it grinds into scraped skin, 0..1 */
+    uint8_t loose;      /* rock in place: the block it breaks into; 0 if it comes away as itself */
+    uint8_t tier;       /* the pickaxe tier (item.h TIER_*) rock and ore need to yield anything */
 } block_def;
 
 extern const block_def g_blocks[B_COUNT];

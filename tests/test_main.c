@@ -2023,6 +2023,7 @@ int main(void)
     test_body_risks_all();
     test_thoughts_all();
     test_drugs_all();
+    test_materials_all();
     test_faint_all();
     test_fear_all();
     test_mobmodel_all();

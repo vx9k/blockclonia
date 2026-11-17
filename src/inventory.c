@@ -186,6 +186,27 @@ const recipe g_recipes[] = {
      * furnace burning the coal can. */
     {{I_COPPER_INGOT, 1}, {{I_RAW_COPPER, 1}, {I_COAL, 1}}, STATION_FURNACE},
     {{I_IRON_INGOT, 1}, {{I_RAW_IRON, 1}, {I_COAL, 2}}, STATION_FURNACE},
+    /* Tin, lead and the precious metals come out of their ores easily;
+     * zinc boils off at 907 C and needs more coal to keep the furnace shut
+     * and reducing, as does nickel at 1455 C. */
+    {{I_TIN_INGOT, 1}, {{I_RAW_TIN, 1}, {I_COAL, 1}}, STATION_FURNACE},
+    {{I_ZINC_INGOT, 1}, {{I_RAW_ZINC, 1}, {I_COAL, 2}}, STATION_FURNACE},
+    {{I_LEAD_INGOT, 1}, {{I_RAW_LEAD, 1}, {I_COAL, 1}}, STATION_FURNACE},
+    {{I_NICKEL_INGOT, 1}, {{I_RAW_NICKEL, 1}, {I_COAL, 2}}, STATION_FURNACE},
+    {{I_SILVER_INGOT, 1}, {{I_RAW_SILVER, 1}, {I_COAL, 1}}, STATION_FURNACE},
+    {{I_GOLD_INGOT, 1}, {{I_RAW_GOLD, 1}, {I_COAL, 1}}, STATION_FURNACE},
+    /* Alloys melted together: bronze about 3:1 copper to tin, brass 2:1
+     * copper to zinc, steel iron soaked in charcoal's carbon. */
+    {{I_BRONZE_INGOT, 4}, {{I_COPPER_INGOT, 3}, {I_TIN_INGOT, 1}}, STATION_FURNACE},
+    {{I_BRASS_INGOT, 3}, {{I_COPPER_INGOT, 2}, {I_ZINC_INGOT, 1}}, STATION_FURNACE},
+    {{I_STEEL_INGOT, 1}, {{I_IRON_INGOT, 1}, {I_CHARCOAL, 1}}, STATION_FURNACE},
+    /* A log smothered in its own embers chars instead of burning away;
+     * limestone gives off its CO2 above about 900 C. */
+    {{I_CHARCOAL, 2}, {{B_LOG, 1}}, STATION_FIRE},
+    {{I_QUICKLIME, 1}, {{B_LIMESTONE, 1}, {I_COAL, 1}}, STATION_FURNACE},
+    /* Black powder by mass: 75% saltpeter, 15% charcoal, 10% sulfur. */
+    {{I_GUNPOWDER, 4}, {{I_SALTPETER, 3}, {I_CHARCOAL, 1}, {I_SULFUR, 1}}, 0},
+    {{B_BRICK, 2}, {{B_CLAY, 1}}, STATION_FIRE},
 /* A head of the material on a stick handle. */
 #define TOOL_RECIPE(kind, tier, mat, n, sticks) \
     {{I_TOOL_FIRST + (kind) * TIER_COUNT + (tier), 1}, {{mat, n}, {I_STICK, sticks}}, 0}

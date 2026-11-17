@@ -155,6 +155,40 @@ static const item_def ITEMS[I_TOOL_FIRST - ITEM_FIRST] = {
                                 .density = 950.0f},
 };
 
+/* The items after the tools, from I_RAW_TIN. Dropped minerals sink at the
+ * density of the mineral, ingots at the metal's; charcoal is porous enough
+ * to float. */
+#define MINERAL(id, nm, text, dens) [(id) - I_TOOL_END] = {.name = (nm), .desc = (text), .density = (dens), .stack = 64}
+static const item_def MINERALS[I_MINERALS_END - I_TOOL_END] = {
+    MINERAL(I_RAW_TIN, "Raw tin", "Cassiterite. Smelt with coal in a furnace.", 6900.0f),
+    MINERAL(I_RAW_ZINC, "Raw zinc", "Sphalerite. Smelt with coal in a furnace.", 4000.0f),
+    MINERAL(I_RAW_LEAD, "Raw lead", "Galena. Smelt with coal in a furnace.", 7500.0f),
+    MINERAL(I_RAW_NICKEL, "Raw nickel", "Pentlandite. Smelt with coal in a furnace.", 4800.0f),
+    MINERAL(I_RAW_SILVER, "Raw silver", "Silver ore. Smelt with coal in a furnace.", 7000.0f),
+    MINERAL(I_RAW_GOLD, "Raw gold", "Gold in quartz. Melt it out in a furnace.", 12000.0f),
+    MINERAL(I_BAUXITE, "Bauxite", "Aluminium ore. Needs electrolysis, not a furnace.", 2500.0f),
+    MINERAL(I_ILMENITE, "Ilmenite", "Titanium ore. Too stable for a furnace to free.", 4700.0f),
+    MINERAL(I_URANINITE, "Uraninite", "Uranium ore, pitchblende. Weakly radioactive.", 8000.0f),
+    MINERAL(I_SPODUMENE, "Spodumene", "Lithium ore. Needs chemical refining.", 3150.0f),
+    MINERAL(I_SULFUR, "Sulfur", "Burns blue. One part in ten of gunpowder.", 2070.0f),
+    MINERAL(I_SALTPETER, "Saltpeter", "Potassium nitrate. Three parts in four of gunpowder.", 2110.0f),
+    MINERAL(I_SALT, "Salt", "Rock salt, halite.", 2170.0f),
+    MINERAL(I_QUARTZ, "Quartz", "Silica crystal. Too hot to melt for a furnace.", 2650.0f),
+    MINERAL(I_GRAPHITE, "Graphite", "Soft carbon. Conducts heat and electricity.", 2160.0f),
+    MINERAL(I_TIN_INGOT, "Tin ingot", "Melts low. Alloys with copper into bronze.", 7290.0f),
+    MINERAL(I_ZINC_INGOT, "Zinc ingot", "Alloys with copper into brass.", 7140.0f),
+    MINERAL(I_LEAD_INGOT, "Lead ingot", "Soft and heavy.", 11340.0f),
+    MINERAL(I_NICKEL_INGOT, "Nickel ingot", "Hard and slow to corrode.", 8910.0f),
+    MINERAL(I_SILVER_INGOT, "Silver ingot", "Smelted silver.", 10490.0f),
+    MINERAL(I_GOLD_INGOT, "Gold ingot", "Smelted gold.", 19300.0f),
+    MINERAL(I_BRONZE_INGOT, "Bronze ingot", "Three parts copper to one of tin.", 8800.0f),
+    MINERAL(I_BRASS_INGOT, "Brass ingot", "Two parts copper to one of zinc.", 8500.0f),
+    MINERAL(I_STEEL_INGOT, "Steel ingot", "Iron hardened with carbon from charcoal.", 7850.0f),
+    MINERAL(I_CHARCOAL, "Charcoal", "Wood baked without air. Burns hot and clean.", 400.0f),
+    MINERAL(I_QUICKLIME, "Quicklime", "Burnt limestone, for mortar and flux.", 3340.0f),
+};
+#undef MINERAL
+
 static const item_def UNKNOWN = {
     .name = "?", .desc = "", .density = 1000.0f, .stack = 1, .block = B_AIR, .tex = T_STONE};
 
@@ -239,12 +273,26 @@ int block_tool(uint8_t block)
 }
 
 /* The pickaxe tier a block needs before it yields anything, -1 for none:
- * any pickaxe for stone, a stone one for the metal ores. */
+ * the block table's tier for rock, ore and masonry. */
 static int pick_tier(uint8_t block)
-{
-    if (block == B_COPPER_ORE || block == B_IRON_ORE) return TIER_STONE;
-    return block_tool(block) == TOOL_PICKAXE && block_get(block)->mat == BM_STONE ? TIER_WOOD : -1;
-}
+{ return block_tool(block) == TOOL_PICKAXE && block_get(block)->mat == BM_STONE ? block_get(block)->tier : -1; }
+
+/* What an ore breaks into: the item, how many, and one more with a chance
+ * of 1 in `extra` (0 for never). Soft deposits crumble into more pieces. */
+static const struct {
+    item_id item;
+    uint8_t count, extra;
+} ORE[B_COUNT] = {
+    [B_COAL_ORE] = {I_COAL, 1, 3},           [B_COPPER_ORE] = {I_RAW_COPPER, 1, 0},
+    [B_IRON_ORE] = {I_RAW_IRON, 1, 0},       [B_TIN_ORE] = {I_RAW_TIN, 1, 0},
+    [B_ZINC_ORE] = {I_RAW_ZINC, 1, 0},       [B_LEAD_ORE] = {I_RAW_LEAD, 1, 0},
+    [B_NICKEL_ORE] = {I_RAW_NICKEL, 1, 0},   [B_SILVER_ORE] = {I_RAW_SILVER, 1, 0},
+    [B_GOLD_ORE] = {I_RAW_GOLD, 1, 0},       [B_BAUXITE] = {I_BAUXITE, 2, 0},
+    [B_TITANIUM_ORE] = {I_ILMENITE, 1, 0},   [B_URANIUM_ORE] = {I_URANINITE, 1, 0},
+    [B_LITHIUM_ORE] = {I_SPODUMENE, 1, 0},   [B_SULFUR_ORE] = {I_SULFUR, 1, 2},
+    [B_SALTPETER_ORE] = {I_SALTPETER, 1, 2}, [B_ROCK_SALT] = {I_SALT, 2, 0},
+    [B_QUARTZ_ORE] = {I_QUARTZ, 1, 0},       [B_GRAPHITE_ORE] = {I_GRAPHITE, 1, 2},
+};
 
 int item_harvests(item_id held, uint8_t block)
 {
@@ -264,19 +312,22 @@ float item_dig_speed(item_id held, uint8_t block)
 
 int item_valid(item_id id)
 {
-    /* Rock and ore only exist in place: breaking them gives stone, coal or
-     * raw metal, so they never become building blocks. */
+    /* Rock and ore only exist in place: breaking them gives the loose rock
+     * or the mineral, so they never become building blocks. */
     if (item_is_block(id))
-        return id < B_COUNT && id != B_WATER && id != B_BEDROCK && id != B_ROCK && id != B_COAL_ORE &&
-               id != B_COPPER_ORE && id != B_IRON_ORE;
+        return id < B_COUNT && id != B_WATER && id != B_BEDROCK && !g_blocks[id].loose && !ORE[id].item;
     return id >= ITEM_FIRST && id < ITEM_END;
 }
 
 const item_def *item_get(item_id id)
 {
-    static item_def blocks[B_COUNT];
+    static item_def blocks[B_COUNT], minerals[I_MINERALS_END - I_TOOL_END];
     static int built;
     if (!built) {
+        for (int i = 0; i < I_MINERALS_END - I_TOOL_END; i++) {
+            minerals[i] = MINERALS[i];
+            minerals[i].tex = (uint8_t)(T_ITEM_RAW_TIN + i);
+        }
         for (int b = 0; b < B_COUNT; b++) {
             const block_def *d = &g_blocks[b];
             blocks[b] = (item_def){
@@ -292,12 +343,17 @@ const item_def *item_get(item_id id)
         blocks[B_CAMPFIRE].desc = "Heat, light and cooking. Feed it sticks, planks or logs.";
         blocks[B_ASH].desc = "What is left of a fire.";
         blocks[B_FURNACE].desc = "Smelts ore. Craft next to it.";
+        blocks[B_CLAY].desc = "Fire it into brick.";
+        blocks[B_MUD].desc = "Waterlogged soil. Needs support from below.";
+        blocks[B_PEAT].desc = "Half-rotted plants from a bog.";
+        blocks[B_OBSIDIAN].desc = "Volcanic glass: shatters when it falls hard.";
         build_tools();
         built = 1;
     }
     if (item_is_block(id) && id < B_COUNT) return &blocks[id];
     if (id >= I_TOOL_FIRST && id < I_TOOL_END) return &g_tools[id - I_TOOL_FIRST];
     if (id >= ITEM_FIRST && id < I_TOOL_FIRST) return &ITEMS[id - ITEM_FIRST];
+    if (id >= I_TOOL_END && id < I_MINERALS_END) return &minerals[id - I_TOOL_END];
     return &UNKNOWN;
 }
 
@@ -319,17 +375,19 @@ int item_drops(uint8_t block, uint32_t *rng, item_stack out[3])
         if (chance(rng, 1, 6)) out[n++] = (item_stack){I_APPLE, 1, 0};
         break;
     case B_GRASS: out[n++] = (item_stack){B_DIRT, 1, 0}; break;
-    case B_ROCK: out[n++] = (item_stack){B_STONE, 1, 0}; break;
-    case B_COAL_ORE: out[n++] = (item_stack){I_COAL, (uint8_t)(1 + chance(rng, 1, 3)), 0}; break;
-    case B_COPPER_ORE: out[n++] = (item_stack){I_RAW_COPPER, 1, 0}; break;
-    case B_IRON_ORE: out[n++] = (item_stack){I_RAW_IRON, 1, 0}; break;
     case B_GLASS: break; /* shatters */
     case B_CAMPFIRE: out[n++] = (item_stack){I_STICK, 2, 0}; break; /* the unburnt ends */
     case B_WATER:
     case B_AIR:
     case B_BEDROCK: break;
     default:
-        if (block < B_COUNT) out[n++] = (item_stack){block, 1, 0};
+        if (block >= B_COUNT) break;
+        if (ORE[block].item) {
+            int extra = ORE[block].extra && chance(rng, 1, ORE[block].extra);
+            out[n++] = (item_stack){ORE[block].item, (uint8_t)(ORE[block].count + extra), 0};
+        } else {
+            out[n++] = (item_stack){g_blocks[block].loose ? g_blocks[block].loose : block, 1, 0};
+        }
         break;
     }
     return n;

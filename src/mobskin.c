@@ -4,7 +4,7 @@
 
 #include <string.h>
 
-_Static_assert(T_COUNT <= ENTITY_TEX_FRONT_MAX + 1, "a creature's front layer must fit in entity_tex's 7 bits");
+_Static_assert(T_MOB_LAST <= ENTITY_TEX_FRONT_MAX, "a creature's front layer must fit in entity_tex's 7 bits");
 
 /* One colour per letter. Wolves are greys over cream (a grey wolf's
  * agouti coat), boars a near-black brown with a pink-grey snout. */
