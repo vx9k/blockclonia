@@ -41,8 +41,8 @@ static void test_liquid_defs(void)
     CHECK(item_bucket(B_WATER) == I_WATER_BUCKET && item_bucket(B_CRUDE_OIL) == I_OIL_BUCKET);
     CHECK(item_bucket(B_BRINE) == I_BRINE_BUCKET && item_bucket(B_LAVA) == I_NONE && item_bucket(B_STONE) == I_NONE);
     CHECK(item_valid(I_OIL_BUCKET) && item_valid(I_BRINE_BUCKET) && !item_valid(I_LIQUIDS_END));
-    CHECK(item_get(I_OIL_BUCKET)->block == B_CRUDE_OIL && item_get(I_OIL_BUCKET)->tex == T_ITEM_OIL_BUCKET);
-    CHECK(item_get(I_BRINE_BUCKET)->block == B_BRINE && item_get(I_BRINE_BUCKET)->tex == T_ITEM_BRINE_BUCKET);
+    CHECK(item_get(I_OIL_BUCKET)->block == B_CRUDE_OIL);
+    CHECK(item_get(I_BRINE_BUCKET)->block == B_BRINE);
     CHECK(item_get(I_OIL_BUCKET)->stack == 1 && item_get(I_BRINE_BUCKET)->stack == 1);
 }
 

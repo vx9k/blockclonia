@@ -2,6 +2,7 @@
 #include "anim.h"
 #include "block.h"
 #include "item.h"
+#include "itemmodel.h"
 #include "torch_model.h"
 
 #include <math.h>
@@ -37,8 +38,9 @@ static const float PIVOT[3] = {0.46f, -0.38f, -0.28f};
 #define HAND_W 0.09f
 #define HAND_Z (-(FOREARM_LEN + HAND_LEN * 0.5f - 0.005f)) /* overlaps the wrist by 5 mm */
 #define BLOCK_SIZE 0.18f
-#define CARD_SIZE 0.30f
-#define CARD_THICK 0.02f
+#define PALM_SIZE 0.14f /* m: what an item in the palm is scaled to, within limits */
+#define TOOL_HELD 0.5f  /* a tool's model in the hand, of its real size */
+#define GUN_HELD 0.85f
 #define TORCH_HELD 0.5f /* the torch model's size in the hand */
 
 /* Timings, s. */
@@ -245,14 +247,41 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
         quat own = quat_mul(flick, quat_axis(0.0f, 1.0f, 0.0f, 0.62f));
         parts[n++] = part(lag, base, arm, at, own, BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE, tex, light);
     } else if (id > 0) {
-        /* Any other item is a card showing its sprite, gripped at its lower
-         * end, turned toward the eye and leaning over like a held tool.
-         * It is always the last instance: its texture has transparent
-         * texels. */
-        const float at[3] = {-0.03f, 0.14f, HAND_Z - 0.04f};
-        quat own = quat_mul(flick, quat_mul(quat_axis(0.0f, 1.0f, 0.0f, -0.45f), quat_axis(0.0f, 0.0f, 1.0f, 0.35f)));
-        parts[n++] = part(lag, base, arm, at, own, CARD_SIZE, CARD_SIZE, CARD_THICK, same_tex(item_get(id)->tex),
-                          light);
+        /* Any other item is its model (itemmodel.h). A tool is gripped at
+         * the foot of its handle, leaning away with its head up; a gun points
+         * ahead, its top up; anything else rests on the fingers, a small thing
+         * shown a little larger and a big one smaller, so all read at a glance. */
+        item_model mdl = {0};
+        if (itemmodel_build(id, &mdl)) {
+            quat own = quat_mul(flick, quat_axis(0.0f, 1.0f, 0.0f, 0.62f));
+            float at[3] = {-0.02f, 0.10f, HAND_Z - 0.03f};
+            float size = fminf(fmaxf(PALM_SIZE / itemmodel_extent(&mdl), 0.7f), 2.5f);
+            if (mdl.hold == IM_HOLD_TOOL) {
+                own = quat_mul(flick, quat_mul(quat_axis(0.0f, 0.0f, 1.0f, 0.2f), quat_axis(1.0f, 0.0f, 0.0f, -0.55f)));
+                at[0] = 0.0f;
+                at[1] = 0.01f;
+                at[2] = HAND_Z - 0.01f;
+                size = TOOL_HELD;
+            } else if (mdl.hold == IM_HOLD_GUN) {
+                /* Muzzle ahead and turned in toward the crosshair, so its side shows. */
+                own = quat_mul(flick, quat_mul(quat_axis(0.0f, 1.0f, 0.0f, 0.35f),
+                                               quat_mul(quat_axis(0.0f, 0.0f, 1.0f, -0.5f * PI_F),
+                                                        quat_axis(1.0f, 0.0f, 0.0f, -0.5f * PI_F))));
+                at[0] = -0.02f;
+                at[1] = 0.0f;
+                at[2] = HAND_Z;
+                size = GUN_HELD;
+            }
+            entity_instance im[IM_MAX_BOXES] = {0};
+            const float zero[3] = {0.0f, 0.0f, 0.0f};
+            int k = itemmodel_place(&mdl, mdl.grip, zero, own, size, light, im, IM_MAX_BOXES);
+            for (int i = 0; i < k && n < VIEWMODEL_MAX; i++) {
+                const float pos[3] = {im[i].pos[0] + at[0], im[i].pos[1] + at[1], im[i].pos[2] + at[2]};
+                parts[n] = part(lag, base, arm, pos, inst_rot(&im[i]), im[i].scale[0], im[i].scale[1], im[i].scale[2],
+                                im[i].tex, im[i].light);
+                parts[n++].tint = im[i].tint;
+            }
+        }
     }
 
     /* Swing, sprint, bob and lag can add up to more than the frame has

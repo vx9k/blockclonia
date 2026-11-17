@@ -45,8 +45,7 @@ enum {
 
 #define I_TOOL_END (I_TOOL_FIRST + 5 * 4)
 
-/* Minerals and metals, after the tools so the ids saved before them hold.
- * Each has the texture layer T_ITEM_RAW_TIN + (id - I_RAW_TIN). */
+/* Minerals and metals, after the tools so the ids saved before them hold. */
 enum {
     I_RAW_TIN = I_TOOL_END, /* cassiterite */
     I_RAW_ZINC,             /* sphalerite */
@@ -76,12 +75,10 @@ enum {
     I_QUICKLIME,
     I_MINERALS_END
 };
-_Static_assert(I_MINERALS_END - I_RAW_TIN == T_ITEM_MINERALS_END - T_ITEM_RAW_TIN, "one texture per mineral item");
 
 /* Buckets of the liquids other than water, after the minerals. Lava has
  * none: it would burn a wooden bucket. */
 enum { I_OIL_BUCKET = I_MINERALS_END, I_BRINE_BUCKET, I_LIQUIDS_END };
-_Static_assert(I_LIQUIDS_END - I_OIL_BUCKET == T_ITEM_BRINE_BUCKET + 1 - T_ITEM_OIL_BUCKET, "one texture per bucket");
 
 #define ITEM_END I_LIQUIDS_END
 
@@ -90,7 +87,6 @@ _Static_assert(I_LIQUIDS_END - I_OIL_BUCKET == T_ITEM_BRINE_BUCKET + 1 - T_ITEM_
 enum { TOOL_PICKAXE, TOOL_AXE, TOOL_SHOVEL, TOOL_KNIFE, TOOL_SWORD, TOOL_KINDS };
 enum { TIER_WOOD, TIER_STONE, TIER_COPPER, TIER_IRON, TIER_COUNT };
 _Static_assert((TOOL_KINDS * TIER_COUNT) == (I_TOOL_END - I_TOOL_FIRST), "one item per tool kind and tier");
-_Static_assert((TOOL_KINDS * TIER_COUNT) == (T_COUNT - T_TOOL_FIRST), "one texture per tool kind and tier");
 
 static inline item_id item_tool_id(int kind, int tier) { return (item_id)(I_TOOL_FIRST + kind * TIER_COUNT + tier); }
 /* 1 if id is a tool or blade, with its kind and tier. */
@@ -120,7 +116,6 @@ typedef struct {
     float density;       /* kg/m^3 of a dropped item: floats below 1000 */
     uint8_t stack;       /* most per slot */
     uint8_t block;       /* block it places, B_AIR if none */
-    uint8_t tex;         /* texture layer: the sprite (items) or the side face (blocks) */
 } item_def;
 
 /* 1 for ids that exist as items (not air, loose water or bedrock). */

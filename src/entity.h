@@ -13,7 +13,13 @@ typedef struct {
     float rot[4];        /* unit quaternion x, y, z, w */
     float scale[3];      /* size in metres along the cube's own axes */
     float light;         /* brightness multiplier */
+    uint32_t tint;       /* colour multiplied into the texture, stored as white minus it so that 0
+                            (any zeroed instance) is no tint: entity_tint */
 } entity_instance;
+
+/* The tint field for colour 0xRRGGBB. */
+static inline uint32_t entity_tint(uint32_t rgb)
+{ return (~rgb & 0xFF0000u) >> 16 | (~rgb & 0xFF00u) | (~rgb & 0xFFu) << 16; }
 
 /* Pixel art drawn to a box's size, as the creatures are. Without it every
  * face stretches its whole 16-texel layer, which suits items and blocks.

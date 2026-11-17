@@ -8,7 +8,7 @@ layout(push_constant) uniform PushVert {
 
 // Texture layers the shaders animate (block.h tex_id; checked by a static
 // assert in renderer.c).
-const uint FIRE_FIRST = 32u;
+const uint FIRE_FIRST = 22u;
 const uint WATER_LAYER = 14u;
 const uint LEAVES_LAYER = 8u;
 

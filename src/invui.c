@@ -1,6 +1,7 @@
 #include "invui.h"
 #include "anim.h"
 #include "combat.h"
+#include "itemmodel.h"
 #include "palette.h"
 #include "texgen.h"
 
@@ -13,23 +14,26 @@
 
 /* ------------------------------------------------------------ icons */
 
-/* Packed RGBA per texel, built once from the texture generator. Blocks keep
- * three 4x4 faces (box-filtered), items their full 16x16 sprite. */
-static uint32_t g_sprite[ITEM_END - ITEM_FIRST][16][16];
+/* Packed RGBA per texel, built once from the texture generator: blocks
+ * as three 4x4 faces (box-filtered). Items, and the torch, are their
+ * models seen from the icon's angle (itemmodel_icon), in a unit square. */
+#define MODEL_ICONS (ITEM_END - ITEM_FIRST + 1)
 static uint32_t g_face[B_COUNT][3][4][4];
+static im_quad g_model_quad[MODEL_ICONS][IM_ICON_QUADS];
+static int g_model_quads[MODEL_ICONS];
 static int g_icons_built;
 
-static uint32_t pack(const uint8_t c[4]) { return ui_rgba(c[0], c[1], c[2], c[3]); }
+/* The torch is a block with a model; it takes the last icon. */
+static int model_slot(item_id id) { return id == B_TORCH ? MODEL_ICONS - 1 : (int)(id - ITEM_FIRST); }
 
 static void build_icons(void)
 {
-    for (item_id id = ITEM_FIRST; id < ITEM_END; id++)
-        for (int y = 0; y < 16; y++)
-            for (int x = 0; x < 16; x++) {
-                uint8_t c[4] = {0};
-                texgen_texel(item_get(id)->tex, x, y, c);
-                g_sprite[id - ITEM_FIRST][y][x] = pack(c);
-            }
+    for (item_id id = ITEM_FIRST; id <= ITEM_END; id++) {
+        item_id m_id = id == ITEM_END ? B_TORCH : id;
+        item_model m = {0};
+        int slot = model_slot(m_id);
+        g_model_quads[slot] = itemmodel_build(m_id, &m) ? itemmodel_icon(&m, g_model_quad[slot], IM_ICON_QUADS) : 0;
+    }
     for (int b = 1; b < B_COUNT; b++) {
         const block_def *d = &g_blocks[b];
         const int layer[3] = {d->tex[2], d->tex[0], d->tex[4]}; /* top, left (+X side), right (+Z side) */
@@ -76,27 +80,25 @@ void invui_icon(ui *u, item_id id, float x, float y, float size, float alpha)
 {
     if (!item_valid(id)) return;
     if (!g_icons_built) build_icons();
-    if (item_is_block(id)) {
-        /* Isometric cube: top diamond, left and right faces. */
-        float s = size, h = s * 0.5f, q = s * 0.25f;
-        face(u, &g_face[id][0][0][0], x + h, y, h, q, -h, q, alpha); /* top: back corner, right edge, left edge */
-        face(u, &g_face[id][1][0][0], x, y + q, h, q, 0.0f, h, alpha); /* left */
-        face(u, &g_face[id][2][0][0], x + h, y + h, h, -q, 0.0f, h, alpha); /* right */
+    if (id == B_TORCH || !item_is_block(id)) {
+        if (id != B_TORCH && (id < ITEM_FIRST || id >= ITEM_END)) return;
+        int slot = model_slot(id);
+        for (int i = 0; i < g_model_quads[slot]; i++) {
+            const im_quad *q = &g_model_quad[slot][i];
+            float xy[8] = {0};
+            for (int k = 0; k < 4; k++) {
+                xy[2 * k] = x + q->xy[2 * k] * size;
+                xy[2 * k + 1] = y + q->xy[2 * k + 1] * size;
+            }
+            ui_quad(u, xy, ui_alpha(q->rgba, alpha * (float)(q->rgba >> 24) / 255.0f));
+        }
         return;
     }
-    /* Items: the sprite, one rectangle per run of equal texels in a row. */
-    if (id < ITEM_FIRST || id >= ITEM_END) return;
-    const float px = size / 16.0f;
-    const uint32_t *sp = &g_sprite[id - ITEM_FIRST][0][0];
-    for (int ty = 0; ty < 16; ty++)
-        for (int tx = 0; tx < 16;) {
-            uint32_t c = sp[ty * 16 + tx];
-            int run = 1;
-            while (tx + run < 16 && sp[ty * 16 + tx + run] == c) run++;
-            if ((c >> 24) >= 8)
-                ui_rect(u, x + (float)tx * px, y + (float)ty * px, (float)run * px, px, ui_alpha(c, alpha));
-            tx += run;
-        }
+    /* Isometric cube: top diamond, left and right faces. */
+    float s = size, h = s * 0.5f, q = s * 0.25f;
+    face(u, &g_face[id][0][0][0], x + h, y, h, q, -h, q, alpha); /* top: back corner, right edge, left edge */
+    face(u, &g_face[id][1][0][0], x, y + q, h, q, 0.0f, h, alpha); /* left */
+    face(u, &g_face[id][2][0][0], x + h, y + h, h, -q, 0.0f, h, alpha); /* right */
 }
 
 /* The count in a slot's corner, with a shadow. */
