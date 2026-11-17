@@ -2043,6 +2043,7 @@ int main(void)
     test_edge_all();
     test_tools_all();
     test_combat_all();
+    test_ballistics_all();
     test_invui_all();
     test_body_risks_all();
     test_thoughts_all();

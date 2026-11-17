@@ -43,11 +43,13 @@ station, the right items in, a cartridge out.
   penetrates and how it wounds. All values come from published
   manufacturer data or typical published figures, in SI units.
 - *Flight is integrated, not faked.* Each step of the fixed 60 Hz
-  physics applies gravity and drag, `a = -(ρ / (2·BC)) · Cd_ref(M) ·
-  v·|v|` with the standard drag curve for the round's model. Air
-  density ρ comes from altitude and the air temperature `thermo`
-  already has, so a shot on a cold mountain flies differently from one
-  in a hot valley. The world's wind drifts the bullet. Time of flight
+  physics applies gravity and drag, `a = -(π/8) · ρ · Cd_ref(M) ·
+  v·|v| / BC`, with the standard drag curve for the round's model and
+  BC in kg/m² (703 times the published lb/in² figure). The air comes
+  from `atmos.c`, which aircraft will share: density ρ from altitude
+  and the air temperature `thermo` already has, so a shot on a cold
+  mountain flies differently from one in a hot valley, and a seeded
+  wind that drifts the bullet in the open but not underground. Time of flight
   is real, so a moving target has to be led. Spin drift and the
   Coriolis effect are left out: they are too small at the game's
   ranges to be worth the code.
@@ -135,19 +137,22 @@ Each step is one pull request:
 
 1. **Ballistic flight.** An ammunition table, drag from G1/G7 curves,
    air density from altitude and temperature, and wind. Tests check
-   drop and time of flight against published tables within a
-   tolerance.
-2. **Penetration and ricochet** through blocks by material, including
+   the flight against closed-form results (a vacuum parabola,
+   exponential slowing where drag is flat, the lag rule for wind
+   drift) and a published remaining velocity.
+2. **Muzzle effects:** a flash that lights the surroundings for a
+   moment, black-powder smoke that drifts with the wind, and tracers.
+3. **Penetration and ricochet** through blocks by material, including
    bullets that pass through walls.
-3. **Wound ballistics** into the health model: the path through body
+4. **Wound ballistics** into the health model: the path through body
    parts, wounds by construction, and pass-throughs.
-4. **The weapon as parts:** barrel, magazine and receiver as an item
+5. **The weapon as parts:** barrel, magazine and receiver as an item
    with an inventory, then reloading and fire modes.
-5. **Load patterns:** the pattern editor and presets, and loading
+6. **Load patterns:** the pattern editor and presets, and loading
    magazines, clips and belts by pattern.
-6. **Condition, heat and malfunctions,** with clearing and cleaning.
-7. **Sights and zeroing,** then optics.
-8. **Armour** on the body, after clothing exists.
+7. **Condition, heat and malfunctions,** with clearing and cleaning.
+8. **Sights and zeroing,** then optics.
+9. **Armour** on the body, after clothing exists.
 
 ## Testing
 

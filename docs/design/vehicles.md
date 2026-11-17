@@ -62,6 +62,10 @@ breakdowns and maintenance.
 6. **Boats:** buoyancy from displaced volume and the hull's density,
    with oars, sail (wind from the climate) and engine.
 7. **Later, perhaps:** aircraft, once everything above is solid.
+   Their wings and control surfaces read the same air as bullets
+   (`atmos.c`: density from altitude and temperature, the speed of
+   sound, wind), and add lift, drag and moments by angle of attack on
+   a rigid body.
 
 ## Rendering
 

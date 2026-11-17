@@ -1377,6 +1377,7 @@ static void open_world(game *g, const char *dir, int backdrop)
     if (o->mobs && !backdrop) place_mobs(&g->mobs, &g->w, &g->pl, o->mobs);
     if (o->figures && !backdrop) g->nfigs = place_figures(g->figs, &g->pl, o->figures);
     combat_init(&g->cb, g->seed ^ 0xC0BA7u);
+    g->cb.th = g->th;
     interact_init(&g->ia, g->seed ^ 0xA5A5u);
     viewmodel_init(&g->vm);
     camera_init(&g->cam);
@@ -1413,6 +1414,7 @@ static void close_world(game *g)
     physics_destroy(&g->ph);
     thermo_destroy(g->th);
     g->th = NULL;
+    g->cb.th = NULL;
 }
 
 /* ---------------------------------------------------------- multiplayer */
