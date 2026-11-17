@@ -22,7 +22,10 @@ static size_t ridx(int x, int y, int z) { return ((size_t)y * R + (size_t)z) * R
 static size_t mid(int x, int y, int z) { return ridx(CHUNK_W + x, y, CHUNK_W + z); }
 
 static uint16_t foot_at(const uint16_t *foot, int x, int y, int z)
-{ return foot[(size_t)y * LIGHT_FOOT * LIGHT_FOOT + (size_t)((z + 1) * LIGHT_FOOT + (x + 1))]; }
+{
+    size_t i = (size_t)y * LIGHT_FOOT * LIGHT_FOOT + (size_t)((z + 1) * LIGHT_FOOT + (x + 1));
+    return foot[i];
+}
 
 /* Stone up to y = 19, air above. */
 static uint8_t *flat_region(void)

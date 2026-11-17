@@ -323,7 +323,10 @@ float light_brightness(uint16_t l, float daylight)
 }
 
 float light_at(const world *w, double x, double y, double z, float daylight)
-{ return light_brightness(world_light(w, (int)floor(x), (int)floor(y), (int)floor(z)), daylight); }
+{
+    int ix = (int)floor(x), iy = (int)floor(y), iz = (int)floor(z);
+    return light_brightness(world_light(w, ix, iy, iz), daylight);
+}
 
 int light_atlas_layout(uint32_t max_dim, int want, int n[3])
 {

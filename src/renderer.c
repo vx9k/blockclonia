@@ -1794,6 +1794,8 @@ static void create_texture(renderer *r)
     VkDescriptorImageInfo dii[3] = {{r->sampler, r->tex_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                                     {r->sampler_filtered, r->tex_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                                     {r->light_sampler, r->light_view, VK_IMAGE_LAYOUT_GENERAL}};
+    /* Binding 0: each set's block texture; binding 1: the light atlas in both. */
+    const VkDescriptorImageInfo *info[4] = {&dii[0], &dii[1], &dii[2], &dii[2]};
     VkWriteDescriptorSet w[4] = {0};
     for (int i = 0; i < 4; i++)
         w[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -1801,7 +1803,7 @@ static void create_texture(renderer *r)
                                       .dstBinding = (uint32_t)(i >> 1),
                                       .descriptorCount = 1,
                                       .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                      .pImageInfo = &dii[i < 2 ? i : 2]};
+                                      .pImageInfo = info[i]};
     vkUpdateDescriptorSets(r->dev, 4, w, 0, NULL);
 }
 

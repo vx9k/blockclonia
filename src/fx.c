@@ -165,7 +165,10 @@ static void put_trans(ent_list *l, entity_instance e)
 
 /* The brightness at p: its cell's light, or daylight without a world. */
 static float lit(const physics *ph, dvec3 p, float daylight)
-{ return ph && ph->w ? light_at(ph->w, p.x, p.y, p.z, daylight) : daylight; }
+{
+    if (!ph || !ph->w) return daylight;
+    return light_at(ph->w, p.x, p.y, p.z, daylight);
+}
 
 void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *crack, dvec3 eye, double alpha, float time,
                        float daylight, entity_instance *out, int max, int *n_opaque, int *n_trans)
