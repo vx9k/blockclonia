@@ -407,6 +407,24 @@ static void test_fluid_seek(void)
     tw_free(&t);
 }
 
+/* Between two ledges a film walks to the nearer, whichever way the tick
+ * turns the order it looks in. */
+static void test_fluid_seek_nearest(void)
+{
+    for (uint32_t order = 0; order < 4; order++) {
+        test_world t = {0};
+        tw_init(&t);
+        world_set(&t.w, 2, GROUND - 1, 0, B_AIR, 0);  /* two cells east */
+        world_set(&t.w, -4, GROUND - 1, 0, B_AIR, 0); /* four cells west */
+        world_set(&t.w, 0, GROUND, 0, B_WATER, 1);
+        for (uint32_t i = 0; i < 20; i++) fluid_tick(&t.ph.fl, order + i);
+        CHECK(world_fluid_level(&t.w, 2, GROUND - 1, 0) == 1);
+        CHECK(world_get(&t.w, -4, GROUND - 1, 0) == B_AIR);
+        CHECK(fluid_pending(&t.ph.fl) == 0);
+        tw_free(&t);
+    }
+}
+
 /* Only a cell with room wakes the liquid diagonally above it. */
 static void test_fluid_wake_diagonal(void)
 {
@@ -543,6 +561,7 @@ void test_fluid_all(void)
     test_fluid_puddles_rest();
     test_fluid_waterfall();
     test_fluid_seek();
+    test_fluid_seek_nearest();
     test_fluid_wake_diagonal();
     test_fluid_dam_break();
     test_fluid_border();
