@@ -593,6 +593,28 @@ static void test_sprint_sneak(void)
     run_steps(&t, &p, &sneak_run, 120);
     CHECK(!p.sprinting && p.sneaking && fabs(hypot(p.vel.x, p.vel.z) - SNEAK_SPEED) < 0.05);
 
+    /* Feet grip: a sprint on grass stops within 0.6 s and 2 m of letting
+     * go, the legs' 1.2 g, not the 3.6 m a skidding body would take. On
+     * ice the same stop is a long skate. */
+    player_spawn(&p, &t.w, 0.5, 20.5);
+    run_steps(&t, &p, &run, 120);
+    double z0 = p.pos.z;
+    player_input none = {0};
+    int steps = 0;
+    while (steps < 600 && hypot(p.vel.x, p.vel.z) > 1e-3) {
+        physics_step(&t.ph, &p, &none);
+        steps++;
+    }
+    double grass_stop = fabs(p.pos.z - z0);
+    CHECK(steps <= 36 && grass_stop < 2.0 && grass_stop > 1.5);
+    for (int x = -2; x <= 2; x++)
+        for (int z = -40; z <= 21; z++) world_set(&t.w, x, GROUND - 1, z, B_ICE, 0);
+    player_spawn(&p, &t.w, 0.5, 20.5);
+    run_steps(&t, &p, &walk, 600);
+    z0 = p.pos.z;
+    run_steps(&t, &p, &none, 300);
+    CHECK(fabs(p.pos.z - z0) > 5.0);
+
     /* A sprint does not start in mid-air, but carries through a jump. */
     player_spawn(&p, &t.w, 0.5, 20.5);
     p.pos.y += 3.0;
@@ -694,8 +716,9 @@ static double slide_distance(uint8_t floor_block)
 static void test_friction(void)
 {
     double stone = slide_distance(B_STONE), ice = slide_distance(B_ICE);
-    /* v^2 / (2 mu g): stone ~1.2 m, ice ~27 m (capped by the 30 m strip). */
-    CHECK(stone > 0.8 && stone < 1.6);
+    /* v^2 / (2 a), with feet braking at twice the sliding friction up to
+     * the legs' 1.2 g: stone ~0.68 m, ice ~14 m. */
+    CHECK(stone > 0.6 && stone < 0.75);
     CHECK(ice > 10.0 * stone);
 }
 
@@ -1153,6 +1176,10 @@ static void test_survival(void)
     p.submerged = 0.0;
     survival_limit_input(k, &p, &in);
     CHECK(in.forward < 0.6f && !in.jump && !in.sprint);
+    /* Walking diagonally is no faster than straight on when hurt. */
+    player_input diag = {.forward = 1.0f, .right = 1.0f};
+    survival_limit_input(k, &p, &diag);
+    CHECK(fabsf(hypotf(diag.forward, diag.right) - in.forward) < 1e-5f);
     player_input fly = {.forward = 1.0f, .jump = 1, .sprint = 1};
     p.flying = 1;
     survival_limit_input(k, &p, &fly);

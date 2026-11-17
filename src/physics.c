@@ -414,7 +414,12 @@ static void player_step(const physics *ph, player *p, const player_input *in)
         target = p->sprinting ? SWIM_SPRINT_SPEED : SWIM_SPEED;
         amax = 3.0;
     } else if (p->on_ground) {
-        amax = ground_friction(ph, p) * GRAVITY;
+        /* The block table holds sliding friction, which suits a skidding
+         * body. A walking foot is planted, not skidding: static friction
+         * of a sole is about twice that, more where the tread bites into
+         * soil or grass. Above that the legs are the limit, about 1.2 g,
+         * which stops a sprint in two strides. Ice stays ice. */
+        amax = fmin(FOOT_GRIP * ground_friction(ph, p), LEG_ACCEL_G) * GRAVITY;
     } else {
         amax = 0.6; /* a little mid-air body English, nothing more */
     }
