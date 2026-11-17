@@ -2140,8 +2140,10 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     fx_build_entities(g->fx, &g->ph, &g->crack, v.eye, alpha, v.time, v.daylight, g->ents, RENDER_MAX_ENTS, &n_op,
                       &n_tr);
     if (g->mp) add_players(g, v.eye, alpha, now, v.daylight, (float)dt, &n_op, n_tr);
-    if (!on_title) add_figures(g, v.eye, v.daylight, (float)dt, &n_op, n_tr);
-    if (!on_title) add_mobs(g, v.eye, alpha, v.daylight, now, &n_op, n_tr);
+    if (!on_title) {
+        add_figures(g, v.eye, v.daylight, (float)dt, &n_op, n_tr);
+        add_mobs(g, v.eye, alpha, v.daylight, now, &n_op, n_tr);
+    }
     v.ents = g->ents;
     v.ent_opaque = n_op;
     v.ent_trans = n_tr;

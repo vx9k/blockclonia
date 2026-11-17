@@ -4,8 +4,10 @@
 #include "avatar.h"
 #include "block.h"
 #include "test_util.h"
+#include "texgen.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define FACE 5 /* box order: pelvis, spine, chest, trapezius, neck, face, hair, back hair, nose */
@@ -300,8 +302,166 @@ static void test_avatar_garbage(void)
         for (int k = 0; k < 4; k++) CHECK(isfinite(e[i].pos[k % 3]) && isfinite(e[i].rot[k]));
 }
 
+/* The box hanging from a bone on the given side (0 right, 1 left): the
+ * first one whose bone is that side's first bone plus k. */
+static int side_box(int first_r, int first_l, int side, int k)
+{
+    int bone = (side ? first_l : first_r) + k;
+    for (int i = 0; i < AVATAR_BOXES; i++)
+        if (avatar_box_bone(i) == bone) return i;
+    CHECK(0); /* no box on that bone */
+    return 0;
+}
+
+static void test_avatar_symmetry(void)
+{
+    /* Standing still with the breath at rest, the left side mirrors the
+     * right across x = 0, and the trunk and head sit on the midline. */
+    entity_instance e[AVATAR_BOXES] = {0};
+    avatar_anim a = moving(0.0f, 0, 0.0f);
+    avatar_build(&a, FEET, 0.0f, 0.0f, 0, 1.0f, e, AVATAR_BOXES);
+    for (int k = 0; k < 5; k++) {
+        const entity_instance *r = &e[side_box(AV_SHOULDER_R, AV_SHOULDER_L, 0, k)];
+        const entity_instance *l = &e[side_box(AV_SHOULDER_R, AV_SHOULDER_L, 1, k)];
+        CHECK(fabsf(r->pos[0] + l->pos[0]) < 1e-4f && fabsf(r->pos[1] - l->pos[1]) < 1e-4f);
+        CHECK(fabsf(r->pos[2] - l->pos[2]) < 1e-4f && r->pos[0] > 0.0f);
+    }
+    for (int k = 0; k < 3; k++) {
+        const entity_instance *r = &e[side_box(AV_HIP_R, AV_HIP_L, 0, k)];
+        const entity_instance *l = &e[side_box(AV_HIP_R, AV_HIP_L, 1, k)];
+        CHECK(fabsf(r->pos[0] + l->pos[0]) < 1e-4f && fabsf(r->pos[1] - l->pos[1]) < 1e-4f);
+        CHECK(r->pos[0] > 0.0f);
+    }
+    for (int i = 0; i <= NOSE; i++) CHECK(fabsf(e[i].pos[0]) < 1e-4f);
+    /* Every box hangs from a bone that leads back to the pelvis. */
+    for (int i = 0; i < AVATAR_BOXES; i++) {
+        int b = avatar_box_bone(i), steps = 0;
+        while (b != AV_PELVIS && b >= 0 && steps++ < AVATAR_BONES) b = avatar_bone_parent(b);
+        CHECK(b == AV_PELVIS);
+    }
+}
+
+static void test_avatar_stride_shape(void)
+{
+    /* Walking, the right foot leads at heel strike and the left half a
+     * stride later, and each arm swings forward with the other leg. */
+    const int foot_r = side_box(AV_HIP_R, AV_HIP_L, 0, 2), foot_l = side_box(AV_HIP_R, AV_HIP_L, 1, 2);
+    const int hand_r = side_box(AV_SHOULDER_R, AV_SHOULDER_L, 0, 2);
+    const int hand_l = side_box(AV_SHOULDER_R, AV_SHOULDER_L, 1, 2);
+    entity_instance e[AVATAR_BOXES] = {0};
+    avatar_anim a = moving(1.4f, 0, 0.0f);
+    avatar_build(&a, FEET, 0.0f, 0.0f, 0, 1.0f, e, AVATAR_BOXES);
+    CHECK(e[foot_r].pos[2] < e[foot_l].pos[2] - 0.3f); /* forward is -z */
+    CHECK(e[hand_l].pos[2] < e[hand_r].pos[2] - 0.05f);
+    a.phase = 0.5f;
+    avatar_build(&a, FEET, 0.0f, 0.0f, 0, 1.0f, e, AVATAR_BOXES);
+    CHECK(e[foot_l].pos[2] < e[foot_r].pos[2] - 0.3f);
+    CHECK(e[hand_r].pos[2] < e[hand_l].pos[2] - 0.05f);
+
+    /* Running leans further forward than walking: the head is further
+     * ahead of the pelvis. */
+    float ahead[2] = {0};
+    const float speeds[2] = {1.4f, 6.5f};
+    for (int g = 0; g < 2; g++) {
+        float sum = 0.0f;
+        for (int k = 0; k < 8; k++) {
+            avatar_anim m = moving(speeds[g], 0, (float)k / 8.0f);
+            avatar_build(&m, FEET, 0.0f, 0.0f, 0, 1.0f, e, AVATAR_BOXES);
+            sum += e[0].pos[2] - e[FACE].pos[2];
+        }
+        ahead[g] = sum / 8.0f;
+    }
+    CHECK(ahead[1] > ahead[0] + 0.05f);
+}
+
+static void test_avatar_turns(void)
+{
+    /* Turning the yaw turns the whole figure about its feet: every box
+     * keeps its height and its distance from the vertical axis. */
+    entity_instance a0[AVATAR_BOXES] = {0}, a1[AVATAR_BOXES] = {0};
+    avatar_anim a = moving(4.0f, 0, 0.3f);
+    avatar_build(&a, FEET, 0.0f, 0.2f, 0, 1.0f, a0, AVATAR_BOXES);
+    avatar_build(&a, FEET, 2.1f, 0.2f, 0, 1.0f, a1, AVATAR_BOXES);
+    float c = cosf(2.1f), s = sinf(2.1f);
+    for (int i = 0; i < AVATAR_BOXES; i++) {
+        CHECK(fabsf(a0[i].pos[1] - a1[i].pos[1]) < 1e-4f);
+        /* Turning by yaw toward +x is -yaw about +y. */
+        float x = c * a0[i].pos[0] - s * a0[i].pos[2], z = s * a0[i].pos[0] + c * a0[i].pos[2];
+        CHECK(fabsf(x - a1[i].pos[0]) < 1e-4f && fabsf(z - a1[i].pos[2]) < 1e-4f);
+    }
+}
+
+static void test_avatar_breath(void)
+{
+    /* Breathing moves only the chest, and never by more than a few
+     * millimetres. */
+    entity_instance a0[AVATAR_BOXES] = {0}, a1[AVATAR_BOXES] = {0};
+    avatar_anim a = moving(0.0f, 0, 0.0f);
+    avatar_build(&a, FEET, 0.0f, 0.0f, 0, 1.0f, a0, AVATAR_BOXES);
+    a.time = 1.0f; /* a quarter breath in: full inhale */
+    avatar_build(&a, FEET, 0.0f, 0.0f, 0, 1.0f, a1, AVATAR_BOXES);
+    CHECK(a1[2].scale[2] > a0[2].scale[2] + 0.002f && a1[2].scale[2] < a0[2].scale[2] + 0.01f);
+    CHECK(fabsf(a1[0].pos[1] - a0[0].pos[1]) < 1e-4f); /* the hips stay put */
+    for (int i = 0; i < AVATAR_BOXES; i++) {
+        float d = fabsf(a1[i].pos[0] - a0[i].pos[0]) + fabsf(a1[i].pos[1] - a0[i].pos[1]) +
+                  fabsf(a1[i].pos[2] - a0[i].pos[2]);
+        CHECK(d < 0.01f);
+    }
+    /* The clock wraps instead of losing precision over a long session. */
+    avatar_anim b = {0};
+    for (int i = 0; i < 200; i++) avatar_anim_update(&b, 0.0, 0.0, 0, 0, 30.0f);
+    CHECK(b.time >= 0.0f && b.time < 3600.0f);
+}
+
+static void test_avatar_settles(void)
+{
+    /* The speed follows a change of pace within a fraction of a second,
+     * and sneaking eases out again when it stops. */
+    avatar_anim a = {0};
+    const float dt = 1.0f / 60.0f;
+    for (int i = 0; i <= 60; i++) avatar_anim_update(&a, (double)(2.0f * dt * (float)i), 0.0, 1, 0, dt);
+    CHECK(fabsf(a.speed - 2.0f) < 0.05f && a.sneak > 0.99f);
+    for (int i = 61; i <= 120; i++) avatar_anim_update(&a, (double)(2.0f * dt * 60.0f), 0.0, 0, 0, dt);
+    CHECK(a.speed < 0.05f && a.sneak < 0.01f);
+    float p = a.phase;
+    avatar_anim_update(&a, (double)(2.0f * dt * 60.0f), 0.0, 0, 0, dt);
+    CHECK(a.phase == p); /* standing still, the stride waits */
+}
+
+static void test_avatar_textures(void)
+{
+    /* The linen, the shorts, the hair and the skin are told apart at a
+     * glance, and the face has dark pupils on light eyes. */
+    const int layers[4] = {T_LINEN, T_LINEN_DARK, T_HAIR, T_SKIN};
+    int mean[4] = {0};
+    for (int l = 0; l < 4; l++) {
+        int sum = 0;
+        for (int y = 0; y < TEX_SIZE; y++)
+            for (int x = 0; x < TEX_SIZE; x++) {
+                uint8_t px[4] = {0};
+                texgen_texel(layers[l], x, y, px);
+                CHECK(px[3] == 255);
+                sum += px[0] + px[1] + px[2];
+            }
+        mean[l] = sum / (TEX_SIZE * TEX_SIZE);
+    }
+    for (int i = 0; i < 4; i++)
+        for (int j = i + 1; j < 4; j++) CHECK(abs(mean[i] - mean[j]) > 20);
+    uint8_t pupil[4] = {0}, white[4] = {0}, cheek[4] = {0};
+    texgen_texel(T_FACE, 5, 7, pupil);
+    texgen_texel(T_FACE, 4, 7, white);
+    texgen_texel(T_FACE, 2, 9, cheek);
+    CHECK(pupil[0] < 80 && white[0] > 200 && cheek[0] > pupil[0] + 100);
+}
+
 void test_avatar_all(void)
 {
+    test_avatar_symmetry();
+    test_avatar_stride_shape();
+    test_avatar_turns();
+    test_avatar_breath();
+    test_avatar_settles();
+    test_avatar_textures();
     test_avatar_boxes();
     test_avatar_stands();
     test_avatar_faces();
