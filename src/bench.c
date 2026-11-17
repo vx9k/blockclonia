@@ -101,6 +101,37 @@ int bench_run(uint32_t seed)
     printf("  fluid: %d ticks to settle, peak %d active cells, %.3f ms/tick\n", ticks, peak,
            ft * 1000.0 / (ticks ? ticks : 1));
 
+    /* A dam break: a 24 x 24 m reservoir 6 m deep, on a stone floor above
+     * the highest ground under it, loses its east wall and floods down the
+     * terrain. */
+    const int r0 = -40, rn = 24, depth = 6;
+    int top = 0;
+    for (int z = r0 - 1; z <= r0 + rn; z++)
+        for (int x = r0 - 1; x <= r0 + rn; x++) {
+            int s = world_surface_y(&w, x, z);
+            top = s > top ? s : top;
+        }
+    for (int z = r0 - 1; z <= r0 + rn; z++)
+        for (int x = r0 - 1; x <= r0 + rn; x++) {
+            int edge = x < r0 || x >= r0 + rn || z < r0 || z >= r0 + rn;
+            for (int y = world_surface_y(&w, x, z); y <= top; y++) world_set(&w, x, y, z, B_STONE, 0);
+            for (int y = top + 1; y <= top + depth; y++) world_set(&w, x, y, z, edge ? B_STONE : B_WATER, 0);
+        }
+    fluid_forget(&ph.fl);
+    for (int z = r0; z < r0 + rn; z++)
+        for (int y = top + 1; y <= top + depth; y++) world_set(&w, r0 + rn, y, z, B_AIR, 0);
+    long updates = 0;
+    peak = 0;
+    t0 = os_now();
+    for (ticks = 0; ticks < 1500 && fluid_pending(&ph.fl); ticks++) {
+        physics_fluid_tick(&ph);
+        updates += ph.fl.updates;
+        if (ph.fl.updates > peak) peak = ph.fl.updates;
+    }
+    ft = os_now() - t0;
+    printf("  flood: %d ticks to settle, %ld cell updates (peak %d/tick), %.3f ms/tick, %.3f ms per 1000 cells\n",
+           ticks, updates, peak, ft * 1000.0 / (ticks ? ticks : 1), ft * 1e6 / (double)(updates ? updates : 1));
+
     physics_destroy(&ph);
     mem_free(in);
     mem_free(out);

@@ -254,6 +254,212 @@ static void test_fluid_budget(void)
             for (int x = -40; x < 40; x++) left += world_get(&t.w, x, GROUND + 3, z) == B_WATER;
     }
     CHECK(left == 0);
+    CHECK(ticks == 2); /* the cells left over went first in the next tick */
+    tw_free(&t);
+}
+
+/* A lone full cell on a floor shares the same amount with all four
+ * neighbours, rather than halving into each in turn. */
+static void test_fluid_spread_even(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    world_set(&t.w, 4, GROUND, 4, B_WATER, 0);
+    fluid_tick(&t.ph.fl, 0);
+    int e = world_fluid_level(&t.w, 5, GROUND, 4);
+    CHECK(e > 0);
+    CHECK(world_fluid_level(&t.w, 3, GROUND, 4) == e);
+    CHECK(world_fluid_level(&t.w, 4, GROUND, 5) == e);
+    CHECK(world_fluid_level(&t.w, 4, GROUND, 3) == e);
+    CHECK(world_fluid_level(&t.w, 4, GROUND, 4) + 4 * e == FLUID_FULL);
+    tw_free(&t);
+}
+
+/* The thinnest film runs off a ledge instead of waiting at its edge. */
+static void test_fluid_ledge(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    world_set(&t.w, 0, GROUND, 0, B_STONE, 0);
+    world_set(&t.w, 0, GROUND + 1, 0, B_WATER, 1);
+    settle(&t, 50);
+    CHECK(world_get(&t.w, 0, GROUND + 1, 0) == B_AIR);
+    CHECK(volume(&t.w, B_WATER, 3, GROUND, GROUND + 1) == 1);
+    tw_free(&t);
+}
+
+/* Digging out the ground beside a film gives it a drop: the film wakes and
+ * runs into the hole, though the cell next to it stayed air. */
+static void test_fluid_wake_drop(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    world_set(&t.w, 0, GROUND, 0, B_WATER, 1);
+    settle(&t, 50);
+    CHECK(world_fluid_level(&t.w, 0, GROUND, 0) == 1); /* a film on flat ground stays */
+    world_set(&t.w, 1, GROUND - 1, 0, B_AIR, 0);
+    CHECK(fluid_pending(&t.ph.fl) > 0);
+    settle(&t, 50);
+    CHECK(world_get(&t.w, 0, GROUND, 0) == B_AIR);
+    CHECK(world_fluid_level(&t.w, 1, GROUND - 1, 0) == 1);
+    tw_free(&t);
+}
+
+/* A cell between two drops splits evenly between them. */
+static void test_fluid_drop_split(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    /* A pillar with the cell on top walled in on two sides. */
+    world_set(&t.w, 0, GROUND, 0, B_STONE, 0);
+    world_set(&t.w, 0, GROUND + 1, 1, B_STONE, 0);
+    world_set(&t.w, 0, GROUND + 1, -1, B_STONE, 0);
+    world_set(&t.w, 0, GROUND + 1, 0, B_WATER, 0);
+    fluid_forget(&t.ph.fl);
+    fluid_wake(&t.ph.fl, 0, GROUND + 1, 0);
+    fluid_tick(&t.ph.fl, 0);
+    CHECK(world_get(&t.w, 0, GROUND + 1, 0) == B_AIR);
+    CHECK(world_fluid_level(&t.w, 1, GROUND + 1, 0) == FLUID_FULL / 2);
+    CHECK(world_fluid_level(&t.w, -1, GROUND + 1, 0) == FLUID_FULL / 2);
+    tw_free(&t);
+}
+
+/* A drop can be liquid with room: a film on a step drains into the
+ * half-full pool below it. */
+static void test_fluid_drop_into_pool(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    basin(&t.w, 2, 1);
+    world_set(&t.w, 0, GROUND, 0, B_WATER, 3);
+    world_set(&t.w, 1, GROUND, 0, B_WATER, 3);
+    world_set(&t.w, 0, GROUND, 1, B_WATER, 3);
+    world_set(&t.w, 1, GROUND, 1, B_WATER, 3);
+    world_set(&t.w, -2, GROUND + 1, 0, B_STONE, 0);
+    world_set(&t.w, -1, GROUND + 1, 0, B_WATER, 1); /* on the basin wall */
+    settle(&t, 50);
+    CHECK(world_get(&t.w, -1, GROUND + 1, 0) == B_AIR);
+    CHECK(volume(&t.w, B_WATER, 1, GROUND, GROUND + 1) == 13);
+    CHECK(volume(&t.w, B_WATER, 3, GROUND + 1, GROUND + 2) == 0);
+    tw_free(&t);
+}
+
+/* Random puddles on flat ground come to rest: the queue empties, no cell
+ * stands more than a level above a neighbour, and nothing is lost. */
+static void test_fluid_puddles_rest(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    uint32_t s = 7;
+    long before = 0;
+    for (int i = 0; i < 40; i++) {
+        int x = (int)(hash_u32(s++) % 12), z = (int)(hash_u32(s++) % 12);
+        int l = 1 + (int)(hash_u32(s++) % FLUID_FULL);
+        before += l - world_fluid_level(&t.w, x, GROUND, z);
+        fluid_set(&t.w, x, GROUND, z, B_WATER, l);
+    }
+    CHECK(settle(&t, 500) < 500);
+    CHECK(volume(&t.w, B_WATER, 30, GROUND, GROUND + 1) == before);
+    int steep = 0;
+    for (int z = -20; z < 30; z++)
+        for (int x = -20; x < 30; x++) {
+            int l = world_fluid_level(&t.w, x, GROUND, z);
+            steep += abs(l - world_fluid_level(&t.w, x + 1, GROUND, z)) > 1;
+            steep += abs(l - world_fluid_level(&t.w, x, GROUND, z + 1)) > 1;
+        }
+    CHECK(steep == 0);
+    tw_free(&t);
+}
+
+/* A reservoir on a platform with one side open empties over the edge:
+ * every level ends on the ground. */
+static void test_fluid_waterfall(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    const int h = 4;
+    for (int z = -1; z <= 3; z++)
+        for (int x = -1; x < 3; x++) {
+            for (int y = GROUND; y < GROUND + h; y++) world_set(&t.w, x, y, z, B_STONE, 0);
+            int wall = x == -1 || z == -1 || z == 3;
+            world_set(&t.w, x, GROUND + h, z, wall ? B_STONE : B_WATER, 0);
+        }
+    long before = volume(&t.w, B_WATER, 4, GROUND + h, GROUND + h + 1);
+    CHECK(before == 9 * FLUID_FULL);
+    CHECK(settle(&t, 1000) < 1000);
+    CHECK(volume(&t.w, B_WATER, 4, GROUND + h, GROUND + h + 1) == 0);
+    CHECK(volume(&t.w, B_WATER, 30, GROUND, GROUND + 1) == before);
+    tw_free(&t);
+}
+
+/* A film a few cells from a ledge walks to it; one further away stays. */
+static void test_fluid_seek(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    world_set(&t.w, 3, GROUND - 1, 0, B_AIR, 0); /* a hole three cells east */
+    world_set(&t.w, 0, GROUND, 0, B_WATER, 1);
+    world_set(&t.w, -10, GROUND, 10, B_WATER, 1); /* far from any ledge */
+    settle(&t, 50);
+    CHECK(world_get(&t.w, 0, GROUND, 0) == B_AIR);
+    CHECK(world_fluid_level(&t.w, 3, GROUND - 1, 0) == 1);
+    CHECK(world_fluid_level(&t.w, -10, GROUND, 10) == 1);
+    tw_free(&t);
+}
+
+/* Between two ledges a film walks to the nearer, whichever way the tick
+ * turns the order it looks in. */
+static void test_fluid_seek_nearest(void)
+{
+    for (uint32_t order = 0; order < 4; order++) {
+        test_world t = {0};
+        tw_init(&t);
+        world_set(&t.w, 2, GROUND - 1, 0, B_AIR, 0);  /* two cells east */
+        world_set(&t.w, -4, GROUND - 1, 0, B_AIR, 0); /* four cells west */
+        world_set(&t.w, 0, GROUND, 0, B_WATER, 1);
+        for (uint32_t i = 0; i < 20; i++) fluid_tick(&t.ph.fl, order + i);
+        CHECK(world_fluid_level(&t.w, 2, GROUND - 1, 0) == 1);
+        CHECK(world_get(&t.w, -4, GROUND - 1, 0) == B_AIR);
+        CHECK(fluid_pending(&t.ph.fl) == 0);
+        tw_free(&t);
+    }
+}
+
+/* Only a cell with room wakes the liquid diagonally above it. */
+static void test_fluid_wake_diagonal(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    world_set(&t.w, 0, GROUND, 0, B_WATER, 1);
+    fluid_forget(&t.ph.fl);
+    fluid_wake(&t.ph.fl, 1, GROUND - 1, 0); /* the ground: no room */
+    CHECK(fluid_pending(&t.ph.fl) == 0);
+    world_set(&t.w, 1, GROUND - 1, 0, B_AIR, 0);
+    CHECK(fluid_pending(&t.ph.fl) == 1);
+    fluid_tick(&t.ph.fl, 0);
+    CHECK(world_fluid_level(&t.w, 1, GROUND, 0) == 1);
+    tw_free(&t);
+}
+
+/* The --bench dam break in small: a walled reservoir loses a wall and
+ * floods the plain. It settles, loses nothing and leaves no step. */
+static void test_fluid_dam_break(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    const int n = 6, depth = 3;
+    basin(&t.w, n, depth);
+    for (int y = GROUND; y < GROUND + depth; y++)
+        for (int z = 0; z < n; z++)
+            for (int x = 0; x < n; x++) world_set(&t.w, x, y, z, B_WATER, 0);
+    settle(&t, 100);
+    long before = volume(&t.w, B_WATER, n, GROUND, GROUND + depth);
+    CHECK(before == n * n * depth * FLUID_FULL);
+    for (int y = GROUND; y < GROUND + depth; y++)
+        for (int z = 0; z < n; z++) world_set(&t.w, n, y, z, B_AIR, 0);
+    CHECK(settle(&t, 3000) < 3000);
+    CHECK(volume(&t.w, B_WATER, 40, GROUND, GROUND + depth) == before);
+    CHECK(volume(&t.w, B_WATER, 40, GROUND + 1, GROUND + depth) < before / 2);
     tw_free(&t);
 }
 
@@ -347,6 +553,17 @@ void test_fluid_all(void)
     test_fluid_conserves();
     test_fluid_sliced();
     test_fluid_budget();
+    test_fluid_spread_even();
+    test_fluid_ledge();
+    test_fluid_wake_drop();
+    test_fluid_drop_split();
+    test_fluid_drop_into_pool();
+    test_fluid_puddles_rest();
+    test_fluid_waterfall();
+    test_fluid_seek();
+    test_fluid_seek_nearest();
+    test_fluid_wake_diagonal();
+    test_fluid_dam_break();
     test_fluid_border();
     test_fluid_displace();
     test_fluid_body_lands();
