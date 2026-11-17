@@ -144,6 +144,19 @@ static const struct {
     {T_GRAPHITE_ORE, {110, 110, 115, 255}, {50, 50, 55, 255}, 45},
 };
 
+/* Stretched over the front of the head, 16 texels to its 0.20 m: brows,
+ * eyes 6.5 cm apart at 0.94 of the height, the shadow under the nose (a box
+ * of its own) and the mouth. */
+static rgba face(int x, int y, int n)
+{
+    int eye = y == 7 && (x == 4 || x == 5 || x == 10 || x == 11);
+    if (eye) return (x == 5 || x == 10) ? shade(52, 40, 32, 255, 0) : shade(232, 226, 218, 255, 0);
+    if (y == 5 && ((x >= 3 && x <= 6) || (x >= 9 && x <= 12))) return shade(88, 62, 44, 255, n / 3);
+    if (y == 10 && (x == 7 || x == 8)) return shade(190, 146, 114, 255, 0);
+    if (y == 12 && x >= 6 && x <= 9) return shade(176, 112, 96, 255, 0);
+    return shade(214, 170, 136, 255, n / 3);
+}
+
 static rgba texel(int layer, int x, int y)
 {
     int n = px_noise(layer, x, y, 12);
@@ -172,17 +185,7 @@ static rgba texel(int layer, int x, int y)
         return shade(176, 163, 132, 255, weave + slub + n / 4);
     }
     case T_HAIR: return shade(58, 42, 30, 255, px_noise(layer, x, 0, 14) + n / 3); /* strands run down */
-    case T_FACE: {
-        /* Stretched over the front of the head, 16 texels to its 0.20 m:
-         * brows, eyes 6.5 cm apart at 0.94 of the height, the shadow under
-         * the nose (a box of its own) and the mouth. */
-        int eye = y == 7 && (x == 4 || x == 5 || x == 10 || x == 11);
-        if (eye) return (x == 5 || x == 10) ? shade(52, 40, 32, 255, 0) : shade(232, 226, 218, 255, 0);
-        if (y == 5 && ((x >= 3 && x <= 6) || (x >= 9 && x <= 12))) return shade(88, 62, 44, 255, n / 3);
-        if (y == 10 && (x == 7 || x == 8)) return shade(190, 146, 114, 255, 0);
-        if (y == 12 && x >= 6 && x <= 9) return shade(176, 112, 96, 255, 0);
-        return shade(214, 170, 136, 255, n / 3);
-    }
+    case T_FACE: return face(x, y, n);
     case T_CAMPFIRE_BASE: {
         /* Crossed logs over glowing embers. */
         int log = (y >= 5 && y <= 10) || (x >= 5 && x <= 10);
