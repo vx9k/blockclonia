@@ -318,8 +318,34 @@ int item_valid(item_id id)
     /* Rock and ore only exist in place: breaking them gives the loose rock
      * or the mineral, so they never become building blocks. */
     if (item_is_block(id))
-        return id < B_COUNT && id != B_WATER && id != B_BEDROCK && !g_blocks[id].loose && !ORE[id].item;
+        return id < B_COUNT && !block_fluid((uint8_t)id) && id != B_BEDROCK && !g_blocks[id].loose && !ORE[id].item;
     return id >= ITEM_FIRST && id < ITEM_END;
+}
+
+/* The full buckets after the minerals, by I_OIL_BUCKET onward. */
+static const item_def LIQUIDS[I_LIQUIDS_END - I_MINERALS_END] = {
+    {.name = "Oil bucket",
+     .stack = 1,
+     .block = B_CRUDE_OIL,
+     .tex = T_ITEM_OIL_BUCKET,
+     .desc = "Crude oil. Right-click to pour.",
+     .density = 950.0f},
+    {.name = "Brine bucket",
+     .stack = 1,
+     .block = B_BRINE,
+     .tex = T_ITEM_BRINE_BUCKET,
+     .desc = "Too salty to drink. Right-click to pour.",
+     .density = 1250.0f},
+};
+
+item_id item_bucket(uint8_t liquid)
+{
+    switch (liquid) {
+    case B_WATER: return I_WATER_BUCKET;
+    case B_CRUDE_OIL: return I_OIL_BUCKET;
+    case B_BRINE: return I_BRINE_BUCKET;
+    default: return I_NONE;
+    }
 }
 
 const item_def *item_get(item_id id)
@@ -357,6 +383,7 @@ const item_def *item_get(item_id id)
     if (id >= I_TOOL_FIRST && id < I_TOOL_END) return &g_tools[id - I_TOOL_FIRST];
     if (id >= ITEM_FIRST && id < I_TOOL_FIRST) return &ITEMS[id - ITEM_FIRST];
     if (id >= I_TOOL_END && id < I_MINERALS_END) return &minerals[id - I_TOOL_END];
+    if (id >= I_MINERALS_END && id < I_LIQUIDS_END) return &LIQUIDS[id - I_MINERALS_END];
     return &UNKNOWN;
 }
 

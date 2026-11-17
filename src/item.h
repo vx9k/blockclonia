@@ -78,7 +78,12 @@ enum {
 };
 _Static_assert(I_MINERALS_END - I_RAW_TIN == T_ITEM_MINERALS_END - T_ITEM_RAW_TIN, "one texture per mineral item");
 
-#define ITEM_END I_MINERALS_END
+/* Buckets of the liquids other than water, after the minerals. Lava has
+ * none: it would burn a wooden bucket. */
+enum { I_OIL_BUCKET = I_MINERALS_END, I_BRINE_BUCKET, I_LIQUIDS_END };
+_Static_assert(I_LIQUIDS_END - I_OIL_BUCKET == T_ITEM_BRINE_BUCKET + 1 - T_ITEM_OIL_BUCKET, "one texture per bucket");
+
+#define ITEM_END I_LIQUIDS_END
 
 /* Tools and blades come in kinds and tiers; the item id is
  * I_TOOL_FIRST + kind * TIER_COUNT + tier. */
@@ -125,6 +130,8 @@ const item_def *item_get(item_id id);
 static inline int item_is_block(item_id id) { return id > 0 && id < ITEM_FIRST; }
 
 /* Food energy (kcal) and water (litres) of one, 0 kcal if it is not food. */
+/* The full bucket that holds liquid id, or I_NONE when a bucket can't. */
+item_id item_bucket(uint8_t liquid);
 float item_food(item_id id, float *water);
 
 /* Uses before an item wears out (tools and blades), 0 for items that do

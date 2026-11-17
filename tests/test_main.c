@@ -2025,6 +2025,7 @@ int main(void)
     test_materials_all();
     test_strata_all();
     test_fluid_all();
+    test_liquids_all();
     test_faint_all();
     test_fear_all();
     test_mobmodel_all();

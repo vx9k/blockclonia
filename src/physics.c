@@ -44,10 +44,11 @@ static int is_structural(uint8_t id)
     return id == B_UNLOADED || (id < B_COUNT && (g_blocks[id].flags & BF_SOLID));
 }
 
-/* Lighter than water: floats, and a floating block counts as supported. */
-static int is_buoyant(uint8_t id)
+/* A solid lighter than the liquid floats on it, and counts as supported. */
+static int floats_on(uint8_t id, uint8_t liquid)
 {
-    return id < B_COUNT && (g_blocks[id].flags & BF_SOLID) && g_blocks[id].density < 1000.0f;
+    return id < B_COUNT && (g_blocks[id].flags & BF_SOLID) && block_fluid(liquid) &&
+           g_blocks[id].density < g_blocks[liquid].density;
 }
 
 static int is_free(uint8_t id) { return id == B_AIR || block_fluid(id); }
@@ -57,7 +58,7 @@ static int supported_below(const world *w, int x, int y, int z, uint8_t id)
 {
     if (y <= 0) return 1;
     uint8_t below = world_get(w, x, y - 1, z);
-    return is_structural(below) || (below == B_WATER && is_buoyant(id));
+    return is_structural(below) || floats_on(id, below);
 }
 
 static int span_of(uint8_t id)
@@ -191,21 +192,26 @@ static double sweep(const physics *ph, aabb box, int axis, double delta, int fla
     return delta;
 }
 
-/* Fraction of the box's height that is under water, sampled on the box's
- * central column (good enough for bodies up to one block wide). */
-static double water_fraction(const world *w, aabb box)
+/* Fraction of the box's height that is in liquid, sampled on the box's
+ * central column (good enough for bodies up to one block wide), and the
+ * liquid's mean density in *rho (water's when it is dry), for lift and
+ * drag: a body floats higher in brine and sinks in oil. */
+static double fluid_fraction(const world *w, aabb box, double *rho)
 {
     int x = (int)floor((box.min.x + box.max.x) * 0.5);
     int z = (int)floor((box.min.z + box.max.z) * 0.5);
-    double h = box.max.y - box.min.y, wet = 0.0;
+    double h = box.max.y - box.min.y, wet = 0.0, mass = 0.0;
     for (int y = (int)floor(box.min.y); y <= (int)floor(box.max.y - EPS); y++) {
-        int level = world_water_level(w, x, y, z);
+        int level = world_fluid_level(w, x, y, z);
         if (!level) continue;
         double top = y + level / (double)FLUID_FULL;
         double lo = box.min.y > y ? box.min.y : y;
         double hi = box.max.y < top ? box.max.y : top;
-        if (hi > lo) wet += hi - lo;
+        if (hi <= lo) continue;
+        wet += hi - lo;
+        mass += (hi - lo) * (double)block_get(world_get(w, x, y, z))->density;
     }
+    *rho = wet > 0.0 ? mass / wet : 1000.0;
     return h > 0 ? clampd(wet / h, 0.0, 1.0) : 0.0;
 }
 
@@ -377,7 +383,8 @@ static void player_step(const physics *ph, player *p, const player_input *in)
         return;
     }
 
-    double sub = water_fraction(ph->w, player_box(p));
+    double rho_l = 0.0;
+    double sub = fluid_fraction(ph->w, player_box(p), &rho_l);
     p->submerged = sub;
 
     /* Sprinting is a state: it starts from the ground or in water, carries
@@ -390,12 +397,12 @@ static void player_step(const physics *ph, player *p, const player_input *in)
 
     /* Gravity and Archimedes: a human is slightly less dense than water. */
     p->vel.y -= GRAVITY * dt;
-    p->vel.y += GRAVITY * (1000.0 / PLAYER_DENSITY) * sub * dt;
+    p->vel.y += GRAVITY * (rho_l / PLAYER_DENSITY) * sub * dt;
 
     /* Quadratic drag, 0.5 * rho * Cd*A * v^2 / m, integrated implicitly so
      * it stays stable in dense water. */
     const double k_air = 0.5 * 1.225 * 0.5 / PLAYER_MASS;
-    const double k_water = 0.5 * 1000.0 * 0.25 / PLAYER_MASS;
+    const double k_water = 0.5 * rho_l * 0.25 / PLAYER_MASS;
     double k = k_air * (1.0 - sub) + k_water * sub;
     double speed = dv3_len(p->vel);
     p->vel = dv3_scale(p->vel, 1.0 / (1.0 + k * speed * dt));
@@ -584,8 +591,9 @@ static void check_splash(physics *ph, aabb before, aabb after)
     double v = (before.min.y - after.min.y) / PHYS_DT;
     if (v < SPLASH_SPEED || ph->splash_count >= MAX_SPLASHES) return;
     double h = after.max.y - after.min.y;
-    if (water_fraction(ph->w, before) * h > 1e-3) return;
-    double wet = water_fraction(ph->w, after) * h;
+    double rho_l = 0.0;
+    if (fluid_fraction(ph->w, before, &rho_l) * h > 1e-3) return;
+    double wet = fluid_fraction(ph->w, after, &rho_l) * h;
     if (wet <= 0.0) return;
     ph->splash_pos[ph->splash_count] = dv3((after.min.x + after.max.x) * 0.5, after.min.y + wet,
                                            (after.min.z + after.max.z) * 0.5);
@@ -705,12 +713,13 @@ static void bodies_step(physics *ph)
         double rho = (double)def->density;
         aabb box = {b->pos, dv3(b->pos.x + 1, b->pos.y + 1, b->pos.z + 1)};
         const aabb start = box;
-        double sub = water_fraction(ph->w, box);
+        double rho_l = 0.0;
+        double sub = fluid_fraction(ph->w, box, &rho_l);
 
         b->vel.y -= GRAVITY * dt;
-        b->vel.y += GRAVITY * (1000.0 / rho) * sub * dt;
+        b->vel.y += GRAVITY * (rho_l / rho) * sub * dt;
         /* Cube face-on: Cd ~1.05, A = 1 m^2, m = rho * 1 m^3. */
-        double k = 0.5 * 1.05 * (1.225 * (1.0 - sub) + 1000.0 * sub) / rho;
+        double k = 0.5 * 1.05 * (1.225 * (1.0 - sub) + rho_l * sub) / rho;
         double speed = dv3_len(b->vel);
         /* Quadratic drag fades at low speed; a floating block also sheds
          * energy into the waves it makes, so it settles in seconds. */
@@ -914,13 +923,14 @@ static void items_step(physics *ph)
         }
         aabb box = {dv3(it->pos.x - ITEM_HALF, it->pos.y - ITEM_HALF, it->pos.z - ITEM_HALF),
                     dv3(it->pos.x + ITEM_HALF, it->pos.y + ITEM_HALF, it->pos.z + ITEM_HALF)};
-        double sub = water_fraction(w, box), rho = item_density(it->id);
+        double rho_l = 0.0;
+        double sub = fluid_fraction(w, box, &rho_l), rho = item_density(it->id);
 
         it->vel.y -= GRAVITY * dt;
-        it->vel.y += GRAVITY * (1000.0 / rho) * sub * dt;
+        it->vel.y += GRAVITY * (rho_l / rho) * sub * dt;
         /* A 25 cm cube face-on: Cd 1.05, A = 0.0625 m^2, m = rho * 0.0156 m^3;
          * plus wave damping when floating. */
-        double k = 2.1 * (1.225 * (1.0 - sub) + 1000.0 * sub) / rho;
+        double k = 2.1 * (1.225 * (1.0 - sub) + rho_l * sub) / rho;
         double speed = dv3_len(it->vel);
         it->vel = dv3_scale(it->vel, 1.0 / (1.0 + (k * speed + 2.0 * sub) * dt));
         it->spin += (float)(dt * (it->on_ground ? 1.2 : 3.0));
@@ -1037,10 +1047,10 @@ int physics_check_structure(physics *ph, int x, int y, int z)
                 /* Cells on the region boundary are assumed supported: we
                  * cannot see their load path, and a false collapse is far
                  * worse than a missed one. */
-                int anchor = id == B_UNLOADED || (block_get(id)->flags & BF_ANCHOR) || wy == 0 ||
-                             i == 0 || i == REGION_W - 1 || k == 0 || k == REGION_W - 1 ||
-                             (j == 0 && y0 > 0) || (j == ny - 1 && y1 < WORLD_H - 1) ||
-                             (j > 0 && ids[RIDX(i, j - 1, k)] == B_WATER && is_buoyant(id)); /* floating */
+                int anchor = id == B_UNLOADED || (block_get(id)->flags & BF_ANCHOR) || wy == 0 || i == 0 ||
+                             i == REGION_W - 1 || k == 0 || k == REGION_W - 1 || (j == 0 && y0 > 0) ||
+                             (j == ny - 1 && y1 < WORLD_H - 1) ||
+                             (j > 0 && floats_on(id, ids[RIDX(i, j - 1, k)])); /* floating */
                 if (anchor) {
                     s[idx] = GROUNDED;
                     bucket[GROUNDED][blen[GROUNDED]++] = idx;
@@ -1141,9 +1151,8 @@ void physics_on_block_changed(void *user, int x, int y, int z, uint8_t old_id, u
     physics *ph = user;
     if (new_id == B_AIR || block_fluid(new_id) || block_fluid(old_id)) fluid_wake(&ph->fl, x, y, z);
     if (ph->suppress_struct) return;
-    /* Water drained from under a floating block: it may now hang. */
-    if (old_id == B_WATER && new_id != B_WATER && is_buoyant(world_get(ph->w, x, y + 1, z)))
-        queue_structure(ph, x, y + 1, z);
+    /* Liquid drained from under a floating block: it may now hang. */
+    if (new_id != old_id && floats_on(world_get(ph->w, x, y + 1, z), old_id)) queue_structure(ph, x, y + 1, z);
     int was = is_structural(old_id), is = is_structural(new_id);
     if (was && !is) {
         if (!removal_is_safe(ph->w, x, y, z)) queue_structure(ph, x, y, z);

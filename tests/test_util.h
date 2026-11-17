@@ -86,5 +86,6 @@ void test_mobmodel_all(void);
 void test_materials_all(void);
 void test_strata_all(void);
 void test_fluid_all(void);
+void test_liquids_all(void);
 
 #endif

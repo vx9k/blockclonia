@@ -171,4 +171,12 @@ const block_def g_blocks[B_COUNT] = {
                       7.0f, BM_STONE, 1.0f, 0.4f, 0, TIER_IRON},
     [B_GRAPHITE_ORE] = {"graphite seam", BF_SOLID | BF_OPAQUE, ALL(T_GRAPHITE_ORE), 15, 2200.0f, 0.4f, 0.25f, 4.0f,
                         710.0f, 25.0f, BM_STONE, 1.0f, 0.3f, 0, TIER_WOOD},
+    /* Basaltic melt; crude oil of a medium grade; brine at a quarter salt
+     * by weight, near saturation. */
+    [B_LAVA] = {"lava", BF_FLUID | BF_TRANSLUCENT, ALL(T_LAVA), 0, 2600.0f, 0.0f, 0.0f, 0.0f, 1200.0f, 1.5f, BM_WATER,
+                1.0f, 0.0f, 0, 0},
+    [B_CRUDE_OIL] = {"crude oil", BF_FLUID | BF_TRANSLUCENT, ALL(T_CRUDE_OIL), 0, 870.0f, 0.0f, 0.0f, 0.0f, 2000.0f,
+                     0.15f, BM_WATER, 1.0f, 0.0f, 0, 0},
+    [B_BRINE] = {"brine", BF_FLUID | BF_TRANSLUCENT, ALL(T_BRINE), 0, 1190.0f, 0.0f, 0.0f, 0.0f, 3300.0f, 0.55f,
+                 BM_WATER, 1.0f, 0.0f, 0, 0},
 };

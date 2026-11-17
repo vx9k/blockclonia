@@ -222,6 +222,33 @@ static int seek_drop(const world *w, int x, int y, int z, int dx, int dz, uint8_
     return 0;
 }
 
+/* Ticks a liquid waits between moves: its viscosity, very roughly. Water
+ * and brine move every tick; crude oil, hundreds of times as viscous,
+ * every other; lava, millions of times, every sixth. */
+static uint32_t flow_period(uint8_t id)
+{
+    switch (id) {
+    case B_CRUDE_OIL: return 2;
+    case B_LAVA: return 6;
+    default: return 1;
+    }
+}
+
+/* Lava touching water or brine sets at once: a full cell chills to glass
+ * (obsidian), a thin flow, cooling right through, to basalt. As in-place
+ * rock it is one mass with what it set on. The steam is thermo's to make. */
+static int quench(world *w, ipos p, int level)
+{
+    static const int N[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+    for (int i = 0; i < 6; i++) {
+        uint8_t n = world_get(w, p.x + N[i][0], p.y + N[i][1], p.z + N[i][2]);
+        if (n != B_WATER && n != B_BRINE) continue;
+        world_set(w, p.x, p.y, p.z, level == FLUID_FULL ? B_OBSIDIAN_ROCK : B_BASALT_ROCK, 0);
+        return 1;
+    }
+    return 0;
+}
+
 /* A liquid moves only into air or more of itself: first down, then to the
  * side. Sideways, a neighbour with a drop under it takes everything, so
  * water runs off a ledge rather than piling at its edge, and thin films
@@ -231,7 +258,9 @@ static int seek_drop(const world *w, int x, int y, int z, int dx, int dz, uint8_
  * level that could not move looks a few cells further for a ledge and
  * steps toward the nearest, so a plateau drains rather than stays wet;
  * each step brings it closer, so it never turns back. The cell writes its
- * own level once, since every write wakes up to eleven cells. */
+ * own level once, since every write wakes up to eleven cells. A denser
+ * liquid sinks through a lighter one below it, the two trading places, and
+ * a viscous one waits its turn (flow_period). */
 static void fluid_cell(fluids *f, ipos p)
 {
     world *w = f->w;
@@ -239,9 +268,20 @@ static void fluid_cell(fluids *f, ipos p)
     uint8_t id = here.id;
     int level = here.level;
     if (!level) return;
+    if (id == B_LAVA && quench(w, p, level)) return;
+    uint32_t period = flow_period(id);
+    if (f->order % period) {
+        queue_push(&f->next, p);
+        return;
+    }
 
     if (p.y > 0) {
         cell under = read_cell(w, p.x, p.y - 1, p.z);
+        if (under.level && under.id != id && g_blocks[id].density > g_blocks[under.id].density) {
+            fluid_set(w, p.x, p.y - 1, p.z, id, level);
+            fluid_set(w, p.x, p.y, p.z, under.id, under.level);
+            return;
+        }
         if (under.id == B_AIR) {
             fluid_set(w, p.x, p.y - 1, p.z, id, level);
             fluid_set(w, p.x, p.y, p.z, id, 0);
