@@ -23,7 +23,7 @@ unless it says otherwise.
 3. **Platforms:** Ubuntu 26.04 (x86_64 and arm64), Alpine Linux and macOS
    only; the Raspberry Pi, armhf and older distributions are dropped.
    - [ ] CI and packages for the supported platforms
-   - [ ] Vulkan 1.2 as the minimum, without the 1.0 fallbacks
+   - [x] Vulkan 1.2 as the minimum, without the 1.0 fallbacks
 
 ## Next
 
@@ -92,7 +92,7 @@ daylight value for the whole world.
 - [ ] A held torch or lantern
 - [ ] Sun and moon direction and colour by time of day; a brightness
       setting
-- [ ] Optional: sun shadows (`GPUCAP_*` bit with a 1.0 fallback)
+- [ ] Optional: sun shadows (`GPUCAP_*` bit with a fallback on bare 1.2)
 
 ### Items and crafting
 
@@ -229,7 +229,7 @@ the clickable panel are merged.
 - [ ] Paths in the app's private directory
 - [ ] Save on pause, rebuild the surface on resume
 - [ ] A signed APK with AAudio sound, built in CI
-- [ ] Runs on one Vulkan 1.1 phone and one Vulkan 1.0 device
+- [ ] Runs on one Vulkan 1.2 phone and one 1.3 or newer device
 
 ### Native Metal renderer (macOS)
 

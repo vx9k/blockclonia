@@ -16,10 +16,15 @@ static const struct {
     uint32_t bit;
     const char *name;
 } NAMES[GPUCAP_COUNT] = {
-    {GPUCAP_MDI, "mdi"},         {GPUCAP_DYNREND, "dynrend"},  {GPUCAP_SYNC2, "sync2"},
-    {GPUCAP_TIMELINE, "timeline"}, {GPUCAP_ANISO, "aniso"},      {GPUCAP_HOSTCOPY, "hostcopy"},
-    {GPUCAP_BUDGET, "budget"},   {GPUCAP_TIMESTAMPS, "timestamps"}, {GPUCAP_PCACHE, "pcache"},
-    {GPUCAP_HOSTRESET, "hostreset"}, {GPUCAP_RELAXED, "relaxed"},
+    {GPUCAP_MDI, "mdi"},
+    {GPUCAP_DYNREND, "dynrend"},
+    {GPUCAP_SYNC2, "sync2"},
+    {GPUCAP_ANISO, "aniso"},
+    {GPUCAP_HOSTCOPY, "hostcopy"},
+    {GPUCAP_BUDGET, "budget"},
+    {GPUCAP_TIMESTAMPS, "timestamps"},
+    {GPUCAP_PCACHE, "pcache"},
+    {GPUCAP_RELAXED, "relaxed"},
 };
 
 static uint32_t strip_patch(uint32_t v) { return GPU_API(GPU_API_MAJOR(v), GPU_API_MINOR(v)); }
@@ -40,11 +45,13 @@ uint32_t gpucaps_device_api(uint32_t device, uint32_t instance)
     return v < GPU_API(1, 0) ? GPU_API(1, 0) : v;
 }
 
+int gpucaps_usable(uint32_t device, uint32_t instance) { return gpucaps_device_api(device, instance) >= GPU_API_MIN; }
+
 int gpucaps_parse_api(const char *s, uint32_t *out)
 {
     if (!s) return 0;
     while (isspace((unsigned char)*s)) s++;
-    if (s[0] != '1' || s[1] != '.' || s[2] < '0' || s[2] > '4') return 0;
+    if (s[0] != '1' || s[1] != '.' || s[2] < '2' || s[2] > '4') return 0;
     const char *e = s + 3;
     while (isspace((unsigned char)*e)) e++;
     if (*e) return 0;
@@ -111,26 +118,23 @@ static uint32_t offered(const gpu_offer *o, uint32_t api, int *dynrend_khr, int 
      * depth_stencil_resolve, are core there). The feature flags come from
      * the same structures either way. */
     if (o->synchronization2 && api >= GPU_API(1, 3)) m |= GPUCAP_SYNC2;
-    else if (o->synchronization2 && api >= GPU_API(1, 2) && o->khr_synchronization2) {
+    else if (o->synchronization2 && o->khr_synchronization2) {
         m |= GPUCAP_SYNC2;
         *sync2_khr = 1;
     }
     if (o->dynamic_rendering && api >= GPU_API(1, 3)) m |= GPUCAP_DYNREND;
-    else if (o->dynamic_rendering && api >= GPU_API(1, 2) && o->khr_dynamic_rendering) {
+    else if (o->dynamic_rendering && o->khr_dynamic_rendering) {
         m |= GPUCAP_DYNREND;
         *dynrend_khr = 1;
     }
-    if (o->timeline_semaphore && api >= GPU_API(1, 2)) m |= GPUCAP_TIMELINE;
     if (o->sampler_anisotropy && o->max_sampler_anisotropy >= 2.0f) m |= GPUCAP_ANISO;
     /* MoltenVK emulates host image copy over Metal, and binding memory to
      * such an image crashed in vkBindImageMemory on Apple's paravirtual
      * GPU (CI's macOS runners). Staging costs a few ms once at start-up. */
     if (o->host_image_copy && api >= GPU_API(1, 4) && !o->portability_subset) m |= GPUCAP_HOSTCOPY;
-    /* vkGetPhysicalDeviceMemoryProperties2 is 1.1 core. */
-    if (o->ext_memory_budget && api >= GPU_API(1, 1)) m |= GPUCAP_BUDGET;
+    if (o->ext_memory_budget) m |= GPUCAP_BUDGET;
     if (o->timestamp_compute_and_graphics && o->timestamp_valid_bits && o->timestamp_period > 0.0f)
         m |= GPUCAP_TIMESTAMPS;
-    if (o->host_query_reset && api >= GPU_API(1, 2)) m |= GPUCAP_HOSTRESET;
     if (o->pipeline_cache) m |= GPUCAP_PCACHE;
     if (o->present_relaxed) m |= GPUCAP_RELAXED;
     return m;
@@ -142,12 +146,12 @@ void gpucaps_choose(const gpu_offer *o, uint32_t disable, gpu_choice *c)
     c->instance_api = strip_patch(o->instance_api);
     c->device_api = gpucaps_device_api(o->device_api, o->instance_api);
     int dynrend_khr = 0, sync2_khr = 0;
-    uint32_t avail = offered(o, c->device_api, &dynrend_khr, &sync2_khr);
+    /* Below the floor the renderer refuses the device; offer nothing. */
+    uint32_t avail = c->device_api >= GPU_API_MIN ? offered(o, c->device_api, &dynrend_khr, &sync2_khr) : 0;
     uint32_t m = avail & ~disable;
     /* Dependencies, in an order where each rule sees the result of the ones
      * it depends on. */
     if (!(m & GPUCAP_SYNC2)) m &= ~GPUCAP_DYNREND;
-    if (!(m & GPUCAP_TIMESTAMPS)) m &= ~GPUCAP_HOSTRESET;
     c->enabled = m;
     c->disabled = avail & disable;
     c->dynrend_khr = (m & GPUCAP_DYNREND) ? dynrend_khr : 0;
@@ -175,7 +179,6 @@ void gpucaps_summary(const gpu_choice *c, char *buf, size_t n)
         {GPUCAP_MDI, "multi-draw indirect"},
         {GPUCAP_DYNREND, c->dynrend_khr ? "dynamic rendering (KHR)" : "dynamic rendering"},
         {GPUCAP_SYNC2, c->sync2_khr ? "synchronization2 (KHR)" : "synchronization2"},
-        {GPUCAP_TIMELINE, "timeline semaphores"},
         {GPUCAP_PCACHE, "pipeline cache"},
         {GPUCAP_ANISO, aniso},
         {GPUCAP_HOSTCOPY, "host image copy"},

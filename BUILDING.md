@@ -6,12 +6,13 @@ the command-line options and the controls, see the [README](README.md).
 
 ## What you need
 
-**A GPU with a Vulkan driver.** Vulkan 1.0 with no optional features is
-enough; the game uses newer features only where the driver offers them.
-That covers any desktop GPU from the last ten years with current drivers,
-Intel and AMD integrated graphics, and the Raspberry Pi 4 and 5 (Mesa's
-V3DV driver). Without a GPU it runs on Mesa's software rasterizer,
-lavapipe, slowly (see [No GPU](#no-gpu)).
+**A GPU with a Vulkan 1.2 driver.** Vulkan 1.2 with no optional features
+is enough; the game uses newer features only where the driver offers
+them. That covers any desktop GPU from the last ten years with current
+drivers, Intel and AMD integrated graphics, and Macs through MoltenVK.
+Without a GPU it runs on Mesa's software rasterizer, lavapipe, slowly
+(see [No GPU](#no-gpu)). An older driver is refused at start-up with a
+message saying so.
 
 **A supported system:**
 
@@ -262,7 +263,7 @@ session, or under `xvfb-run`.
 Khronos validation layers: `vulkan-validationlayers` on Debian,
 `vulkan-validation-layers` on Arch) and include the `[warn] vulkan:`
 lines when you report it. `MC_VK_DISABLE=all` turns off every optional
-Vulkan feature, and `MC_VK_API=1.0` caps the API version. If either one
+Vulkan feature, and `MC_VK_API=1.2` caps the API version. If either one
 fixes the problem, say so in the report: it narrows the bug down to one
 feature.
 

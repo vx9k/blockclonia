@@ -1,23 +1,26 @@
 /* Choosing which Vulkan features the renderer turns on.
  *
- * The renderer runs everywhere from Vulkan 1.0 (Raspberry Pi 4 on older
- * Mesa, lavapipe in CI) to 1.4 desktop drivers. Each newer feature it uses
- * saves CPU time, memory or stutter, and each has a 1.0 fallback. The
- * decision what to use is made here, from plain numbers and booleans the
- * renderer read from the instance and the device, so it can be unit tested
- * without a GPU (tests/test_gpucaps.c) and the rules live in one place:
+ * The renderer needs Vulkan 1.2 (GPU_API_MIN) and uses what newer
+ * versions and extensions offer, up to 1.4 desktop drivers. Each optional
+ * feature saves CPU time, memory or stutter, and each has a fallback on a
+ * bare 1.2 device. The decision what to use is made here, from plain
+ * numbers and booleans the renderer read from the instance and the device,
+ * so it can be unit tested without a GPU (tests/test_gpucaps.c) and the
+ * rules live in one place:
  *
  *   - API version: instance = min(loader, headers, 1.4, MC_VK_API);
- *     device = min(device, instance). A feature is only used when its core
- *     version (or, for dynamic rendering and synchronization2 on 1.2, its
- *     extension) is available at the negotiated version.
+ *     device = min(device, instance). Either below 1.2 is refused
+ *     (gpucaps_usable). A feature is only used when its core version (or,
+ *     for dynamic rendering and synchronization2 on 1.2, its extension) is
+ *     available at the negotiated version.
  *   - Dependencies: multi-draw indirect needs drawIndirectFirstInstance too
  *     (the section origin rides on firstInstance); dynamic rendering needs
- *     synchronization2 (its layout transitions use vkCmdPipelineBarrier2);
- *     host query reset is only useful with timestamps; the memory budget
- *     needs vkGetPhysicalDeviceMemoryProperties2 (1.1).
+ *     synchronization2 (its layout transitions use vkCmdPipelineBarrier2).
+ *   - Required, so not optional bits: 1.2's timeline semaphores (frame
+ *     pacing) and host query reset (timestamps), which every 1.2 device
+ *     supports.
  *   - Overrides for testing the fallbacks on a capable machine:
- *     MC_VK_API=1.0|1.1|1.2|1.3|1.4 caps the version and MC_VK_DISABLE is a
+ *     MC_VK_API=1.2|1.3|1.4 caps the version and MC_VK_DISABLE is a
  *     comma list of feature names (see gpucaps_name) or "all".
  *
  * No Vulkan headers here: versions use Vulkan's own packing
@@ -33,22 +36,25 @@
 #define GPU_API(major, minor) ((uint32_t)(major) << 22 | (uint32_t)(minor) << 12)
 #define GPU_API_MAJOR(v) ((unsigned)((v) >> 22) & 0x7Fu)
 #define GPU_API_MINOR(v) ((unsigned)((v) >> 12) & 0x3FFu)
-/* The newest version the renderer knows how to use. */
+/* The newest version the renderer knows how to use, and the oldest it
+ * runs on: 1.2 brings timeline semaphores and host query reset as
+ * required features, and every desktop driver and lavapipe offer it. */
 #define GPU_API_MAX GPU_API(1, 4)
+#define GPU_API_MIN GPU_API(1, 2)
 
 /* Optional features, as bits of gpu_choice.enabled and of the disable mask. */
+/* clang-format off */
 #define GPUCAP_MDI         (1u << 0) /* multi-draw indirect for terrain sections (1.0 optional) */
 #define GPUCAP_DYNREND     (1u << 1) /* dynamic rendering instead of a VkRenderPass (1.3, KHR on 1.2) */
 #define GPUCAP_SYNC2       (1u << 2) /* vkCmdPipelineBarrier2 / vkQueueSubmit2 (1.3, KHR on 1.2) */
-#define GPUCAP_TIMELINE    (1u << 3) /* one timeline semaphore paces frames (1.2) */
-#define GPUCAP_ANISO       (1u << 4) /* anisotropic minification (1.0 optional samplerAnisotropy) */
-#define GPUCAP_HOSTCOPY    (1u << 5) /* textures uploaded without a staging buffer (1.4) */
-#define GPUCAP_BUDGET      (1u << 6) /* VK_EXT_memory_budget: VRAM use in the stats */
-#define GPUCAP_TIMESTAMPS  (1u << 7) /* GPU frame time from timestamp queries (1.0) */
-#define GPUCAP_PCACHE      (1u << 8) /* pipeline cache kept on disk between runs (1.0) */
-#define GPUCAP_HOSTRESET   (1u << 9) /* timestamp queries reset from the CPU (1.2) */
-#define GPUCAP_RELAXED     (1u << 10) /* FIFO_RELAXED present mode with vsync on */
-#define GPUCAP_COUNT 11
+#define GPUCAP_ANISO       (1u << 3) /* anisotropic minification (optional samplerAnisotropy) */
+#define GPUCAP_HOSTCOPY    (1u << 4) /* textures uploaded without a staging buffer (1.4) */
+#define GPUCAP_BUDGET      (1u << 5) /* VK_EXT_memory_budget: VRAM use in the stats */
+#define GPUCAP_TIMESTAMPS  (1u << 6) /* GPU frame time from timestamp queries */
+#define GPUCAP_PCACHE      (1u << 7) /* pipeline cache kept on disk between runs */
+#define GPUCAP_RELAXED     (1u << 8) /* FIFO_RELAXED present mode with vsync on */
+#define GPUCAP_COUNT 9
+/* clang-format on */
 #define GPUCAP_ALL ((1u << GPUCAP_COUNT) - 1u)
 
 /* What the instance and device report. All flags 0/1; zero-initialise and
@@ -64,8 +70,6 @@ typedef struct {
     int timestamp_compute_and_graphics;
     uint32_t timestamp_valid_bits; /* of the queue family the renderer uses */
     float timestamp_period;        /* ns per tick */
-    /* 1.2 */
-    int timeline_semaphore, host_query_reset;
     /* 1.3 features, or on a 1.2 device the features of the KHR extensions */
     int dynamic_rendering, synchronization2;
     int khr_dynamic_rendering, khr_synchronization2; /* the extensions are listed */
@@ -95,9 +99,12 @@ typedef struct {
 uint32_t gpucaps_instance_api(uint32_t loader, uint32_t headers, uint32_t cap);
 /* min(device, instance), patch bits dropped. */
 uint32_t gpucaps_device_api(uint32_t device, uint32_t instance);
+/* 1 when a device reporting `device` can run under an instance created at
+ * `instance`: both at GPU_API_MIN or newer. */
+int gpucaps_usable(uint32_t device, uint32_t instance);
 
 /* "1.2" -> GPU_API(1, 2). Returns 0 (and leaves *out) unless the string is
- * one of 1.0 .. 1.4; NULL or "" also return 0. */
+ * one of 1.2 .. 1.4; NULL or "" also return 0. */
 int gpucaps_parse_api(const char *s, uint32_t *out);
 /* "mdi, dynrend,aniso" -> GPUCAP_MDI | GPUCAP_DYNREND | GPUCAP_ANISO. Case
  * and blanks are ignored, "all" disables everything. Unknown names are
@@ -112,7 +119,7 @@ const char *gpucaps_name(uint32_t bit);
 void gpucaps_choose(const gpu_offer *o, uint32_t disable, gpu_choice *c);
 
 /* "Vulkan 1.4: multi-draw indirect, dynamic rendering, ...", or just
- * "Vulkan 1.0" when nothing optional is on. Always NUL-terminated. */
+ * "Vulkan 1.2" when nothing optional is on. Always NUL-terminated. */
 void gpucaps_summary(const gpu_choice *c, char *buf, size_t n);
 
 /* A saved pipeline cache is only handed to the driver when its header

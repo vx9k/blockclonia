@@ -97,19 +97,22 @@ clang 21 (Ubuntu 26.04), clang 22 (Alpine 3.24) and macOS's Apple clang.
 
 ### Renderer (`renderer.c`, `gpucaps.c`, `shaders/`)
 
-- **Vulkan 1.0 with no optional features must keep working.** It is what
-  the Raspberry Pi 4 and older Mesa offer. Newer features (1.1–1.4 core,
-  extensions) are optional: `gpucaps.c` decides from what the device reports,
-  and every feature has a 1.0 fallback path. Add a feature by adding a
-  `GPUCAP_*` bit, its rule in `gpucaps_choose`, a test in
-  `tests/test_gpucaps.c`, and the fallback.
+- **Vulkan 1.2 with no optional features must keep working.** It is the
+  minimum (`GPU_API_MIN`): every desktop driver, MoltenVK and lavapipe
+  offer it, and its required features (timeline semaphores, host query
+  reset) are used without a fallback. Newer features (1.3–1.4 core,
+  extensions, optional 1.2 features) are optional: `gpucaps.c` decides
+  from what the device reports, and every one has a fallback on a bare
+  1.2 device. Add a feature by adding a `GPUCAP_*` bit, its rule in
+  `gpucaps_choose`, a test in `tests/test_gpucaps.c`, and the fallback.
 - **Load newer entry points at run time.** Every platform CI builds on
   (Ubuntu 26.04, Alpine 3.24, Homebrew) ships Vulkan 1.4 headers, so no
-  header guards are needed, but load entry points newer than 1.0 with
+  header guards are needed, but load entry points newer than 1.0 (the
+  1.2 ones included) with
   `vkGetDeviceProcAddr`/`vkGetInstanceProcAddr`, never by linking.
-- **Test the fallbacks** on a capable machine with `MC_VK_API=1.0` (up to
+- **Test the fallbacks** on a capable machine with `MC_VK_API=1.2` (up to
   `1.4`) to cap the API version and `MC_VK_DISABLE=all` (or a comma list:
-  `mdi,dynrend,sync2,timeline,aniso,hostcopy,budget,timestamps,pcache,hostreset,relaxed`).
+  `mdi,dynrend,sync2,aniso,hostcopy,budget,timestamps,pcache,relaxed`).
   Any renderer change must run with `--validate` and zero validation
   messages, on a real GPU and on lavapipe.
 - The hot path is built for weak GPUs: 4-byte vertices, one pool buffer,

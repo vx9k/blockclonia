@@ -35,7 +35,7 @@ function(mc_compile_shaders target)
     set(out "${out_dir}/${name}.inc")
     add_custom_command(
       OUTPUT "${out}"
-      COMMAND "${MC_GLSLC}" -O --target-env=vulkan1.0 ${werror} -mfmt=c
+      COMMAND "${MC_GLSLC}" -O --target-env=vulkan1.2 ${werror} -mfmt=c
               -I "${ARG_SOURCE_DIR}" -MD -MF "${out}.d" -o "${out}" "${src}"
       MAIN_DEPENDENCY "${src}"
       DEPFILE "${out}.d"

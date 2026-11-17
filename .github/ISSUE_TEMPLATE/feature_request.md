@@ -21,5 +21,5 @@ Other ways to get there, including ones that already exist.
 **Fit with the project**
 blockclonia aims for realistic physics in SI units, a simulated body
 instead of a health bar, generated assets (no texture or audio files), and
-good performance on low-end GPUs down to Vulkan 1.0. Does the idea hold up
+good performance on low-end GPUs down to Vulkan 1.2. Does the idea hold up
 under those constraints, or does it need an exception?

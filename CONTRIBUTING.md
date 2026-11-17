@@ -19,7 +19,7 @@ the same shape as the code around them.
 1. Build with `cmake --preset dev && cmake --build --preset dev`
    (requirements are in the [README](README.md#building)).
 2. Read [AGENTS.md](AGENTS.md). It has the code rules (allocation,
-   units, determinism, headless modules, file formats, the Vulkan 1.0
+   units, determinism, headless modules, file formats, the Vulkan 1.2
    baseline) and a list of the places to update when behaviour changes.
    [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how the pieces
    fit together.

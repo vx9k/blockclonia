@@ -88,7 +88,6 @@ typedef struct {
 
 typedef struct {
     VkCommandBuffer cmd;
-    VkFence fence;
     VkSemaphore image_ready;
     uint64_t serial;              /* number of the frame last submitted from this slot */
     gbuf staging;
@@ -233,9 +232,8 @@ struct renderer {
     pool_free *frees;             /* oldest first */
     int free_count, free_cap;
     uint64_t submitted, completed;
-    /* GPUCAP_TIMELINE: one timeline semaphore counts finished frames (each
-     * submit signals its serial), in place of the per-slot fences; the 1.2
-     * entry points are loaded. VK_NULL_HANDLE: the fences. */
+    /* One timeline semaphore counts finished frames: each submit signals its
+     * serial. The 1.2 entry points are loaded. */
     VkSemaphore timeline;
     PFN_vkWaitSemaphores wait_semaphores;
     PFN_vkGetSemaphoreCounterValue semaphore_value;
@@ -265,9 +263,8 @@ struct renderer {
     int vis_cap;
     render_stats stats;
     /* GPU frame time: a start and an end timestamp per frame slot, read
-     * once the slot's fence has signalled. NULL handles without
-     * GPUCAP_TIMESTAMPS; reset_queries only with GPUCAP_HOSTRESET (else
-     * the command buffer resets them). */
+     * once the slot's frame has finished and reset from the CPU (1.2's
+     * vkResetQueryPool). NULL handles without GPUCAP_TIMESTAMPS. */
     VkQueryPool queries;
     PFN_vkResetQueryPool reset_queries;
     float gpu_ms;
@@ -520,12 +517,12 @@ static uint32_t loader_api(void)
     return v;
 }
 
-/* MC_VK_API=1.0 .. 1.4 caps the version to test the fallbacks; 0 is no cap. */
+/* MC_VK_API=1.2 .. 1.4 caps the version to test the fallbacks; 0 is no cap. */
 static uint32_t api_cap(void)
 {
     uint32_t cap = 0;
     const char *s = getenv("MC_VK_API");
-    if (s && s[0] && !gpucaps_parse_api(s, &cap)) log_warn("MC_VK_API=%s ignored: use 1.0 to 1.4", s);
+    if (s && s[0] && !gpucaps_parse_api(s, &cap)) log_warn("MC_VK_API=%s ignored: use 1.2 to 1.4", s);
     return cap;
 }
 
@@ -540,14 +537,11 @@ static void create_instance(renderer *r, int validate)
     for (uint32_t i = 0; i < glfw_count && n < 13; i++) exts[n++] = glfw_ext[i];
     /* macOS: the loader lists MoltenVK, a layer over Metal that is not a
      * fully conformant driver, only to an instance that asks for such
-     * "portability" drivers. Its device needs VK_KHR_portability_subset,
-     * which depends on properties2 when the API is capped at 1.0. */
+     * "portability" drivers. */
     VkInstanceCreateFlags flags = 0;
     if (has_instance_ext("VK_KHR_portability_enumeration")) {
         exts[n++] = "VK_KHR_portability_enumeration";
         flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-        if (has_instance_ext("VK_KHR_get_physical_device_properties2"))
-            exts[n++] = "VK_KHR_get_physical_device_properties2";
     }
     const char *layers[1] = {0};
     uint32_t nl = 0;
@@ -563,6 +557,10 @@ static void create_instance(renderer *r, int validate)
 
     /* The headers cap it too: the renderer cannot use what they don't define. */
     r->instance_api = gpucaps_instance_api(loader_api(), VK_HEADER_VERSION_COMPLETE, api_cap());
+    if (r->instance_api < GPU_API_MIN)
+        log_fatal("blockclonia needs Vulkan 1.2, and this system's Vulkan loader offers %u.%u: update the "
+                  "Vulkan loader and the GPU driver",
+                  GPU_API_MAJOR(r->instance_api), GPU_API_MINOR(r->instance_api));
     VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
                              .pApplicationName = "blockclonia",
                              .applicationVersion = 1,
@@ -649,8 +647,8 @@ static int has_present_mode(const renderer *r, VkPresentModeKHR mode)
 
 /* Fills the offer from what the instance and the chosen device report.
  * Newer feature structures are only queried at the negotiated version (the
- * lower of device and instance), so MC_VK_API=1.0 never calls a 1.1 entry
- * point; vkGetPhysicalDeviceFeatures2 is 1.1 core and loaded, not linked. */
+ * lower of device and instance); vkGetPhysicalDeviceFeatures2 is 1.1 core
+ * and loaded, not linked. */
 static void query_offer(const renderer *r, const render_opts *o, gpu_offer *off)
 {
     memset(off, 0, sizeof *off);
@@ -682,7 +680,6 @@ static void query_offer(const renderer *r, const render_opts *o, gpu_offer *off)
     off->present_relaxed = has_present_mode(r, VK_PRESENT_MODE_FIFO_RELAXED_KHR);
     off->pipeline_cache = !o->pipeline_cache || o->pipeline_cache[0];
 
-    if (api < GPU_API(1, 2)) return; /* everything below is 1.2 or newer */
     PFN_vkGetPhysicalDeviceFeatures2 features2 = (PFN_vkGetPhysicalDeviceFeatures2)
         vkGetInstanceProcAddr(r->inst, "vkGetPhysicalDeviceFeatures2");
     if (!features2) return;
@@ -718,8 +715,6 @@ static void query_offer(const renderer *r, const render_opts *o, gpu_offer *off)
 #endif
     f2.pNext = chain;
     features2(r->pd, &f2);
-    off->timeline_semaphore = v12.timelineSemaphore == VK_TRUE;
-    off->host_query_reset = v12.hostQueryReset == VK_TRUE;
     if (api >= GPU_API(1, 3)) {
         off->dynamic_rendering = v13.dynamicRendering == VK_TRUE;
         off->synchronization2 = v13.synchronization2 == VK_TRUE;
@@ -739,17 +734,24 @@ static void pick_device(renderer *r, const render_opts *o)
     if (!n) log_fatal("no Vulkan devices found");
     VkPhysicalDevice *pds = mem_alloc(mem_array_size(n, sizeof *pds));
     VK_CHECK(vkEnumeratePhysicalDevices(r->inst, &n, pds));
-    int best = -1, best_score = -1;
+    int best = -1, best_score = -1, too_old = 0;
     for (uint32_t i = 0; i < n; i++) {
         VkPhysicalDeviceProperties p = {0};
         vkGetPhysicalDeviceProperties(pds[i], &p);
         uint32_t fam = 0;
+        if (!gpucaps_usable(p.apiVersion, r->instance_api)) {
+            log_info("GPU %s skipped: Vulkan %u.%u, and blockclonia needs 1.2", p.deviceName,
+                     GPU_API_MAJOR(p.apiVersion), GPU_API_MINOR(p.apiVersion));
+            too_old++;
+            continue;
+        }
         if (!find_queue(r, pds[i], &fam) || !has_device_ext(pds[i], VK_KHR_SWAPCHAIN_EXTENSION_NAME)) continue;
         int score = device_score(p.deviceType);
         if (o->gpu_index >= 0) score = (int)i == o->gpu_index ? 100 : -1;
         if (score > best_score) { best = (int)i; best_score = score; }
     }
-    if (best < 0) log_fatal("no Vulkan device can present to this window");
+    if (best < 0 && too_old == (int)n) log_fatal("no GPU offers Vulkan 1.2: update the GPU driver");
+    if (best < 0) log_fatal("no Vulkan 1.2 device can present to this window");
     r->pd = pds[best];
     mem_free(pds);
     find_queue(r, r->pd, &r->qfam);
@@ -788,16 +790,17 @@ static void create_device(renderer *r)
     if (has_device_ext(r->pd, "VK_KHR_portability_subset")) exts[n++] = "VK_KHR_portability_subset";
     /* Exactly what gpucaps chose: the 1.0 features through pEnabledFeatures,
      * newer ones through one structure per version (per KHR extension on
-     * 1.2), each chained only when something in it is enabled. */
+     * 1.2), each chained only when something in it is enabled. 1.2's
+     * timeline semaphores and host query reset are always on: every 1.2
+     * device has them. */
     uint32_t m = r->caps.enabled;
     VkPhysicalDeviceFeatures feats = {0};
     feats.multiDrawIndirect = feats.drawIndirectFirstInstance = (m & GPUCAP_MDI) ? VK_TRUE : VK_FALSE;
     feats.samplerAnisotropy = (m & GPUCAP_ANISO) ? VK_TRUE : VK_FALSE;
-    void *chain = NULL;
     VkPhysicalDeviceVulkan12Features v12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-                                            .timelineSemaphore = (m & GPUCAP_TIMELINE) ? VK_TRUE : VK_FALSE,
-                                            .hostQueryReset = (m & GPUCAP_HOSTRESET) ? VK_TRUE : VK_FALSE};
-    if (v12.timelineSemaphore || v12.hostQueryReset) chain = &v12;
+                                            .timelineSemaphore = VK_TRUE,
+                                            .hostQueryReset = VK_TRUE};
+    void *chain = &v12;
     VkPhysicalDeviceVulkan13Features v13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
                                             .dynamicRendering = (m & GPUCAP_DYNREND) && !r->caps.dynrend_khr ? VK_TRUE
                                                                                                              : VK_FALSE,
@@ -1833,10 +1836,6 @@ static void defer_free(renderer *r, int block, uint32_t start, uint32_t len)
 /* Blocks until the frame last submitted from slot f has finished. */
 static void wait_frame(renderer *r, const frame *f)
 {
-    if (!r->timeline) {
-        VK_CHECK(vkWaitForFences(r->dev, 1, &f->fence, VK_TRUE, UINT64_MAX));
-        return;
-    }
     VkSemaphoreWaitInfo wi = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
                               .semaphoreCount = 1,
                               .pSemaphores = &r->timeline,
@@ -1847,12 +1846,7 @@ static void wait_frame(renderer *r, const frame *f)
 static void release_frees(renderer *r)
 {
     uint64_t done = 0;
-    if (r->timeline && r->semaphore_value(r->dev, r->timeline, &done) == VK_SUCCESS && done > r->completed)
-        r->completed = done;
-    for (int i = 0; i < FRAMES && !r->timeline; i++) {
-        frame *f = &r->frames[i];
-        if (f->serial > r->completed && vkGetFenceStatus(r->dev, f->fence) == VK_SUCCESS) r->completed = f->serial;
-    }
+    if (r->semaphore_value(r->dev, r->timeline, &done) == VK_SUCCESS && done > r->completed) r->completed = done;
     int n = 0;
     while (n < r->free_count && r->frees[n].serial <= r->completed) {
         const pool_free *pf = &r->frees[n++];
@@ -1871,12 +1865,12 @@ static void create_queries(renderer *r)
                                 .queryCount = FRAMES * 2};
     VK_CHECK(vkCreateQueryPool(r->dev, &qi, r->ac, &r->queries));
     /* 1.2 core, so loaded rather than linked. */
-    if (r->caps.enabled & GPUCAP_HOSTRESET)
-        r->reset_queries = (PFN_vkResetQueryPool)vkGetDeviceProcAddr(r->dev, "vkResetQueryPool");
-    if (r->reset_queries) r->reset_queries(r->dev, r->queries, 0, FRAMES * 2);
+    r->reset_queries = (PFN_vkResetQueryPool)vkGetDeviceProcAddr(r->dev, "vkResetQueryPool");
+    if (!r->reset_queries) log_fatal("the Vulkan driver has no vkResetQueryPool");
+    r->reset_queries(r->dev, r->queries, 0, FRAMES * 2);
 }
 
-/* Called once the slot's fence has signalled, so the results are there. */
+/* Called once the slot's frame has finished, so the results are there. */
 static void read_gpu_time(renderer *r, frame *f)
 {
     uint32_t q = (uint32_t)(f - r->frames) * 2;
@@ -1885,7 +1879,7 @@ static void read_gpu_time(renderer *r, frame *f)
         if (vkGetQueryPoolResults(r->dev, r->queries, q, 2, sizeof t, t, sizeof t[0], VK_QUERY_RESULT_64_BIT) ==
             VK_SUCCESS)
             r->gpu_ms = (float)((double)((t[1] - t[0]) & r->caps.timestamp_mask) * r->caps.timestamp_ms_per_tick);
-        if (r->reset_queries) r->reset_queries(r->dev, r->queries, q, 2);
+        r->reset_queries(r->dev, r->queries, q, 2);
     }
     f->timed = 0;
 }
@@ -1896,14 +1890,13 @@ static void create_frames(renderer *r, uint32_t pool_mb)
                                   .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
                                   .queueFamilyIndex = r->qfam};
     VK_CHECK(vkCreateCommandPool(r->dev, &ci, r->ac, &r->cmdpool));
-    if (r->caps.enabled & GPUCAP_TIMELINE) {
-        r->wait_semaphores = (PFN_vkWaitSemaphores)vkGetDeviceProcAddr(r->dev, "vkWaitSemaphores");
-        r->semaphore_value = (PFN_vkGetSemaphoreCounterValue)vkGetDeviceProcAddr(r->dev, "vkGetSemaphoreCounterValue");
-        VkSemaphoreTypeCreateInfo ti = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
-                                        .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE};
-        VkSemaphoreCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &ti};
-        if (r->wait_semaphores && r->semaphore_value) VK_CHECK(vkCreateSemaphore(r->dev, &si, r->ac, &r->timeline));
-    }
+    r->wait_semaphores = (PFN_vkWaitSemaphores)vkGetDeviceProcAddr(r->dev, "vkWaitSemaphores");
+    r->semaphore_value = (PFN_vkGetSemaphoreCounterValue)vkGetDeviceProcAddr(r->dev, "vkGetSemaphoreCounterValue");
+    if (!r->wait_semaphores || !r->semaphore_value) log_fatal("the Vulkan driver has no timeline semaphore calls");
+    VkSemaphoreTypeCreateInfo ti = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+                                    .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE};
+    VkSemaphoreCreateInfo tsi = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &ti};
+    VK_CHECK(vkCreateSemaphore(r->dev, &tsi, r->ac, &r->timeline));
 
     r->pool_host_visible = r->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ||
                            r->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
@@ -1918,8 +1911,6 @@ static void create_frames(renderer *r, uint32_t pool_mb)
                                           .commandPool = r->cmdpool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
                                           .commandBufferCount = 1};
         VK_CHECK(vkAllocateCommandBuffers(r->dev, &ai, &f->cmd));
-        VkFenceCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT};
-        VK_CHECK(vkCreateFence(r->dev, &fi, r->ac, &f->fence));
         VkSemaphoreCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
         VK_CHECK(vkCreateSemaphore(r->dev, &si, r->ac, &f->image_ready));
         if (!r->pool_host_visible)
@@ -2070,7 +2061,6 @@ void renderer_destroy(renderer *r)
         buffer_destroy(r, &f->dyn);
         buffer_destroy(r, &f->ui);
         buffer_destroy(r, &f->ind);
-        vkDestroyFence(r->dev, f->fence, r->ac);
         vkDestroySemaphore(r->dev, f->image_ready, r->ac);
         for (int b = 0; b < MAX_POOL_BLOCKS; b++) mem_free(f->copies[b].v);
     }
@@ -2182,7 +2172,6 @@ int renderer_begin_frame(renderer *r)
         return 0;
     }
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) log_fatal("vkAcquireNextImageKHR failed (%d)", (int)res);
-    if (!r->timeline) VK_CHECK(vkResetFences(r->dev, 1, &f->fence));
     r->frame_active = 1;
     return 1;
 }
@@ -2224,7 +2213,7 @@ static int layer_has_alpha(uint32_t tex)
 /* The terrain draws of a frame. With multi-draw indirect, consecutive draws
  * from one pool block are queued in the frame's indirect buffer and issued
  * as one vkCmdDrawIndexedIndirect (the section origin rides on
- * firstInstance). Without it (Vulkan 1.0 devices lacking the feature), or
+ * firstInstance). Without it (devices lacking the feature), or
  * once the buffer is full, each draw is a vkCmdDrawIndexed. Draw order is
  * the same either way, which the back-to-front translucent pass needs. */
 typedef struct {
@@ -2402,12 +2391,11 @@ static void end_pass(const renderer *r, VkCommandBuffer cmd, int scene)
 }
 
 /* Submits the frame's command buffer: it waits for the acquired image and
- * signals render_done for the present, plus, with a timeline, the frame's
- * serial instead of the slot's fence. */
+ * signals render_done for the present and the frame's serial on the
+ * timeline. */
 static void submit_frame(renderer *r, frame *f)
 {
     VkSemaphore done = r->render_done[r->image_index];
-    VkFence fence = r->timeline ? VK_NULL_HANDLE : f->fence;
     if (r->queue_submit2) {
         VkSemaphoreSubmitInfo wait = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
                                       .semaphore = f->image_ready,
@@ -2425,9 +2413,9 @@ static void submit_frame(renderer *r, frame *f)
                             .pWaitSemaphoreInfos = &wait,
                             .commandBufferInfoCount = 1,
                             .pCommandBufferInfos = &cb,
-                            .signalSemaphoreInfoCount = r->timeline ? 2u : 1u,
+                            .signalSemaphoreInfoCount = 2,
                             .pSignalSemaphoreInfos = sig};
-        VK_CHECK(r->queue_submit2(r->queue, 1, &si, fence));
+        VK_CHECK(r->queue_submit2(r->queue, 1, &si, VK_NULL_HANDLE));
         return;
     }
     VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -2439,15 +2427,15 @@ static void submit_frame(renderer *r, frame *f)
                                         .signalSemaphoreValueCount = 2,
                                         .pSignalSemaphoreValues = values};
     VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                       .pNext = r->timeline ? &ti : NULL,
+                       .pNext = &ti,
                        .waitSemaphoreCount = 1,
                        .pWaitSemaphores = &f->image_ready,
                        .pWaitDstStageMask = &wait_stage,
                        .commandBufferCount = 1,
                        .pCommandBuffers = &f->cmd,
-                       .signalSemaphoreCount = r->timeline ? 2u : 1u,
+                       .signalSemaphoreCount = 2,
                        .pSignalSemaphores = signals};
-    VK_CHECK(vkQueueSubmit(r->queue, 1, &si, fence));
+    VK_CHECK(vkQueueSubmit(r->queue, 1, &si, VK_NULL_HANDLE));
 }
 
 /* The frame-independent part of the stats, then publishes them. */
@@ -2480,10 +2468,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
                                    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     VK_CHECK(vkBeginCommandBuffer(cmd, &bi));
     uint32_t query = (uint32_t)r->frame_index * 2;
-    if (r->queries) {
-        if (!r->reset_queries) vkCmdResetQueryPool(cmd, r->queries, query, 2);
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, r->queries, query);
-    }
+    if (r->queries) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, r->queries, query);
 
     int copied = 0;
     for (int b = 0; b < r->pool_blocks; b++) {

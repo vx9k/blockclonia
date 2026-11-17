@@ -17,7 +17,7 @@
   display, use `xvfb-run -a` with the lavapipe ICD (see AGENTS.md) and
   `--no-sound`.
 - Before a renderer change is finished, run it with `--validate` at the
-  default API version and at `MC_VK_API=1.0`, and read the log for
+  default API version and at `MC_VK_API=1.2`, and read the log for
   `[warn] vulkan:` lines. The unit tests cannot see these.
 - Prefer the smallest diff that fits the surrounding code. Match its
   comment density and naming, and don't reformat lines you didn't change.
@@ -42,6 +42,6 @@
   `general-dev` (Sonnet, medium effort) for everyday development, and
   `deep-reasoning` (Opus, high effort) for the hard and high-stakes
   work: design decisions, cross-module bugs, file formats, the Vulkan
-  1.0 path, Vulkan synchronization, mem.h, chunk meshing, rendering
+  Vulkan 1.2 baseline, Vulkan synchronization, mem.h, chunk meshing, rendering
   pipeline design and anything security-sensitive. Pick the cheapest
   tier that fits, and delegate when the user asks for it.
