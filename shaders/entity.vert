@@ -43,7 +43,9 @@ void main()
     }
     // i_scale.w is the light where the entity is (light_at: sky light by
     // daylight, block light), so the atlas is read at its full slot.
-    float light = FACE_SHADE[face] * i_scale.w;
+    // block.frag gains block light by 1.3 (lightfx.h) and the full slot
+    // reads as block light, so the entity's own light is divided by it.
+    float light = FACE_SHADE[face] * i_scale.w * (1.0 / 1.3);
     // Flames are a flip-book (fog.z carries the time), full brightness.
     if (f_layer - FIRE_FIRST < 4u) {
         f_layer = FIRE_FIRST + (uint(pc.fog.z * 8.0) + f_layer) % 4u;

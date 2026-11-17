@@ -211,6 +211,19 @@ and heads it off; once down, you come round within seconds.
 - **The sky** lights everything that sees it and fades a level per block
   under cover, scaled by the daylight; block light doesn't follow the
   sun, so a lit room stays lit at night.
+- **Sun and moon**: faces turned to the sun are brighter than those
+  turned away, the light warms at sunrise and sunset, and at night the
+  moon lights the world from opposite the sun, dim and blue, at 4% of
+  noon. Bright light rolls off toward white rather than clipping.
+- **The night sky**: 1,800 stars and a band of the Milky Way come out at
+  dusk, twinkle, fade into the haze at the horizon, and turn about the
+  pole once a day; the moon rises opposite the sun.
+- **A held torch** (or any light you carry) lights what is in front of
+  you, falling off with distance, and flickers like the placed one. The
+  torch is a small 3D model with a glowing ember, a layered flame and
+  rising sparks.
+- **Fog** takes the light where you stand: dark in a cave, warm beside a
+  fire, the sky's colour in the open.
 - **The GPU samples it**: each section's light is one 18³ box in a 3D
   texture (4 bits a channel where the GPU can filter that format),
   filtered between cells, so light falls off smoothly across a face.
@@ -386,7 +399,7 @@ starts with the defaults and doesn't save changes over it.
 | Video | Render distance | 2–32 columns; applies on the next start |
 | Video | Texture filtering (distance) | on (default): trilinear between mipmaps, with up to 8× anisotropic filtering where the GPU supports it; off: the nearest texel of the nearest mipmap, sharper but shimmering in the distance. Up close textures stay pixel-sharp either way |
 | Video | View bobbing, FOV effects | on/off |
-| Video | Brightness (nights) | 0–100% (default 0): lifts the darkest light toward dusk; daylight is unchanged |
+| Video | Brightness (nights) | 0–100% (default 0): a floor under all light, for dark nights and caves; daylight is unchanged |
 | Display | Fullscreen | on/off (also F11): borderless at the monitor's own resolution |
 | Display | VSync | on/off |
 | Display | Frame limit | unlimited (default), 30, 60, 90, 120, 144, 165 or 240 fps; used while VSync is off |

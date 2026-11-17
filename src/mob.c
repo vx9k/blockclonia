@@ -2,6 +2,7 @@
 #include "health.h"
 #include "item.h"
 #include "mathlib.h"
+#include "thermo.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -25,7 +26,7 @@ static const mob_rule RULES[MOB_KINDS] = {
 #define NEAR 64.0        /* the per-kind cap counts mobs this close to a player */
 #define HUNT_RANGE 20.0  /* m a wolf notices a player from */
 #define BITE_RANGE 1.3   /* m between bodies' centres */
-#define NIGHT 0.35f      /* daylight below this is night for wolves */
+#define NIGHT (THERMO_NIGHT_LIGHT + 0.207f * (1.0f - THERMO_NIGHT_LIGHT)) /* daylight below this is night for wolves */
 #define CHARGE 8.0       /* m from its prey a stalking wolf breaks into a run */
 #define CALM 45.0f       /* s after a world opens before the first wolf */
 #define LOOK_RANGE 8.0   /* m a creature glances at a player from */

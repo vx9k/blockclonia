@@ -79,6 +79,7 @@ void test_combat_all(void);
 void test_invui_all(void);
 void test_body_risks_all(void);
 void test_light_all(void);
+void test_lightfx_all(void);
 void test_thoughts_all(void);
 void test_drugs_all(void);
 void test_faint_all(void);

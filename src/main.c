@@ -14,6 +14,7 @@
 #include "invui.h"
 #include "jobs.h"
 #include "light.h"
+#include "lightfx.h"
 #include "log.h"
 #include "mem.h"
 #include "menu.h"
@@ -28,6 +29,7 @@
 #include "save.h"
 #include "save_db.h"
 #include "settings.h"
+#include "sky.h"
 #include "sound.h"
 #include "survival.h"
 #include "sysinfo.h"
@@ -902,6 +904,8 @@ typedef struct {
     viewmodel vm;
     entity_instance vm_ents[VIEWMODEL_MAX];
     float eat_anim;           /* 1 at the start of eating, easing to 0 */
+    float fog[3];             /* the fog's colour, easing toward the light at the eye */
+    int fog_set;
     uint32_t death_rng;
     int actions;              /* blocks broken or placed since the last physics step */
     menu mn;
@@ -2020,6 +2024,21 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     /* Brightness lifts the darkest light toward dusk; days are unchanged. */
     v.daylight = fmaxf(thermo_daylight(g->th), 0.006f * (float)g->st.brightness);
     thermo_sky(g->th, v.sky);
+    float sun[3] = {0.0f, 1.0f, 0.0f};
+    thermo_sun(g->th, sun);
+    const item_stack *carried = &g->inv.slot[g->inv.selected];
+    uint32_t held_id = on_title || g->hl.dead || !carried->count ? 0 : carried->id;
+    lightfx_build(&v.lfx, sun, thermo_daylight(g->th), held_id, g->st.brightness, now);
+    v.stars = sky_visibility(thermo_daylight(g->th));
+    v.star_rot = sky_rotation(thermo_day_time(g->th));
+    v.moon = sky_moon(sun);
+    uint16_t eye_light = world_light(&g->w, (int)floor(v.eye.x), (int)floor(v.eye.y), (int)floor(v.eye.z));
+    float fog_to[3] = {0.0f, 0.0f, 0.0f};
+    lightfx_fog(&v.lfx, v.sky, eye_light, fog_to);
+    if (!g->fog_set) memcpy(g->fog, fog_to, sizeof g->fog);
+    lightfx_ease(g->fog, fog_to, (float)dt);
+    g->fog_set = 1;
+    memcpy(v.fog, g->fog, sizeof v.fog);
 
     g->eat_anim = fmaxf(0.0f, g->eat_anim - (float)dt / 1.6f);
     if (!on_title && !g->hl.dead && !g->in_menu) {
@@ -2033,7 +2052,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
                               g->look_dx,
                               g->look_dy,
                               g->eat_anim > 0.0f ? 1.0f - g->eat_anim : 0.0f,
-                              light_at(&g->w, v.eye.x, v.eye.y, v.eye.z, v.daylight),
+                              lightfx_at(&v.lfx, eye_light, 0.3f),
                               (float)dt};
         v.view_model = g->vm_ents;
         v.view_model_count = viewmodel_build(&g->vm, &vi, g->vm_ents, VIEWMODEL_MAX);

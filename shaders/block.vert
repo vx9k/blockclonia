@@ -10,13 +10,21 @@ layout(location = 1) in vec3 i_origin;
 layout(location = 2) in uint i_light;
 
 layout(location = 0) out vec2 f_uv;
-layout(location = 1) flat out uint f_layer;
+layout(location = 1) flat out uint f_layer;  // texture layer | sun shading << 16
 layout(location = 2) out mediump vec2 f_shade;  // x: shade, y: fog
 layout(location = 3) out vec3 f_luv;            // light atlas coordinate
 
 const float FACE_SHADE[6] = float[](0.80, 0.80, 1.00, 0.50, 0.65, 0.65);
 const float AO_CURVE[4] = float[](0.45, 0.65, 0.82, 1.00);
 const float TAU = 6.2831853;
+// The sun shades the sky's light on faces turned from it (lightfx.h): a
+// face keeps 1 - SUN_SHADE times the contrast of its light. The sun runs
+// in a plane tilted by the latitude, so its z is its y times tan(40 deg)
+// and the push constants carry only x and y (times the contrast).
+const float SUN_SHADE = 0.4;  // LIGHTFX_SUN_SHADE
+const float SUN_Z = 0.8391;
+const float LIGHT_K = 4.8289214;  // LIGHT_CURVE_K
+const float SUN_STEPS = 1024.0;  // 1 / LIGHTFX_SUN_STEP
 
 // Animation is a function of the world position, which is rel + pc.origin
 // with x and z wrapped to a 256 m tile, and of pc.fog.z, time wrapped to
@@ -92,7 +100,11 @@ void main()
     // Texture coordinates come from the position, so greedy-merged quads
     // tile the texture with a REPEAT sampler at no extra vertex cost.
     f_uv = (face < 2u ? vec2(p.z, -p.y) : (face < 4u ? p.xz : vec2(p.x, -p.y))) + scroll;
-    f_layer = layer;
+    // As a shift of the sky's level, which block.frag adds before its one
+    // exp2: flat, so it costs no interpolation, in bits f_layer has spare.
+    vec3 sun = vec3(pc.origin.w, pc.fog.w, pc.fog.w * SUN_Z);
+    float m = 1.0 - SUN_SHADE * (length(sun) - max(dot(2.0 * n, sun), 0.0));
+    f_layer = layer | uint(-log2(m) * (SUN_STEPS / LIGHT_K) + 0.5) << 16;
     // Eight components to interpolate (uv 2, layer 1, shade and fog 2,
     // light 3) fill two vec4 slots; daylight is applied per pixel instead
     // of costing a ninth, which Intel pays for with a third slot.
