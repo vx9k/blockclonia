@@ -275,7 +275,10 @@ int block_tool(uint8_t block)
 /* The pickaxe tier a block needs before it yields anything, -1 for none:
  * the block table's tier for rock, ore and masonry. */
 static int pick_tier(uint8_t block)
-{ return block_tool(block) == TOOL_PICKAXE && block_get(block)->mat == BM_STONE ? block_get(block)->tier : -1; }
+{
+    const block_def *d = block_get(block);
+    return block_tool(block) == TOOL_PICKAXE && d->mat == BM_STONE ? d->tier : -1;
+}
 
 /* What an ore breaks into: the item, how many, and one more with a chance
  * of 1 in `extra` (0 for never). Soft deposits crumble into more pieces. */
