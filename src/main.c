@@ -759,8 +759,15 @@ static int place_figures(figure *f, const player *p, const char *list)
         const char *name;
         float speed;
         int sneak, dead;
-    } GAITS[] = {{"stand", 0.0f, 0, 0}, {"walk", 1.4f, 0, 0},  {"jog", (float)WALK_SPEED, 0, 0},  {"run", (float)SPRINT_SPEED, 0, 0},
-                 {"sneak", (float)SNEAK_SPEED, 1, 0}, {"crouch", 0.0f, 1, 0}, {"dead", 0.0f, 0, 1}};
+    } GAITS[] = {
+        {"stand", 0.0f, 0, 0},
+        {"walk", 1.4f, 0, 0},
+        {"jog", (float)WALK_SPEED, 0, 0},
+        {"run", (float)SPRINT_SPEED, 0, 0},
+        {"sneak", (float)SNEAK_SPEED, 1, 0},
+        {"crouch", 0.0f, 1, 0},
+        {"dead", 0.0f, 0, 1},
+    };
     char buf[256] = {0};
     snprintf(buf, sizeof buf, "%s", list);
     char *save = NULL;

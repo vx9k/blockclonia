@@ -65,6 +65,8 @@ static const struct {
  * bone, the centre's x and z, and the layers. The chest is 0.30 m across
  * at the armpits and the shoulder joints sit outside it, so the upper arms
  * clear the ribs. */
+/* Laid out by hand: clang-format versions disagree on the braces inside ARM and LEG. */
+/* clang-format off */
 #define SKIN ((uint32_t)T_SKIN * 0x010101u)
 #define LINEN ((uint32_t)T_LINEN * 0x010101u)
 #define SHORTS ((uint32_t)T_LINEN_DARK * 0x010101u)
@@ -88,7 +90,7 @@ static const struct {
         {AV_SHOULDER_##s + 1, 0.08f, 0.075f, 0.0f, -FOREARM + 0.01f, 0.0f, 0.0f, SKIN}, \
         {AV_SHOULDER_##s + 2, 0.032f, 0.085f, 0.0f, -0.1f, 0.0f, 0.0f, SKIN},           \
         {AV_SHOULDER_##s + 3, 0.026f, 0.078f, 0.0f, -0.085f, 0.0f, 0.0f, SKIN},         \
-    { AV_SHOULDER_##s + 4, 0.024f, 0.024f, 0.0f, -0.06f, 0.0f, 0.0f, SKIN }
+        {AV_SHOULDER_##s + 4, 0.024f, 0.024f, 0.0f, -0.06f, 0.0f, 0.0f, SKIN}
     ARM(R),
     ARM(L),
 #undef ARM
@@ -96,10 +98,11 @@ static const struct {
     {AV_HIP_##s, 0.135f, 0.15f, 0.02f, -0.16f, 0.0f, 0.0f, SHORTS},            \
         {AV_HIP_##s, 0.13f, 0.14f, -0.16f, -THIGH, 0.0f, 0.0f, SKIN},          \
         {AV_HIP_##s + 1, 0.1f, 0.11f, 0.0f, -SHANK + 0.01f, 0.0f, 0.0f, SKIN}, \
-    { AV_HIP_##s + 2, 0.09f, FOOT_LEN, 0.015f, -ANKLE_Y, 0.0f, -(FOOT_LEN * 0.5f - HEEL), SKIN }
+        {AV_HIP_##s + 2, 0.09f, FOOT_LEN, 0.015f, -ANKLE_Y, 0.0f, -(FOOT_LEN * 0.5f - HEEL), SKIN}
     LEG(R),
     LEG(L),
 #undef LEG
+    /* clang-format on */
 };
 #define FACE_BOX 5
 #define CHEST_BOX 2
