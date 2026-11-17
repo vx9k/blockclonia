@@ -2503,11 +2503,14 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     frustum fr = frustum_from(vp);
     float sky[3] = {0.53f, 0.74f, 1.0f}, water_fog[3] = {0.10f, 0.25f, 0.55f};
     if (v->sky[0] > 0.0f || v->sky[1] > 0.0f || v->sky[2] > 0.0f) memcpy(sky, v->sky, sizeof sky);
+    if (v->under_range > 0.0f) memcpy(water_fog, v->under_fog, sizeof water_fog);
     float daylight = v->daylight > 0.0f ? v->daylight : 1.0f;
-    if (v->underwater)
+    /* Lava lights itself; other liquids darken with the day. */
+    if (v->underwater && v->under_range >= 1.0f)
         for (int i = 0; i < 3; i++) water_fog[i] *= 0.25f + 0.75f * daylight;
     const float *fogc = v->underwater ? water_fog : sky;
-    float fog_end = v->underwater ? 24.0f : (float)(r->radius * CHUNK_W) - 8.0f;
+    float under_end = v->under_range > 0.0f ? v->under_range : 24.0f;
+    float fog_end = v->underwater ? under_end : (float)(r->radius * CHUNK_W) - 8.0f;
     float fog_start = v->underwater ? 0.0f : fog_end * 0.55f;
     push_vert pv = {0};
     memcpy(pv.view_proj, vp.m, sizeof pv.view_proj);

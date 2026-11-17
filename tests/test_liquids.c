@@ -108,24 +108,26 @@ static void test_liquid_viscous(void)
 }
 
 /* Lava meeting water or brine sets: a full cell to obsidian, a thin one to
- * basalt, and either way the water stays. */
+ * basalt, boiling off as many levels of the water as it had. */
 static void test_liquid_quench(void)
 {
     test_world t = {0};
     tw_init(&t);
-    shaft(&t.w, 0, 0, 3);
+    shaft(&t.w, 0, 0, 4);
     world_set(&t.w, 0, GROUND, 0, B_WATER, 0);
-    world_set(&t.w, 0, GROUND + 1, 0, B_LAVA, 0); /* lava poured onto water */
+    world_set(&t.w, 0, GROUND + 1, 0, B_WATER, 0);
+    world_set(&t.w, 0, GROUND + 2, 0, B_LAVA, 0); /* lava poured onto water */
     settle(&t, 100);
-    CHECK(world_get(&t.w, 0, GROUND + 1, 0) == B_OBSIDIAN_ROCK);
-    CHECK(world_get(&t.w, 0, GROUND, 0) == B_WATER);
+    CHECK(world_get(&t.w, 0, GROUND + 2, 0) == B_OBSIDIAN_ROCK);
+    CHECK(world_get(&t.w, 0, GROUND + 1, 0) == B_AIR); /* a full cell boiled away */
+    CHECK(world_get(&t.w, 0, GROUND, 0) == B_WATER && world_fluid_level(&t.w, 0, GROUND, 0) == FLUID_FULL);
 
     shaft(&t.w, 5, 0, 3);
     world_set(&t.w, 5, GROUND, 0, B_BRINE, 0);
     world_set(&t.w, 5, GROUND + 1, 0, B_LAVA, 3);
     settle(&t, 100);
     CHECK(world_get(&t.w, 5, GROUND + 1, 0) == B_BASALT_ROCK);
-    CHECK(world_get(&t.w, 5, GROUND, 0) == B_BRINE);
+    CHECK(world_get(&t.w, 5, GROUND, 0) == B_BRINE && world_fluid_level(&t.w, 5, GROUND, 0) == FLUID_FULL - 3);
     /* Oil doesn't quench lava: the lava sinks through it. */
     shaft(&t.w, 10, 0, 3);
     world_set(&t.w, 10, GROUND, 0, B_CRUDE_OIL, 0);

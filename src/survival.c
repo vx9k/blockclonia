@@ -245,6 +245,12 @@ void survival_thermal(const thermo *th, const world *w, const player *p, health_
     int fx = (int)floor(p->pos.x), fz = (int)floor(p->pos.z), fy = (int)floor(p->pos.y - 0.05);
     double contact = block_solid(world_get(w, fx, fy, fz)) ? (double)thermo_block_temp(th, w, fx, fy, fz) : air;
     survival_env_thermal(e, air, radiant, contact, 0);
+    /* The liquid the body is in: lava where any of it touches lava. */
+    e->water_temp = SURVIVAL_WATER_TEMP;
+    for (int k = 0; k < 3; k++) {
+        int y = (int)floor(p->pos.y + 0.1 + 0.75 * k);
+        if (world_get(w, fx, y, fz) == B_LAVA) e->water_temp = THERMO_LAVA_C;
+    }
 }
 
 void survival_drop_all(physics *ph, inventory *inv, const player *p, uint32_t *rng)

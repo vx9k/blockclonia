@@ -42,8 +42,8 @@ void survival_impacts(health *h, const world *w, const player_contact *c, const 
 
 struct thermo;
 /* survival_env_thermal from the heat field around the body: the air at
- * the chest, radiant heat from fires (none while flying) and the block
- * under the feet. */
+ * the chest, radiant heat from fires and lava (none while flying), the
+ * block under the feet, and the liquid it is in (lava or water). */
 void survival_thermal(const struct thermo *th, const world *w, const player *p, health_env *e);
 
 /* Everything carried falls where the player died, in directions from
