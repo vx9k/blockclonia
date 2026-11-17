@@ -131,11 +131,12 @@ static void test_strata(void)
 {
     tally *t = mem_calloc(1, sizeof *t);
     for (int gz = 0; gz < 10; gz++)
-        for (int gx = 0; gx < 10; gx++) survey((gx * 2400 - 12000) / CHUNK_W + gz, (gz * 2400 - 12000) / CHUNK_W - gx, t);
-    static const uint8_t MUST[] = {B_ROCK,        B_GRANITE_ROCK, B_BASALT_ROCK, B_LIMESTONE_ROCK, B_SANDSTONE_ROCK,
-                                   B_SHALE_ROCK,  B_MARBLE_ROCK,  B_OBSIDIAN_ROCK, B_ROCK_SALT,    B_CLAY,
-                                   B_PEAT,        B_PODZOL,       B_BAUXITE,     B_SALTPETER_ORE,  B_COAL_ORE,
-                                   B_COPPER_ORE,  B_IRON_ORE};
+        for (int gx = 0; gx < 10; gx++)
+            survey((gx * 2400 - 12000) / CHUNK_W + gz, (gz * 2400 - 12000) / CHUNK_W - gx, t);
+    static const uint8_t MUST[] = {B_ROCK,       B_GRANITE_ROCK, B_BASALT_ROCK,   B_LIMESTONE_ROCK, B_SANDSTONE_ROCK,
+                                   B_SHALE_ROCK, B_MARBLE_ROCK,  B_OBSIDIAN_ROCK, B_ROCK_SALT,      B_CLAY,
+                                   B_PEAT,       B_PODZOL,       B_BAUXITE,       B_SALTPETER_ORE,  B_COAL_ORE,
+                                   B_COPPER_ORE, B_IRON_ORE};
     for (size_t i = 0; i < sizeof MUST; i++) {
         if (!t->kind[MUST[i]]) fprintf(stderr, "  no %s in 24 km\n", block_get(MUST[i])->name);
         CHECK(t->kind[MUST[i]] > 0);

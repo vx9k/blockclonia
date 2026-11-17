@@ -431,7 +431,10 @@ static void bed_sequence(uint32_t seed, float *u)
 }
 
 static uint8_t basement_at(const strata *s, int y)
-{ return y < s->granite_to ? B_GRANITE_ROCK : y >= s->basalt_from ? B_BASALT_ROCK : B_ROCK; }
+{
+    uint8_t above = y >= s->basalt_from ? B_BASALT_ROCK : B_ROCK;
+    return y < s->granite_to ? B_GRANITE_ROCK : above;
+}
 
 static strata strata_at(uint32_t seed, int x, int z, const slow *s, const geo *g, int h, float fine)
 {
