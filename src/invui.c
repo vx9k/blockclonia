@@ -206,7 +206,8 @@ int invui_recipe_category(int r)
     switch (id) {
     case B_GLASS:
     case B_BRICK:
-    case B_FURNACE: return RCAT_BUILDING;
+    case B_FURNACE:
+    case B_LAMP: return RCAT_BUILDING;
     case I_COPPER_INGOT:
     case I_IRON_INGOT:
     case I_CHARCOAL:

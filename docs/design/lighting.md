@@ -8,18 +8,34 @@ holds the reasoning and the detail.
 
 ## Where it stands
 
-- `block.vert` lights a face as `FACE_SHADE[face] * AO_CURVE[ao] *
-  daylight`.
-- The ambient occlusion is baked into the vertex by the mesher (2 bits).
-  Daylight is one number for the whole world, pushed per frame.
-  Burning blocks are drawn at full brightness.
-- So a cave 50 m down is as bright as a meadow at noon, a room with no
-  windows is lit, and nothing but the sky gives off light: a campfire
-  heats (`thermo`) but doesn't light. The furnace, lamps, lava and
-  underground exploration all need this fixed.
-- The block vertex is 4 bytes and every bit is used: position, face, AO,
-  texture layer, and the water drop (`mesher.h`). Light has to reach the
-  shader some other way, or the format has to change.
+The light engine is in (`light.c`, the light jobs in `world.c`, the atlas
+in `renderer.c`); the visual polish (sun direction, HDR and tone mapping,
+bloom, a held torch) is next.
+
+- **Per cell:** 16 bits, sky in bits 0-3 and red, green and blue in
+  4-7, 8-11 and 12-15. That is B4G4R4A4's texel, so the shader reads
+  `.rgb` as block light and `.a` as sky with no unpacking. A section
+  whose cells all match (open sky, solid rock) stores one value.
+- **Relighting:** a light job per column floods a snapshot of the 3 x 3
+  columns around it (sources up to 15 blocks out reach it) and keeps the
+  middle 18 x 18 footprint. A full flood of the column, rather than
+  removal and re-addition queues: it runs on a worker, never
+  touches the main thread, and can't drift from a full relight. An edit
+  marks dirty only the columns within 15 blocks, and only when it
+  changes what lets light through or gives it off. Sections are meshed
+  only once their column is lit, and the sections whose light changed
+  (and their neighbours) are remeshed.
+- **To the shader (option b):** each meshed section's light is an 18³
+  box in one 3D atlas texture, filtered linearly; the vertex stays 4
+  bytes. Opaque texels take the dimmest of their open neighbours, level
+  by level, so the filter neither darkens the edge of a lit floor nor
+  carries light through a one-block wall into a room's corners. Atlas
+  sides are 7, 14, 28 ... slots (126 texels and its doublings), which
+  Intel tiles with 4% padding instead of up to 120%.
+- **Hot blocks** glow from `thermo`'s field (`light_glow`, red at 500 °C
+  to white at 2000 °C), passed to the light jobs through a hook.
+- **The curve:** 0.8 per level below 15, the sky scaled by daylight;
+  block light ignores the time of day.
 
 ## Goals
 

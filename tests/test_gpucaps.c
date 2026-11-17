@@ -28,6 +28,7 @@ static gpu_offer full_offer(void)
     o.ext_memory_budget = 1;
     o.present_relaxed = 1;
     o.pipeline_cache = 1;
+    o.light_4bit = 1;
     return o;
 }
 
@@ -167,7 +168,8 @@ static void test_choose_versions(void)
 {
     gpu_offer o = full_offer();
     gpu_choice c = {0};
-    uint32_t always = GPUCAP_MDI | GPUCAP_ANISO | GPUCAP_TIMESTAMPS | GPUCAP_PCACHE | GPUCAP_RELAXED | GPUCAP_BUDGET;
+    uint32_t always = GPUCAP_MDI | GPUCAP_ANISO | GPUCAP_TIMESTAMPS | GPUCAP_PCACHE | GPUCAP_RELAXED | GPUCAP_BUDGET |
+                      GPUCAP_LIGHT4;
 
     /* Below the floor nothing is offered (the renderer refuses it). */
     o.instance_api = GPU_API(1, 1);
@@ -284,7 +286,7 @@ static void test_overrides(void)
 {
     gpu_offer o = full_offer();
     gpu_choice c = {0};
-    uint32_t off = gpucaps_parse_disable("mdi,dynrend,sync2,aniso,hostcopy,budget,timestamps,pcache", NULL, 0);
+    uint32_t off = gpucaps_parse_disable("mdi,dynrend,sync2,aniso,hostcopy,budget,timestamps,pcache,light4", NULL, 0);
     gpucaps_choose(&o, off, &c);
     CHECK(c.enabled == GPUCAP_RELAXED);
     CHECK(c.disabled == off);
@@ -294,6 +296,14 @@ static void test_overrides(void)
     o.host_image_copy = 0;
     gpucaps_choose(&o, GPUCAP_HOSTCOPY, &c);
     CHECK(!(c.disabled & GPUCAP_HOSTCOPY));
+    /* Without the 4-bit format (MoltenVK on an Intel Mac) light falls back
+     * to RGBA8; the rest is unaffected. */
+    o = full_offer();
+    o.light_4bit = 0;
+    gpucaps_choose(&o, 0, &c);
+    CHECK(!(c.enabled & GPUCAP_LIGHT4) && (c.enabled & GPUCAP_MDI));
+    CHECK(gpucaps_parse_disable("light4", NULL, 0) == GPUCAP_LIGHT4 &&
+          strcmp(gpucaps_name(GPUCAP_LIGHT4), "light4") == 0);
     /* MC_VK_API=1.2 as the renderer applies it: the KHR paths, no 1.4. */
     uint32_t cap = 0;
     CHECK(gpucaps_parse_api("1.2", &cap));
@@ -312,9 +322,9 @@ static void test_summary(void)
     gpucaps_choose(&o, 0, &c);
     gpucaps_summary(&c, s, sizeof s);
     CHECK(strcmp(s, "Vulkan 1.4: multi-draw indirect, dynamic rendering, synchronization2, pipeline cache, "
-                    "8x anisotropic, host image copy, memory budget, GPU timestamps") == 0);
+                    "8x anisotropic, host image copy, memory budget, GPU timestamps, 4-bit light") == 0);
     o.instance_api = GPU_API(1, 2);
-    gpucaps_choose(&o, GPUCAP_MDI | GPUCAP_PCACHE, &c);
+    gpucaps_choose(&o, GPUCAP_MDI | GPUCAP_PCACHE | GPUCAP_LIGHT4, &c);
     gpucaps_summary(&c, s, sizeof s);
     CHECK(strcmp(s, "Vulkan 1.2: dynamic rendering (KHR), synchronization2 (KHR), 8x anisotropic, "
                     "memory budget, GPU timestamps") == 0);

@@ -18,6 +18,9 @@
  * - Phase changes with latent heat: snow and ice melt into water (volume
  *   conserving: snow gives less water than ice), still surface water
  *   exposed to freezing air freezes.
+ * - Glow: a solid hotter than about 500 C gives off light (light_glow),
+ *   handed to the world's light jobs through thermo_glow; the columns
+ *   around a cell relight when its glow changes.
  * - What the body feels: air temperature at a point including local heat,
  *   radiant flux from fires (Stefan-Boltzmann, falling off with the square
  *   of distance), and the temperature of a surface.
@@ -90,6 +93,12 @@ void thermo_step(thermo *t, world *w, double dt, dvec3 player);
 int thermo_add_fuel(thermo *t, world *w, int x, int y, int z, int units);
 
 /* Cells in the heat field and burning fires, for the F3 overlay. */
+/* The glowing cells in the box x0 <= x < x0 + LIGHT_REGION, z0 <= z <
+ * z0 + LIGHT_REGION, y < top, in the box's coordinates, at most cap:
+ * world.glow's signature, with the thermo as user. Returns how many. */
+struct light_emitter;
+int thermo_glow(const void *user, int x0, int z0, int top, struct light_emitter *out, int cap);
+
 int thermo_cell_count(const thermo *t);
 int thermo_fire_count(const thermo *t);
 

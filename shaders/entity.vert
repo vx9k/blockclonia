@@ -13,7 +13,8 @@ layout(location = 4) in vec4 i_scale;  // xyz: size in metres, w: brightness
 
 layout(location = 0) out vec2 f_uv;
 layout(location = 1) flat out uint f_layer;
-layout(location = 2) out mediump vec2 f_light_fog;
+layout(location = 2) out mediump vec2 f_shade;  // as block.vert: shade, fog
+layout(location = 3) out vec3 f_luv;
 
 const float FACE_SHADE[6] = float[](0.80, 0.80, 1.00, 0.50, 0.65, 0.65);
 
@@ -40,14 +41,14 @@ void main()
         vec2 size = face < 2u ? i_scale.zy : (face < 4u ? i_scale.xz : i_scale.xy);
         f_uv = fp * size;
     }
-    // Daylight scales world entities like the blocks around them. The view
-    // model pass turns fog off (fog.y = 0) and brings its own brightness
-    // in i_scale.w, so it is not darkened twice.
-    float light = FACE_SHADE[face] * i_scale.w * (pc.fog.y > 0.0 ? pc.fog.w : 1.0);
+    // i_scale.w is the light where the entity is (light_at: sky light by
+    // daylight, block light), so the atlas is read at its full slot.
+    float light = FACE_SHADE[face] * i_scale.w;
     // Flames are a flip-book (fog.z carries the time), full brightness.
     if (f_layer - FIRE_FIRST < 4u) {
         f_layer = FIRE_FIRST + (uint(pc.fog.z * 8.0) + f_layer) % 4u;
         light = i_scale.w;
     }
-    f_light_fog = vec2(light, clamp((length(rel) - pc.fog.x) * pc.fog.y, 0.0, 1.0));
+    f_shade = vec2(light, clamp((length(rel) - pc.fog.x) * pc.fog.y, 0.0, 1.0));
+    f_luv = LIGHT_FULL;
 }

@@ -6,10 +6,13 @@
 layout(location = 0) in uint v_data;
 // Section min corner relative to the camera, one per draw (firstInstance).
 layout(location = 1) in vec3 i_origin;
+// The section's light slot: its texel offset in the atlas, x | y << 11 | z << 22.
+layout(location = 2) in uint i_light;
 
 layout(location = 0) out vec2 f_uv;
 layout(location = 1) flat out uint f_layer;
-layout(location = 2) out mediump vec2 f_light_fog;
+layout(location = 2) out mediump vec2 f_shade;  // x: shade, y: fog
+layout(location = 3) out vec3 f_luv;            // light atlas coordinate
 
 const float FACE_SHADE[6] = float[](0.80, 0.80, 1.00, 0.50, 0.65, 0.65);
 const float AO_CURVE[4] = float[](0.45, 0.65, 0.82, 1.00);
@@ -38,13 +41,28 @@ void main()
     uint ao = (v_data >> 18) & 3u;
     uint drop = v_data >> 28;
     uint layer = (v_data >> 20) & 255u;
+
+    // Light comes from the cell in front of the face: half a cell out along
+    // the normal is that cell's centre, and along the face the corner lies
+    // between texel centres, so the linear filter blends the four cells
+    // around each corner (smooth lighting) and never the solid cell behind.
+    // The slot's border (+1) holds the neighbours. Texels are stored x, z, y.
+    // The coordinate is affine in the position, so it is computed here and
+    // interpolated, and the fragment shader does one fetch and no maths.
+    // Intel interpolates in the fragment shader, so the three components
+    // cost about 0.2 ms a frame on its iGPU at 32 columns, but sending the
+    // coordinate flat and rebuilding it there from f_uv measured slower.
+    vec3 n = vec3(equal(uvec3(face >> 1), uvec3(0u, 1u, 2u))) * (0.5 - float(face & 1u));
+    vec3 q = p + 1.0 + n;
+    vec3 base = vec3(float(i_light & 2047u), float((i_light >> 11) & 2047u), float(i_light >> 22));
+    f_luv = (base + q.xzy) * vec3(LIGHT_INV_X, LIGHT_INV_Y, LIGHT_INV_Z);
     p.y -= float(drop) * 0.125;
 
     vec3 rel = p + i_origin;
     vec3 world = rel + pc.origin.xyz;
     float t = pc.fog.z;
-    // Night: daylight scales everything lit by the sky; face shade and AO stay.
-    float light = FACE_SHADE[face] * AO_CURVE[ao] * pc.fog.w;
+    // Face shade and AO darken both kinds of light; daylight scales only the sky's.
+    float shade = FACE_SHADE[face] * AO_CURVE[ao];
     vec2 scroll = vec2(0.0);
     if (layer == WATER_LAYER) {
         // Only vertices on a surface's top edge carry a drop; the side
@@ -66,7 +84,8 @@ void main()
     } else if (layer - FIRE_FIRST < 4u) {
         // Flames: a flip-book at 8 frames/s, full brightness day and night.
         layer = FIRE_FIRST + (uint(t * 8.0) + layer) % 4u;
-        light = 1.0;
+        shade = 1.0;
+        f_luv = LIGHT_FULL;
     }
     gl_Position = pc.view_proj * vec4(rel, 1.0);
 
@@ -74,5 +93,8 @@ void main()
     // tile the texture with a REPEAT sampler at no extra vertex cost.
     f_uv = (face < 2u ? vec2(p.z, -p.y) : (face < 4u ? p.xz : vec2(p.x, -p.y))) + scroll;
     f_layer = layer;
-    f_light_fog = vec2(light, clamp((length(rel) - pc.fog.x) * pc.fog.y, 0.0, 1.0));
+    // Eight components to interpolate (uv 2, layer 1, shade and fog 2,
+    // light 3) fill two vec4 slots; daylight is applied per pixel instead
+    // of costing a ninth, which Intel pays for with a third slot.
+    f_shade = vec2(shade, clamp((length(rel) - pc.fog.x) * pc.fog.y, 0.0, 1.0));
 }

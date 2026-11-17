@@ -79,16 +79,18 @@ the underground series is in progress.
 
 **Goal:** dark caves and nights, light from fire, lamps and hot blocks,
 and a sun that moves.
-**Status:** not started. Faces are lit by face shading, baked AO and one
-daylight value for the whole world.
+**Status:** the light engine is in: coloured block light and sky light
+by flood fill, a 3D light texture per section, torches, lamps, foxfire
+and hot-block glow. Next: the visual polish.
 **Design:** [docs/design/lighting.md](docs/design/lighting.md)
 
-- [ ] Choose how light reaches the shader (a second vertex stream or a
-      light texture per section), measured on integrated GPUs and lavapipe
-- [ ] Sky light and block light by flood fill on the workers, with
-      incremental relighting on edits
-- [ ] Emitters: campfire, furnace, lava, torches, lamps; glow from
+- [x] Choose how light reaches the shader: a light texture per section
+- [x] Sky light and block light by flood fill on the workers, with
+      relighting on edits
+- [x] Emitters: campfire, lava, torches, lamps, foxfire; glow from
       `thermo` temperature
+- [ ] HDR with tone mapping and a brightness setting, bloom, fog tinted
+      by the light, a smooth-lighting toggle
 - [ ] A held torch or lantern
 - [ ] Sun and moon direction and colour by time of day; a brightness
       setting
@@ -177,7 +179,7 @@ mortar that makes walls strong.
 
 - [ ] A shape table in the mesher: slabs, stairs, fences, panes, doors
 - [ ] Doors, trapdoors, chests, beds, tables, chairs
-- [ ] Lamps and torches (after lighting)
+- [x] Lamps and torches (after lighting)
 - [ ] Lime mortar, then cement and concrete
 
 ### User interface

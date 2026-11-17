@@ -1,6 +1,7 @@
 #include "thermo.h"
 #include "health.h"
 #include "inventory.h"
+#include "light.h"
 #include "mem.h"
 #include "worldgen.h"
 
@@ -170,6 +171,7 @@ typedef struct {
     int32_t nb[6];     /* neighbour cell, -1 for the ambient */
     uint8_t mat, kind, freezable, shelter;
     uint8_t dyn;       /* bit f set for an air-air vertical face */
+    uint16_t glow;     /* the light it gives off (light_glow), as last announced */
     double exposed;    /* survival s a fuel cell has touched lava (ignition) */
 } cell;
 
@@ -804,6 +806,35 @@ static void ignite(thermo *t, world *w, double dts)
     }
 }
 
+/* Hot solids glow. Lava is a light source of its own (light_emission) and
+ * hot air is transparent, so only solid cells count. A cell's light is
+ * announced only when its level changes, which at a few K per level is
+ * rare enough that a cooling lava flow relights its columns now and then,
+ * not every step. */
+static void glow(thermo *t, world *w)
+{
+    for (int i = 0; i < t->count; i++) {
+        cell *c = &t->cells[i];
+        uint16_t g = c->kind == K_SOLID ? light_glow((float)(c->amb + c->dev)) : 0;
+        if (g == c->glow) continue;
+        c->glow = g;
+        world_light_touch(w, c->x, c->z);
+    }
+}
+
+int thermo_glow(const void *user, int x0, int z0, int top, light_emitter *out, int cap)
+{
+    const thermo *t = user;
+    int n = 0;
+    for (int i = 0; i < t->count && n < cap; i++) {
+        const cell *c = &t->cells[i];
+        int x = c->x - x0, z = c->z - z0;
+        if (!c->glow || x < 0 || z < 0 || x >= LIGHT_REGION || z >= LIGHT_REGION || c->y >= top) continue;
+        out[n++] = (light_emitter){(int16_t)x, (int16_t)c->y, (int16_t)z, c->glow};
+    }
+    return n;
+}
+
 /* Melting and freezing that completed this call. */
 static void convert(thermo *t, world *w)
 {
@@ -1072,6 +1103,7 @@ void thermo_step(thermo *t, world *w, double dt, dvec3 player)
     for (int s = 0; s < n; s++) substep(t, h);
     convert(t, w);
     ignite(t, w, dts);
+    glow(t, w);
 }
 
 int thermo_add_fuel(thermo *t, world *w, int x, int y, int z, int units)

@@ -1,6 +1,7 @@
 #include "renderer.h"
 #include "gpucaps.h"
 #include "gpupool.h"
+#include "light.h"
 #include "log.h"
 #include "mem.h"
 #include "mesher.h"
@@ -24,6 +25,19 @@
 #define FRAMES 2
 #define MAX_SWAP_IMAGES 8
 #define STAGING_SIZE (4u << 20)
+/* Light texels per frame: 179 sections at 2 bytes a texel, enough for a
+ * full column of edits plus streaming; more waits a frame. */
+#define LIGHT_STAGING (2u << 20)
+#define LIGHT_SLOT_BYTES(texel) ((VkDeviceSize)LIGHT_TEX_VOL * (texel))
+/* Reserved atlas slots. FULL is full block light and no sky light, for
+ * flames and entities, which bring their own brightness and must not
+ * take daylight; sections of open sky or of darkness share one. */
+#define LIGHT_SLOT_FULL 0u
+#define LIGHT_SLOT_SKY 1u
+#define LIGHT_SLOT_DARK 2u
+#define LIGHT_SLOT_FIRST 3u
+/* Torches drawn, two instances each (stick, flame). */
+#define MAX_PROPS 1024
 #define POOL_GRANULE 64u      /* vertices */
 #define MAX_POOL_BLOCKS 8
 #define POOL_GROW_MB 16u
@@ -98,6 +112,10 @@ typedef struct {
     int timed;                    /* its last submission wrote both timestamps */
     gbuf ind;                     /* multi-draw indirect commands for the terrain (GPUCAP_MDI) */
     uint32_t ind_cap;             /* commands ind holds; 0 without GPUCAP_MDI */
+    gbuf lstage;                  /* light texels on their way to the atlas */
+    VkDeviceSize lstage_used;
+    VkBufferImageCopy *lcopies;   /* one per section, LIGHT_STAGING / slot size at most */
+    uint32_t lcopy_count;
 } frame;
 
 /* Chunk meshes live in a few big vertex buffers ("pool blocks"). The first
@@ -106,6 +124,12 @@ typedef struct {
     gbuf buf;
     gpupool alloc;
 } pool_block;
+
+/* A light atlas slot waiting for the GPU to stop reading it. */
+typedef struct {
+    uint32_t slot;
+    uint64_t serial;
+} light_slot_free;
 
 /* A pool range waiting for the GPU to stop reading it. */
 typedef struct {
@@ -124,7 +148,7 @@ typedef struct {
 } visible;
 
 /* Push constants, split by stage so the vertex-only range is all a draw
- * ever updates. 112 bytes: inside the 128 every implementation offers. */
+ * ever updates. 128 bytes: the most every implementation offers. */
 typedef struct {
     float view_proj[16];
     float origin[4];
@@ -133,6 +157,7 @@ typedef struct {
 
 typedef struct {
     float color[4];
+    float light[4]; /* x: log2(daylight) / LIGHT_CURVE_K, the sky's level shift */
 } push_frag;
 
 typedef struct {
@@ -147,7 +172,9 @@ typedef struct {
 
 #define PUSH_FRAG_OFFSET 96u
 _Static_assert(sizeof(push_vert) == PUSH_FRAG_OFFSET, "push_vert must end where push_frag starts");
-_Static_assert(MAX_VIS * 16u + (MAX_BODIES + RENDER_MAX_ENTS + 16) * sizeof(entity_instance) + DYN_LINES_BYTES + 64 <=
+_Static_assert(PUSH_FRAG_OFFSET + sizeof(push_frag) <= 128, "maxPushConstantsSize is at least 128");
+_Static_assert(MAX_VIS * 16u + (MAX_BODIES + RENDER_MAX_ENTS + 2 * MAX_PROPS + 16) * sizeof(entity_instance) +
+                       DYN_LINES_BYTES + 64 <=
                    DYN_SIZE,
                "per-frame dynamic buffer too small");
 
@@ -273,6 +300,27 @@ struct renderer {
     PFN_vkGetPhysicalDeviceMemoryProperties2 memprops2;
     uint32_t vram_used_mb, vram_budget_mb;
     int pool_full_warned;
+
+    /* Light: every meshed section's texels (light.h) in one 3D image of
+     * LIGHT_TEX^3 slots, in GENERAL layout for good: copies only ever write
+     * slots no frame in flight reads (frees wait like pool ranges), so no
+     * layout transitions or frame-to-frame barriers are needed. */
+    VkImage light_img;
+    VkDeviceMemory light_mem;
+    VkImageView light_view;
+    VkSampler light_sampler;
+    uint32_t *light_stack;        /* free slots */
+    light_slot_free *light_frees; /* oldest first */
+    entity_instance *torch_insts; /* this frame's torch instances */
+    VkFormat light_fmt;           /* B4G4R4A4 (GPUCAP_LIGHT4) or RGBA8 */
+    uint32_t light_texel;         /* bytes per texel */
+    int light_n[3];               /* slots per axis */
+    uint32_t light_slots;
+    uint32_t light_stack_count;
+    int light_free_count, light_free_cap;
+    uint32_t light_peak;
+    int light_full_warned;
+    int torch_count;
 };
 
 /* ------------------------------------------------------------- utilities */
@@ -678,6 +726,18 @@ static void query_offer(const renderer *r, const render_opts *o, gpu_offer *off)
     off->ext_memory_budget = has_device_ext(r->pd, "VK_EXT_memory_budget");
     off->portability_subset = has_device_ext(r->pd, "VK_KHR_portability_subset");
     off->present_relaxed = has_present_mode(r, VK_PRESENT_MODE_FIFO_RELAXED_KHR);
+    VkFormatProperties lfp = {0};
+    vkGetPhysicalDeviceFormatProperties(r->pd, VK_FORMAT_B4G4R4A4_UNORM_PACK16, &lfp);
+    VkFormatFeatureFlags lneed = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                                 VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+    VkImageFormatProperties lip = {0};
+    off->light_4bit = (lfp.optimalTilingFeatures & lneed) == lneed &&
+                      vkGetPhysicalDeviceImageFormatProperties(r->pd, VK_FORMAT_B4G4R4A4_UNORM_PACK16, VK_IMAGE_TYPE_3D,
+                                                               VK_IMAGE_TILING_OPTIMAL,
+                                                               VK_IMAGE_USAGE_SAMPLED_BIT |
+                                                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                                               0, &lip) == VK_SUCCESS &&
+                      lip.maxExtent.depth >= LIGHT_TEX;
     off->pipeline_cache = !o->pipeline_cache || o->pipeline_cache[0];
 
     PFN_vkGetPhysicalDeviceFeatures2 features2 = (PFN_vkGetPhysicalDeviceFeatures2)
@@ -1261,15 +1321,21 @@ typedef struct {
     int depth_test, depth_write, blend;
     VkCullModeFlags cull;
     VkPipelineLayout layout;      /* 0: the world layout */
+    const VkSpecializationInfo *vspec;
 } pipe_desc;
 
 static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
 {
     VkPipelineShaderStageCreateInfo stages[2] = {
-        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
-         .module = d->vs, .pName = "main"},
-        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-         .module = d->fs, .pName = "main"},
+        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+         .stage = VK_SHADER_STAGE_VERTEX_BIT,
+         .module = d->vs,
+         .pName = "main",
+         .pSpecializationInfo = d->vspec},
+        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+         .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+         .module = d->fs,
+         .pName = "main"},
     };
     VkPipelineVertexInputStateCreateInfo vin = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
                                                 .vertexBindingDescriptionCount = d->binding_count,
@@ -1330,10 +1396,18 @@ static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
 
 static void create_pipelines(renderer *r)
 {
-    VkDescriptorSetLayoutBinding b = {.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                      .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT};
+    /* 0: the block textures, 1: the light atlas. */
+    VkDescriptorSetLayoutBinding b[2] = {{.binding = 0,
+                                          .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                          .descriptorCount = 1,
+                                          .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT},
+                                         {.binding = 1,
+                                          .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                          .descriptorCount = 1,
+                                          .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT}};
     VkDescriptorSetLayoutCreateInfo dl = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                                          .bindingCount = 1, .pBindings = &b};
+                                          .bindingCount = 2,
+                                          .pBindings = b};
     VK_CHECK(vkCreateDescriptorSetLayout(r->dev, &dl, r->ac, &r->dsl));
     VkPushConstantRange pcr[2] = {{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push_vert)},
                                   {VK_SHADER_STAGE_FRAGMENT_BIT, PUSH_FRAG_OFFSET, sizeof(push_frag)}};
@@ -1348,12 +1422,22 @@ static void create_pipelines(renderer *r)
     VkShaderModule lvs = make_module(r, SPV_LINE_VERT, sizeof SPV_LINE_VERT);
     VkShaderModule lfs = make_module(r, SPV_LINE_FRAG, sizeof SPV_LINE_FRAG);
 
-    /* Sections: packed vertices, plus the section origin as a per-instance
-     * attribute picked by firstInstance, so a draw is a single call. */
+    /* Sections: packed vertices, plus the section origin and its light
+     * slot as per-instance attributes picked by firstInstance, so a draw is
+     * a single call. */
     VkVertexInputBindingDescription block_bind[2] = {{0, sizeof(uint32_t), VK_VERTEX_INPUT_RATE_VERTEX},
                                                      {1, sizeof(float) * 4, VK_VERTEX_INPUT_RATE_INSTANCE}};
-    VkVertexInputAttributeDescription block_attr[2] = {{0, 0, VK_FORMAT_R32_UINT, 0},
-                                                       {1, 1, VK_FORMAT_R32G32B32_SFLOAT, 0}};
+    VkVertexInputAttributeDescription block_attr[3] = {{0, 0, VK_FORMAT_R32_UINT, 0},
+                                                       {1, 1, VK_FORMAT_R32G32B32_SFLOAT, 0},
+                                                       {2, 1, VK_FORMAT_R32_UINT, sizeof(float) * 3}};
+    /* The light atlas's size, as constants: the shaders turn a slot's texel
+     * offset into a coordinate with one multiply. */
+    float inv[3] = {0};
+    for (int i = 0; i < 3; i++) inv[i] = 1.0f / (float)(r->light_n[i] * LIGHT_TEX);
+    VkSpecializationMapEntry se[3] = {{0, 0, sizeof(float)},
+                                      {1, sizeof(float), sizeof(float)},
+                                      {2, 2 * sizeof(float), sizeof(float)}};
+    VkSpecializationInfo spec = {3, se, sizeof inv, inv};
     /* Entities: a static unit cube instanced per body, item or particle. */
     VkVertexInputBindingDescription ent_bind[2] = {{0, sizeof(uint32_t), VK_VERTEX_INPUT_RATE_VERTEX},
                                                    {1, sizeof(entity_instance), VK_VERTEX_INPUT_RATE_INSTANCE}};
@@ -1372,13 +1456,14 @@ static void create_pipelines(renderer *r)
                    block_bind,
                    2,
                    block_attr,
-                   2,
+                   3,
                    VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
                    1,
                    1,
                    0,
                    VK_CULL_MODE_BACK_BIT,
-                   VK_NULL_HANDLE};
+                   VK_NULL_HANDLE,
+                   &spec};
     r->p_opaque = make_pipeline(r, &d);
     d.depth_write = 0;
     d.blend = 1;
@@ -1394,14 +1479,25 @@ static void create_pipelines(renderer *r)
                    1,
                    0,
                    VK_CULL_MODE_BACK_BIT,
-                   VK_NULL_HANDLE};
+                   VK_NULL_HANDLE,
+                   &spec};
     r->p_entity = make_pipeline(r, &e);
     e.depth_write = 0;
     e.blend = 1;
     r->p_entity_trans = make_pipeline(r, &e);
-    pipe_desc l = {
-        lvs,           lfs, &line_bind, 1, &line_attr, 1, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, 1, 0, 0, VK_CULL_MODE_NONE,
-        VK_NULL_HANDLE};
+    pipe_desc l = {lvs,
+                   lfs,
+                   &line_bind,
+                   1,
+                   &line_attr,
+                   1,
+                   VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
+                   1,
+                   0,
+                   0,
+                   VK_CULL_MODE_NONE,
+                   VK_NULL_HANDLE,
+                   NULL};
     r->p_line_world = make_pipeline(r, &l);
     l.depth_test = 0;
     r->p_line_screen = make_pipeline(r, &l);
@@ -1437,8 +1533,8 @@ static void create_ui_pipeline(renderer *r)
     VkVertexInputAttributeDescription attr[3] = {{0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(ui_vertex, x)},
                                                  {1, 0, VK_FORMAT_R16G16_UNORM, offsetof(ui_vertex, u)},
                                                  {2, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(ui_vertex, rgba)}};
-    pipe_desc d = {vs,          fs, &bind, 1, attr, 3, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, 0, 1, VK_CULL_MODE_NONE,
-                   r->ui_layout};
+    pipe_desc d = {
+        vs, fs, &bind, 1, attr, 3, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, 0, 1, VK_CULL_MODE_NONE, r->ui_layout, NULL};
     r->p_ui = make_pipeline(r, &d);
     vkDestroyShaderModule(r->dev, vs, r->ac);
     vkDestroyShaderModule(r->dev, fs, r->ac);
@@ -1451,7 +1547,8 @@ static void create_ui_pipeline(renderer *r)
     vs = make_module(r, SPV_POST_VERT, sizeof SPV_POST_VERT);
     fs = make_module(r, SPV_POST_FRAG, sizeof SPV_POST_FRAG);
     pipe_desc p = {
-        vs, fs, NULL, 0, NULL, 0, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, 0, 0, VK_CULL_MODE_NONE, r->post_layout};
+        vs,  fs, NULL, 0, NULL, 0, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, 0, 0, VK_CULL_MODE_NONE, r->post_layout,
+        NULL};
     r->p_post = make_pipeline(r, &p);
     vkDestroyShaderModule(r->dev, vs, r->ac);
     vkDestroyShaderModule(r->dev, fs, r->ac);
@@ -1682,7 +1779,7 @@ static void create_texture(renderer *r)
     /* One set per sampler, written once: switching filtering only changes
      * which set the next recorded frame binds, so frames in flight are never
      * touched. */
-    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2};
+    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4};
     VkDescriptorPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
                                      .maxSets = 2,
                                      .poolSizeCount = 1,
@@ -1694,17 +1791,141 @@ static void create_texture(renderer *r)
                                        .descriptorSetCount = 2,
                                        .pSetLayouts = layouts};
     VK_CHECK(vkAllocateDescriptorSets(r->dev, &dai, r->dsets));
-    VkDescriptorImageInfo dii[2] = {{r->sampler, r->tex_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                                    {r->sampler_filtered, r->tex_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
-    VkWriteDescriptorSet w[2] = {0};
-    for (int i = 0; i < 2; i++)
+    VkDescriptorImageInfo dii[3] = {{r->sampler, r->tex_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                                    {r->sampler_filtered, r->tex_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                                    {r->light_sampler, r->light_view, VK_IMAGE_LAYOUT_GENERAL}};
+    VkWriteDescriptorSet w[4] = {0};
+    for (int i = 0; i < 4; i++)
         w[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                      .dstSet = r->dsets[i],
-                                      .dstBinding = 0,
+                                      .dstSet = r->dsets[i & 1],
+                                      .dstBinding = (uint32_t)(i >> 1),
                                       .descriptorCount = 1,
                                       .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                      .pImageInfo = &dii[i]};
-    vkUpdateDescriptorSets(r->dev, 2, w, 0, NULL);
+                                      .pImageInfo = &dii[i < 2 ? i : 2]};
+    vkUpdateDescriptorSets(r->dev, 4, w, 0, NULL);
+}
+
+/* ------------------------------------------------------------------ light */
+
+/* How many slots and in which format, before the pipelines are built (the
+ * shaders get the atlas size as constants). Meshed sections average under
+ * one non-uniform slot per column at the surface; caves and buildings
+ * raise that, so the atlas holds three per column in view. */
+static void light_plan(renderer *r)
+{
+    r->light_fmt = (r->caps.enabled & GPUCAP_LIGHT4) ? VK_FORMAT_B4G4R4A4_UNORM_PACK16 : VK_FORMAT_R8G8B8A8_UNORM;
+    r->light_texel = (r->caps.enabled & GPUCAP_LIGHT4) ? 2u : 4u;
+    /* Sections that need their own slot (neither all open sky nor all
+     * dark) peaked at 6.7, 8.5 and 9.8 per (radius + 1)^2 at radius 8, 16
+     * and 32 once the world had loaded (seeds 1337 and 7): mountains and
+     * caves fill more of a column farther out. A full atlas lights the
+     * rest as open sky and says so in the log. */
+    int want = 12 * (r->radius + 1) * (r->radius + 1) + (int)LIGHT_SLOT_FIRST;
+    r->light_slots = (uint32_t)light_atlas_layout(r->props.limits.maxImageDimension3D, want, r->light_n);
+}
+
+/* Writes a section's texels in the atlas's format. */
+static void light_pack(const renderer *r, const uint16_t *src, uint16_t fill, uint8_t *dst)
+{
+    if (r->light_texel == 2) {
+        if (src) memcpy(dst, src, sizeof(uint16_t) * LIGHT_TEX_VOL);
+        else
+            for (int i = 0; i < LIGHT_TEX_VOL; i++) memcpy(dst + 2 * i, &fill, 2);
+        return;
+    }
+    /* RGBA8: each 4-bit level becomes a byte, 15 -> 255. */
+    for (int i = 0; i < LIGHT_TEX_VOL; i++) {
+        uint16_t l = src ? src[i] : fill;
+        dst[4 * i + 0] = (uint8_t)(LIGHT_R(l) * 17u);
+        dst[4 * i + 1] = (uint8_t)(LIGHT_G(l) * 17u);
+        dst[4 * i + 2] = (uint8_t)(LIGHT_B(l) * 17u);
+        dst[4 * i + 3] = (uint8_t)(LIGHT_SKY(l) * 17u);
+    }
+}
+
+static VkBufferImageCopy light_region_of(const renderer *r, uint32_t slot, VkDeviceSize offset)
+{
+    uint32_t b = light_slot_base((int)slot, r->light_n);
+    return (VkBufferImageCopy){.bufferOffset = offset,
+                               .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                               .imageOffset = {(int32_t)(b & 2047u), (int32_t)(b >> 11 & 2047u), (int32_t)(b >> 22)},
+                               .imageExtent = {LIGHT_TEX, LIGHT_TEX, LIGHT_TEX}};
+}
+
+/* The atlas, its reserved slots filled, and the free list. Image axes are
+ * the texels' x, z, y: mesh_pidx's order, so a section copies as one box. */
+static void create_light(renderer *r)
+{
+    VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                            .imageType = VK_IMAGE_TYPE_3D,
+                            .format = r->light_fmt,
+                            .extent = {(uint32_t)(r->light_n[0] * LIGHT_TEX), (uint32_t)(r->light_n[1] * LIGHT_TEX),
+                                       (uint32_t)(r->light_n[2] * LIGHT_TEX)},
+                            .mipLevels = 1,
+                            .arrayLayers = 1,
+                            .samples = VK_SAMPLE_COUNT_1_BIT,
+                            .tiling = VK_IMAGE_TILING_OPTIMAL,
+                            .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+    VK_CHECK(vkCreateImage(r->dev, &ii, r->ac, &r->light_img));
+    VkMemoryRequirements req = {0};
+    vkGetImageMemoryRequirements(r->dev, r->light_img, &req);
+    VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                               .allocationSize = req.size,
+                               .memoryTypeIndex = find_memtype(r, req.memoryTypeBits,
+                                                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0)};
+    VK_CHECK(vkAllocateMemory(r->dev, &ai, r->ac, &r->light_mem));
+    VK_CHECK(vkBindImageMemory(r->dev, r->light_img, r->light_mem, 0));
+    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                .image = r->light_img,
+                                .viewType = VK_IMAGE_VIEW_TYPE_3D,
+                                .format = r->light_fmt,
+                                .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    VK_CHECK(vkCreateImageView(r->dev, &vi, r->ac, &r->light_view));
+    /* Linear: light blends smoothly across a face, from the cell in front
+     * of each corner. Slots never bleed: coordinates stay inside them. */
+    VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                              .magFilter = VK_FILTER_LINEAR,
+                              .minFilter = VK_FILTER_LINEAR,
+                              .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+                              .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                              .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                              .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE};
+    VK_CHECK(vkCreateSampler(r->dev, &si, r->ac, &r->light_sampler));
+
+    VkDeviceSize slot_bytes = LIGHT_SLOT_BYTES(r->light_texel);
+    gbuf st = {0};
+    buffer_create(r, &st, slot_bytes * LIGHT_SLOT_FIRST, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
+    const uint16_t fills[LIGHT_SLOT_FIRST] = {LIGHT_PACK(0, 15, 15, 15), LIGHT_OPEN_SKY, 0};
+    VkBufferImageCopy regions[LIGHT_SLOT_FIRST] = {0};
+    for (uint32_t i = 0; i < LIGHT_SLOT_FIRST; i++) {
+        light_pack(r, NULL, fills[i], (uint8_t *)st.map + slot_bytes * i);
+        regions[i] = light_region_of(r, i, slot_bytes * i);
+    }
+    VkCommandBuffer cmd = one_shot_begin(r);
+    image_barrier(r, cmd, r->light_img, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                  VK_PIPELINE_STAGE_TRANSFER_BIT);
+    vkCmdCopyBufferToImage(cmd, st.buf, r->light_img, VK_IMAGE_LAYOUT_GENERAL, LIGHT_SLOT_FIRST, regions);
+    memory_barrier(r, cmd, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                   VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    one_shot_end(r, cmd);
+    buffer_destroy(r, &st);
+
+    /* Lowest slots on top, so the atlas fills from one corner. */
+    r->light_stack = mem_alloc(mem_array_size(r->light_slots, sizeof *r->light_stack));
+    for (uint32_t s = r->light_slots; s-- > LIGHT_SLOT_FIRST;) r->light_stack[r->light_stack_count++] = s;
+    uint32_t per_frame = (uint32_t)(LIGHT_STAGING / slot_bytes);
+    for (int i = 0; i < FRAMES; i++) {
+        frame *f = &r->frames[i];
+        buffer_create(r, &f->lstage, LIGHT_STAGING, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
+        f->lcopies = mem_alloc(mem_array_size(per_frame, sizeof *f->lcopies));
+    }
+    r->torch_insts = mem_alloc(mem_array_size(MAX_PROPS * 2, sizeof *r->torch_insts));
+    log_info("light atlas: %d x %d x %d slots, %.1f MB (%s)", r->light_n[0], r->light_n[1], r->light_n[2],
+             (double)req.size / (1024.0 * 1024.0), r->light_texel == 2 ? "4-bit" : "8-bit");
 }
 
 static uint32_t pack_cube_vertex(const int p[3], int face)
@@ -1847,6 +2068,13 @@ static void release_frees(renderer *r)
 {
     uint64_t done = 0;
     if (r->semaphore_value(r->dev, r->timeline, &done) == VK_SUCCESS && done > r->completed) r->completed = done;
+    int k = 0;
+    while (k < r->light_free_count && r->light_frees[k].serial <= r->completed)
+        r->light_stack[r->light_stack_count++] = r->light_frees[k++].slot;
+    if (k) {
+        r->light_free_count -= k;
+        memmove(r->light_frees, r->light_frees + k, sizeof *r->light_frees * (size_t)r->light_free_count);
+    }
     int n = 0;
     while (n < r->free_count && r->frees[n].serial <= r->completed) {
         const pool_free *pf = &r->frees[n++];
@@ -1933,11 +2161,43 @@ static void create_frames(renderer *r, uint32_t pool_mb)
 
 static void on_mesh_free(void *user, section_mesh *m)
 {
-    if (m->vtx_capacity) defer_free(user, m->block, m->vtx_offset, m->vtx_capacity);
+    renderer *r = user;
+    if (m->vtx_capacity) defer_free(r, m->block, m->vtx_offset, m->vtx_capacity);
+    if (m->light_slot >= LIGHT_SLOT_FIRST) {
+        if (r->light_free_count == r->light_free_cap) {
+            r->light_free_cap = r->light_free_cap ? r->light_free_cap * 2 : 64;
+            r->light_frees = mem_realloc(r->light_frees,
+                                         mem_array_size((size_t)r->light_free_cap, sizeof *r->light_frees));
+        }
+        r->light_frees[r->light_free_count++] = (light_slot_free){m->light_slot, r->submitted};
+    }
+    mem_free(m->props);
     memset(m, 0, sizeof *m);
 }
 
-static int on_mesh_ready(void *user, column *c, int sy, const uint32_t *verts, const mesh_counts *mc)
+/* The slot for a section's light: a shared one when it is uniform sky or
+ * darkness, else a slot of its own with its texels queued for this frame.
+ * The caller has checked there is staging room. */
+static uint32_t light_upload(renderer *r, frame *f, const mesh_extra *x)
+{
+    if (!x->light && x->light_fill == LIGHT_OPEN_SKY) return LIGHT_SLOT_SKY;
+    if (!x->light && x->light_fill == 0) return LIGHT_SLOT_DARK;
+    if (!r->light_stack_count) {
+        if (!r->light_full_warned) log_warn("light atlas is full; some terrain is lit as open sky");
+        r->light_full_warned = 1;
+        return LIGHT_SLOT_SKY;
+    }
+    uint32_t slot = r->light_stack[--r->light_stack_count];
+    uint32_t used = r->light_slots - r->light_stack_count;
+    if (used > r->light_peak) r->light_peak = used;
+    light_pack(r, x->light, x->light_fill, (uint8_t *)f->lstage.map + f->lstage_used);
+    f->lcopies[f->lcopy_count++] = light_region_of(r, slot, f->lstage_used);
+    f->lstage_used += LIGHT_SLOT_BYTES(r->light_texel);
+    return slot;
+}
+
+static int on_mesh_ready(void *user, column *c, int sy, const uint32_t *verts, const mesh_counts *mc,
+                         const mesh_extra *x)
 {
     renderer *r = user;
     section_mesh *m = &c->mesh[sy];
@@ -1947,6 +2207,7 @@ static int on_mesh_ready(void *user, column *c, int sy, const uint32_t *verts, c
 
     if (nverts && !r->pool_host_visible && (!r->frame_active || f->staging_used + bytes > STAGING_SIZE))
         return 0; /* no staging room this frame: the world keeps it and retries */
+    if (nverts && (!r->frame_active || f->lstage_used + LIGHT_SLOT_BYTES(r->light_texel) > LIGHT_STAGING)) return 0;
 
     uint32_t start = 0, got = 0;
     int blk = 0;
@@ -1961,6 +2222,11 @@ static int on_mesh_ready(void *user, column *c, int sy, const uint32_t *verts, c
         }
     }
     on_mesh_free(r, m);
+    if (x->prop_count) {
+        m->props = mem_alloc(mem_array_size((size_t)x->prop_count, sizeof *m->props));
+        memcpy(m->props, x->props, sizeof *m->props * (size_t)x->prop_count);
+        m->prop_count = (uint16_t)x->prop_count;
+    }
     if (!nverts) return 1;
 
     if (r->pool_host_visible) {
@@ -1981,6 +2247,7 @@ static int on_mesh_ready(void *user, column *c, int sy, const uint32_t *verts, c
     m->trans_quads = mc->trans;
     memcpy(m->face_end, mc->face_end, sizeof m->face_end);
     m->block = (uint8_t)blk;
+    m->light_slot = light_upload(r, f, x);
     return 1;
 }
 
@@ -2023,6 +2290,7 @@ renderer *renderer_create(GLFWwindow *win, const render_opts *o)
     size_t cache_size = 0;
     void *cache = create_pipeline_cache(r, o, &cache_size);
     double t0 = glfwGetTime();
+    light_plan(r);
     create_pipelines(r);
     create_ui_pipeline(r);
     log_info("pipelines built in %.1f ms (%s)", (glfwGetTime() - t0) * 1000.0,
@@ -2044,6 +2312,7 @@ renderer *renderer_create(GLFWwindow *win, const render_opts *o)
     if (pool_mb > 512) pool_mb = 512;
     create_frames(r, pool_mb);
     create_queries(r);
+    create_light(r);
     create_texture(r);
     create_font(r);
     create_static_buffers(r);
@@ -2063,7 +2332,17 @@ void renderer_destroy(renderer *r)
         buffer_destroy(r, &f->ind);
         vkDestroySemaphore(r->dev, f->image_ready, r->ac);
         for (int b = 0; b < MAX_POOL_BLOCKS; b++) mem_free(f->copies[b].v);
+        buffer_destroy(r, &f->lstage);
+        mem_free(f->lcopies);
     }
+    log_info("light atlas: %u of %u slots used at most", r->light_peak, r->light_slots);
+    vkDestroySampler(r->dev, r->light_sampler, r->ac);
+    vkDestroyImageView(r->dev, r->light_view, r->ac);
+    vkDestroyImage(r->dev, r->light_img, r->ac);
+    vkFreeMemory(r->dev, r->light_mem, r->ac);
+    mem_free(r->light_stack);
+    mem_free(r->light_frees);
+    mem_free(r->torch_insts);
     for (int b = 0; b < r->pool_blocks; b++) {
         buffer_destroy(r, &r->pool[b].buf);
         gpupool_destroy(&r->pool[b].alloc);
@@ -2163,6 +2442,8 @@ int renderer_begin_frame(renderer *r)
     release_frees(r);
     f->staging_used = 0;
     for (int b = 0; b < MAX_POOL_BLOCKS; b++) f->copies[b].count = 0;
+    f->lstage_used = 0;
+    f->lcopy_count = 0;
 
     VkResult res = vkAcquireNextImageKHR(r->dev, r->swap, UINT64_MAX, f->image_ready, VK_NULL_HANDLE,
                                          &r->image_index);
@@ -2277,9 +2558,27 @@ static uint32_t facing_groups(vec3 o)
  * height first, so the list is roughly front to back without sorting. Each
  * origin is written to the dynamic buffer as that draw's instance
  * attribute. */
+/* A torch: a stick of planks with a flame on top, in the cell's light. */
+static void add_torch(renderer *r, const world *w, const render_view *v, int x, int y, int z, float daylight)
+{
+    if (r->torch_count + 2 > MAX_PROPS * 2) return;
+    float px = (float)((double)x + 0.5 - v->eye.x), py = (float)((double)y - v->eye.y);
+    float pz = (float)((double)z + 0.5 - v->eye.z);
+    float light = light_brightness(world_light(w, x, y, z), daylight);
+    r->torch_insts[r->torch_count++] = (entity_instance){{px, py + 0.3125f, pz},
+                                                         (uint32_t)T_PLANKS * 0x010101u | ENTITY_TEX_METRIC,
+                                                         {0.0f, 0.0f, 0.0f, 1.0f},
+                                                         {0.125f, 0.625f, 0.125f},
+                                                         light};
+    r->torch_insts[r->torch_count++] = (entity_instance){
+        {px, py + 0.72f, pz}, (uint32_t)T_FIRE0 * 0x010101u, {0.0f, 0.0f, 0.0f, 1.0f}, {0.19f, 0.22f, 0.19f}, 1.0f};
+}
+
 static int collect_visible(renderer *r, const world *w, const render_view *v, const frustum *fr, float (*origins)[4])
 {
     int nvis = 0;
+    float daylight = v->daylight > 0.0f ? v->daylight : 1.0f;
+    r->torch_count = 0;
     int ccx = chunk_of((int)floor(v->eye.x)), ccz = chunk_of((int)floor(v->eye.z));
     int ey = (int)floor(v->eye.y) / SECTION_H;
     if (ey < 0) ey = 0;
@@ -2301,14 +2600,19 @@ static int collect_visible(renderer *r, const world *w, const render_view *v, co
             int sy = ey + ((k & 1) ? (k + 1) / 2 : -(k / 2));
             if (sy < 0 || sy >= SECTIONS) continue;
             const section_mesh *m = &c->mesh[sy];
-            if (!m->vtx_capacity) continue;
+            if (!mesh_held(m)) continue;
             vec3 o = v3(ox, (float)((double)(sy * SECTION_H) - v->eye.y), oz);
             if (!frustum_box(fr, o, v3(16, 16, 16))) continue;
+            for (int p = 0; p < m->prop_count; p++)
+                add_torch(r, w, v, c->cx * CHUNK_W + (m->props[p] & 15), sy * SECTION_H + (m->props[p] >> 8),
+                          c->cz * CHUNK_W + (m->props[p] >> 4 & 15), daylight);
+            if (!m->vtx_capacity) continue;
             if (nvis == r->vis_cap || nvis == MAX_VIS) break;
+            uint32_t slot = light_slot_base((int)m->light_slot, r->light_n);
             origins[nvis][0] = o.x;
             origins[nvis][1] = o.y;
             origins[nvis][2] = o.z;
-            origins[nvis][3] = 0.0f;
+            memcpy(&origins[nvis][3], &slot, sizeof slot);
             r->vis[nvis++] = (visible){m, facing_groups(o)};
         }
     }
@@ -2481,6 +2785,11 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         memory_barrier(r, cmd, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT,
                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT);
     }
+    if (f->lcopy_count) {
+        vkCmdCopyBufferToImage(cmd, f->lstage.buf, r->light_img, VK_IMAGE_LAYOUT_GENERAL, f->lcopy_count, f->lcopies);
+        memory_barrier(r, cmd, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    }
 
     /* Camera and fog. */
     float aspect = (float)r->extent.width / (float)r->extent.height;
@@ -2512,6 +2821,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     push_frag pf = {0};
     for (int i = 0; i < 3; i++) pf.color[i] = r->swap_srgb ? srgb_to_linear(fogc[i]) : fogc[i];
     pf.color[3] = r->filtering ? 1.0f : 0.0f; /* block.frag: the filtered set is bound */
+    pf.light[0] = log2f(daylight > 1e-3f ? daylight : 1e-3f) / LIGHT_CURVE_K;
 
     VkClearValue clears[2] = {0};
     clears[0].color = (VkClearColorValue){{pf.color[0], pf.color[1], pf.color[2], 1.0f}};
@@ -2564,7 +2874,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     int nb = ph ? ph->body_count : 0;
     int ng_o = v->ents ? clampi(v->ent_opaque, 0, RENDER_MAX_ENTS) : 0;
     int ng_t = v->ents ? clampi(v->ent_trans, 0, RENDER_MAX_ENTS - ng_o) : 0;
-    int total = nb + ng_o + ng_t;
+    int total = nb + r->torch_count + ng_o + ng_t;
     if (total) {
         int n_opaque = 0;
         entity_instance *insts = (entity_instance *)(dyn + ent_off);
@@ -2580,8 +2890,9 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
                                                 (uint32_t)bd->tex[3] << 16,
                                             {b->rot[0], b->rot[1], b->rot[2], b->rot[3]},
                                             {1.0f, 1.0f, 1.0f},
-                                            1.0f};
+                                            light_at(w, p.x + 0.5, p.y + 0.5, p.z + 0.5, daylight)};
         }
+        for (int i = 0; i < r->torch_count; i++) insts[n_opaque++] = r->torch_insts[i];
         for (int i = 0; i < ng_o; i++) insts[n_opaque++] = v->ents[i];
         for (int i = 0; i < ng_t; i++) insts[total - 1 - n_trans++] = v->ents[ng_o + i];
         dyn_used += (VkDeviceSize)total * sizeof(entity_instance);
@@ -2640,7 +2951,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         lp.origin[0] = (float)(v->selection.x - v->eye.x);
         lp.origin[1] = (float)(v->selection.y - v->eye.y);
         lp.origin[2] = (float)(v->selection.z - v->eye.z);
-        push_frag lc = {{0.02f, 0.02f, 0.02f, 1.0f}};
+        push_frag lc = {.color = {0.02f, 0.02f, 0.02f, 1.0f}};
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_line_world);
         vkCmdPushConstants(cmd, r->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof lp, &lp);
         vkCmdPushConstants(cmd, r->layout, VK_SHADER_STAGE_FRAGMENT_BIT, PUSH_FRAG_OFFSET, sizeof lc, &lc);
@@ -2720,7 +3031,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         memset(&cp, 0, sizeof cp);
         mat4 id = m4_identity();
         memcpy(cp.view_proj, id.m, sizeof cp.view_proj);
-        push_frag cc = {{0.95f, 0.95f, 0.95f, 1.0f}};
+        push_frag cc = {.color = {0.95f, 0.95f, 0.95f, 1.0f}};
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_line_screen);
         vkCmdPushConstants(cmd, r->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof cp, &cp);
         vkCmdPushConstants(cmd, r->layout, VK_SHADER_STAGE_FRAGMENT_BIT, PUSH_FRAG_OFFSET, sizeof cc, &cc);

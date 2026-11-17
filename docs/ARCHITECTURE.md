@@ -48,7 +48,7 @@ frame_interact                    raycast, break/place/use (interact_frame), tre
 world_update                      stream columns around the player, schedule jobs
 frame_render
   renderer_begin_frame            wait for the frame slot, acquire a swapchain image
-  jobs_poll                       finished generation/meshing jobs: meshes upload now
+  jobs_poll                       finished generation/light/meshing jobs: meshes and light upload now
   build_view                      interpolated camera, sky, entity list, view model
   frame_sound                     listener, ambience loops, fires -> sound commands
   draw_overlay                    HUD, hotbar, inventory, menus, F3 -> the UI batch
@@ -66,7 +66,7 @@ accumulator stays at zero, so the world stands still.
 | Thread | Runs | Touches |
 |---|---|---|
 | Main | everything in the frame above | all game state |
-| Workers (`jobs.c`, cores − 1 while memory allows; `sys_plan`) | terrain generation (decoding a saved column first), meshing | only the job's own data: a column being generated, or a snapshot of a section and its neighbours |
+| Workers (`jobs.c`, cores − 1 while memory allows; `sys_plan`) | terrain generation (decoding a saved column first), lighting a column, meshing | only the job's own data: a column being generated, a snapshot of the 3 x 3 columns being lit, or a snapshot of a section and its neighbours with their light |
 | Audio (miniaudio's device thread) | `sound_render`: mixing voices | the mixer's own voices, fed by a lock-free single-producer ring |
 | Driver threads | whatever the Vulkan driver does | nothing of ours |
 

@@ -24,7 +24,7 @@ void mesher_init(void)
 {
     for (int i = 0; i < 256; i++) {
         uint8_t c = 0;
-        if (i == B_AIR) c = C_AIR;
+        if (i == B_AIR || i == B_TORCH) c = C_AIR; /* a torch is a model (renderer.c), not faces */
         else if (i < B_COUNT && (g_blocks[i].flags & BF_FLUID)) c = C_FLUID;
         else if (i >= B_COUNT || (g_blocks[i].flags & BF_OPAQUE)) c = C_OPAQUE; /* unknown/unloaded: hide faces */
         else c = C_TRANS;

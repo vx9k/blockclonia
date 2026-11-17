@@ -47,9 +47,10 @@ typedef struct {
 } fx_crack;
 
 /* Fills out[] with dropped items and particles (opaque first, then
- * translucent) and the crack overlay. Positions are relative to eye;
- * alpha interpolates physics state between steps. */
+ * translucent) and the crack overlay, each in the light of its cell
+ * (light_at with daylight). Positions are relative to eye; alpha
+ * interpolates physics state between steps. */
 void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *crack, dvec3 eye, double alpha, float time,
-                       entity_instance *out, int max, int *n_opaque, int *n_trans);
+                       float daylight, entity_instance *out, int max, int *n_opaque, int *n_trans);
 
 #endif

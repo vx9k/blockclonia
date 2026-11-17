@@ -122,10 +122,10 @@ static void test_climate(void)
 static void test_generators(void)
 {
     /* Worlds keep growing exactly as they began. */
-    CHECK(hash_columns(1337) == 0xea54b4e0a12d5a50ull);
+    CHECK(hash_columns(1337) == 0xab58b795f49ee954ull);
 
     long ore[3] = {0}, cave = 0, under = 0, bad_band = 0, hanging = 0, no_bedrock = 0, bad_ground = 0;
-    long mouths = 0, mouth_cols = 0, cols = 0;
+    long mouths = 0, mouth_cols = 0, cols = 0, fox = 0, bad_fox = 0;
     /* Around the origin, and where seed 1337 has its nearest cave mouths. */
     static const int AREA[][4] = {{-3, -3, 3, 3}, {4, 0, 8, 4}};
     for (int a = 0; a < 2; a++)
@@ -147,6 +147,11 @@ static void test_generators(void)
                             if (!ore_band_ok(b, y)) bad_band++;
                             if (y < h) under++;
                             if (b == B_AIR && y < h - 5) cave++;
+                            /* Foxfire only on deep cave floors. */
+                            if (b == B_FOXFIRE) {
+                                fox++;
+                                bad_fox += up != B_AIR || y >= h - 25;
+                            }
                             /* A hole under water would flood, under sand it
                              * would pour in: neither is ever carved. */
                             if (b == B_AIR && y < h && (up == B_WATER || (block_get(up)->flags & BF_GRANULAR)))
@@ -164,6 +169,7 @@ static void test_generators(void)
     CHECK(bad_band == 0);
     CHECK(cave > under / 50 && cave < under / 8);
     CHECK(hanging == 0);
+    CHECK(fox > 0 && fox < cave / 20 && bad_fox == 0);
     CHECK(no_bedrock == 0 && bad_ground == 0);
     /* Caves break out of the ground, but seldom. */
     CHECK(mouths > 0 && mouth_cols * 4 < cols);

@@ -376,6 +376,9 @@ const item_def *item_get(item_id id)
         blocks[B_MUD].desc = "Waterlogged soil. Needs support from below.";
         blocks[B_PEAT].desc = "Half-rotted plants from a bog.";
         blocks[B_OBSIDIAN].desc = "Volcanic glass: shatters when it falls hard.";
+        blocks[B_TORCH].desc = "Light. Burns for ever, but gives no heat to speak of.";
+        blocks[B_LAMP].desc = "A steady light behind glass.";
+        blocks[B_FOXFIRE].desc = "Fungus that glows faintly green.";
         build_tools();
         built = 1;
     }
