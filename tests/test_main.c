@@ -1673,8 +1673,10 @@ static void test_settings(void)
     s.volume_ui = 20;
     s.volume_body = 0;
     s.mute_unfocused = 0;
+    s.smooth_light = 0;
     int n = settings_format(&s, buf, (int)sizeof buf);
     CHECK(n > 0 && n < (int)sizeof buf);
+    CHECK(strstr(buf, "smooth_light 0\n") != NULL); /* saved under its key */
     settings_default(&t);
     CHECK(settings_parse(&t, buf) == (int)(sizeof(settings) / sizeof(int))); /* every field, round-tripped */
     CHECK(memcmp(&s, &t, sizeof s) == 0);
@@ -1682,6 +1684,14 @@ static void test_settings(void)
     settings_default(&t);
     CHECK(settings_parse(&t, "fov 500\nfov 12x\nbogus 3\n# fov 80\nsensitivity 250\r\nvsync -1\n fov 60\n") == 1);
     CHECK(t.fov == 70 && t.sensitivity == 250 && t.vsync == 1);
+    /* Smooth lighting is on unless a file turns it off; a file from before
+     * the setting keeps it on. */
+    settings_default(&t);
+    CHECK(t.smooth_light == 1);
+    CHECK(settings_parse(&t, "smooth_light 0\n") == 1 && t.smooth_light == 0);
+    CHECK(settings_parse(&t, "smooth_light 2\n") == 0 && t.smooth_light == 0);
+    settings_default(&t);
+    CHECK(settings_parse(&t, "fov 80\nbrightness 10\n") == 2 && t.smooth_light == 1);
     /* A tiny buffer truncates instead of overflowing. */
     char tiny[8] = {0};
     CHECK(settings_format(&s, tiny, (int)sizeof tiny) == 7 && tiny[7] == '\0');

@@ -310,6 +310,7 @@ static int settings_video(ctx *c, settings *s, float rx, float ry, float rw)
                       SETTINGS_RD_MAX, 1, "");
     changed |= cycle(c, rx, ry + 80, rw, "Texture filtering (distance)", &s->filtering, ONOFF, 2);
     changed |= slider(c, rx, ry + 100, rw, "Brightness (nights)", &s->brightness, 0, 100, 5, "%");
+    changed |= cycle(c, rx, ry + 120, rw, "Smooth lighting", &s->smooth_light, ONOFF, 2);
     return changed;
 }
 

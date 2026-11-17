@@ -1555,6 +1555,7 @@ static void game_init_world(game *g)
                       .pool_mb = o->pool_mb,
                       .screenshots = o->screenshot != NULL,
                       .filtering = g->st.filtering,
+                      .smooth_light = g->st.smooth_light,
                       .pipeline_cache = g_paths.pipelines};
     g->rd = renderer_create(g->win, &ro);
 }
@@ -2363,6 +2364,7 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
         if (g->o.no_vsync && g->st.vsync) g->o.no_vsync = 0; /* turned back on in the menu: a real choice */
         renderer_set_vsync(g->rd, g->st.vsync);
         renderer_set_filtering(g->rd, g->st.filtering);
+        renderer_set_smooth_light(g->rd, g->st.smooth_light);
         set_fullscreen(g, g->st.fullscreen);
         apply_volumes(g);
         apply_discord(g);
