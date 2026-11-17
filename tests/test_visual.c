@@ -604,13 +604,17 @@ static void test_vm_rifle(void)
      * under it, the rear posts either side of the line, and the hands stay
      * on the rifle. */
     in.aim = 1.0f;
-    n = vm_run(&vm, &in, 0.5f, out);
+    n = vm_run(&vm, &in, 1.0f, out);
     CHECK(n == ITEM + rifle.n && vm_sane_near(out, n, 0));
     const float *post = out[ITEM + 10].pos;
-    CHECK(post[2] < -0.6f && fabsf(post[0] / post[2]) < 0.004f && fabsf(post[1] / post[2]) < 0.02f);
-    CHECK(post[1] < 0.0f);
+    float tip = post[1] + 0.024f; /* the post is 48 mm tall, standing up */
+    CHECK(post[2] < -0.6f && fabsf(post[0] / post[2]) < 0.004f && fabsf(tip / post[2]) < 0.005f);
+    CHECK(post[1] < 0.0f && tip < 0.0f);
+    /* The eye rides high over the stock, so the fist on its wrist is well
+     * under the line of sight (more than 48 degrees down), not across it. */
+    CHECK(-out[R_HAND].pos[1] > 1.1f * -out[R_HAND].pos[2]);
     CHECK(out[ITEM + 11].pos[0] * out[ITEM + 12].pos[0] < 0.0f);
-    CHECK(fabsf(out[ITEM + 11].pos[0] + out[ITEM + 12].pos[0]) < 0.002f);
+    CHECK(fabsf(out[ITEM + 11].pos[0] + out[ITEM + 12].pos[0]) < 0.003f);
     CHECK(off_axis(out[R_HAND].pos, &out[ITEM + 1]) < 0.07f && off_axis(out[L_HAND].pos, &out[ITEM + 2]) < 0.07f);
     /* Halfway up, it's between the two. */
     in.aim = 0.5f;
@@ -621,7 +625,7 @@ static void test_vm_rifle(void)
     /* A shot: the muzzle climbs within a tenth of a second and settles
      * back on the line within half a second. */
     in.aim = 1.0f;
-    vm_run(&vm, &in, 0.5f, out);
+    vm_run(&vm, &in, 1.0f, out);
     const float aimed[3] = {post[0], post[1], post[2]};
     viewmodel still = vm;
     in.swing = 1.0f;
@@ -654,6 +658,63 @@ static void test_vm_rifle(void)
     CHECK(dist3(out[ITEM + 1].pos, uout[ITEM + 1].pos) < 1e-4f);
 }
 
+/* Raising the rifle is a mount: it swings through an arc below the
+ * straight line from the hip to the cheek, overshoots a little and settles
+ * within half a second, never jumping; once aimed it drifts, but by less
+ * than a few milliradians. */
+static void test_vm_mount(void)
+{
+    entity_instance out[VIEWMODEL_MAX] = {{0}};
+    viewmodel vm;
+    viewmodel_init(&vm);
+    viewmodel_input in = vm_input(I_RIFLE);
+    vm_run(&vm, &in, 1.0f, out);
+    viewmodel up = vm;
+    entity_instance aimed[VIEWMODEL_MAX] = {{0}};
+    in.aim = 1.0f;
+    vm_run(&up, &in, 1.0f, aimed);
+    const float hip[3] = {out[ITEM + 10].pos[0], out[ITEM + 10].pos[1], out[ITEM + 10].pos[2]};
+    const float *end = aimed[ITEM + 10].pos;
+    float line[3] = {end[0] - hip[0], end[1] - hip[1], end[2] - hip[2]};
+    float len = sqrtf(line[0] * line[0] + line[1] * line[1] + line[2] * line[2]);
+    for (int k = 0; k < 3; k++) line[k] /= len;
+    float below = 0.0f, over = 0.0f, jump = 0.0f, prev[3] = {hip[0], hip[1], hip[2]};
+    for (int i = 0; i < 60; i++) {
+        viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
+        const float *p = out[ITEM + 10].pos;
+        const float d[3] = {p[0] - hip[0], p[1] - hip[1], p[2] - hip[2]};
+        float along = d[0] * line[0] + d[1] * line[1] + d[2] * line[2];
+        if (along > 0.2f * len && along < 0.8f * len) below = fmaxf(below, hip[1] + line[1] * along - p[1]);
+        over = fmaxf(over, vm.aim_x);
+        jump = fmaxf(jump, dist3(p, prev));
+        memcpy(prev, p, sizeof prev);
+    }
+    CHECK(below > 0.02f);
+    CHECK(over > 1.03f && over < 1.2f);
+    CHECK(jump < 0.06f);
+    CHECK(fabsf(vm.aim_x - 1.0f) < 0.02f);
+
+    /* Held: the post wanders, but stays within 4 mrad of the line. */
+    float lo = 9.0f, hi = -9.0f, worst = 0.0f;
+    for (int i = 0; i < 600; i++) {
+        viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
+        const float *p = out[ITEM + 10].pos;
+        float a = p[0] / -p[2];
+        lo = fminf(lo, a);
+        hi = fmaxf(hi, a);
+        worst = fmaxf(worst, fabsf(a));
+    }
+    CHECK(hi - lo > 0.001f && worst < 0.004f);
+
+    /* Garbage in the spring starts it clean, and another item drops it. */
+    vm.aim_v = NAN;
+    int n = viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
+    CHECK(vm_sane_near(out, n, 0) && isfinite(vm.aim_x));
+    in.held_id = 0;
+    vm_run(&vm, &in, 1.0f, out);
+    CHECK(vm.aim_x == 0.0f && vm.aim_v == 0.0f);
+}
+
 void test_visual_all(void)
 {
     test_vm_parts();
@@ -663,4 +724,5 @@ void test_visual_all(void)
     test_vm_robust();
     test_vm_two_hands();
     test_vm_rifle();
+    test_vm_mount();
 }

@@ -113,8 +113,14 @@ static const hold_key DIG[] = {
  * the eye sits on the line over the rear notch and the front post, a cheek
  * weld 0.3 m behind the notch; at the hip that point is low and right, the
  * rifle turned in a little and canted so its side shows. */
-static const float GUN_EYE[3] = {-0.058f, 0.23f, 0.0f};
+static const float GUN_EYE[3] = {-0.092f, 0.23f, 0.0f};
 static const float GUN_HIP[3] = {0.12f, -0.15f, -0.22f};
+/* Raising the rifle is a mount, not a slide: an underdamped spring (2.4 Hz,
+ * damping 0.6) carries it, overshooting by about a tenth and settling in
+ * a third of a second, the way a body brings a weight up to the cheek and
+ * stops it there. */
+#define MOUNT_HZ 2.4f
+#define MOUNT_DAMP 0.6f
 static const float GUN_HAND[2][3] = {{0.035f, 0.33f, 0.0f}, {0.04f, 0.82f, 0.0f}}; /* wrist of the stock, fore-end */
 
 /* ---- helpers */
@@ -280,7 +286,7 @@ static void advance(viewmodel *vm, const viewmodel_input *in, float dt)
 {
     /* A NaN that got in once would stay forever; start clean instead. */
     if (!isfinite(vm->equip) || !isfinite(vm->swing_t) || !isfinite(vm->lag_x) || !isfinite(vm->lag_y) ||
-        !isfinite(vm->time)) {
+        !isfinite(vm->time) || !isfinite(vm->aim_x) || !isfinite(vm->aim_v)) {
         item_id shown = vm->shown_id;
         viewmodel_init(vm);
         vm->shown_id = shown;
@@ -321,6 +327,20 @@ static void advance(viewmodel *vm, const viewmodel_input *in, float dt)
         vm->swing_t = fminf(1.0f, fmaxf(0.0f, vm->swing_t) + dt / SWING_S);
     }
 
+    /* The mount follows the aim on its spring, in steps short enough to
+     * stay stable at any frame rate; another item drops it at once. */
+    if (hold == HOLD_GUN) {
+        float target = anim_clamp01(finite_or0(in->aim)), w = 2.0f * PI_F * MOUNT_HZ;
+        int steps = (int)ceilf(dt * 240.0f);
+        float h = steps > 0 ? dt / (float)steps : 0.0f;
+        for (int i = 0; i < steps; i++) {
+            vm->aim_v += (w * w * (target - vm->aim_x) - 2.0f * MOUNT_DAMP * w * vm->aim_v) * h;
+            vm->aim_x += vm->aim_v * h;
+        }
+    } else {
+        vm->aim_x = vm->aim_v = 0.0f;
+    }
+
     /* Mouse lag: a first-order follower driven by the look rate w settles
      * at an angle -w * tau behind the view, and eases back when the look
      * stops. */
@@ -351,10 +371,22 @@ static int two_hands(const viewmodel *vm, int hold, float aim, float sprint, con
          * side; running, it's carried muzzle down. */
         quat hip = quat_mul(quat_axis(0.0f, 1.0f, 0.0f, 0.07f), quat_mul(quat_axis(0.0f, 0.0f, 1.0f, 0.18f), ads));
         hip = quat_mul(quat_axis(1.0f, 0.0f, 0.0f, -0.35f * sprint), hip);
+        /* On the way up the rifle swings through an arc below the line,
+         * canted, butt first, the muzzle coming onto the mark last; down
+         * the sights it drifts in a slow figure of eight and with each
+         * breath, a milliradian or two, as a standing shooter's does. */
+        float mount = sinf(PI_F * anim_clamp01(aim)), held = anim_clamp01(aim), t = vm->time;
+        float drift_x = 0.0016f * sinf(2.0f * PI_F * 0.21f * t + 1.0f) * held;
+        float drift_y = (0.0012f * sinf(2.0f * PI_F * 0.42f * t) + 0.0008f * sinf(2.0f * PI_F * BREATH_HZ * t)) * held;
+        quat swing = quat_mul(quat_axis(0.0f, 1.0f, 0.0f, drift_x),
+                              quat_mul(quat_axis(1.0f, 0.0f, 0.0f, drift_y - 0.09f * mount),
+                                       quat_axis(0.0f, 0.0f, 1.0f, 0.14f * mount)));
         /* Recoil: the muzzle climbs and the butt drives back into the shoulder. */
-        rot = quat_mul(quat_axis(1.0f, 0.0f, 0.0f, 0.10f * kick), quat_blend(hip, ads, aim));
+        rot = quat_mul(quat_axis(1.0f, 0.0f, 0.0f, 0.10f * kick), quat_mul(swing, quat_blend(hip, ads, aim)));
         float settle = 1.0f - 0.8f * aim;
         for (int i = 0; i < 3; i++) at[i] = GUN_HIP[i] * (1.0f - aim) + sway[i] * settle;
+        at[0] += 0.015f * mount;
+        at[1] -= 0.035f * mount;
         at[1] += 0.008f * kick - 0.03f * sprint * (1.0f - aim);
         at[2] += 0.035f * kick;
         memcpy(origin, GUN_EYE, sizeof origin);
@@ -446,8 +478,9 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
     /* Lag rotates the whole view model about the eye (yaw is positive to
      * the right, so the view-space angle is its negative). */
     int hold = hold_of(vm->shown_id);
-    float aim = hold == HOLD_GUN ? ease_in_out(anim_clamp01(finite_or0(in->aim))) : 0.0f;
-    float steady = 1.0f - 0.7f * aim; /* down the sights the rifle is held still against the cheek */
+    /* The mount may overshoot a little past 1; that's the settle. */
+    float aim = hold == HOLD_GUN ? clamp_range(vm->aim_x, -0.2f, 1.2f) : 0.0f;
+    float steady = 1.0f - 0.7f * anim_clamp01(aim); /* down the sights the rifle is held still against the cheek */
     quat lag = quat_mul(quat_axis(0.0f, 1.0f, 0.0f, -vm->lag_x * steady),
                         quat_axis(1.0f, 0.0f, 0.0f, vm->lag_y * steady));
 

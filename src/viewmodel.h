@@ -33,6 +33,7 @@ typedef struct {
     item_id shown_id;     /* the item drawn (changes while lowered) */
     float lag_x, lag_y;   /* smoothed mouse lag */
     float swing_t;        /* 0..1 progress of the current swing */
+    float aim_x, aim_v;   /* the rifle's mount: a spring following the aim, and its rate */
     float time;
 } viewmodel;
 
