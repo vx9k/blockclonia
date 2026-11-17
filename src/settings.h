@@ -27,6 +27,7 @@ typedef struct {
     int mute_unfocused;   /* silence while the window is in the background */
     int discord;          /* show what the player is doing as their Discord status */
     int inner_voice;      /* thoughts and body sensations on the HUD */
+    int smooth_light;     /* light blends across faces; off: each face takes its own cell's light, flat */
 } settings;
 
 #define SETTINGS_FOV_MIN 50

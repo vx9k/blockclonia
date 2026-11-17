@@ -32,6 +32,7 @@ typedef struct {
     uint32_t pool_mb;    /* first vertex pool block; 0: derive from render radius */
     int screenshots;     /* a screenshot is planned: readable swapchain from the start */
     int filtering;       /* trilinear + up to 8x anisotropic minification (see renderer_set_filtering) */
+    int smooth_light;    /* see renderer_set_smooth_light */
     /* Pipeline cache file, kept between runs so pipelines build faster.
      * NULL: "blockclonia.pipelines" in the working directory; "": none. */
     const char *pipeline_cache;
@@ -122,6 +123,9 @@ void renderer_set_vsync(renderer *r, int on);
  * supported. Magnification stays nearest either way (pixel art up close).
  * Takes effect with the next frame recorded; frames in flight keep theirs. */
 void renderer_set_filtering(renderer *r, int enabled);
+/* On, light blends across each face from the cells around its corners; off,
+ * a face takes the light of the cell in front of it, in flat steps. */
+void renderer_set_smooth_light(renderer *r, int enabled);
 const char *renderer_device_name(const renderer *r);
 /* "Vulkan 1.3: multi-draw indirect, dynamic rendering, ...": the API
  * version in use and the optional features the renderer turned on. */

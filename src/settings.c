@@ -37,6 +37,7 @@ static const field FIELDS[] = {
     {"mute_unfocused", 0, 1},
     {"discord", 0, 1},
     {"inner_voice", 0, 1},
+    {"smooth_light", 0, 1},
 };
 #define NFIELDS ((int)(sizeof FIELDS / sizeof FIELDS[0]))
 _Static_assert(sizeof FIELDS / sizeof FIELDS[0] * sizeof(int) == sizeof(settings), "every setting needs a FIELDS row");
@@ -65,6 +66,7 @@ void settings_default(settings *s)
     s->mute_unfocused = 1;
     s->discord = 0; /* opt-in: nothing leaves the machine unasked */
     s->inner_voice = 1;
+    s->smooth_light = 1;
 }
 
 static int *field_ptr(settings *s, int i)
@@ -91,7 +93,8 @@ static int *field_ptr(settings *s, int i)
     case 18: return &s->volume_body;
     case 19: return &s->mute_unfocused;
     case 20: return &s->discord;
-    default: return &s->inner_voice;
+    case 21: return &s->inner_voice;
+    default: return &s->smooth_light;
     }
 }
 

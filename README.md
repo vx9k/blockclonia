@@ -399,6 +399,7 @@ starts with the defaults and doesn't save changes over it.
 | Video | Render distance | 2–32 columns; applies on the next start |
 | Video | Texture filtering (distance) | on (default): trilinear between mipmaps, with up to 8× anisotropic filtering where the GPU supports it; off: the nearest texel of the nearest mipmap, sharper but shimmering in the distance. Up close textures stay pixel-sharp either way |
 | Video | View bobbing, FOV effects | on/off |
+| Video | Smooth lighting | on (default): light blends across each face from the cells around it; off: each face takes the light of the cell in front of it, in flat steps |
 | Video | Brightness (nights) | 0–100% (default 0): a floor under all light, for dark nights and caves; daylight is unchanged |
 | Display | Fullscreen | on/off (also F11): borderless at the monitor's own resolution |
 | Display | VSync | on/off |

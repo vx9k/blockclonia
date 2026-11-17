@@ -240,7 +240,7 @@ struct renderer {
     VkRenderPass pass;
     VkDescriptorSetLayout dsl;
     VkDescriptorPool dpool;
-    VkDescriptorSet dsets[2];     /* the terrain texture with r->sampler, and with sampler_filtered */
+    VkDescriptorSet dsets[4];     /* bit 0: terrain with sampler_filtered, not r->sampler; bit 1: flat light */
     VkPipelineLayout layout;
     VkPipeline p_opaque, p_trans, p_entity, p_entity_trans, p_line_world, p_line_screen;
     VkPipeline p_star; /* stars and the moon (sky.h), added where the sky shows */
@@ -292,7 +292,7 @@ struct renderer {
     frame frames[FRAMES];
     uint32_t frame_index, image_index;
     int frame_active;
-    int resized, vsync, radius, filtering;
+    int resized, vsync, radius, filtering, smooth_light;
 
     char shot_path[512];
     int shot_pending;
@@ -320,6 +320,7 @@ struct renderer {
     VkDeviceMemory light_mem;
     VkImageView light_view;
     VkSampler light_sampler;
+    VkSampler light_sampler_flat; /* nearest, with smooth lighting off */
     uint32_t *light_stack;        /* free slots */
     light_slot_free *light_frees; /* oldest first */
     entity_instance *torch_insts; /* this frame's torch instances */
@@ -1816,32 +1817,35 @@ static void create_texture(renderer *r)
     /* One set per sampler, written once: switching filtering only changes
      * which set the next recorded frame binds, so frames in flight are never
      * touched. */
-    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4};
+    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8};
     VkDescriptorPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-                                     .maxSets = 2,
+                                     .maxSets = 4,
                                      .poolSizeCount = 1,
                                      .pPoolSizes = &ps};
     VK_CHECK(vkCreateDescriptorPool(r->dev, &pi, r->ac, &r->dpool));
-    VkDescriptorSetLayout layouts[2] = {r->dsl, r->dsl};
+    VkDescriptorSetLayout layouts[4] = {r->dsl, r->dsl, r->dsl, r->dsl};
     VkDescriptorSetAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                                        .descriptorPool = r->dpool,
-                                       .descriptorSetCount = 2,
+                                       .descriptorSetCount = 4,
                                        .pSetLayouts = layouts};
     VK_CHECK(vkAllocateDescriptorSets(r->dev, &dai, r->dsets));
-    VkDescriptorImageInfo dii[3] = {{r->sampler, r->tex_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+    VkDescriptorImageInfo dii[4] = {{r->sampler, r->tex_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                                     {r->sampler_filtered, r->tex_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                                    {r->light_sampler, r->light_view, VK_IMAGE_LAYOUT_GENERAL}};
-    /* Binding 0: each set's block texture; binding 1: the light atlas in both. */
-    const VkDescriptorImageInfo *info[4] = {&dii[0], &dii[1], &dii[2], &dii[2]};
-    VkWriteDescriptorSet w[4] = {0};
-    for (int i = 0; i < 4; i++)
+                                    {r->light_sampler, r->light_view, VK_IMAGE_LAYOUT_GENERAL},
+                                    {r->light_sampler_flat, r->light_view, VK_IMAGE_LAYOUT_GENERAL}};
+    /* Binding 0: the block texture, by bit 0 of the set; binding 1: the
+     * light atlas, by bit 1. */
+    VkWriteDescriptorSet w[8] = {0};
+    for (int i = 0; i < 8; i++) {
+        int set = i >> 1, binding = i & 1;
         w[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                      .dstSet = r->dsets[i & 1],
-                                      .dstBinding = (uint32_t)(i >> 1),
+                                      .dstSet = r->dsets[set],
+                                      .dstBinding = (uint32_t)binding,
                                       .descriptorCount = 1,
                                       .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                      .pImageInfo = info[i]};
-    vkUpdateDescriptorSets(r->dev, 4, w, 0, NULL);
+                                      .pImageInfo = binding ? &dii[2 + (set >> 1)] : &dii[set & 1]};
+    }
+    vkUpdateDescriptorSets(r->dev, 8, w, 0, NULL);
 }
 
 /* ------------------------------------------------------------------ light */
@@ -1931,6 +1935,10 @@ static void create_light(renderer *r)
                               .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
                               .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE};
     VK_CHECK(vkCreateSampler(r->dev, &si, r->ac, &r->light_sampler));
+    /* Nearest: a face's corners sit on its front cell's edges, so every
+     * fragment inside it reads that one cell. */
+    si.magFilter = si.minFilter = VK_FILTER_NEAREST;
+    VK_CHECK(vkCreateSampler(r->dev, &si, r->ac, &r->light_sampler_flat));
 
     VkDeviceSize slot_bytes = LIGHT_SLOT_BYTES(r->light_texel);
     gbuf st = {0};
@@ -2312,6 +2320,7 @@ renderer *renderer_create(GLFWwindow *win, const render_opts *o)
     r->ac = vk_callbacks();
     r->vsync = o->vsync;
     r->filtering = !!o->filtering;
+    r->smooth_light = !!o->smooth_light;
     r->radius = o->render_radius < 32 ? o->render_radius : 32;
     r->shot_usage = o->screenshots;
 
@@ -2381,6 +2390,7 @@ void renderer_destroy(renderer *r)
     }
     log_info("light atlas: %u of %u slots used at most", r->light_peak, r->light_slots);
     vkDestroySampler(r->dev, r->light_sampler, r->ac);
+    vkDestroySampler(r->dev, r->light_sampler_flat, r->ac);
     vkDestroyImageView(r->dev, r->light_view, r->ac);
     vkDestroyImage(r->dev, r->light_img, r->ac);
     vkFreeMemory(r->dev, r->light_mem, r->ac);
@@ -2450,6 +2460,7 @@ void renderer_set_vsync(renderer *r, int on)
 }
 
 void renderer_set_filtering(renderer *r, int enabled) { r->filtering = !!enabled; }
+void renderer_set_smooth_light(renderer *r, int enabled) { r->smooth_light = !!enabled; }
 
 const char *renderer_device_name(const renderer *r) { return r->props.deviceName; }
 
@@ -2891,7 +2902,8 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     /* Opaque, front to back for early-Z. Face groups that point away from
      * the camera are skipped; adjacent groups merge into one draw. */
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_opaque);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->layout, 0, 1, &r->dsets[r->filtering], 0, NULL);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->layout, 0, 1,
+                            &r->dsets[r->filtering | (!r->smooth_light) << 1], 0, NULL);
     vkCmdBindVertexBuffers(cmd, 1, 1, &f->dyn.buf, &zero);
     vkCmdBindIndexBuffer(cmd, r->index.buf, 0, VK_INDEX_TYPE_UINT16);
     vkCmdPushConstants(cmd, r->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof pv, &pv);
@@ -3053,8 +3065,8 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
          * its own, and the texture bound before it no longer reaches the
          * fragment shader: the arm came out black and item cards invisible.
          * Vulkan keeps bound state across the clear; binding again is free. */
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->layout, 0, 1, &r->dsets[r->filtering], 0,
-                                NULL);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->layout, 0, 1,
+                                &r->dsets[r->filtering | (!r->smooth_light) << 1], 0, NULL);
         push_vert mp = pv;
         mat4 proj = m4_perspective_revz(70.0f * (float)(MC_PI / 180.0), aspect, 0.02f);
         memcpy(mp.view_proj, proj.m, sizeof mp.view_proj);
