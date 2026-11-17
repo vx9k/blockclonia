@@ -263,7 +263,6 @@ struct renderer {
     VkDescriptorSet bloom_dset[2]; /* reading bloom[0], bloom[1] */
     VkPipeline p_glow, p_entity_glow, p_bloom_extract, p_bloom_blur;
     uint32_t glow_mask[BLOOM_MASK_WORDS];
-    int bloom_mode; /* the setting */
     bloom_auto bloom_auto;
 
     VkRenderPass pass;
@@ -321,7 +320,7 @@ struct renderer {
     frame frames[FRAMES];
     uint32_t frame_index, image_index;
     int frame_active;
-    int resized, vsync, radius, filtering, smooth_light;
+    int resized, vsync, radius, filtering, smooth_light, bloom_mode;
 
     char shot_path[512];
     int shot_pending;
@@ -3149,6 +3148,80 @@ static void finish_stats(renderer *r, render_stats *st)
     r->stats = *st;
 }
 
+/* Copies the view model's n parts to out, solid ones first, and returns
+ * how many are solid. */
+static int split_view_model(entity_instance *out, const entity_instance *in, int n)
+{
+    int solid = 0;
+    for (int i = 0; i < n; i++)
+        if (!layer_has_alpha(in[i].tex)) out[solid++] = in[i];
+    int k = solid;
+    for (int i = 0; i < n; i++)
+        if (layer_has_alpha(in[i].tex)) out[k++] = in[i];
+    return solid;
+}
+
+/* Ends the scene pass, runs bloom if it is on and filters the scene onto
+ * the swapchain image in a new pass, which is left open for the overlay. */
+static void draw_post(renderer *r, VkCommandBuffer cmd, frame *f, const render_view *v, const VkClearValue clears[2],
+                      int bloom, uint32_t query, render_stats *st)
+{
+    /* Bloom's cost, for Auto: everything between the world and the
+     * frame on screen that drawing straight to it would not do. */
+    int timed = bloom && r->queries;
+    if (timed) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, r->queries, query + 2);
+    end_pass(r, cmd, 1);
+    if (bloom) {
+        draw_bloom(r, cmd);
+        st->draw_calls += 3;
+    }
+    begin_pass(r, cmd, clears, 0);
+    VkViewport viewport = {0, 0, (float)r->extent.width, (float)r->extent.height, 0.0f, 1.0f};
+    VkRect2D scissor = {{0, 0}, r->extent};
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    float px = (float)r->extent.height / 1080.0f;
+    push_post pp = {{1.0f / (float)r->extent.width, 1.0f / (float)r->extent.height},
+                    clampf(v->blur, 0.0f, 1.0f) * 7.0f * px,
+                    clampf(v->doubled, 0.0f, 1.0f) * 40.0f * px * (0.8f + 0.2f * sinf(v->time * 0.9f)),
+                    bloom ? BLOOM_STRENGTH : 0.0f,
+                    {0.0f, 0.0f, 0.0f}};
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_post);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->post_layout, 0, 1, &r->post_dset, 0, NULL);
+    vkCmdPushConstants(cmd, r->post_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pp, &pp);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    st->draw_calls++;
+    if (timed) {
+        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, r->queries, query + 3);
+        f->bloom_timed = 1;
+    }
+}
+
+/* Bloom's glow pass over the sections holding glowing translucent quads,
+ * then the translucent entities from instance `first` on. */
+static void draw_glow(terrain_pass *tp, int nvis, int n_trans, int first, VkDeviceSize ent_off)
+{
+    const renderer *r = tp->r;
+    VkCommandBuffer cmd = tp->cmd;
+    const VkDeviceSize zero = 0;
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_glow);
+    vkCmdBindVertexBuffers(cmd, 1, 1, &tp->f->dyn.buf, &zero);
+    tp->bound = -1;
+    for (int i = nvis - 1; i >= 0; i--) {
+        const section_mesh *m = r->vis[i].m;
+        if (!m->trans_quads || !m->glow) continue;
+        pass_draw(tp, m->block, m->vtx_offset + m->opaque_quads * 4, m->trans_quads, (uint32_t)i);
+    }
+    pass_flush(tp);
+    if (!n_trans) return;
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_entity_glow);
+    VkBuffer bufs[2] = {r->cube.buf, tp->f->dyn.buf};
+    VkDeviceSize offs[2] = {0, ent_off};
+    vkCmdBindVertexBuffers(cmd, 0, 2, bufs, offs);
+    vkCmdDrawIndexed(cmd, 36, (uint32_t)n_trans, 0, 0, (uint32_t)first);
+    tp->st->draw_calls++;
+}
+
 void renderer_end_frame(renderer *r, const world *w, const physics *ph, const render_view *v, double alpha)
 {
     if (!r->frame_active) return;
@@ -3354,25 +3427,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     /* Bloom's glow pass: lava and flames are blended, so their alpha above
      * was coverage; their glow goes into alpha alone, here. Only sections
      * holding any are drawn twice. */
-    if (bloom) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_glow);
-        vkCmdBindVertexBuffers(cmd, 1, 1, &f->dyn.buf, &zero);
-        tp.bound = -1;
-        for (int i = nvis - 1; i >= 0; i--) {
-            const section_mesh *m = r->vis[i].m;
-            if (!m->trans_quads || !m->glow) continue;
-            pass_draw(&tp, m->block, m->vtx_offset + m->opaque_quads * 4, m->trans_quads, (uint32_t)i);
-        }
-        pass_flush(&tp);
-        if (n_trans) {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_entity_glow);
-            VkBuffer bufs[2] = {r->cube.buf, f->dyn.buf};
-            VkDeviceSize offs[2] = {0, ent_off};
-            vkCmdBindVertexBuffers(cmd, 0, 2, bufs, offs);
-            vkCmdDrawIndexed(cmd, 36, (uint32_t)n_trans, 0, 0, (uint32_t)(total - n_trans));
-            st.draw_calls++;
-        }
-    }
+    if (bloom) draw_glow(&tp, nvis, n_trans, total - n_trans, ent_off);
 
     /* Selection outline and crosshair. */
     dyn_used = (dyn_used + 15) & ~(VkDeviceSize)15;
@@ -3415,11 +3470,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         /* Solid parts first, then anything with transparent texels (item
          * cards, glass, a held campfire), which needs blending. */
         entity_instance *vm = (entity_instance *)(dyn + vm_off);
-        int vm_solid = 0, vm_cards = 0;
-        for (int i = 0; i < nvm; i++)
-            if (!layer_has_alpha(v->view_model[i].tex)) vm[vm_solid++] = v->view_model[i];
-        for (int i = 0; i < nvm; i++)
-            if (layer_has_alpha(v->view_model[i].tex)) vm[vm_solid + vm_cards++] = v->view_model[i];
+        int vm_solid = split_view_model(vm, v->view_model, nvm), vm_cards = nvm - vm_solid;
         VkClearAttachment ca = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .clearValue.depthStencil = {0.0f, 0}};
         VkClearRect cr = {.rect = {{0, 0}, r->extent}, .baseArrayLayer = 0, .layerCount = 1};
         vkCmdClearAttachments(cmd, 1, &ca, 1, &cr);
@@ -3466,35 +3517,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
      * carry over into the new pass. The defocus scales with the height so
      * it looks the same at any resolution; the two images drift slowly
      * apart and together as the eyes try to fuse them. */
-    if (post) {
-        /* Bloom's cost, for Auto: everything between the world and the
-         * frame on screen that drawing straight to it would not do. */
-        int timed = bloom && r->queries;
-        if (timed) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, r->queries, query + 2);
-        end_pass(r, cmd, 1);
-        if (bloom) {
-            draw_bloom(r, cmd);
-            st.draw_calls += 3;
-        }
-        begin_pass(r, cmd, clears, 0);
-        vkCmdSetViewport(cmd, 0, 1, &viewport);
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
-        float px = (float)r->extent.height / 1080.0f;
-        push_post pp = {{1.0f / (float)r->extent.width, 1.0f / (float)r->extent.height},
-                        clampf(v->blur, 0.0f, 1.0f) * 7.0f * px,
-                        clampf(v->doubled, 0.0f, 1.0f) * 40.0f * px * (0.8f + 0.2f * sinf(v->time * 0.9f)),
-                        bloom ? BLOOM_STRENGTH : 0.0f,
-                        {0.0f, 0.0f, 0.0f}};
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_post);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->post_layout, 0, 1, &r->post_dset, 0, NULL);
-        vkCmdPushConstants(cmd, r->post_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pp, &pp);
-        vkCmdDraw(cmd, 3, 1, 0, 0);
-        st.draw_calls++;
-        if (timed) {
-            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, r->queries, query + 3);
-            f->bloom_timed = 1;
-        }
-    }
+    if (post) draw_post(r, cmd, f, v, clears, bloom, query, &st);
     if (!v->hide_crosshair) {
         push_vert cp = {0};
         memset(&cp, 0, sizeof cp);
