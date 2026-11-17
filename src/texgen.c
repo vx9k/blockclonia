@@ -499,9 +499,25 @@ static rgba texel(int layer, int x, int y)
     }
     switch (layer) {
     case T_SKIN: return shade(214, 170, 136, 255, n / 3);
-    case T_SLEEVE: {
-        int seam = (y % 5 == 4) ? -14 : 0;
-        return shade(56, 88, 140, 255, seam + n / 2);
+    case T_LINEN:
+    case T_LINEN_DARK: {
+        /* Plain weave: warp and weft alternate, and the odd slub (a
+         * thicker stretch of thread) runs across. */
+        int weave = ((x + y) & 1) ? 5 : -5, slub = (hash2i(0x11E, 0, y) & 7u) == 0 ? -8 : 0;
+        if (layer == T_LINEN) return shade(214, 204, 180, 255, weave + slub + n / 4);
+        return shade(176, 163, 132, 255, weave + slub + n / 4);
+    }
+    case T_HAIR: return shade(58, 42, 30, 255, px_noise(layer, x, 0, 14) + n / 3); /* strands run down */
+    case T_FACE: {
+        /* Stretched over the front of the head, 16 texels to its 0.20 m:
+         * brows, eyes 6.5 cm apart at 0.94 of the height, the shadow under
+         * the nose (a box of its own) and the mouth. */
+        int eye = y == 7 && (x == 4 || x == 5 || x == 10 || x == 11);
+        if (eye) return (x == 5 || x == 10) ? shade(52, 40, 32, 255, 0) : shade(232, 226, 218, 255, 0);
+        if (y == 5 && ((x >= 3 && x <= 6) || (x >= 9 && x <= 12))) return shade(88, 62, 44, 255, n / 3);
+        if (y == 10 && (x == 7 || x == 8)) return shade(190, 146, 114, 255, 0);
+        if (y == 12 && x >= 6 && x <= 9) return shade(176, 112, 96, 255, 0);
+        return shade(214, 170, 136, 255, n / 3);
     }
     case T_CAMPFIRE_BASE: {
         /* Crossed logs over glowing embers. */

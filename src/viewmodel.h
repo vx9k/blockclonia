@@ -10,7 +10,7 @@
 #include "entity.h"
 #include "item.h"
 
-#define VIEWMODEL_MAX 12 /* the sleeve, the hand and a torch (torch_model.h) */
+#define VIEWMODEL_MAX 12 /* the forearm, the hand and a torch (torch_model.h) */
 
 typedef struct {
     item_id held_id;      /* item in hand, 0 for the bare hand */
@@ -37,13 +37,5 @@ void viewmodel_init(viewmodel *vm);
 
 /* Advances the animation and writes up to max instances; returns how many. */
 int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *out, int max);
-
-/* Another player as a blocky figure of VIEWMODEL_FIGURE cubes in world
- * orientation: feet relative to the camera, facing yaw with the head
- * tilted by pitch; lower when sneaking, lying down when dead. Writes up to
- * max instances and returns how many. */
-#define VIEWMODEL_FIGURE 6
-int viewmodel_figure(const float feet[3], float yaw, float pitch, int sneaking, int dead, float light,
-                     entity_instance *out, int max);
 
 #endif

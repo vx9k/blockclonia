@@ -9,7 +9,7 @@
 #define VM_DT (1.0f / 60.0f)
 #define TAN_HALF_VFOV 0.7002f /* tan(35 deg): the view-model pass draws a 70 degree vertical view */
 #define NEAR_Z (-0.02f)       /* its near plane */
-#define HAND 1                /* instance order: sleeve, hand, held */
+#define HAND 1                /* instance order: forearm, hand, held */
 #define HELD 2
 
 static viewmodel_input vm_input(item_id held)
@@ -112,12 +112,13 @@ static void test_vm_parts(void)
     viewmodel_init(&vm);
     viewmodel_input in = vm_input(0);
     int n = vm_run(&vm, &in, 0.5f, out);
-    CHECK(n == 2); /* the bare hand: sleeve and hand */
-    CHECK(out[0].tex == (uint32_t)T_SLEEVE * 0x010101u && out[HAND].tex == (uint32_t)T_SKIN * 0x010101u);
+    CHECK(n == 2); /* the bare hand: forearm and hand */
+    CHECK(out[0].tex == (uint32_t)T_SKIN * 0x010101u && out[HAND].tex == (uint32_t)T_SKIN * 0x010101u);
     CHECK(vm_sane(out, n) && in_view(out[HAND].pos));
-    /* The sleeve runs 0.5 m along the arm and the hand sits at its far end,
+    /* The forearm runs 0.5 m along the arm and the hand sits at its far end,
      * further from the eye. */
-    CHECK(fabsf(out[0].scale[2] - 0.5f) < 1e-6f && fabsf(out[0].scale[0] - 0.12f) < 1e-6f);
+    CHECK(fabsf(out[0].scale[2] - 0.5f) < 1e-6f && fabsf(out[0].scale[0] - 0.085f) < 1e-6f);
+    CHECK(out[HAND].scale[0] > out[0].scale[0] && out[HAND].scale[0] < 0.1f); /* a fist, wider than the wrist */
     CHECK(-out[HAND].pos[2] > -out[0].pos[2] + 0.2f);
     CHECK(out[HAND].pos[0] > 0.1f && out[HAND].pos[1] < -0.1f); /* lower right */
 

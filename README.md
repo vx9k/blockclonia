@@ -497,7 +497,7 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
             [--threads N] [--pool-mb N] [--gpu N] [--world DIR | --no-save]
             [--config FILE] [--validate] [--no-sound]
             [--play] [--screen title|worlds|create|multiplayer|pause|settings|controls|debug-health|inventory]
-            [--debug] [--time HH] [--give LIST] [--mobs LIST] [--hurt LIST]
+            [--debug] [--time HH] [--give LIST] [--mobs LIST] [--figures LIST] [--hurt LIST]
             [--frames N] [--screenshot F] [--look YAW,PITCH] [--spawn X,Z]
             [--demo] [--health-panel] [--bench] [--mem-stats]
             [--host [--port N] [--client-server] | --join ADDR[:PORT]] [--name NAME]
@@ -506,7 +506,8 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
 - `--play` skips the menus and plays the default world; `--screen` opens a menu at start and
   `--debug` turns F3 on.
 - `--give log:8,sand:4` starts you with items (names as shown in game).
-  `--mobs wolf,boar` stands creatures side by side 4 m in front of you.
+  `--mobs wolf,boar` stands creatures side by side 4 m in front of you, and
+  `--figures walk,run,sneak` does the same with players' figures, moving on the spot.
   `--time 21` starts at 21:00.
 - `--hurt` starts you injured, to try treatments or take screenshots: a
   comma list of names (`--help` lists them all: bleeds, fractures, burns

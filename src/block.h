@@ -119,9 +119,9 @@ typedef enum {
     T_ITEM_APPLE,
     T_ITEM_BUCKET,
     T_ITEM_WATER_BUCKET,
-    /* The first-person arm. */
+    /* Skin, and the undyed linen of the players' base layer (avatar.c). */
     T_SKIN,
-    T_SLEEVE,
+    T_LINEN,
     /* Break progress overlay, four stages (transparent between cracks). */
     T_CRACK0,
     T_CRACK1,
@@ -214,6 +214,11 @@ typedef enum {
     T_ROCK_SALT,
     T_QUARTZ_ORE,
     T_GRAPHITE_ORE,
+    /* The players' figure (avatar.c): the shorts' heavier linen, hair, and
+     * the face, which is a front layer and so stays under 128. */
+    T_LINEN_DARK,
+    T_HAIR,
+    T_FACE,
     /* One per item from I_RAW_TIN, in item order (item.h checks). */
     T_ITEM_RAW_TIN,
     T_ITEM_RAW_ZINC,
