@@ -12,7 +12,7 @@ unless it says otherwise.
 1. **The underground series** (see [World generation](#world-generation)):
    - [x] Each block's material class in the block table (#68)
    - [x] 32-bit item ids (#70)
-   - [ ] Materials: 7 rocks, 4 soils, 15 new ores, raw items, ingots
+   - [x] Materials: 7 rocks, 4 soils, 15 new ores, raw items, ingots
          and alloys, smelting
    - [ ] Strata, ores in their host rock, soil depth
    - [ ] Liquids: lava, crude oil, brine

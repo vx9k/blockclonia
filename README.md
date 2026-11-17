@@ -35,7 +35,8 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
   [Health](#health).
 - **Tools, weapons and creatures**: axes, pickaxes, shovels, knives and
   swords in four tiers (wood, stone, copper, iron) that wear out, a rifle
-  with cartridges, a furnace for smelting ore into ingots, and boars and
+  with cartridges, a furnace for smelting eight metals and alloying
+  bronze, brass and steel, and boars and
   wolves that roam, flee, hunt and bite. See [Crafting](#crafting).
 - **Multiplayer** for up to 8 players: host from the menu, and friends
   join by typing your address; your router's port is opened for you
@@ -151,8 +152,8 @@ and heads it off; once down, you come round within seconds.
   shows them for the block you look at.
 - **Structural integrity**: every block needs a load path to the ground.
   Each material can cantilever a set number of blocks (stone 7, timber 6,
-  brick 5, dirt 1, rock and ore in place 15); sand and gravel only rest on
-  what's directly below.
+  brick 5, dirt 1, rock and ore in place 15); sand, gravel and mud only
+  rest on what's directly below.
   Knock out a support and everything it held becomes falling rigid bodies.
   They tumble as they fall, bounce by their restitution, slide to a stop
   by friction, shatter if they are glass or ice, shove or pin the player,
@@ -257,12 +258,21 @@ or burns.
 | 1 furnace | 8 stone | |
 | 1 copper ingot | 1 raw copper, 1 coal | a furnace nearby |
 | 1 iron ingot | 1 raw iron, 2 coal | a furnace nearby |
+| 1 tin, lead, silver or gold ingot | 1 of its raw ore, 1 coal | a furnace nearby |
+| 1 zinc or nickel ingot | 1 of its raw ore, 2 coal | a furnace nearby |
+| 4 bronze ingots | 3 copper ingots, 1 tin ingot | a furnace nearby |
+| 3 brass ingots | 2 copper ingots, 1 zinc ingot | a furnace nearby |
+| 1 steel ingot | 1 iron ingot, 1 charcoal | a furnace nearby |
+| 2 charcoal | 1 log | a burning campfire nearby |
+| 1 quicklime | 1 limestone, 1 coal | a furnace nearby |
+| 2 bricks | 1 clay | a burning campfire nearby |
 | 1 pickaxe or axe | 3 of the material, 2 sticks | |
 | 1 shovel | 1 of the material, 2 sticks | |
 | 1 knife | 1 of the material, 1 stick | |
 | 1 sword | 2 of the material, 1 stick | |
 | 1 cooked meat | 1 raw meat | a burning campfire nearby |
 | 2 gunpowder | 2 coal, 1 ash | |
+| 4 gunpowder | 3 saltpeter, 1 charcoal, 1 sulfur | |
 | 4 cartridges | 1 copper ingot, 1 gunpowder | |
 | 1 rifle | 4 iron ingots, 2 planks | a furnace nearby |
 
@@ -290,8 +300,11 @@ ingots and iron ingots. The right tool breaks a block 2 (wood), 4
 (stone), 5 (copper) or 6.5 (iron) times faster than a bare hand: a
 pickaxe for rock, ore, stone, brick and ice, an axe for wood, a shovel
 for soil, sand, gravel and snow. Rock, ore and masonry yield nothing
-without a pickaxe (and take three times as long by hand), and copper and
-iron ore need one of stone or better. Every block broken wears the tool
+without a pickaxe (and take three times as long by hand). Soft deposits
+(coal, bauxite, sulfur, saltpeter, rock salt, graphite) give to any
+pickaxe; copper, iron, tin, zinc, lead, silver and gold ore need one of
+stone or better, nickel, uranium and lithium ore copper, and titanium
+ore and quartz iron. Every block broken wears the tool
 in hand by one use: wooden tools last 60, stone 130, copper 180 and iron
 250. A bar under the slot shows what is left; a worn-out tool is gone.
 The mouse wheel scrolls the crafting list while the inventory is open.

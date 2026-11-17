@@ -44,7 +44,41 @@ enum {
 };
 
 #define I_TOOL_END (I_TOOL_FIRST + 5 * 4)
-#define ITEM_END I_TOOL_END
+
+/* Minerals and metals, after the tools so the ids saved before them hold.
+ * Each has the texture layer T_ITEM_RAW_TIN + (id - I_RAW_TIN). */
+enum {
+    I_RAW_TIN = I_TOOL_END, /* cassiterite */
+    I_RAW_ZINC,             /* sphalerite */
+    I_RAW_LEAD,             /* galena */
+    I_RAW_NICKEL,           /* pentlandite */
+    I_RAW_SILVER,
+    I_RAW_GOLD,
+    I_BAUXITE,              /* aluminium ore */
+    I_ILMENITE,             /* titanium ore */
+    I_URANINITE,            /* uranium ore */
+    I_SPODUMENE,            /* lithium ore */
+    I_SULFUR,
+    I_SALTPETER,
+    I_SALT,
+    I_QUARTZ,
+    I_GRAPHITE,
+    I_TIN_INGOT,
+    I_ZINC_INGOT,
+    I_LEAD_INGOT,
+    I_NICKEL_INGOT,
+    I_SILVER_INGOT,
+    I_GOLD_INGOT,
+    I_BRONZE_INGOT,
+    I_BRASS_INGOT,
+    I_STEEL_INGOT,
+    I_CHARCOAL,
+    I_QUICKLIME,
+    I_MINERALS_END
+};
+_Static_assert(I_MINERALS_END - I_RAW_TIN == T_ITEM_MINERALS_END - T_ITEM_RAW_TIN, "one texture per mineral item");
+
+#define ITEM_END I_MINERALS_END
 
 /* Tools and blades come in kinds and tiers; the item id is
  * I_TOOL_FIRST + kind * TIER_COUNT + tier. */

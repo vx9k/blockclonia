@@ -27,7 +27,7 @@ static void stock(inventory *inv, item_id id, int n)
 
 static void test_drug_items(void)
 {
-    CHECK(I_SPIRITS + 1 == I_TOOL_FIRST && I_TOOL_END == ITEM_END);
+    CHECK(I_SPIRITS + 1 == I_TOOL_FIRST && I_TOOL_END == I_RAW_TIN && I_MINERALS_END == ITEM_END);
     CHECK(item_valid(I_MORPHINE) && item_valid(I_NALOXONE) && item_valid(I_SPIRITS) && !item_valid(ITEM_END));
     int kind = 0, tier = 0;
     CHECK(!item_tool(I_MORPHINE, &kind, &tier) && !item_tool(I_SPIRITS, &kind, &tier));

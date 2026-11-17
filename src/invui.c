@@ -209,6 +209,8 @@ int invui_recipe_category(int r)
     case B_FURNACE: return RCAT_BUILDING;
     case I_COPPER_INGOT:
     case I_IRON_INGOT:
+    case I_CHARCOAL:
+    case I_QUICKLIME:
     case I_COOKED_MEAT: return RCAT_SMELTING;
     case I_RIFLE:
     case I_CARTRIDGE:
@@ -216,7 +218,7 @@ int invui_recipe_category(int r)
     case I_SPLINT:
     case I_SPIRITS:
     case I_BANDAGE: return RCAT_MEDICAL;
-    default: return RCAT_BASICS;
+    default: return id >= I_TIN_INGOT && id <= I_STEEL_INGOT ? RCAT_SMELTING : RCAT_BASICS;
     }
 }
 
