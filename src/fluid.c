@@ -7,6 +7,9 @@
 #define QUEUE_CAP 16384 /* initial; grows on demand */
 #define QUEUE_MAX (1 << 18)
 #define FLUID_BUDGET 4096 /* cells per tick */
+#define FLUID_SEEK 4      /* how far a film looks along a line for a ledge */
+
+static const int D[4][2] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}}; /* the sides */
 
 /* ------------------------------------------------------------ the queue */
 
@@ -97,12 +100,38 @@ void fluid_init(fluids *f, world *w)
     f->w = w;
     queue_init(&f->now, QUEUE_CAP);
     queue_init(&f->next, QUEUE_CAP);
+    queue_init(&f->spare, QUEUE_CAP);
 }
 
 void fluid_destroy(fluids *f)
 {
     queue_free(&f->now);
     queue_free(&f->next);
+    queue_free(&f->spare);
+}
+
+/* A cell's block and, for a liquid, its level: world_get and
+ * world_fluid_level in one column lookup. */
+typedef struct {
+    uint8_t id;
+    int level;
+} cell;
+
+static inline cell read_cell(const world *w, int x, int y, int z)
+{
+    cell c = {y < 0 ? B_BEDROCK : B_AIR, 0};
+    if (y < 0 || y >= WORLD_H) return c;
+    const column *col = world_column(w, chunk_of(x), chunk_of(z));
+    if (!col) {
+        c.id = B_UNLOADED;
+        return c;
+    }
+    int i = col_index(x & (CHUNK_W - 1), y, z & (CHUNK_W - 1));
+    c.id = col->blocks[i];
+    if (!block_fluid(c.id)) return c;
+    uint8_t m = col->meta ? col->meta[i] : 0;
+    c.level = m ? m : FLUID_FULL;
+    return c;
 }
 
 static void wake_one(fluids *f, int x, int y, int z)
@@ -110,15 +139,41 @@ static void wake_one(fluids *f, int x, int y, int z)
     if (block_fluid(world_get(f->w, x, y, z))) queue_push(&f->next, (ipos){x, y, z});
 }
 
+/* A cell on open ground cleared: a film up to FLUID_SEEK cells away along
+ * a line may have been waiting for the way to a ledge to open (fluid_cell). */
+static void wake_lines(fluids *f, int x, int y, int z)
+{
+    for (int k = 0; k < 4; k++)
+        for (int i = 1; i <= FLUID_SEEK; i++) {
+            cell c = read_cell(f->w, x + D[k][0] * i, y, z + D[k][1] * i);
+            if (c.id == B_AIR) continue;
+            if (c.level == 1) queue_push(&f->next, (ipos){x + D[k][0] * i, y, z + D[k][1] * i});
+            break;
+        }
+}
+
 void fluid_wake(fluids *f, int x, int y, int z)
 {
-    wake_one(f, x, y, z);
+    cell c = read_cell(f->w, x, y, z);
+    if (c.level) queue_push(&f->next, (ipos){x, y, z});
     wake_one(f, x + 1, y, z);
     wake_one(f, x - 1, y, z);
     wake_one(f, x, y + 1, z);
     wake_one(f, x, y - 1, z);
     wake_one(f, x, y, z + 1);
     wake_one(f, x, y, z - 1);
+    /* A cell with room is a drop for the liquid diagonally above it, which
+     * may now run off its ledge (fluid_cell). */
+    if (c.id == B_AIR || (c.level && c.level < FLUID_FULL)) {
+        wake_one(f, x + 1, y + 1, z);
+        wake_one(f, x - 1, y + 1, z);
+        wake_one(f, x, y + 1, z + 1);
+        wake_one(f, x, y + 1, z - 1);
+    }
+    if (c.id == B_AIR && y > 0) {
+        cell u = read_cell(f->w, x, y - 1, z);
+        if (u.id != B_AIR && (!u.level || u.level == FLUID_FULL)) wake_lines(f, x, y, z);
+    }
 }
 
 int fluid_pending(const fluids *f) { return f->next.count; }
@@ -142,56 +197,151 @@ void fluid_displace(world *w, int x, int y, int z, uint8_t id, int level, int pl
     else world_set(w, x, y + 1, z, id, meta);
 }
 
-/* A liquid moves only into air or more of itself. */
+/* Whether a cell at (x, y, z) has somewhere to drain: air, or the same
+ * liquid with room, below it. */
+static int has_drop(const world *w, int x, int y, int z, uint8_t id)
+{
+    if (y <= 0) return 0;
+    cell u = read_cell(w, x, y - 1, z);
+    return u.id == B_AIR || (u.id == id && u.level < FLUID_FULL);
+}
+
+/* The distance along (dx, dz) over open ground to the nearest ledge, or 0
+ * if there is none within FLUID_SEEK. A ledge is air or the same liquid
+ * with room, with a drop under it: water already pouring over the edge
+ * still marks it. */
+static int seek_drop(const world *w, int x, int y, int z, int dx, int dz, uint8_t id)
+{
+    for (int i = 1; i <= FLUID_SEEK; i++) {
+        int sx = x + dx * i, sz = z + dz * i;
+        cell c = read_cell(w, sx, y, sz);
+        if (c.id != B_AIR && (c.id != id || c.level == FLUID_FULL)) return 0;
+        if (has_drop(w, sx, y, sz, id)) return i;
+        if (c.id != B_AIR) return 0;
+    }
+    return 0;
+}
+
+/* A liquid moves only into air or more of itself: first down, then to the
+ * side. Sideways, a neighbour with a drop under it takes everything, so
+ * water runs off a ledge rather than piling at its edge, and thin films
+ * drain down slopes. Without one, the cell levels with all its lower
+ * neighbours at once, to their common average; a difference of one level
+ * is stable, which keeps a puddle from creeping forever. A film of one
+ * level that could not move looks a few cells further for a ledge and
+ * steps toward the nearest, so a plateau drains rather than stays wet;
+ * each step brings it closer, so it never turns back. The cell writes its
+ * own level once, since every write wakes up to eleven cells. */
 static void fluid_cell(fluids *f, ipos p)
 {
     world *w = f->w;
-    uint8_t id = world_get(w, p.x, p.y, p.z);
-    int level = world_fluid_level(w, p.x, p.y, p.z);
+    cell here = read_cell(w, p.x, p.y, p.z);
+    uint8_t id = here.id;
+    int level = here.level;
     if (!level) return;
 
     if (p.y > 0) {
-        uint8_t below = world_get(w, p.x, p.y - 1, p.z);
-        if (below == B_AIR) {
+        cell under = read_cell(w, p.x, p.y - 1, p.z);
+        if (under.id == B_AIR) {
             fluid_set(w, p.x, p.y - 1, p.z, id, level);
             fluid_set(w, p.x, p.y, p.z, id, 0);
             return;
         }
-        if (below == id) {
-            int lb = world_fluid_level(w, p.x, p.y - 1, p.z);
-            int t = FLUID_FULL - lb < level ? FLUID_FULL - lb : level;
-            if (t > 0) {
-                fluid_set(w, p.x, p.y - 1, p.z, id, lb + t);
-                level -= t;
-                fluid_set(w, p.x, p.y, p.z, id, level);
-                if (!level) return;
-            }
+        if (under.id == id && under.level < FLUID_FULL) {
+            int t = FLUID_FULL - under.level < level ? FLUID_FULL - under.level : level;
+            fluid_set(w, p.x, p.y - 1, p.z, id, under.level + t);
+            level -= t;
         }
     }
 
-    static const int D[4][2] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
     uint32_t start = f->order + ipos_hash(p);
-    for (int k = 0; k < 4 && level > 1; k++) {
-        const int *d = D[(start + (uint32_t)k) & 3];
-        int nx = p.x + d[0], nz = p.z + d[1];
-        uint8_t nb = world_get(w, nx, p.y, nz);
-        int ln = 0;
-        if (nb == B_AIR) ln = 0;
-        else if (nb == id) ln = world_fluid_level(w, nx, p.y, nz);
-        else continue;
-        int t = (level - ln) / 2;
-        if (t <= 0) continue;
-        fluid_set(w, nx, p.y, nz, id, ln + t);
-        level -= t;
-        fluid_set(w, p.x, p.y, p.z, id, level);
+    int nx[4] = {0}, nz[4] = {0}, nl[4] = {0}, drop[4] = {0};
+    int before = level;
+    int k = 0, drops = 0;
+    for (int i = 0; i < 4 && level > 0; i++) {
+        const int *d = D[(start + (uint32_t)i) & 3];
+        int x = p.x + d[0], z = p.z + d[1];
+        cell n = read_cell(w, x, p.y, z);
+        if ((n.id != B_AIR && n.id != id) || n.level >= level) continue;
+        nx[k] = x;
+        nz[k] = z;
+        nl[k] = n.level;
+        drop[k] = has_drop(w, x, p.y, z, id);
+        drops += drop[k];
+        k++;
     }
+
+    if (drops) {
+        /* Split evenly between the drops, the odd levels to the first. */
+        int share = level / drops, odd = level % drops;
+        for (int i = 0; i < k; i++) {
+            if (!drop[i]) continue;
+            int t = share + (odd > 0);
+            odd--;
+            if (t > FLUID_FULL - nl[i]) t = FLUID_FULL - nl[i];
+            if (t <= 0) continue;
+            fluid_set(w, nx[i], p.y, nz[i], id, nl[i] + t);
+            level -= t;
+        }
+    } else if (k) {
+        /* Neighbours lowest first (ties keep the turning order), then level
+         * with as many of them as each still gain from it. */
+        int by[4] = {0, 1, 2, 3};
+        for (int i = 1; i < k; i++)
+            for (int j = i; j > 0 && nl[by[j]] < nl[by[j - 1]]; j--) {
+                int t = by[j];
+                by[j] = by[j - 1];
+                by[j - 1] = t;
+            }
+        int m = 0, avg = 0, sum = level;
+        for (int i = 0; i < k; i++) {
+            int a = (sum + nl[by[i]]) / (i + 2);
+            if (a <= nl[by[i]]) break;
+            sum += nl[by[i]];
+            avg = a;
+            m = i + 1;
+        }
+        for (int i = 0; i < m; i++) {
+            fluid_set(w, nx[by[i]], p.y, nz[by[i]], id, avg);
+            level -= avg - nl[by[i]];
+        }
+    }
+
+    if (level == 1 && before == 1) {
+        int best = 0;
+        const int *to = NULL;
+        for (int i = 0; i < 4; i++) {
+            const int *d = D[(start + (uint32_t)i) & 3];
+            int dist = seek_drop(w, p.x, p.y, p.z, d[0], d[1], id);
+            if (dist && (!best || dist < best)) {
+                best = dist;
+                to = d;
+            }
+        }
+        if (to) {
+            int tx = p.x + to[0], tz = p.z + to[1];
+            fluid_set(w, tx, p.y, tz, id, read_cell(w, tx, p.y, tz).level + 1);
+            level = 0;
+        }
+    }
+    if (level != here.level) fluid_set(w, p.x, p.y, p.z, id, level);
 }
 
-/* Moves this tick's unprocessed cells to the next tick. */
+/* Moves this tick's unprocessed cells to the next tick. They go ahead of
+ * the cells woken since: a flood bigger than the budget would otherwise
+ * keep putting its far end at the back of the line, and some cells would
+ * wait many ticks for their turn. */
 static void fluid_carry(fluids *f)
 {
-    fluid_queue *now = &f->now;
-    for (int i = f->read; i < now->count; i++) queue_push(&f->next, now->items[i]);
+    fluid_queue *now = &f->now, *line = &f->spare;
+    if (f->read < now->count) {
+        for (int i = f->read; i < now->count; i++) queue_push(line, now->items[i]);
+        for (int i = 0; i < f->next.count; i++) queue_push(line, f->next.items[i]);
+        queue_clear(&f->next);
+        fluid_queue tmp = f->next;
+        f->next = *line;
+        *line = tmp;
+    }
     queue_clear(now);
     f->read = f->end = 0;
 }

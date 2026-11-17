@@ -1,11 +1,12 @@
 /* Fluids: liquid blocks (BF_FLUID) flowing through the world.
  *
  * - A liquid cell holds a level 1..FLUID_FULL in its meta (world.h). Each
- *   tick a cell pours what it can into the cell below, then shares what
- *   is left with lower neighbours at its side, half the difference at a
- *   time, so levels even out and volume is conserved exactly.
- * - Only cells that may move are simulated: a change to a cell wakes it
- *   and its six neighbours (fluid_wake), and a cell that moved wakes its
+ *   tick a cell pours what it can into the cell below, then moves sideways:
+ *   all of it over a ledge if a neighbour has a drop under it, otherwise
+ *   levelling with its lower neighbours. Volume is conserved exactly.
+ * - Only cells that may move are simulated: a change to a cell wakes it,
+ *   its six neighbours and, when it has room, the cells diagonally above
+ *   that may drain into it (fluid_wake). A cell that moved wakes its
  *   neighbours through the world's change hook. A still sea costs nothing.
  * - Ticks run at 10 Hz with a fixed budget of cells, so a flood slows
  *   down rather than stalls the frame, the same on every machine.
@@ -31,6 +32,7 @@ typedef struct {
 typedef struct {
     world *w;
     fluid_queue now, next; /* this tick's cells, and those woken for the next */
+    fluid_queue spare;     /* empty; where begin_tick lines the two up */
     int read, end;         /* this tick's cells: now.items[read, end) */
     int per_step;          /* a tick's work is spread over FLUID_TICK_EVERY steps */
     uint32_t order;        /* the tick's number, which turns the order cells share sideways */
