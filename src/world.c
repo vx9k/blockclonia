@@ -210,7 +210,10 @@ int world_fluid_level(const world *w, int x, int y, int z)
 }
 
 int world_water_level(const world *w, int x, int y, int z)
-{ return world_get(w, x, y, z) == B_WATER ? world_fluid_level(w, x, y, z) : 0; }
+{
+    if (world_get(w, x, y, z) != B_WATER) return 0;
+    return world_fluid_level(w, x, y, z);
+}
 
 static void mark_section(world *w, int cx, int cz, int sy, int urgent)
 {

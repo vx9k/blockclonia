@@ -1155,7 +1155,6 @@ void physics_on_block_changed(void *user, int x, int y, int z, uint8_t old_id, u
     }
 }
 
-/* A liquid moves only into air or more of itself. */
 /* ------------------------------------------------------------------ step */
 
 /* The player's own move, and a splash if it went into water fast. */
