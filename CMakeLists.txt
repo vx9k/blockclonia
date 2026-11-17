@@ -210,6 +210,14 @@ if(MC_BUILD_GAME)
     add_executable(blockclonia src/main.c src/renderer.c src/audio_null.c)
   endif()
   target_link_libraries(blockclonia PRIVATE mccore Vulkan::Vulkan mc::glfw mc_warnings)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # musl (Alpine) gives threads it didn't size a 128 KB stack, and takes a
+    # bigger default only from the program's PT_GNU_STACK header. Mesa starts
+    # its shader-compiler threads that way, and LLVM's AArch64 backend
+    # overflowed 128 KB compiling lavapipe's first pipeline. glibc sizes such
+    # threads from RLIMIT_STACK (8 MB) and ignores this header.
+    target_link_options(blockclonia PRIVATE LINKER:-z,stack-size=8388608)
+  endif()
   target_compile_definitions(blockclonia PRIVATE MC_DISCORD_APP_ID="${MC_DISCORD_APP_ID}")
   if(MC_VK_MIMALLOC AND NOT MC_MEM_LIBC)
     # renderer.c's VkAllocationCallbacks; libc builds (sanitizer, fuzz) lack the aligned mem_* calls.

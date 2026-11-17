@@ -216,6 +216,14 @@ class Packages(unittest.TestCase):
         self.assertIn('-DMC_PGO=ON -DMC_BOLT=ON', ubuntu)
         self.assertIn('-DMC_WERROR=ON', alpine)
 
+    def test_musl_threads_get_a_glibc_sized_default_stack(self):
+        # Mesa's shader-compiler threads take musl's default stack; at 128 KB
+        # LLVM's AArch64 backend overflowed it and the Alpine arm64 render
+        # crashed.
+        cmake = (ROOT / 'CMakeLists.txt').read_text()
+        self.assertIn('target_link_options(blockclonia PRIVATE LINKER:-z,stack-size=8388608)', cmake)
+        self.assertNotIn('gdb', job(PACKAGE, 'alpine'))
+
     def test_alpine_installs_the_runtime_files_clang_links_with(self):
         # Without gcc, Alpine's clang can't find crtbeginS.o or libgcc and
         # every link fails, starting with CMake's compiler check.
