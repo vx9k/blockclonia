@@ -1582,9 +1582,16 @@ static void test_mem(void)
      * encode it differently (mem.c), so a wrong decode shows up here. */
     char v[64] = {0};
     mem_version_string(v, sizeof v);
-    unsigned major = 0, minor = 0, patch = 0;
-    CHECK(strcmp(v, "libc") == 0 || sscanf(v, "mimalloc %u.%u.%u", &major, &minor, &patch) == 3);
-    CHECK(major <= 9 && minor <= 99 && patch <= 99);
+    if (strcmp(v, "libc") != 0) {
+        CHECK(strncmp(v, "mimalloc ", 9) == 0);
+        char *end = v + 9;
+        unsigned long major = strtoul(end, &end, 10);
+        CHECK(*end == '.');
+        unsigned long minor = strtoul(end + 1, &end, 10);
+        CHECK(*end == '.');
+        unsigned long patch = strtoul(end + 1, &end, 10);
+        CHECK(*end == '\0' && major >= 2 && major <= 9 && minor <= 99 && patch <= 99);
+    }
     /* One value from each encoding mimalloc has used; 3208 came out as
      * "32.0.8" when only two were known. */
     static const struct {
