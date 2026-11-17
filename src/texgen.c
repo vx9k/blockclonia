@@ -344,19 +344,24 @@ static const recolour MINERAL_ART[T_ITEM_MINERALS_END - T_ITEM_RAW_TIN] = {
 #undef HEAP
 
 /* The other liquids' buckets: the water bucket with what is in it. */
-#define BUCKET(q, Q)                                                                                 \
-    {                                                                                                \
-        T_ITEM_WATER_BUCKET,                                                                         \
-        {                                                                                            \
-            {'#', C(70, 70, 76)}, {'b', C(110, 80, 45)}, {'q', q}, {'Q', Q}, {'w', C(170, 128, 76)}, \
-            { 'h', C(130, 136, 146) }                                                                \
-        }                                                                                            \
-    }
 static const recolour BUCKET_ART[] = {
-    BUCKET(C(25, 20, 15), C(70, 60, 50)),    /* crude oil */
-    BUCKET(C(60, 110, 150), C(225, 230, 235)), /* brine, a crust of salt */
+    /* crude oil */
+    {T_ITEM_WATER_BUCKET,
+     {{'#', C(70, 70, 76)},
+      {'b', C(110, 80, 45)},
+      {'q', C(25, 20, 15)},
+      {'Q', C(70, 60, 50)},
+      {'w', C(170, 128, 76)},
+      {'h', C(130, 136, 146)}}},
+    /* brine, a crust of salt */
+    {T_ITEM_WATER_BUCKET,
+     {{'#', C(70, 70, 76)},
+      {'b', C(110, 80, 45)},
+      {'q', C(60, 110, 150)},
+      {'Q', C(225, 230, 235)},
+      {'w', C(170, 128, 76)},
+      {'h', C(130, 136, 146)}}},
 };
-#undef BUCKET
 #undef C
 
 static int sprite_texel(int layer, int x, int y, rgba *out)
