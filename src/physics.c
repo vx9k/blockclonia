@@ -1,7 +1,7 @@
 #include "physics.h"
 #include "entity.h"
+#include "fluid.h"
 #include "item.h"
-#include "log.h"
 #include "mem.h"
 #include "noise.h"
 #include "wire.h"
@@ -18,9 +18,6 @@
 #define EPS (1.0 / 262144.0)
 #define REGION_W (2 * STRUCT_RADIUS + 1)
 #define REGION_CELLS (REGION_W * REGION_W * REGION_W)
-#define FLUID_QUEUE_CAP 16384   /* initial; grows on demand */
-#define FLUID_QUEUE_MAX (1 << 18)
-#define FLUID_BUDGET 4096
 #define ITEM_BODY_SWEEP_MAX 64 /* falling blocks items still collide with */
 #define GROUNDED (STRUCT_MAX_SPAN + 1)
 /* Structural work per step, after the first check, in units of one block
@@ -53,7 +50,7 @@ static int is_buoyant(uint8_t id)
     return id < B_COUNT && (g_blocks[id].flags & BF_SOLID) && g_blocks[id].density < 1000.0f;
 }
 
-static int is_free(uint8_t id) { return id == B_AIR || id == B_WATER; }
+static int is_free(uint8_t id) { return id == B_AIR || block_fluid(id); }
 
 /* Would a block placed at (x, y, z) be supported right away? */
 static int supported_below(const world *w, int x, int y, int z, uint8_t id)
@@ -77,92 +74,6 @@ static int boxes_overlap(aabb a, aabb b)
            a.min.z < b.max.z - EPS && a.max.z > b.min.z + EPS;
 }
 
-/* ----------------------------------------------------------- position set */
-
-static uint32_t hash_pos(ipos p)
-{
-    return hash_u32((uint32_t)p.x * 73856093U ^ (uint32_t)p.y * 19349663U ^ (uint32_t)p.z * 83492791U);
-}
-
-static void pq_init(pos_queue *q, int cap)
-{
-    q->cap = cap;
-    q->count = 0;
-    q->items = mem_alloc(mem_array_size((size_t)cap, sizeof(ipos)));
-    q->set_cap = 1;
-    while (q->set_cap < (uint32_t)cap * 2) q->set_cap <<= 1;
-    q->set = mem_calloc(q->set_cap, sizeof(uint32_t));
-}
-
-static void pq_free(pos_queue *q)
-{
-    mem_free(q->items);
-    mem_free(q->set);
-    memset(q, 0, sizeof *q);
-}
-
-static void pq_grow(pos_queue *q)
-{
-    q->cap *= 2;
-    q->items = mem_realloc(q->items, mem_array_size((size_t)q->cap, sizeof(ipos)));
-    q->set_cap *= 2;
-    mem_free(q->set);
-    q->set = mem_calloc(q->set_cap, sizeof(uint32_t));
-    uint32_t mask = q->set_cap - 1;
-    for (int i = 0; i < q->count; i++) {
-        uint32_t h = hash_pos(q->items[i]) & mask;
-        while (q->set[h]) h = (h + 1) & mask;
-        q->set[h] = (uint32_t)i + 1;
-    }
-}
-
-static int pq_push(pos_queue *q, ipos p)
-{
-    uint32_t mask = q->set_cap - 1, h = hash_pos(p) & mask;
-    while (q->set[h]) {
-        ipos o = q->items[q->set[h] - 1];
-        if (o.x == p.x && o.y == p.y && o.z == p.z) return 1;
-        h = (h + 1) & mask;
-    }
-    if (q->count >= q->cap) {
-        if (q->cap >= FLUID_QUEUE_MAX) {
-            /* A dropped wake leaves water frozen until something nearby
-             * changes; say so once rather than silently. */
-            static int warned;
-            if (!warned) log_warn("fluid queue full (%d cells); some water will pause", q->cap);
-            warned = 1;
-            return 0;
-        }
-        pq_grow(q); /* rehashes: find p's slot again */
-        mask = q->set_cap - 1;
-        h = hash_pos(p) & mask;
-        while (q->set[h]) h = (h + 1) & mask;
-    }
-    q->items[q->count++] = p;
-    q->set[h] = (uint32_t)q->count;
-    return 1;
-}
-
-/* Cost follows the item count, not the table size: a tick that touched a
- * few cells no longer wipes 128 KB. */
-static void pq_clear(pos_queue *q)
-{
-    if (!q->count) return;
-    if ((uint32_t)q->count > q->set_cap / 8) {
-        memset(q->set, 0, q->set_cap * sizeof(uint32_t));
-    } else {
-        uint32_t mask = q->set_cap - 1;
-        for (int i = 0; i < q->count; i++) {
-            /* Every item is in the table, so its probe always finds it;
-             * slots already cleared are simply stepped over. */
-            uint32_t h = hash_pos(q->items[i]) & mask;
-            while (q->set[h] != (uint32_t)i + 1) h = (h + 1) & mask;
-            q->set[h] = 0;
-        }
-    }
-    q->count = 0;
-}
-
 /* ------------------------------------------------------------------ init */
 
 void physics_init(physics *ph, world *w)
@@ -171,8 +82,7 @@ void physics_init(physics *ph, world *w)
     ph->w = w;
     ph->bodies = mem_alloc(sizeof(body) * MAX_BODIES);
     ph->items = mem_alloc(sizeof(item_ent) * MAX_ITEMS);
-    pq_init(&ph->fluid_now, FLUID_QUEUE_CAP);
-    pq_init(&ph->fluid_next, FLUID_QUEUE_CAP);
+    fluid_init(&ph->fl, w);
     ph->st_s = mem_alloc(REGION_CELLS);
     ph->st_id = mem_alloc(REGION_CELLS);
     for (int i = 0; i <= GROUNDED; i++)
@@ -183,8 +93,7 @@ void physics_destroy(physics *ph)
 {
     mem_free(ph->bodies);
     mem_free(ph->items);
-    pq_free(&ph->fluid_now);
-    pq_free(&ph->fluid_next);
+    fluid_destroy(&ph->fl);
     mem_free(ph->st_s);
     mem_free(ph->st_id);
     for (int i = 0; i <= GROUNDED; i++) mem_free(ph->st_bucket[i]);
@@ -292,7 +201,7 @@ static double water_fraction(const world *w, aabb box)
     for (int y = (int)floor(box.min.y); y <= (int)floor(box.max.y - EPS); y++) {
         int level = world_water_level(w, x, y, z);
         if (!level) continue;
-        double top = y + level / (double)WATER_FULL;
+        double top = y + level / (double)FLUID_FULL;
         double lo = box.min.y > y ? box.min.y : y;
         double hi = box.max.y < top ? box.max.y : top;
         if (hi > lo) wet += hi - lo;
@@ -534,12 +443,6 @@ static void spawn_body(physics *ph, int x, int y, int z, uint8_t id)
     b->rot[3] = 1.0f;
 }
 
-static void set_water(world *w, int x, int y, int z, int level)
-{
-    if (level <= 0) world_set(w, x, y, z, B_AIR, 0);
-    else world_set(w, x, y, z, B_WATER, (uint8_t)(level >= WATER_FULL ? 0 : level));
-}
-
 /* Returns 1 if the body is finished (placed or destroyed). */
 static int solidify(physics *ph, const body *b)
 {
@@ -548,7 +451,7 @@ static int solidify(physics *ph, const body *b)
     for (int t = 0; t < 3; t++, y++) {
         if (y >= WORLD_H) return 1;
         uint8_t id = world_get(w, x, y, z);
-        if (id != B_AIR && id != B_WATER) continue;
+        if (id != B_AIR && !block_fluid(id)) continue;
         aabb cell = {dv3(x, y, z), dv3(x + 1, y + 1, z + 1)};
         /* Never inside the player, flying or not; and only where it will
          * stay put, or the structural check would knock it loose again. A
@@ -556,17 +459,9 @@ static int solidify(physics *ph, const body *b)
         for (int k = 0; k < ph->pl_count; k++)
             if (boxes_overlap(cell, player_box(ph->pls[k]))) return 0;
         if (!supported_below(w, x, y, z, b->block)) return 0;
-        int displaced = id == B_WATER ? world_water_level(w, x, y, z) : 0;
+        int displaced = world_fluid_level(w, x, y, z);
         world_set(w, x, y, z, b->block, b->meta);
-        if (displaced) {
-            /* Push the displaced water up rather than deleting it. */
-            uint8_t up = world_get(w, x, y + 1, z);
-            int have = up == B_WATER ? world_water_level(w, x, y + 1, z) : 0;
-            if (up == B_AIR || up == B_WATER) {
-                int total = have + displaced;
-                set_water(w, x, y + 1, z, total > WATER_FULL ? WATER_FULL : total);
-            }
-        }
+        fluid_displace(w, x, y, z, id, displaced, 0);
         return 1;
     }
     return 1; /* no room: crushed to rubble */
@@ -625,7 +520,7 @@ static float hash_unit(uint32_t h) { return (float)(h >> 8) / 16777216.0f; }
 static uint32_t body_hash(const physics *ph, const body *b, uint32_t salt)
 {
     ipos c = {(int)floor(b->pos.x + 0.5), (int)floor(b->pos.y + 0.5), (int)floor(b->pos.z + 0.5)};
-    return hash_u32(hash_pos(c) ^ (uint32_t)ph->step_count * 2654435761u ^ salt * 0x85EBCA77u);
+    return hash_u32(ipos_hash(c) ^ (uint32_t)ph->step_count * 2654435761u ^ salt * 0x85EBCA77u);
 }
 
 /* Adds spin about the horizontal axis that rolls the block's top toward
@@ -646,7 +541,7 @@ static void add_roll(body *b, double dx, double dz, double rate)
 static void collapse_spin(body *b, int dx, int dz)
 {
     ipos c = {(int)b->pos.x, (int)b->pos.y, (int)b->pos.z};
-    uint32_t h = hash_u32(hash_pos(c));
+    uint32_t h = hash_u32(ipos_hash(c));
     double u = (double)hash_unit(h), dist = hypot(dx, dz);
     if (dist < 0.5) {
         double a = u * 2.0 * MC_PI;
@@ -1241,25 +1136,10 @@ static int removal_is_safe(const world *w, int x, int y, int z)
     return 1;
 }
 
-/* ---------------------------------------------------------------- fluids */
-
-static void wake_water(physics *ph, int x, int y, int z)
-{
-    if (world_get(ph->w, x, y, z) == B_WATER) pq_push(&ph->fluid_next, (ipos){x, y, z});
-}
-
 void physics_on_block_changed(void *user, int x, int y, int z, uint8_t old_id, uint8_t new_id)
 {
     physics *ph = user;
-    if (new_id == B_AIR || new_id == B_WATER || old_id == B_WATER) {
-        wake_water(ph, x, y, z);
-        wake_water(ph, x + 1, y, z);
-        wake_water(ph, x - 1, y, z);
-        wake_water(ph, x, y + 1, z);
-        wake_water(ph, x, y - 1, z);
-        wake_water(ph, x, y, z + 1);
-        wake_water(ph, x, y, z - 1);
-    }
+    if (new_id == B_AIR || block_fluid(new_id) || block_fluid(old_id)) fluid_wake(&ph->fl, x, y, z);
     if (ph->suppress_struct) return;
     /* Water drained from under a floating block: it may now hang. */
     if (old_id == B_WATER && new_id != B_WATER && is_buoyant(world_get(ph->w, x, y + 1, z)))
@@ -1275,83 +1155,7 @@ void physics_on_block_changed(void *user, int x, int y, int z, uint8_t old_id, u
     }
 }
 
-static void fluid_cell(physics *ph, ipos p)
-{
-    world *w = ph->w;
-    int level = world_water_level(w, p.x, p.y, p.z);
-    if (!level) return;
-
-    if (p.y > 0) {
-        uint8_t below = world_get(w, p.x, p.y - 1, p.z);
-        if (below == B_AIR) {
-            set_water(w, p.x, p.y - 1, p.z, level);
-            set_water(w, p.x, p.y, p.z, 0);
-            return;
-        }
-        if (below == B_WATER) {
-            int lb = world_water_level(w, p.x, p.y - 1, p.z);
-            int t = WATER_FULL - lb < level ? WATER_FULL - lb : level;
-            if (t > 0) {
-                set_water(w, p.x, p.y - 1, p.z, lb + t);
-                level -= t;
-                set_water(w, p.x, p.y, p.z, level);
-                if (!level) return;
-            }
-        }
-    }
-
-    static const int D[4][2] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
-    uint32_t start = (uint32_t)(ph->step_count / FLUID_TICK_EVERY) + hash_pos(p);
-    for (int k = 0; k < 4 && level > 1; k++) {
-        const int *d = D[(start + (uint32_t)k) & 3];
-        int nx = p.x + d[0], nz = p.z + d[1];
-        uint8_t nb = world_get(w, nx, p.y, nz);
-        int ln = 0;
-        if (nb == B_AIR) ln = 0;
-        else if (nb == B_WATER) ln = world_water_level(w, nx, p.y, nz);
-        else continue;
-        int t = (level - ln) / 2;
-        if (t <= 0) continue;
-        set_water(w, nx, p.y, nz, ln + t);
-        level -= t;
-        set_water(w, p.x, p.y, p.z, level);
-    }
-}
-
-/* Moves this tick's unprocessed cells to the next tick. */
-static void fluid_carry(physics *ph)
-{
-    pos_queue *now = &ph->fluid_now;
-    for (int i = ph->fluid_read; i < now->count; i++) pq_push(&ph->fluid_next, now->items[i]);
-    pq_clear(now);
-    ph->fluid_read = ph->fluid_end = 0;
-}
-
-static void fluid_begin_tick(physics *ph)
-{
-    fluid_carry(ph);
-    pos_queue tmp = ph->fluid_now;
-    ph->fluid_now = ph->fluid_next;
-    ph->fluid_next = tmp;
-    int n = ph->fluid_now.count;
-    ph->fluid_end = n < FLUID_BUDGET ? n : FLUID_BUDGET;
-    ph->fluid_per_step = (ph->fluid_end + FLUID_TICK_EVERY - 1) / FLUID_TICK_EVERY;
-    ph->fluid_updates = ph->fluid_end;
-}
-
-static void fluid_run(physics *ph, int n)
-{
-    int end = ph->fluid_read + n < ph->fluid_end ? ph->fluid_read + n : ph->fluid_end;
-    while (ph->fluid_read < end) fluid_cell(ph, ph->fluid_now.items[ph->fluid_read++]);
-}
-
-void physics_fluid_tick(physics *ph)
-{
-    fluid_begin_tick(ph);
-    fluid_run(ph, FLUID_BUDGET);
-    fluid_carry(ph);
-}
-
+/* A liquid moves only into air or more of itself. */
 /* ------------------------------------------------------------------ step */
 
 /* The player's own move, and a splash if it went into water fast. */
@@ -1399,8 +1203,9 @@ void physics_step_players(physics *ph, player *const *ps, const player_input *in
     /* Fluids tick at 10 Hz, but each tick's cells are spread over the
      * steps until the next one instead of landing in a single step. */
     ph->step_count++;
-    if (ph->step_count % FLUID_TICK_EVERY == 0) fluid_begin_tick(ph);
-    fluid_run(ph, ph->fluid_per_step);
+    if (ph->step_count % FLUID_TICK_EVERY == 0)
+        fluid_begin_tick(&ph->fl, (uint32_t)(ph->step_count / FLUID_TICK_EVERY));
+    fluid_run(&ph->fl, ph->fl.per_step);
 }
 
 /* --------------------------------------------------------------- raycast */
@@ -1422,7 +1227,7 @@ ray_hit physics_raycast(const world *w, dvec3 o, vec3 dir, double max_dist)
     for (int steps = 0; steps < 256 && t <= max_dist; steps++) {
         uint8_t id = world_get(w, x, y, z);
         if (id == B_UNLOADED) return r;
-        if (id != B_AIR && id != B_WATER) {
+        if (id != B_AIR && !block_fluid(id)) {
             r.hit = 1;
             r.block = (ipos){x, y, z};
             r.before = (ipos){px, py, pz};
@@ -1436,3 +1241,5 @@ ray_hit physics_raycast(const world *w, dvec3 o, vec3 dir, double max_dist)
     }
     return r;
 }
+
+void physics_fluid_tick(physics *ph) { fluid_tick(&ph->fl, (uint32_t)(ph->step_count / FLUID_TICK_EVERY)); }

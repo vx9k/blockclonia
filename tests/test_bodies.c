@@ -259,8 +259,7 @@ static void make_pool(test_world *t)
     for (int y = GROUND - 6; y < GROUND; y++)
         for (int z = -3; z <= 3; z++)
             for (int x = -3; x <= 3; x++) world_set(&t->w, x, y, z, B_WATER, 0);
-    t->ph.fluid_next.count = 0; /* level pool: nothing to simulate */
-    memset(t->ph.fluid_next.set, 0, t->ph.fluid_next.set_cap * sizeof(uint32_t));
+    fluid_forget(&t->ph.fl); /* level pool: nothing to simulate */
 }
 
 /* Stone falling 4 m hits the water at sqrt(2 g 4) = 8.9 m/s: one splash at

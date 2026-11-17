@@ -788,8 +788,7 @@ static void test_buoyancy(void)
     for (int y = GROUND - 6; y < GROUND; y++)
         for (int z = -3; z <= 3; z++)
             for (int x = -3; x <= 3; x++) world_set(&t.w, x, y, z, B_WATER, 0);
-    t.ph.fluid_next.count = 0; /* level pool: nothing to simulate */
-    memset(t.ph.fluid_next.set, 0, t.ph.fluid_next.set_cap * sizeof(uint32_t));
+    fluid_forget(&t.ph.fl); /* level pool: nothing to simulate */
 
     t.ph.bodies[0] = (body){.pos = dv3(0, GROUND - 5, 0), .prev_pos = dv3(0, GROUND - 5, 0), .block = B_LOG};
     t.ph.bodies[1] = (body){.pos = dv3(2, GROUND - 1, 2), .prev_pos = dv3(2, GROUND - 1, 2), .block = B_STONE};
@@ -842,9 +841,9 @@ static void test_fluid(void)
     /* Pour 5 full blocks of water from above onto flat ground. */
     for (int y = GROUND + 3; y < GROUND + 8; y++) world_set(&t.w, 0, y, 0, B_WATER, 0);
     long before = total_water(&t.w, 20);
-    CHECK(before == 5 * WATER_FULL);
+    CHECK(before == 5 * FLUID_FULL);
     int ticks = 0;
-    while (t.ph.fluid_next.count && ticks < 500) {
+    while (fluid_pending(&t.ph.fl) && ticks < 500) {
         physics_fluid_tick(&t.ph);
         ticks++;
     }
@@ -1548,7 +1547,7 @@ static void test_review_fixes(void)
     interact_input use = {.use_click = 1, .can_act = 1, .speed = 1.0f, .dt = 1.0f / 60.0f};
     p.flying = 1; /* out of the way of the cell */
     interact_frame(&s, &t.w, &t.ph, NULL, &p, &inv, fx, dv3(6.5, GROUND + 3.0, 6.5), v3(0, -1, 0), hit, &use);
-    CHECK(world_get(&t.w, 6, GROUND, 6) == B_PLANKS && world_water_level(&t.w, 6, GROUND + 1, 6) == WATER_FULL);
+    CHECK(world_get(&t.w, 6, GROUND, 6) == B_PLANKS && world_water_level(&t.w, 6, GROUND + 1, 6) == FLUID_FULL);
     p.flying = 0;
 
     /* A campfire with 3 units of fuel knocked off its pillar lands with 3. */
@@ -2025,6 +2024,7 @@ int main(void)
     test_drugs_all();
     test_materials_all();
     test_strata_all();
+    test_fluid_all();
     test_faint_all();
     test_fear_all();
     test_mobmodel_all();

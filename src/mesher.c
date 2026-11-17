@@ -12,10 +12,11 @@
 #define K_TEX(k)    ((k) & 0xFFu)
 #define K_AO(k)     (((k) >> 8) & 0xFFu)
 #define K_DROP(k)   (((k) >> 16) & 0xFu)
-/* On the side face of a step down to lower water: the lower surface's drop. */
+/* On the side face of a step down to a lower surface of the same liquid:
+ * that surface's drop. */
 #define K_BASE(k) (((k) >> 20) & 0xFu)
 
-enum { C_OPAQUE = 1, C_TRANS = 2, C_WATER = 4, C_AIR = 8 };
+enum { C_OPAQUE = 1, C_TRANS = 2, C_FLUID = 4, C_AIR = 8 };
 
 static uint8_t g_class[256];
 
@@ -24,7 +25,7 @@ void mesher_init(void)
     for (int i = 0; i < 256; i++) {
         uint8_t c = 0;
         if (i == B_AIR) c = C_AIR;
-        else if (i == B_WATER) c = C_WATER;
+        else if (i < B_COUNT && (g_blocks[i].flags & BF_FLUID)) c = C_FLUID;
         else if (i >= B_COUNT || (g_blocks[i].flags & BF_OPAQUE)) c = C_OPAQUE; /* unknown/unloaded: hide faces */
         else c = C_TRANS;
         g_class[i] = c;
@@ -49,14 +50,14 @@ static inline int corner_ao(const uint8_t *cls, int n, int ou, int ov)
     return (s1 && s2) ? 0 : 3 - (s1 + s2 + cr);
 }
 
-/* How far a water surface sits below its block top, in 1/8 block: none
- * under more water, else the missing levels, and at least one so even a
- * full block's surface shows below the bank. */
-static inline int water_drop(const mesh_input *in, const uint8_t *cls, int i)
+/* How far a liquid's surface sits below its block top, in 1/8 block: none
+ * under more of the same liquid, else the missing levels, and at least one
+ * so even a full block's surface shows below the bank. */
+static inline int fluid_drop(const mesh_input *in, int i)
 {
-    if (cls[i + STRIDE[1]] == C_WATER) return 0;
-    int level = in->meta[i] ? in->meta[i] : WATER_FULL;
-    return WATER_FULL - level > 0 ? WATER_FULL - level : 1;
+    if (in->blocks[i + STRIDE[1]] == in->blocks[i]) return 0;
+    int level = in->meta[i] ? in->meta[i] : FLUID_FULL;
+    return FLUID_FULL - level > 0 ? FLUID_FULL - level : 1;
 }
 
 static inline uint32_t face_key(const mesh_input *in, const uint8_t *cls, int pi, int ni, int f, int su, int sv)
@@ -65,7 +66,7 @@ static inline uint32_t face_key(const mesh_input *in, const uint8_t *cls, int pi
     if (cb == C_AIR) return 0;
     uint8_t cn = cls[ni];
     uint8_t b = in->blocks[pi];
-    if (cn == C_OPAQUE && cb != C_WATER) { /* hidden: the common case, decided first */
+    if (cn == C_OPAQUE && cb != C_FLUID) { /* hidden: the common case, decided first */
         /* Leaves sway in block.vert and nothing else does, so where leaves
          * touch another loaded block both faces stay: the one that moves
          * away would otherwise open a gap into the block's empty inside. */
@@ -74,15 +75,16 @@ static inline uint32_t face_key(const mesh_input *in, const uint8_t *cls, int pi
     }
     uint32_t key = K_PRESENT | block_get(b)->tex[f]; /* ids >= B_COUNT read as stone */
 
-    if (cb == C_WATER) {
-        int level = in->meta[pi] ? in->meta[pi] : WATER_FULL;
-        if (cn == C_OPAQUE && !(f == 2 && level < WATER_FULL)) return 0;
-        int drop = water_drop(in, cls, pi), base = 0;
-        if (cn == C_WATER) {
-            /* Beside lower water, the step between the two surfaces shows:
-             * a side face from this surface down to the neighbour's. */
+    if (cb == C_FLUID) {
+        int level = in->meta[pi] ? in->meta[pi] : FLUID_FULL;
+        if (cn == C_OPAQUE && !(f == 2 && level < FLUID_FULL)) return 0;
+        int drop = fluid_drop(in, pi), base = 0;
+        if (in->blocks[ni] == b) {
+            /* Beside lower liquid of its kind, the step between the two
+             * surfaces shows: a side face from this surface down to the
+             * neighbour's. */
             if (f == 2 || f == 3) return 0;
-            base = water_drop(in, cls, ni);
+            base = fluid_drop(in, ni);
             if (base <= drop) return 0;
         }
         key |= K_TRANS | (uint32_t)drop << 16 | (uint32_t)base << 20 | (uint32_t)3 << 8 | (uint32_t)3 << 10 |

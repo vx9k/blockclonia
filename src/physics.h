@@ -20,6 +20,7 @@
 #ifndef MC_PHYSICS_H
 #define MC_PHYSICS_H
 
+#include "fluid.h"
 #include "item.h"
 #include "mathlib.h"
 #include "world.h"
@@ -29,7 +30,6 @@
 #define PHYS_HZ 60
 #define PHYS_DT (1.0 / PHYS_HZ)
 #define GRAVITY 9.81
-#define FLUID_TICK_EVERY 6      /* 10 Hz fluid updates */
 #define MAX_BODIES 4096
 #define STRUCT_RADIUS 12
 #define STRUCT_MAX_SPAN 15
@@ -84,15 +84,6 @@ typedef struct {
     int sneak;           /* slow walk that will not step off an edge */
 } player_input;
 
-typedef struct { int x, y, z; } ipos;
-
-typedef struct {
-    ipos *items;
-    int count, cap;
-    uint32_t *set;       /* open-addressing dedupe of items (index + 1) */
-    uint32_t set_cap;
-} pos_queue;
-
 /* A falling block that struck the player during the last step. */
 typedef struct {
     float mass;          /* kg */
@@ -145,9 +136,7 @@ typedef struct physics {
     world *w;
     body *bodies;
     int body_count;
-    pos_queue fluid_now, fluid_next;
-    int fluid_read, fluid_end;   /* this tick's cells: fluid_now.items[fluid_read, fluid_end) */
-    int fluid_per_step;          /* a tick's work is spread over FLUID_TICK_EVERY steps */
+    fluids fl;
     ipos struct_queue[256];
     int struct_head, struct_count;
     int struct_work;             /* cost of the last check, in STRUCT_BUDGET units */
@@ -178,7 +167,6 @@ typedef struct physics {
     int thud_count;
     /* Stats for the HUD/bench. */
     int last_collapse;
-    int fluid_updates;
 } physics;
 
 /* Allocates the body, item and fluid queues; w must outlive ph. */

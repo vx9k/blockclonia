@@ -773,7 +773,7 @@ static void on_block_changed(void *user, int x, int y, int z, uint8_t old_id, ui
          * nothing may wake its structure or water queues. What changed is
          * heard and seen as if done here. */
         dvec3 at = dv3(x + 0.5, y + 0.5, z + 0.5);
-        if (new_id == B_AIR && old_id != B_AIR && old_id != B_WATER) {
+        if (new_id == B_AIR && old_id != B_AIR && !block_fluid(old_id)) {
             sound_play(h->snd, SND_BREAK, &at, old_id, 0.8f);
             fx_break(h->fx, old_id, x, y, z, 12);
         } else if (old_id == B_AIR && block_solid(new_id)) {
@@ -2086,7 +2086,7 @@ static void draw_debug(game *g, ui *u, int fb_w, int fb_h, double alpha)
     di.items = g->ph.item_count;
     di.particles = g->fx->count;
     di.break_progress = g->ia.has_target ? g->ia.progress : 0.0f;
-    di.fluid_updates = g->ph.fluid_updates;
+    di.fluid_updates = g->ph.fl.updates;
     di.last_collapse = g->ph.last_collapse;
     di.draw_calls = rs.draw_calls;
     di.indirect_draws = rs.indirect_draws;

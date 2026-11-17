@@ -112,7 +112,7 @@ static void use_item(interact *s, world *w, const physics *ph, thermo *th, const
             o->msg = "No water in reach";
             return;
         }
-        if (world_water_level(w, c.x, c.y, c.z) < WATER_FULL) {
+        if (world_water_level(w, c.x, c.y, c.z) < FLUID_FULL) {
             o->msg = "Too shallow to fill the bucket";
             return;
         }
@@ -139,27 +139,22 @@ static void use_item(interact *s, world *w, const physics *ph, thermo *th, const
     if (d->block == B_AIR) return;
     ipos t = hit.before;
     if (!can_place(w, ph, pl, t)) return;
-    /* A bucket holds exactly one cell: pouring onto water would overwrite
-     * what is there and lose it. */
-    if (d->block == B_WATER && world_get(w, t.x, t.y, t.z) != B_AIR) {
+    /* A bucket holds exactly one cell: pouring onto a liquid would
+     * overwrite what is there and lose it. */
+    if (block_fluid(d->block) && world_get(w, t.x, t.y, t.z) != B_AIR) {
         o->msg = "Pour onto dry ground";
         return;
     }
-    /* Water in the cell is pushed up, not deleted (as when a falling block
-     * lands in water); what does not fit above is lost to the surroundings. */
-    int displaced = world_water_level(w, t.x, t.y, t.z);
+    /* A liquid in the cell is pushed up, not deleted (as when a falling
+     * block lands in it); what does not fit above is lost to the
+     * surroundings. */
+    uint8_t was = world_get(w, t.x, t.y, t.z);
+    int displaced = world_fluid_level(w, t.x, t.y, t.z);
     world_set_player(w, t.x, t.y, t.z, d->block, 0);
-    if (displaced && t.y + 1 < WORLD_H) {
-        uint8_t up = world_get(w, t.x, t.y + 1, t.z);
-        if (up == B_AIR || up == B_WATER) {
-            int total = displaced + world_water_level(w, t.x, t.y + 1, t.z);
-            if (total > WATER_FULL) total = WATER_FULL;
-            world_set_player(w, t.x, t.y + 1, t.z, B_WATER, (uint8_t)(total >= WATER_FULL ? 0 : total));
-        }
-    }
+    fluid_displace(w, t.x, t.y, t.z, was, displaced, 1);
     o->actions++;
     s->swing = 1.0f;
-    emit(o, d->block == B_WATER ? IE_POUR : IE_PLACE, d->block, centre(t));
+    emit(o, block_fluid(d->block) ? IE_POUR : IE_PLACE, d->block, centre(t));
     if (held->id == I_WATER_BUCKET) inv_set_held(inv, I_BUCKET, 1);
     else if (!creative) inv_use_held(inv, 1);
 }

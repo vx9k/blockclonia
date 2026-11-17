@@ -128,7 +128,7 @@ int save_decode_column(column *c, const uint8_t *data, size_t len)
     size_t used = rle_decode(p, payload, blocks, vol, B_COUNT - 1);
     int ok = used != 0;
     if (ok && meta) {
-        size_t m = rle_decode(p + used, payload - used, meta, vol, WATER_FULL - 1);
+        size_t m = rle_decode(p + used, payload - used, meta, vol, FLUID_FULL - 1);
         ok = m != 0;
         used += m;
         for (size_t i = 0; ok && i < vol; i++)
