@@ -587,7 +587,8 @@ static void test_vm_rifle(void)
     item_model rifle = {0};
     CHECK(itemmodel_build(I_RIFLE, &rifle));
     /* The model's boxes: 1 the wrist of the stock, 2 the fore-end, 4 the
-     * barrel, 10 the front post, 11 and 12 the rear sight's posts. */
+     * barrel, 10 the front blade, 11 and 12 the rear sight's ears, 13 and
+     * 14 the sights' bases. */
     viewmodel vm;
     viewmodel_init(&vm);
     viewmodel_input in = vm_input(I_RIFLE);
@@ -607,7 +608,7 @@ static void test_vm_rifle(void)
     n = vm_run(&vm, &in, 1.0f, out);
     CHECK(n == ITEM + rifle.n && vm_sane_near(out, n, 0));
     const float *post = out[ITEM + 10].pos;
-    float tip = post[1] + 0.024f; /* the post is 48 mm tall, standing up */
+    float tip = post[1] + 0.006f; /* the blade is 12 mm tall, standing up */
     CHECK(post[2] < -0.6f && fabsf(post[0] / post[2]) < 0.004f && fabsf(tip / post[2]) < 0.005f);
     CHECK(post[1] < 0.0f && tip < 0.0f);
     /* The eye rides high over the stock, so the fist on its wrist is well

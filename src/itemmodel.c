@@ -428,13 +428,17 @@ static void rifle(item_model *m)
     box(m, 0.045f, 0.37f, 0.0f, 0.01f, 0.07f, 0.012f, T_MAT_METAL, GUNMETAL);
     box(m, 0.034f, 0.375f, 0.0f, 0.014f, 0.006f, 0.006f, T_MAT_METAL, 0x5A5C60u);
     box(m, 0.035f, 0.46f, 0.0f, 0.022f, 0.08f, 0.03f, T_MAT_METAL, GUNMETAL);
-    box(m, -0.066f, 1.09f, 0.0f, 0.048f, 0.012f, 0.006f, T_MAT_METAL, GUNMETAL);
-    /* The rear sight is a notch, two ears 9 mm apart: down the sights the
-     * front post stands in the gap. Both stand 5 cm off the barrel, so the
-     * eye rides high enough that the stock and the hand on it sit below the
-     * line of sight rather than across it. */
+    /* Open sights, as on a pistol: a short 4 mm front blade, and behind it
+     * two ears either side of a 9 mm notch, the blade standing in the notch
+     * with a strip of light either side, its top level with theirs. Each
+     * sits on a solid base 4 cm off the barrel, so the eye rides high
+     * enough that the stock and the hand on it sit below the line of sight
+     * rather than across it. The blade, the ears, then the two bases: */
+    box(m, -0.084f, 1.09f, 0.0f, 0.012f, 0.012f, 0.004f, T_MAT_METAL, GUNMETAL);
     for (int s = -1; s <= 1; s += 2)
-        box(m, -0.066f, 0.53f, (float)s * 0.0075f, 0.048f, 0.02f, 0.006f, T_MAT_METAL, GUNMETAL);
+        box(m, -0.084f, 0.53f, (float)s * 0.0105f, 0.012f, 0.02f, 0.012f, T_MAT_METAL, GUNMETAL);
+    box(m, -0.0605f, 1.09f, 0.0f, 0.035f, 0.025f, 0.016f, T_MAT_METAL, GUNMETAL);
+    box(m, -0.059f, 0.53f, 0.0f, 0.038f, 0.03f, 0.033f, T_MAT_METAL, GUNMETAL);
     m->grip[0] = 0.0f;
     m->grip[1] = 0.34f;
 }
