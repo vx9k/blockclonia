@@ -14,6 +14,7 @@ static void test_mask(void)
     for (uint32_t l = T_FIRE0; l <= T_FIRE3; l++) CHECK(bloom_layer_glows(m, l));
     CHECK(bloom_layer_glows(m, T_CAMPFIRE_BASE));
     CHECK(bloom_layer_glows(m, T_FOXFIRE));
+    CHECK(bloom_layer_glows(m, T_LAMP));
     /* See-through but not alight: water, glass, oil, ice. */
     CHECK(!bloom_layer_glows(m, T_WATER));
     CHECK(!bloom_layer_glows(m, T_GLASS));
@@ -23,7 +24,7 @@ static void test_mask(void)
     CHECK(!bloom_layer_glows(m, 300u));
     int n = 0;
     for (uint32_t l = 0; l < T_COUNT; l++) n += bloom_layer_glows(m, l);
-    CHECK(n == 7);
+    CHECK(n == 8);
 }
 
 static uint32_t quad_vertex(uint32_t layer) { return layer << 20 | 3u << 15; }

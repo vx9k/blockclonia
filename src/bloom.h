@@ -1,4 +1,4 @@
-/* Bloom: the glow around fire, lava, torches, foxfire and the moon. The
+/* Bloom: the glow around fire, lava, torches, lamps, foxfire and the moon. The
  * renderer marks glowing pixels in the scene image's alpha, blurs them at
  * a quarter of the resolution and adds the result back. This module holds
  * the parts that need no GPU: which texture layers glow, the blur's

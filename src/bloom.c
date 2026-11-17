@@ -8,9 +8,10 @@
 _Static_assert(T_COUNT <= BLOOM_MASK_WORDS * 32, "a glow bit per texture layer");
 
 /* What gives off its own light: the melt, the flames, the embers under a
- * campfire's logs and foxfire's threads. The shader lets only a layer's
- * bright texels glow, so lava's cooled skin and the logs stay dark. */
-static const int GLOWING[] = {T_LAVA, T_FIRE0, T_FIRE1, T_FIRE2, T_FIRE3, T_CAMPFIRE_BASE, T_FOXFIRE};
+ * campfire's logs, foxfire's threads and the lamp's flame. The shader
+ * lets only a layer's bright texels glow, so lava's cooled skin and the
+ * logs stay dark. */
+static const int GLOWING[] = {T_LAVA, T_FIRE0, T_FIRE1, T_FIRE2, T_FIRE3, T_CAMPFIRE_BASE, T_FOXFIRE, T_LAMP};
 
 void bloom_auto_reset(bloom_auto *a) { memset(a, 0, sizeof *a); }
 
