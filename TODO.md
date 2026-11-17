@@ -189,6 +189,8 @@ bullet has gravity but no drag, and it stops at the first block.
       pass-throughs
 - [ ] The weapon as parts: barrel, magazine, receiver; reloading and
       fire modes
+- [ ] Load patterns: fill magazines, clips and belts to a repeating
+      pattern (such as one tracer then two ball), with presets per weapon
 - [ ] Condition, barrel heat and malfunctions, with clearing and
       cleaning
 - [ ] Sights and zeroing, then optics

@@ -96,6 +96,15 @@ station, the right items in, a cartridge out.
   - **Magazines:** each round is tracked in its magazine, so mixed
     loads fire in order. Reloading with a round still chambered is
     faster than from empty.
+  - **Load patterns:** a magazine, stripper clip or belt can be filled
+    to a repeating pattern, such as one tracer then two ball rounds.
+    - Patterns are edited in the weapon's panel, and can be saved as
+      presets per weapon.
+    - Loading takes rounds from the inventory in the pattern's order.
+    - When a type runs out, the next type in the pattern fills its
+      slot, and the HUD says so.
+    - The last rounds can be set apart, for example tracers as the
+      final three, to show that the magazine is nearly empty.
   - **Fire modes:** a weapon has only the modes its trigger group has.
   - **Zeroing:** each sight has adjustable elevation and a zero range.
     The game has no aim assist, so learning the drop is the skill.
@@ -134,9 +143,11 @@ Each step is one pull request:
    parts, wounds by construction, and pass-throughs.
 4. **The weapon as parts:** barrel, magazine and receiver as an item
    with an inventory, then reloading and fire modes.
-5. **Condition, heat and malfunctions,** with clearing and cleaning.
-6. **Sights and zeroing,** then optics.
-7. **Armour** on the body, after clothing exists.
+5. **Load patterns:** the pattern editor and presets, and loading
+   magazines, clips and belts by pattern.
+6. **Condition, heat and malfunctions,** with clearing and cleaning.
+7. **Sights and zeroing,** then optics.
+8. **Armour** on the body, after clothing exists.
 
 ## Testing
 
@@ -150,6 +161,9 @@ Each step is one pull request:
   identical.
 - Wounds: a pass-through leaves an exit wound, and an expanding round
   stays in the body and delivers more energy.
+- Load patterns: a 1-tracer, 2-ball pattern fills a 30-round magazine
+  as 10 repeats, and fires in that order. When tracers run out, ball
+  rounds take their slots. A saved preset survives a save and reload.
 - Malfunctions: a replay with the same seed jams on the same shot.
   Clearing works for each kind of malfunction.
 - Performance: COMBAT_SHOTS bullets in flight cost less than a set
