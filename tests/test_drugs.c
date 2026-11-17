@@ -32,7 +32,7 @@ static void test_drug_items(void)
     int kind = 0, tier = 0;
     CHECK(!item_tool(I_MORPHINE, &kind, &tier) && !item_tool(I_SPIRITS, &kind, &tier));
     CHECK(item_tool(I_TOOL_END - 1, &kind, &tier) && tier == TIER_COUNT - 1);
-    CHECK(!strcmp(item_get(I_MORPHINE)->name, "Morphine") && item_get(I_SPIRITS)->tex == T_ITEM_SPIRITS);
+    CHECK(!strcmp(item_get(I_MORPHINE)->name, "Morphine"));
     CHECK(item_get(I_NALOXONE)->stack == 4 && item_get(I_NALOXONE)->block == B_AIR);
 
     inventory inv = {0};

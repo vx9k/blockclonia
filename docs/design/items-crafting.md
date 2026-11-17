@@ -8,9 +8,10 @@ holds the reasoning and the detail.
 
 ## Where it stands
 
-Every item except the tools is a card: its 16x16 sprite on a thin slab,
-whether dropped (`fx.c`) or held (`viewmodel.c`). Blocks that do
-something, like the furnace, are plain cubes with a static texture.
+Every item is a model of boxes at its real size (`itemmodel.c`), the
+same one dropped (`fx.c`), held (`viewmodel.c`) and in the inventory
+(`invui.c`). Blocks that do something, like the furnace, are plain cubes
+with a static texture.
 Crafting is a list on the inventory screen: pick a recipe and the inputs
 turn into the output at once. The goal is a world of solid objects that
 you make by hand. This comes after the underground materials, so the new
@@ -18,16 +19,28 @@ metals, minerals and ingots get their models from the start.
 
 ## 3D models for every item
 
-- Each item is a small model built from pixel-art boxes, the way the
-  creatures are (`ENTITY_TEX_METRIC`, 1/16 m texels, generated in code;
-  still no image files). For example: an ingot is a tapered bar, a raw
-  ore a lumpy nugget, a bucket has a handle, a bandage is a roll, and
-  there is a bottle and a rifle.
-- The dropped item, the held item and the inventory icon all use the
-  same model. The icon is rendered from it once at start-up, so the
-  three always match.
-- Models are kept small for weak GPUs: about a dozen boxes, instanced
-  like the creatures, and each within 1 m along every axis.
+Done (`itemmodel.c`):
+
+- Each item is a few boxes at its real size in metres: a pick with a
+  0.8 m handle and a curved head about 0.6 m across, a 10 cm bar ingot
+  that tapers to its top, a coopered ten-litre bucket with a rope bail,
+  a 7 cm cartridge, a 1.1 m bolt-action rifle, a corked bottle of
+  spirits, an amber antiseptic bottle, a glass ampoule.
+- Families share a builder: tools by kind with the head's material by
+  tier (wood, flint lashed on with fibre, copper, iron), ingots by
+  metal, ores as the host rock with the mineral breaking its surface
+  (galena and salt as stepped cubes, quartz and sulfur as prisms),
+  buckets by their liquid.
+- A box has a greyscale material layer (`T_MAT_*`: wood grain, brushed
+  metal, cast metal, rock, cloth, glass, plain, flesh, grain) and a tint,
+  so one layer serves every metal. The layer is stretched over each
+  face, since the boxes are a few centimetres. Glass and liquids blend.
+- Held: a tool by the foot of its handle, a gun by the wrist of its
+  stock, anything else in the palm, scaled so small things can be seen.
+  Dropped: real size, small things enlarged to 25 cm, tools lying flat.
+- The icon is the same boxes drawn flat-shaded from a fixed angle (tools
+  diagonal), built once and cached, so the three always match.
+- At most 16 boxes each, every model within 1.3 m.
 
 ## Animated objects
 

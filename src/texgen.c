@@ -49,355 +49,19 @@ static const sprite SPRITES[] = {
       {'f', {225, 90, 30, 255}},
       {'y', {250, 185, 60, 255}},
       {'W', {255, 245, 190, 255}}}},
-    {T_ITEM_STICK,
-     {"..............##", ".............#w#", "............#w#.", "...........#w#..", "..........#w#...",
-      ".........#w#....", "........#w#.....", ".......#w#......", "......#w#.......", ".....#w#........",
-      "....#w#.........", "...#w#..........", "..#w#...........", ".#w#............", "#w#.............",
-      "##.............."},
-     {{'#', {84, 58, 30, 255}}, {'w', {150, 110, 62, 255}}}},
-    {T_ITEM_FIBRE,
-     {"................", "....g.......g...", "...g.g.....g.G..", "...g..g...g..G..", "..G...g..g...g..",
-      "..G....gg....g..", "..g....Gg....G..", "..g...g..G...g..", "...g.g....g.g...", "...Gg......gG...",
-      "....g......g....", "...g.g....g.g...", "..g...G..G...g..", ".G.....gg.....g.", "................",
-      "................"},
-     {{'g', {92, 150, 60, 255}}, {'G', {60, 110, 40, 255}}}},
-    {T_ITEM_BANDAGE,
-     {"................", "................", ".....######.....", "...##wwwwww##...", "..#wwwwwwwwww#..",
-      "..#wwwgggggww#..", ".#wwwg####gwww#.", ".#wwwg#..#gwww#.", ".#wwwg#..#gwww#.", ".#wwwg####gwww#.",
-      "..#wwwgggggww#..", "..#wwwwwwwwww#..", "...##wwwwww##ww.", ".....######wwww.", "............ww..",
-      "................"},
-     {{'#', {128, 128, 120, 255}}, {'w', {242, 242, 234, 255}}, {'g', {205, 205, 198, 255}}}},
-    {T_ITEM_SPLINT,
-     {"................", "....##....##....", "....ww....ww....", "....ww....ww....", "...tttttttttt...",
-      "....ww....ww....", "....ww....ww....", "....ww....ww....", "....ww....ww....", "...tttttttttt...",
-      "....ww....ww....", "....ww....ww....", "....ww....ww....", "....##....##....", "................",
-      "................"},
-     {{'#', {110, 80, 45, 255}}, {'w', {176, 138, 84, 255}}, {'t', {236, 236, 228, 255}}}},
-    {T_ITEM_ANTISEPTIC,
-     {"................", "......cccc......", "......cccc......", ".......nn.......", ".......nn.......",
-      "......bbbb......", ".....bbbbbb.....", "....bbbbbbbb....", "....bllrrllb....", "....blrrrrlb....",
-      "....blrrrrlb....", "....bllrrllb....", "....bbbbbbbb....", "....bbbbbbbb....", ".....bbbbbb.....",
-      "................"},
-     {{'c', {40, 40, 44, 255}},
-      {'n', {120, 70, 30, 255}},
-      {'b', {140, 78, 30, 255}},
-      {'l', {236, 236, 230, 255}},
-      {'r', {210, 40, 40, 255}}}},
-    {T_ITEM_PAINKILLER,
-     {"................", "................", "..ssssssssssss..", "..s.pp.pp.pp.s..", "..spppppppppps..",
-      "..spppppppppps..", "..s.pp.pp.pp.s..", "..ssssssssssss..", "..s.pp.pp.pp.s..", "..spppppppppps..",
-      "..spppppppppps..", "..s.pp.pp.pp.s..", "..ssssssssssss..", "................", "................",
-      "................"},
-     {{'s', {170, 176, 186, 255}}, {'p', {250, 250, 250, 255}}}},
-    {T_ITEM_ANTIBIOTIC,
-     {"................", "................", "..ssssssssssss..", "..s.rw.rw.rw.s..", "..srrwwrrwwrws..",
-      "..srrwwrrwwrws..", "..s.rw.rw.rw.s..", "..ssssssssssss..", "..s.rw.rw.rw.s..", "..srrwwrrwwrws..",
-      "..srrwwrrwwrws..", "..s.rw.rw.rw.s..", "..ssssssssssss..", "................", "................",
-      "................"},
-     {{'s', {170, 176, 186, 255}}, {'r', {205, 50, 50, 255}}, {'w', {245, 245, 240, 255}}}},
-    {T_ITEM_APPLE,
-     {"................", "........#.......", ".......#..gg....", "....rrr#rrgg....", "...rrrrrrrrr....",
-      "..rrrRrrrrrrr...", "..rrRRrrrrrrr...", "..rrRrrrrrrrr...", "..rrrrrrrrrrr...", "..rrrrrrrrrrr...",
-      "...rrrrrrrrrd...", "...rrrrrrrrd....", "....rrrrrrd.....", ".....rr.rr......", "................",
-      "................"},
-     {{'#', {90, 60, 30, 255}},
-      {'g', {80, 160, 60, 255}},
-      {'r', {200, 36, 36, 255}},
-      {'R', {245, 140, 130, 255}},
-      {'d', {140, 20, 24, 255}}}},
-    {T_ITEM_BUCKET,
-     {"................", "....########....", "...#........#...", "..#..........#..", "..bbbbbbbbbbbb..",
-      "..bkkkkkkkkkkb..", "..bwwwwwwwwwwb..", "...hhhhhhhhhh...", "...wwwwwwwwww...", "...wwwwwwwwww...",
-      "...hhhhhhhhhh...", "....wwwwwwww....", "....wwwwwwww....", "....hhhhhhhh....", "................",
-      "................"},
-     {{'#', {70, 70, 76, 255}},
-      {'b', {110, 80, 45, 255}},
-      {'k', {60, 42, 24, 255}},
-      {'w', {170, 128, 76, 255}},
-      {'h', {130, 136, 146, 255}}}},
-    {T_ITEM_WATER_BUCKET,
-     {"................", "....########....", "...#........#...", "..#..........#..", "..bbbbbbbbbbbb..",
-      "..bqqqQqqqqqqb..", "..bwwwwwwwwwwb..", "...hhhhhhhhhh...", "...wwwwwwwwww...", "...wwwwwwwwww...",
-      "...hhhhhhhhhh...", "....wwwwwwww....", "....wwwwwwww....", "....hhhhhhhh....", "................",
-      "................"},
-     {{'#', {70, 70, 76, 255}},
-      {'b', {110, 80, 45, 255}},
-      {'q', {40, 90, 200, 255}},
-      {'Q', {120, 170, 250, 255}},
-      {'w', {170, 128, 76, 255}},
-      {'h', {130, 136, 146, 255}}}},
-    /* An AED: green case, the heart-and-bolt sign, an orange shock button. */
-    {T_ITEM_DEFIBRILLATOR,
-     {"................", "....hhhhhhhh....", "....h......h....", "..############..", "..#gggggggggg#..",
-      "..#ggwwggwwgg#..", "..#gwwwwwwwwg#..", "..#gwwwwrwwwg#..", "..#ggwwrrwwgg#..", "..#gggwrwwggg#..",
-      "..#ggggwwgggg#..", "..#gggggggggg#..", "..#googgggggg#..", "..############..", "................",
-      "................"},
-     {{'#', {40, 44, 48, 255}},
-      {'g', {40, 160, 90, 255}},
-      {'w', {240, 240, 235, 255}},
-      {'r', {215, 40, 40, 255}},
-      {'o', {245, 150, 30, 255}},
-      {'h', {120, 125, 130, 255}}}},
-    {T_ITEM_COAL,
-     {"................", "................", "................", "......####......", "....##kkkk#.....",
-      "...#kkhkkkk##...", "...#khkkkkkkk#..", "..#kkkkkkhkkk#..", "..#kkkkkkkkkk#..", "..#kkkhkkkkk#...",
-      "...#kkkkkkkk#...", "....##kkkk##....", "......####......", "................", "................",
-      "................"},
-     {{'#', {20, 20, 22, 255}}, {'k', {45, 45, 48, 255}}, {'h', {95, 95, 100, 255}}}},
-    {T_ITEM_COPPER_INGOT,
-     {"................", "................", "................", "................", "................",
-      ".....########...", "....#hhhhhhh##..", "...#hhhhhhh#m#..", "..##########mm#.", "..#mmmmmmmmm#m#.",
-      "..#mmmmmmmmm##..", "..###########...", "................", "................", "................",
-      "................"},
-     {{'#', {110, 50, 25, 255}}, {'h', {235, 150, 95, 255}}, {'m', {190, 100, 55, 255}}}},
-    {T_ITEM_IRON_INGOT,
-     {"................", "................", "................", "................", "................",
-      ".....########...", "....#hhhhhhh##..", "...#hhhhhhh#m#..", "..##########mm#.", "..#mmmmmmmmm#m#.",
-      "..#mmmmmmmmm##..", "..###########...", "................", "................", "................",
-      "................"},
-     {{'#', {70, 72, 78, 255}}, {'h', {215, 218, 222, 255}}, {'m', {160, 163, 170, 255}}}},
-    {T_ITEM_RAW_COPPER,
-     {"................", "................", "................", "......###.......", "....##ahh##.....",
-      "...#aahaaam#....", "..#aaaaamaaa#...", "..#ammaaaahaa#..", "..#aaaahaaaam#..", "...#amaaaamaa#..",
-      "...#aaaammaa#...", "....##aaaa##....", "......####......", "................", "................",
-      "................"},
-     {{'#', {70, 50, 40, 255}}, {'a', {150, 95, 70, 255}}, {'h', {225, 140, 80, 255}}, {'m', {80, 150, 110, 255}}}},
-    {T_ITEM_RAW_IRON,
-     {"................", "................", "................", "......###.......", "....##ahh##.....",
-      "...#aahaaam#....", "..#aaaaamaaa#...", "..#ammaaaahaa#..", "..#aaaahaaaam#..", "...#amaaaamaa#..",
-      "...#aaaammaa#...", "....##aaaa##....", "......####......", "................", "................",
-      "................"},
-     {{'#', {70, 60, 55, 255}}, {'a', {165, 140, 120, 255}}, {'h', {215, 185, 160, 255}}, {'m', {120, 80, 65, 255}}}},
-    {T_ITEM_RAW_MEAT,
-     {"................", "................", "................", ".....#####......", "....#mmmmm##....",
-      "...#mmfmmmmm#...", "..#mmmmmmmfmm#..", "..#mffmmmmmmm#..", "..#mmmmmmmmmm#bb", "...#mmmmfmmm#bwb",
-      "....##mmmmm#.bb.", "......#####.....", "................", "................", "................",
-      "................"},
-     {{'#', {120, 30, 35, 255}},
-      {'m', {200, 60, 70, 255}},
-      {'f', {240, 210, 200, 255}},
-      {'b', {225, 220, 205, 255}},
-      {'w', {255, 250, 240, 255}}}},
-    {T_ITEM_COOKED_MEAT,
-     {"................", "................", "................", ".....#####......", "....#mmmmm##....",
-      "...#mmfmmmmm#...", "..#mmmmmmmfmm#..", "..#mffmmmmmmm#..", "..#mmmmmmmmmm#bb", "...#mmmmfmmm#bwb",
-      "....##mmmmm#.bb.", "......#####.....", "................", "................", "................",
-      "................"},
-     {{'#', {70, 40, 20, 255}},
-      {'m', {150, 90, 45, 255}},
-      {'f', {200, 150, 90, 255}},
-      {'b', {225, 220, 205, 255}},
-      {'w', {255, 250, 240, 255}}}},
-    {T_ITEM_RIFLE,
-     {"................", "................", "................", "................", "................",
-      "..............mm", ".............mmm", "..........mmmmm.", ".......mmmmmm#..", "wwwwwmmmmm#.....",
-      "wwwwwwm#........", "wwww...#........", "ww..............", "................", "................",
-      "................"},
-     {{'w', {120, 80, 45, 255}}, {'m', {70, 72, 78, 255}}, {'#', {40, 40, 44, 255}}}},
-    {T_ITEM_CARTRIDGE,
-     {"................", "................", "......cc........", ".....cccc.......", ".....bbbb.......",
-      ".....bbbb.......", ".....bbbb.......", ".....bbbb.......", ".....bbbb.......", ".....bbbb.......",
-      ".....bbbb.......", ".....dddd.......", "................", "................", "................",
-      "................"},
-     {{'c', {150, 100, 70, 255}}, {'b', {215, 160, 70, 255}}, {'d', {150, 110, 50, 255}}}},
-    {T_ITEM_GUNPOWDER,
-     {"................", "................", "................", "................", "................",
-      "................", ".......g........", "......gGg.......", ".....ggGgg......", "....gGgggGg.....",
-      "...ggggGgggg....", "..gggGgggggGg...", "................", "................", "................",
-      "................"},
-     {{'g', {50, 50, 55, 255}}, {'G', {90, 90, 95, 255}}}},
-    /* An auto-injector: a yellow safety cap, the barrel, an orange tip. */
-    {T_ITEM_ADRENALINE,
-     {"................", "...........cc...", "..........cyyc..", ".........cyyc...", "........wwwc....",
-      ".......wwww.....", "......wwww......", ".....wwwbw......", "....wwwbw.......", "...wwwww........",
-      "..owww..........", ".oo.............", "o...............", "................", "................",
-      "................"},
-     {{'c', {80, 70, 30, 255}},
-      {'y', {240, 210, 40, 255}},
-      {'w', {230, 232, 235, 255}},
-      {'b', {60, 120, 200, 255}},
-      {'o', {240, 120, 30, 255}}}},
-    /* A brown pharmacy bottle of tablets with a white label. */
-    {T_ITEM_MORPHINE,
-     {"................", "................", ".....cccccc.....", ".....cccccc.....", "......nnnn......",
-      ".....bbbbbb.....", "....bbbbbbbb....", "....bwwwwwwb....", "....bwrrrrwb....", "....bwwwwwwb....",
-      "....bwrrrwwb....", "....bwwwwwwb....", "....bbbbbbbb....", "....bbbbbbbb....", ".....bbbbbb.....",
-      "................"},
-     {{'c', {235, 235, 235, 255}},
-      {'n', {90, 60, 30, 255}},
-      {'b', {120, 70, 25, 255}},
-      {'w', {240, 240, 236, 255}},
-      {'r', {60, 90, 170, 255}}}},
-    /* A nasal spray: white body, a narrow nozzle, an orange plunger. */
-    {T_ITEM_NALOXONE,
-     {"................", ".......ww.......", ".......ww.......", ".......ww.......", "......wwww......",
-      ".....oooooo.....", ".....oooooo.....", "......wwww......", "......wwww......", "......wkkw......",
-      "......wkkw......", "......wwww......", "......wwww......", "......wwww......", "................",
-      "................"},
-     {{'w', {236, 238, 240, 255}}, {'o', {240, 130, 40, 255}}, {'k', {40, 120, 200, 255}}}},
-    /* A glass bottle of amber brandy with a cork. */
-    {T_ITEM_SPIRITS,
-     {"................", "......kk........", "......kk........", "......gg........", "......gg........",
-      ".....gggg.......", "....gaaaag......", "....gaaaag......", "....gaAaag......", "....gaAaag......",
-      "....gaaaag......", "....gaaaag......", "....gaaaag......", ".....gggg.......", "................",
-      "................"},
-     {{'k', {150, 100, 55, 255}}, {'g', {170, 200, 190, 255}}, {'a', {200, 120, 30, 255}}, {'A', {240, 180, 80, 255}}}},
 };
-
-/* Tools and blades, drawn from geometry rather than 20 hand-made sprites:
- * a handle along the diagonal from the bottom left, and a head that
- * depends on the kind, coloured by the tier's material. */
-static int tool_texel(int layer, int x, int y, rgba *out)
-{
-    if (layer < T_TOOL_FIRST || layer >= T_COUNT) return 0;
-    static const rgba HEAD[TIER_COUNT] = {{150, 112, 64, 255},
-                                          {128, 128, 128, 255},
-                                          {205, 120, 70, 255},
-                                          {205, 208, 214, 255}};
-    int kind = (layer - T_TOOL_FIRST) / TIER_COUNT, tier = (layer - T_TOOL_FIRST) % TIER_COUNT;
-    float fx = (float)x + 0.5f, fy = (float)y + 0.5f;
-    float along = (fx + fy - 16.0f) * 0.70710678f; /* across the handle */
-    float up = (fx + (16.0f - fy)) * 0.70710678f; /* along it, 0 at the bottom-left corner */
-    int handle = fabsf(along) < 0.75f && up > 1.5f, head = 0;
-    switch (kind) {
-    case TOOL_PICKAXE:
-        handle = handle && up < 17.5f;
-        head = fabsf(up - 15.5f) < 1.1f && fabsf(along) < 7.0f - fabsf(along) * 0.15f;
-        break;
-    case TOOL_AXE:
-        handle = handle && up < 18.5f;
-        head = up > 12.5f && up < 18.0f && along > 0.5f && along < 5.0f - (18.0f - up) * 0.2f;
-        break;
-    case TOOL_SHOVEL:
-        handle = handle && up < 15.0f;
-        head = up >= 14.5f && up < 20.5f && fabsf(along) < 2.6f - fmaxf(0.0f, up - 19.0f);
-        break;
-    case TOOL_KNIFE:
-        handle = handle && up < 8.0f;
-        head = up >= 8.0f && up < 16.0f && along > -0.9f && along < 0.9f - (up - 8.0f) * 0.1f;
-        break;
-    default: /* sword */
-        handle = handle && up < 6.5f;
-        head = (up >= 6.5f && up < 20.0f && fabsf(along) < 1.0f) || (fabsf(up - 6.5f) < 0.75f && fabsf(along) < 3.2f);
-        break;
-    }
-    *out = (rgba){0, 0, 0, 0};
-    int n = px_noise(layer, x, y, 8);
-    if (head) {
-        rgba c = HEAD[tier];
-        *out = shade(c.r, c.g, c.b, 255, n);
-    } else if (handle) {
-        *out = shade(110, 78, 42, 255, n);
-    }
-    return 1;
-}
-
-/* The mineral items (from T_ITEM_RAW_TIN, in item order) reuse three
- * shapes in their own colours: a raw lump, a cast ingot and a heap of
- * powder. */
-typedef struct {
-    int shape; /* the sprite whose rows it takes */
-    pal_entry pal[6];
-} recolour;
-
-#define C(r, g, b) {r, g, b, 255}
-#define LUMP(o, a, h, m)                             \
-    {                                                \
-        T_ITEM_RAW_IRON,                             \
-        {                                            \
-            {'#', o}, {'a', a}, {'h', h}, { 'm', m } \
-        }                                            \
-    }
-#define INGOT(o, h, m)                     \
-    {                                      \
-        T_ITEM_IRON_INGOT,                 \
-        {                                  \
-            {'#', o}, {'h', h}, { 'm', m } \
-        }                                  \
-    }
-#define HEAP(g, G)               \
-    {                            \
-        T_ITEM_GUNPOWDER,        \
-        {                        \
-            {'g', g}, { 'G', G } \
-        }                        \
-    }
-static const recolour MINERAL_ART[T_ITEM_MINERALS_END - T_ITEM_RAW_TIN] = {
-    LUMP(C(35, 25, 20), C(75, 55, 45), C(130, 100, 80), C(40, 30, 25)), /* raw tin */
-    LUMP(C(60, 40, 20), C(140, 100, 45), C(200, 160, 80), C(90, 60, 30)), /* raw zinc */
-    LUMP(C(50, 52, 58), C(120, 124, 132), C(190, 195, 205), C(85, 88, 95)), /* raw lead */
-    LUMP(C(70, 60, 30), C(165, 145, 85), C(215, 195, 120), C(110, 95, 55)), /* raw nickel */
-    LUMP(C(70, 70, 75), C(175, 175, 180), C(235, 235, 240), C(60, 60, 65)), /* raw silver */
-    LUMP(C(120, 115, 105), C(225, 220, 210), C(240, 200, 60), C(215, 170, 40)), /* raw gold */
-    LUMP(C(90, 40, 20), C(180, 95, 55), C(215, 140, 90), C(150, 70, 40)), /* bauxite */
-    LUMP(C(20, 20, 22), C(55, 55, 60), C(120, 120, 130), C(40, 40, 45)), /* ilmenite */
-    LUMP(C(20, 20, 18), C(50, 50, 45), C(90, 90, 85), C(200, 190, 40)), /* uraninite */
-    LUMP(C(120, 100, 115), C(215, 190, 210), C(240, 225, 240), C(180, 200, 175)), /* spodumene */
-    HEAP(C(220, 200, 40), C(250, 235, 90)), /* sulfur */
-    HEAP(C(210, 210, 200), C(250, 250, 245)), /* saltpeter */
-    HEAP(C(225, 205, 200), C(250, 242, 238)), /* salt */
-    LUMP(C(150, 150, 155), C(225, 225, 230), C(250, 250, 255), C(200, 200, 210)), /* quartz */
-    LUMP(C(30, 30, 34), C(70, 70, 76), C(140, 140, 150), C(50, 50, 55)), /* graphite */
-    INGOT(C(90, 92, 96), C(225, 228, 230), C(185, 188, 192)), /* tin */
-    INGOT(C(80, 90, 95), C(200, 212, 218), C(160, 172, 180)), /* zinc */
-    INGOT(C(45, 48, 58), C(140, 145, 160), C(100, 104, 118)), /* lead */
-    INGOT(C(85, 82, 72), C(215, 210, 195), C(175, 170, 155)), /* nickel */
-    INGOT(C(110, 110, 115), C(245, 245, 250), C(200, 200, 208)), /* silver */
-    INGOT(C(130, 90, 10), C(255, 220, 90), C(220, 170, 40)), /* gold */
-    INGOT(C(95, 60, 25), C(215, 160, 90), C(170, 115, 55)), /* bronze */
-    INGOT(C(120, 95, 30), C(240, 210, 110), C(200, 165, 70)), /* brass */
-    INGOT(C(55, 60, 68), C(200, 206, 214), C(140, 146, 156)), /* steel */
-    LUMP(C(15, 15, 15), C(35, 33, 32), C(80, 78, 76), C(25, 24, 24)), /* charcoal */
-    HEAP(C(215, 213, 205), C(250, 250, 245)), /* quicklime */
-};
-#undef LUMP
-#undef INGOT
-#undef HEAP
-
-/* The other liquids' buckets: the water bucket with what is in it. */
-static const recolour BUCKET_ART[] = {
-    /* crude oil */
-    {T_ITEM_WATER_BUCKET,
-     {{'#', C(70, 70, 76)},
-      {'b', C(110, 80, 45)},
-      {'q', C(25, 20, 15)},
-      {'Q', C(70, 60, 50)},
-      {'w', C(170, 128, 76)},
-      {'h', C(130, 136, 146)}}},
-    /* brine, a crust of salt */
-    {T_ITEM_WATER_BUCKET,
-     {{'#', C(70, 70, 76)},
-      {'b', C(110, 80, 45)},
-      {'q', C(60, 110, 150)},
-      {'Q', C(225, 230, 235)},
-      {'w', C(170, 128, 76)},
-      {'h', C(130, 136, 146)}}},
-};
-#undef C
 
 static int sprite_texel(int layer, int x, int y, rgba *out)
 {
-    if (tool_texel(layer, x, y, out)) return 1;
-    int shape = layer;
-    const pal_entry *pal = NULL;
-    if (layer >= T_ITEM_OIL_BUCKET && layer <= T_ITEM_BRINE_BUCKET) {
-        shape = BUCKET_ART[layer - T_ITEM_OIL_BUCKET].shape;
-        pal = BUCKET_ART[layer - T_ITEM_OIL_BUCKET].pal;
-    }
-    if (layer >= T_ITEM_RAW_TIN && layer < T_ITEM_MINERALS_END) {
-        shape = MINERAL_ART[layer - T_ITEM_RAW_TIN].shape;
-        pal = MINERAL_ART[layer - T_ITEM_RAW_TIN].pal;
-    }
     for (int i = 0; i < (int)(sizeof SPRITES / sizeof SPRITES[0]); i++) {
         const sprite *s = &SPRITES[i];
-        if (s->layer != shape) continue;
-        if (!pal) pal = s->pal;
+        if (s->layer != layer) continue;
         char ch = s->rows[y][x];
         *out = (rgba){0, 0, 0, 0};
         for (int k = 0; k < 6; k++)
-            if (pal[k].ch == ch && ch) {
+            if (s->pal[k].ch == ch && ch) {
                 int n = px_noise(layer, x, y, 6);
-                rgba c = pal[k].c;
+                rgba c = s->pal[k].c;
                 *out = shade(c.r, c.g, c.b, c.a, n);
             }
         return 1;
@@ -480,6 +144,19 @@ static const struct {
     {T_GRAPHITE_ORE, {110, 110, 115, 255}, {50, 50, 55, 255}, 45},
 };
 
+/* Stretched over the front of the head, 16 texels to its 0.20 m: brows,
+ * eyes 6.5 cm apart at 0.94 of the height, the shadow under the nose (a box
+ * of its own) and the mouth. */
+static rgba face(int x, int y, int n)
+{
+    int eye = y == 7 && (x == 4 || x == 5 || x == 10 || x == 11);
+    if (eye) return (x == 5 || x == 10) ? shade(52, 40, 32, 255, 0) : shade(232, 226, 218, 255, 0);
+    if (y == 5 && ((x >= 3 && x <= 6) || (x >= 9 && x <= 12))) return shade(88, 62, 44, 255, n / 3);
+    if (y == 10 && (x == 7 || x == 8)) return shade(190, 146, 114, 255, 0);
+    if (y == 12 && x >= 6 && x <= 9) return shade(176, 112, 96, 255, 0);
+    return shade(214, 170, 136, 255, n / 3);
+}
+
 static rgba texel(int layer, int x, int y)
 {
     int n = px_noise(layer, x, y, 12);
@@ -508,17 +185,7 @@ static rgba texel(int layer, int x, int y)
         return shade(176, 163, 132, 255, weave + slub + n / 4);
     }
     case T_HAIR: return shade(58, 42, 30, 255, px_noise(layer, x, 0, 14) + n / 3); /* strands run down */
-    case T_FACE: {
-        /* Stretched over the front of the head, 16 texels to its 0.20 m:
-         * brows, eyes 6.5 cm apart at 0.94 of the height, the shadow under
-         * the nose (a box of its own) and the mouth. */
-        int eye = y == 7 && (x == 4 || x == 5 || x == 10 || x == 11);
-        if (eye) return (x == 5 || x == 10) ? shade(52, 40, 32, 255, 0) : shade(232, 226, 218, 255, 0);
-        if (y == 5 && ((x >= 3 && x <= 6) || (x >= 9 && x <= 12))) return shade(88, 62, 44, 255, n / 3);
-        if (y == 10 && (x == 7 || x == 8)) return shade(190, 146, 114, 255, 0);
-        if (y == 12 && x >= 6 && x <= 9) return shade(176, 112, 96, 255, 0);
-        return shade(214, 170, 136, 255, n / 3);
-    }
+    case T_FACE: return face(x, y, n);
     case T_CAMPFIRE_BASE: {
         /* Crossed logs over glowing embers. */
         int log = (y >= 5 && y <= 10) || (x >= 5 && x <= 10);
@@ -643,6 +310,30 @@ static rgba texel(int layer, int x, int y)
         int glow = px_noise(layer, x / 2, y, 100) > 30 || px_noise(layer, x, y / 2, 100) > 55;
         return glow ? shade(150, 235, 160, 255, n / 2) : shade(45, 40, 32, 255, n);
     }
+    /* The item materials: grey, so the tint sets the colour, and gentle,
+     * since a face stretches the layer over a 3 cm handle or a 20 cm
+     * bucket alike. */
+    case T_MAT_WOOD: {
+        /* Grain along the length, wandering a texel or two. */
+        int g = (x + (int)(hash2i(0x600Du, 0, y / 5) % 3u)) % 5 == 0;
+        return shade(232, 232, 232, 255, (g ? -34 : 0) + n / 2);
+    }
+    case T_MAT_METAL: {
+        /* Brushed: streaks along the rows and one bright band. */
+        int band = y == 4 || y == 5 ? 16 : 0;
+        return shade(228, 228, 228, 255, band + px_noise(layer, 0, y, 8) + n / 4);
+    }
+    case T_MAT_CAST: return shade(218, 218, 218, 255, px_noise(layer, x / 2, y / 2, 22) + n / 3);
+    case T_MAT_ROCK: return shade(214, 214, 214, 255, px_noise(layer, x / 4, y / 4, 36) + n / 2);
+    case T_MAT_CLOTH: return shade(236, 236, 236, 255, ((x + y) % 2 ? -12 : 4) + n / 4);
+    case T_MAT_GLASS: return x == 3 || x == 4 ? (rgba){255, 255, 255, 200} : (rgba){236, 240, 242, 130};
+    case T_MAT_PLAIN: return shade(238, 238, 238, 255, n / 3);
+    case T_MAT_FLESH: {
+        /* Muscle with paler streaks of fat. */
+        int fat = (y + (int)(hash2i(0xFA7u, x / 3, 0) % 4u)) % 6 == 0;
+        return shade(214, 214, 214, 255, (fat ? 36 : 0) + n);
+    }
+    case T_MAT_GRAIN: return shade(212, 212, 212, 255, px_noise(layer, x, y, 40));
     default: return (rgba){255, 0, 255, 255};
     }
 }

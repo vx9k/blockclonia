@@ -16,6 +16,7 @@
 
 #define COMBAT_SHOTS 32
 #define COMBAT_REACH 3.0     /* m a blow reaches */
+#define HIP_SPREAD 0.06f    /* extra spread fired from the hip (about +-1.7 degrees) */
 #define BULLET_SPEED 400.0   /* m/s at the muzzle, a black-powder rifle */
 
 typedef struct {
@@ -54,10 +55,11 @@ void combat_init(combat *c, uint32_t seed);
  * block_dist: the attack button then strikes instead of digging. */
 int combat_aim(const mobs *ms, const combat_targets *t, int who, dvec3 eye, vec3 dir, double block_dist);
 
-/* Player `who`'s hands this frame: a blow on attack_click, a shot on
- * use_click when holding the rifle with a cartridge in the inventory. */
+/* Player `who`'s hands this frame: on attack_click a blow, or a shot when
+ * holding the rifle with a cartridge in the inventory. aim (0 at the hip ..
+ * 1 down the sights) sets the shot's spread. */
 combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *t, int who, inventory *inv, dvec3 eye,
-                        vec3 dir, double block_dist, int attack_click, int use_click, float dt);
+                        vec3 dir, double block_dist, int attack_click, float aim, float dt);
 
 /* Moves the bullets one physics step and applies what they hit. Returns
  * the number that hit a body (for sound). */

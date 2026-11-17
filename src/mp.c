@@ -35,7 +35,7 @@ _Static_assert(SAVE_MAX_FILE + 9 <= NET_MAX_MESSAGE, "a column message must fit 
 
 enum { C_INPUT = 1, C_OP, C_COLUMN };
 enum { H_WELCOME = 16, H_COLUMN, H_EDITS, H_SNAP, H_HEALTH, H_INV, H_MSG };
-enum { B_JUMP = 1, B_DESCEND = 2, B_SPRINT = 4, B_SNEAK = 8, B_ATTACK = 16, B_FLY = 32 };
+enum { B_JUMP = 1, B_DESCEND = 2, B_SPRINT = 4, B_SNEAK = 8, B_ATTACK = 16, B_FLY = 32, B_AIM = 64 };
 enum { F_FLYING = 1, F_SNEAKING = 2, F_DEAD = 4 };
 
 typedef struct {
@@ -618,7 +618,7 @@ static void host_hands(mp *m, remote *r, int who)
         if (combat_aim(m->ctx.mobs, &t, who, eye, look, block_d)) ii.attack = 0;
         if (ii.can_act) {
             combat_out co = combat_frame(m->ctx.cb, m->ctx.mobs, m->ctx.ph, &t, who, &r->inv, eye, look, block_d,
-                                         ii.attack_click, ii.use_click, (float)PHYS_DT);
+                                         ii.attack_click, (in->buttons & B_AIM) ? 1.0f : 0.0f, (float)PHYS_DT);
             if (co.msg) snprintf(r->msg, sizeof r->msg, "%s", co.msg);
             if (co.struck || co.fired) ii.attack_click = 0;
         }
@@ -836,7 +836,7 @@ static void predict(mp *m, const intent *in, const player_input *raw)
     physics_move_player(m->ctx.ph, pl, &lim);
 }
 
-void mp_client_step(mp *m, const player_input *in, int attack)
+void mp_client_step(mp *m, const player_input *in, int attack, int aim)
 {
     client *c = &m->c;
     if (m->host || !mp_ready(m)) return;
@@ -845,7 +845,8 @@ void mp_client_step(mp *m, const player_input *in, int attack)
     it.forward = in->forward;
     it.right = in->right;
     it.buttons = (uint8_t)((in->jump ? B_JUMP : 0) | (in->descend ? B_DESCEND : 0) | (in->sprint ? B_SPRINT : 0) |
-                           (in->sneak ? B_SNEAK : 0) | (attack ? B_ATTACK : 0) | (pl->flying ? B_FLY : 0));
+                           (in->sneak ? B_SNEAK : 0) | (attack ? B_ATTACK : 0) | (pl->flying ? B_FLY : 0) |
+                           (aim ? B_AIM : 0));
     it.yaw = pl->yaw;
     it.pitch = pl->pitch;
     it.selected = (uint8_t)m->ctx.inv->selected;

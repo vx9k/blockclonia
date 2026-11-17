@@ -103,12 +103,12 @@ and hot-block glow. Next: the visual polish.
 
 **Goal:** every item a solid model; objects that move; crafting by hand
 at stations instead of from a list.
-**Status:** planned. Items other than tools are cards, and crafting is
-a list.
+**Status:** in progress. Every item is a box model at its real size;
+crafting is still a list.
 **Design:** [docs/design/items-crafting.md](docs/design/items-crafting.md)
 
-- [ ] Item models (box pixel art) shared by the world, the hand and the
-      icon
+- [x] Item models (boxes at real size) shared by the world, the hand and
+      the icon
 - [ ] An animated furnace and campfire, driven by `thermo`
 - [ ] Stations: workbench, furnace with moulds, crucible for alloys,
       anvil and quench for forging
@@ -217,7 +217,7 @@ mortar that makes walls strong.
 - [ ] Font, plates, tape, keycaps, sliders, switches, the palette test,
       UI scale; title, pause and settings
 - [ ] The HUD: belt, injury alerts, reduce motion
-- [ ] Pixel item icons (or the item models, if those land first)
+- [x] Item icons, drawn from the item models
 - [ ] The character panel on `Tab`
 - [ ] The body side with treatment by item and by dragging
 - [ ] Bone, Organs and Blood layers

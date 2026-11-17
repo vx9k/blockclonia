@@ -2,158 +2,135 @@
 
 #include <stdio.h>
 
+/* clang-format off */
 static const item_def ITEMS[I_TOOL_FIRST - ITEM_FIRST] = {
     [I_STICK - ITEM_FIRST] = {.name = "Stick",
                               .stack = 64,
                               .block = B_AIR,
-                              .tex = T_ITEM_STICK,
                               .desc = "Fuel, splints. 2 planks make 4.",
                               .density = 600.0f},
     [I_FIBRE - ITEM_FIRST] = {.name = "Plant fibre",
                               .stack = 64,
                               .block = B_AIR,
-                              .tex = T_ITEM_FIBRE,
                               .desc = "From leaves. 2 make a rough bandage.",
                               .density = 300.0f},
     [I_BANDAGE - ITEM_FIRST] = {.name = "Sterile bandage",
                                 .stack = 16,
                                 .block = B_AIR,
-                                .tex = T_ITEM_BANDAGE,
                                 .desc = "Pressure dressing (H, then B).",
                                 .density = 250.0f},
     [I_SPLINT - ITEM_FIRST] = {.name = "Splint",
                                .stack = 16,
                                .block = B_AIR,
-                               .tex = T_ITEM_SPLINT,
                                .desc = "Holds a broken limb (H, then S).",
                                .density = 600.0f},
     [I_ANTISEPTIC - ITEM_FIRST] = {.name = "Antiseptic",
                                    .stack = 16,
                                    .block = B_AIR,
-                                   .tex = T_ITEM_ANTISEPTIC,
                                    .desc = "Cleans wounds (H, then D).",
                                    .density = 1050.0f},
     [I_PAINKILLER - ITEM_FIRST] = {.name = "Painkillers",
                                    .stack = 32,
                                    .block = B_AIR,
-                                   .tex = T_ITEM_PAINKILLER,
                                    .desc = "6 h of relief (H, then P).",
                                    .density = 1200.0f},
     [I_ANTIBIOTIC - ITEM_FIRST] = {.name = "Antibiotics",
                                    .stack = 16,
                                    .block = B_AIR,
-                                   .tex = T_ITEM_ANTIBIOTIC,
                                    .desc = "Treats infection (H, then A).",
                                    .density = 1200.0f},
     [I_APPLE - ITEM_FIRST] = {.name = "Apple",
                               .stack = 32,
                               .block = B_AIR,
-                              .tex = T_ITEM_APPLE,
                               .desc = "95 kcal. E to eat.",
                               .density = 800.0f},
     [I_BUCKET - ITEM_FIRST] = {.name = "Bucket",
                                .stack = 1,
                                .block = B_AIR,
-                               .tex = T_ITEM_BUCKET,
                                .desc = "Right-click water to fill.",
                                .density = 550.0f},
     [I_WATER_BUCKET - ITEM_FIRST] = {.name = "Water bucket",
                                      .stack = 1,
                                      .block = B_WATER,
-                                     .tex = T_ITEM_WATER_BUCKET,
                                      .desc = "Right-click to pour; R to drink.",
                                      .density = 1080.0f},
     [I_DEFIBRILLATOR - ITEM_FIRST] = {.name = "Defibrillator",
                                       .stack = 1,
                                       .block = B_AIR,
-                                      .tex = T_ITEM_DEFIBRILLATOR,
                                       .desc = "Automatic. Right-click: pads on or off.",
                                       .density = 650.0f},
     [I_COAL - ITEM_FIRST] = {.name = "Coal",
                              .stack = 64,
                              .block = B_AIR,
-                             .tex = T_ITEM_COAL,
                              .desc = "Fuel for smelting ore in a furnace.",
                              .density = 1350.0f},
     [I_COPPER_INGOT - ITEM_FIRST] = {.name = "Copper ingot",
                                      .stack = 64,
                                      .block = B_AIR,
-                                     .tex = T_ITEM_COPPER_INGOT,
                                      .desc = "Smelted copper.",
                                      .density = 8960.0f},
     [I_IRON_INGOT - ITEM_FIRST] = {.name = "Iron ingot",
                                    .stack = 64,
                                    .block = B_AIR,
-                                   .tex = T_ITEM_IRON_INGOT,
                                    .desc = "Smelted iron.",
                                    .density = 7870.0f},
     [I_RAW_COPPER - ITEM_FIRST] = {.name = "Raw copper",
                                    .stack = 64,
                                    .block = B_AIR,
-                                   .tex = T_ITEM_RAW_COPPER,
                                    .desc = "Copper ore. Smelt with coal in a furnace.",
                                    .density = 4000.0f},
     [I_RAW_IRON - ITEM_FIRST] = {.name = "Raw iron",
                                  .stack = 64,
                                  .block = B_AIR,
-                                 .tex = T_ITEM_RAW_IRON,
                                  .desc = "Iron ore. Smelt with coal in a furnace.",
                                  .density = 5000.0f},
     [I_RAW_MEAT - ITEM_FIRST] = {.name = "Raw meat",
                                  .stack = 16,
                                  .block = B_AIR,
-                                 .tex = T_ITEM_RAW_MEAT,
                                  .desc = "Better cooked over a fire. E to eat.",
                                  .density = 1050.0f},
     [I_COOKED_MEAT - ITEM_FIRST] = {.name = "Cooked meat",
                                     .stack = 16,
                                     .block = B_AIR,
-                                    .tex = T_ITEM_COOKED_MEAT,
                                     .desc = "350 kcal. E to eat.",
                                     .density = 1000.0f},
     [I_GUNPOWDER - ITEM_FIRST] = {.name = "Gunpowder",
                                   .stack = 64,
                                   .block = B_AIR,
-                                  .tex = T_ITEM_GUNPOWDER,
                                   .desc = "Coal and the potash in ash. For cartridges.",
                                   .density = 1700.0f},
     [I_CARTRIDGE - ITEM_FIRST] = {.name = "Cartridge",
                                   .stack = 32,
                                   .block = B_AIR,
-                                  .tex = T_ITEM_CARTRIDGE,
                                   .desc = "Rifle ammunition.",
                                   .density = 5000.0f},
     [I_RIFLE - ITEM_FIRST] = {.name = "Rifle",
                               .stack = 1,
                               .block = B_AIR,
-                              .tex = T_ITEM_RIFLE,
                               .desc = "Right-click to fire. Uses cartridges.",
                               .density = 900.0f},
     [I_ADRENALINE - ITEM_FIRST] = {.name = "Adrenaline auto-injector",
                                    .stack = 4,
                                    .block = B_AIR,
-                                   .tex = T_ITEM_ADRENALINE,
                                    .desc = "0.3 mg. For a stopped heart (H, then N); risky on a beating one.",
                                    .density = 1100.0f},
     [I_MORPHINE - ITEM_FIRST] = {.name = "Morphine",
                                  .stack = 16,
                                  .block = B_AIR,
-                                 .tex = T_ITEM_MORPHINE,
                                  .desc = "10 mg. Strong pain relief (H, then M). Slows breathing.",
                                  .density = 1200.0f},
     [I_NALOXONE - ITEM_FIRST] = {.name = "Naloxone spray",
                                  .stack = 4,
                                  .block = B_AIR,
-                                 .tex = T_ITEM_NALOXONE,
                                  .desc = "Reverses opioids for about an hour (H, then O).",
                                  .density = 1000.0f},
     [I_SPIRITS - ITEM_FIRST] = {.name = "Spirits",
                                 .stack = 8,
                                 .block = B_AIR,
-                                .tex = T_ITEM_SPIRITS,
                                 .desc = "Apple brandy. A drink (H, then L), or to clean wounds.",
                                 .density = 950.0f},
 };
+/* clang-format on */
 
 /* The items after the tools, from I_RAW_TIN. Dropped minerals sink at the
  * density of the mineral, ingots at the metal's; charcoal is porous enough
@@ -189,8 +166,7 @@ static const item_def MINERALS[I_MINERALS_END - I_TOOL_END] = {
 };
 #undef MINERAL
 
-static const item_def UNKNOWN = {
-    .name = "?", .desc = "", .density = 1000.0f, .stack = 1, .block = B_AIR, .tex = T_STONE};
+static const item_def UNKNOWN = {.name = "?", .desc = "", .density = 1000.0f, .stack = 1, .block = B_AIR};
 
 static const char *const TIER_NAME[TIER_COUNT] = {"Wooden", "Stone", "Copper", "Iron"};
 static const char *const KIND_NAME[TOOL_KINDS] = {"pickaxe", "axe", "shovel", "knife", "sword"};
@@ -215,12 +191,7 @@ static void build_tools(void)
             /* Densities of the head's material, so a dropped tool floats or
              * sinks as its head would. */
             static const float DENS[TIER_COUNT] = {600.0f, 2600.0f, 8960.0f, 7870.0f};
-            g_tools[i] = (item_def){.name = names[i],
-                                    .desc = descs[i],
-                                    .density = DENS[t],
-                                    .stack = 1,
-                                    .block = B_AIR,
-                                    .tex = (uint8_t)(T_TOOL_FIRST + i)};
+            g_tools[i] = (item_def){.name = names[i], .desc = descs[i], .density = DENS[t], .stack = 1, .block = B_AIR};
         }
 }
 
@@ -327,13 +298,11 @@ static const item_def LIQUIDS[I_LIQUIDS_END - I_MINERALS_END] = {
     {.name = "Oil bucket",
      .stack = 1,
      .block = B_CRUDE_OIL,
-     .tex = T_ITEM_OIL_BUCKET,
      .desc = "Crude oil. Right-click to pour.",
      .density = 950.0f},
     {.name = "Brine bucket",
      .stack = 1,
      .block = B_BRINE,
-     .tex = T_ITEM_BRINE_BUCKET,
      .desc = "Too salty to drink. Right-click to pour.",
      .density = 1250.0f},
 };
@@ -353,14 +322,11 @@ const item_def *item_get(item_id id)
     static item_def blocks[B_COUNT], minerals[I_MINERALS_END - I_TOOL_END];
     static int built;
     if (!built) {
-        for (int i = 0; i < I_MINERALS_END - I_TOOL_END; i++) {
-            minerals[i] = MINERALS[i];
-            minerals[i].tex = (uint8_t)(T_ITEM_RAW_TIN + i);
-        }
+        for (int i = 0; i < I_MINERALS_END - I_TOOL_END; i++) minerals[i] = MINERALS[i];
         for (int b = 0; b < B_COUNT; b++) {
             const block_def *d = &g_blocks[b];
-            blocks[b] = (item_def){
-                .name = d->name, .desc = "", .density = d->density, .stack = 64, .block = (uint8_t)b, .tex = d->tex[0]};
+            blocks[b] =
+                (item_def){.name = d->name, .desc = "", .density = d->density, .stack = 64, .block = (uint8_t)b};
         }
         blocks[B_GLASS].desc = "Brittle: shatters when it falls hard.";
         blocks[B_ICE].desc = "Melts above 0"

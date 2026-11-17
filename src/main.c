@@ -96,6 +96,7 @@ typedef struct {
     int have_mouse, captured;
     int click_break, click_place, click_pick;
     int attack;         /* left button held in the game */
+    int aim_down;       /* right button held in the game (raises a rifle to the eye) */
     int toggle_fly, want_shot, resized;
     int slot;           /* hotbar slot chosen with a number key, -1 none */
     int inv_open;       /* inventory screen (Tab / I) */
@@ -555,6 +556,7 @@ static void mouse_button_cb(GLFWwindow *win, int button, int action, int mods)
         if (action == GLFW_RELEASE) g_in.attack = 0;
     }
     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) g_in.ui_rclick = 1;
+    if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE) g_in.aim_down = 0;
     if (action != GLFW_PRESS || g_in.screen != SCREEN_NONE || g_in.inv_open || g_in.panel) return;
     if (!g_in.captured) {
         set_captured(win, 1); /* this click only takes the mouse */
@@ -563,8 +565,10 @@ static void mouse_button_cb(GLFWwindow *win, int button, int action, int mods)
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         g_in.click_break = 1;
         g_in.attack = 1;
-    } else if (button == GLFW_MOUSE_BUTTON_RIGHT) g_in.click_place = 1;
-    else if (button == GLFW_MOUSE_BUTTON_MIDDLE) g_in.click_pick = 1;
+    } else if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+        g_in.click_place = 1;
+        g_in.aim_down = 1;
+    } else if (button == GLFW_MOUSE_BUTTON_MIDDLE) g_in.click_pick = 1;
 }
 
 static void cursor_cb(GLFWwindow *win, double x, double y)
@@ -964,6 +968,7 @@ typedef struct {
     figure figs[MAX_FIGURES];             /* --figures */
     int nfigs;
     float eat_anim;           /* 1 at the start of eating, easing to 0 */
+    float aim;                /* 0 rifle at the hip .. 1 down its sights */
     float fog[3];             /* the fog's colour, easing toward the light at the eye */
     int fog_set;
     uint32_t death_rng;
@@ -1720,13 +1725,13 @@ static void frame_menus(game *g, double dt)
         g->acc = 0.0; /* the simulation stands still */
         memset(g_in.keys, 0, sizeof g_in.keys); /* no keys stuck down on return */
         g_in.click_break = g_in.click_place = g_in.click_pick = 0;
-        g_in.attack = 0;
+        g_in.attack = g_in.aim_down = 0;
     } else {
         /* Other players keep playing behind the menus. */
         if (g->in_menu) {
             memset(g_in.keys, 0, sizeof g_in.keys);
             g_in.click_break = g_in.click_place = g_in.click_pick = 0;
-            g_in.attack = 0;
+            g_in.attack = g_in.aim_down = 0;
         }
         g->acc += dt;
     }
@@ -1755,12 +1760,26 @@ static void frame_menus(game *g, double dt)
     if (g->frozen) g_in.mouse_dx = g_in.mouse_dy = 0;
 }
 
+#define AIM_S 0.2f    /* s to raise the rifle to the eye */
+#define AIM_ZOOM 1.25f /* the view's magnification down the sights */
+
+/* The view's scale at aim (0..1): narrows to 1 / AIM_ZOOM, eased. */
+static float aim_zoom(float aim) { return 1.0f - (1.0f - 1.0f / AIM_ZOOM) * ease_in_out(clampf(aim, 0.0f, 1.0f)); }
+
+static int held_gun(game *g)
+{
+    const item_stack *held = inv_held(&g->inv);
+    return held->count && held->id == I_RIFLE;
+}
+
 /* Looking, the hotbar and the movement keys. */
 static player_input frame_input(game *g)
 {
     const settings *st = &g->st;
     player *pl = &g->pl;
-    const float sens = 0.0022f * (float)st->sensitivity / 100.0f;
+    /* Aiming narrows the view, and the mouse slows with it so a sight
+     * picture moves as far on screen per hand movement. */
+    const float sens = 0.0022f * (float)st->sensitivity / 100.0f * aim_zoom(g->aim);
     g->look_dx = (float)g_in.mouse_dx * sens;
     g->look_dy = (float)g_in.mouse_dy * sens;
     pl->yaw += g->look_dx;
@@ -1809,7 +1828,7 @@ static void frame_simulate(game *g, const player_input *raw, double dt)
     if (g->client) {
         /* The host simulates; this side predicts its own movement. */
         while (g->acc >= PHYS_DT && steps < MAX_STEPS_PER_FRAME) {
-            mp_client_step(g->mp, raw, g_in.attack && !g->frozen);
+            mp_client_step(g->mp, raw, g_in.attack && !g->frozen, g->aim > 0.5f);
             if ((float)g->pl.fall_speed > landing) landing = (float)g->pl.fall_speed;
             g->acc -= PHYS_DT;
             steps++;
@@ -1877,7 +1896,7 @@ static void client_hands(game *g, double dt)
         if (g_in.click_place) mp_client_click(g->mp, MP_CLICK_PLACE);
         if (g_in.click_pick) mp_client_click(g->mp, MP_CLICK_PICK);
         if (g_in.drop) mp_client_click(g->mp, g_in.drop == 2 ? MP_CLICK_DROP_ALL : MP_CLICK_DROP);
-        if (g_in.click_break || g_in.click_place) g->ia.swing = 1.0f;
+        if (g_in.click_break || (g_in.click_place && !held_gun(g))) g->ia.swing = 1.0f;
     }
     g->ia.swing = fmaxf(0.0f, g->ia.swing - (float)dt * 3.0f);
     g->ia.swinging = g_in.attack && g->hit.hit && !g->frozen;
@@ -1909,6 +1928,10 @@ static void client_hands(game *g, double dt)
 static void frame_interact(game *g, double dt)
 {
     player *pl = &g->pl;
+    /* The rifle comes up to the eye in about a fifth of a second while the
+     * right button is held, and down as fast when it's let go. */
+    int raise = g_in.aim_down && !g->frozen && !g->hl.dead && held_gun(g);
+    g->aim = clampf(g->aim + (raise ? 1.0f : -1.0f) * (float)dt / AIM_S, 0.0f, 1.0f);
     g->eye = dv3(pl->pos.x, pl->pos.y + PLAYER_EYE - (double)g->cam.crouch, pl->pos.z);
     g->look = look_dir(pl->yaw, pl->pitch);
     g->hit = physics_raycast(&g->w, g->eye, g->look, REACH);
@@ -1938,7 +1961,7 @@ static void frame_interact(game *g, double dt)
         if (combat_aim(&g->mobs, &t, 0, g->eye, g->look, block_d)) ii.attack = 0;
         if (hands) {
             combat_out co = combat_frame(&g->cb, &g->mobs, &g->ph, &t, 0, &g->inv, g->eye, g->look, block_d,
-                                         ii.attack_click, ii.use_click, (float)dt);
+                                         ii.attack_click, g->aim, (float)dt);
             if (co.fired) sound_play(g->snd, SND_SHOT, NULL, 0, 1.0f);
             if (co.struck) sound_play(g->snd, SND_HIT, &co.at, 0, 0.8f);
             if (co.struck || co.fired) {
@@ -2074,7 +2097,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     v.eye.z += (double)g->pose.dz;
     v.roll = g->pose.roll;
     v.pitch = clampf(v.pitch + g->pose.pitch_add, -1.56f, 1.56f);
-    v.fov *= g->pose.fov_scale;
+    v.fov *= g->pose.fov_scale * aim_zoom(g->aim);
     if (on_title) {
         /* The title screen circles high above the player, whose
          * surroundings are what the world keeps loaded. */
@@ -2132,6 +2155,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
                               g->look_dx,
                               g->look_dy,
                               g->eat_anim > 0.0f ? 1.0f - g->eat_anim : 0.0f,
+                              g->aim,
                               lightfx_at(&v.lfx, eye_light, 0.3f),
                               (float)dt};
         v.view_model = g->vm_ents;
@@ -2154,7 +2178,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     v.ents = g->ents;
     v.ent_opaque = n_op;
     v.ent_trans = n_tr;
-    v.hide_crosshair = g->frozen || on_title;
+    v.hide_crosshair = g->frozen || on_title || g->aim > 0.5f; /* the sights take its place */
     return v;
 }
 

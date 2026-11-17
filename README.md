@@ -85,8 +85,8 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
 | Left Shift | Sneak: slower, and you won't walk off edges (in fly mode: down) |
 | Space | Jump / swim up (in fly mode: up) |
 | F | Toggle fly mode (no injuries while flying) |
-| Left click (hold) | Break the block; takes the material's hardness in seconds, less with the right tool. Strikes a creature or player in reach instead |
-| Right click | Place the held block, use the held item (fill or empty a bucket, eat food, feed a campfire, put a defibrillator's pads on or take them off, fire a rifle) |
+| Left click (hold) | Break the block; takes the material's hardness in seconds, less with the right tool. Strikes a creature or player in reach instead. Fires a held rifle |
+| Right click | Place the held block, use the held item (fill or empty a bucket, eat food, feed a campfire, put a defibrillator's pads on or take them off). Hold with a rifle to bring it up to the cheek and aim down its iron sights: the view zooms 1.25×, and aimed shots spread far less than shots from the hip |
 | Middle click | Pick the targeted block into the hand |
 | 1–9 or scroll | Select a hotbar slot |
 | Q / Ctrl+Q | Drop one item / the whole stack |

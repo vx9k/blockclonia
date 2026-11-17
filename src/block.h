@@ -107,18 +107,6 @@ typedef enum {
     T_ICE,
     T_WATER,
     T_BEDROCK,
-    /* Items, drawn on thin cards when dropped or held (transparent outside
-     * the shape). */
-    T_ITEM_STICK,
-    T_ITEM_FIBRE,
-    T_ITEM_BANDAGE,
-    T_ITEM_SPLINT,
-    T_ITEM_ANTISEPTIC,
-    T_ITEM_PAINKILLER,
-    T_ITEM_ANTIBIOTIC,
-    T_ITEM_APPLE,
-    T_ITEM_BUCKET,
-    T_ITEM_WATER_BUCKET,
     /* Skin, and the undyed linen of the players' base layer (avatar.c). */
     T_SKIN,
     T_LINEN,
@@ -134,21 +122,13 @@ typedef enum {
     T_FIRE3,
     T_CAMPFIRE_BASE,
     T_ASH,
-    /* Items added later go last, so the layers the shaders animate keep
+    /* Layers added later go last, so the ones the shaders animate keep
      * their numbers. */
-    T_ITEM_DEFIBRILLATOR,
     T_COAL_ORE,
     T_COPPER_ORE,
     T_IRON_ORE,
     T_FURNACE_FRONT,
     T_FURNACE_TOP,
-    T_ITEM_COAL,
-    T_ITEM_COPPER_INGOT,
-    T_ITEM_IRON_INGOT,
-    T_ITEM_RAW_COPPER,
-    T_ITEM_RAW_IRON,
-    T_ITEM_RAW_MEAT,
-    T_ITEM_COOKED_MEAT,
     /* The creatures' pixel art (mobskin.c), one layer per kind of face. */
     T_WOLF_BODY_SIDE,
     T_WOLF_BODY_TOP,
@@ -181,13 +161,6 @@ typedef enum {
     T_BOAR_LEG_LOWER,
     T_BOAR_FUR,
     T_MOB_SOLE, /* paw and hoof undersides */
-    T_ITEM_GUNPOWDER,
-    T_ITEM_CARTRIDGE,
-    T_ITEM_RIFLE,
-    T_ITEM_ADRENALINE,
-    T_ITEM_MORPHINE,
-    T_ITEM_NALOXONE,
-    T_ITEM_SPIRITS,
     T_GRANITE,
     T_BASALT,
     T_LIMESTONE,
@@ -219,47 +192,27 @@ typedef enum {
     T_LINEN_DARK,
     T_HAIR,
     T_FACE,
-    /* One per item from I_RAW_TIN, in item order (item.h checks). */
-    T_ITEM_RAW_TIN,
-    T_ITEM_RAW_ZINC,
-    T_ITEM_RAW_LEAD,
-    T_ITEM_RAW_NICKEL,
-    T_ITEM_RAW_SILVER,
-    T_ITEM_RAW_GOLD,
-    T_ITEM_BAUXITE,
-    T_ITEM_ILMENITE,
-    T_ITEM_URANINITE,
-    T_ITEM_SPODUMENE,
-    T_ITEM_SULFUR,
-    T_ITEM_SALTPETER,
-    T_ITEM_SALT,
-    T_ITEM_QUARTZ,
-    T_ITEM_GRAPHITE,
-    T_ITEM_TIN_INGOT,
-    T_ITEM_ZINC_INGOT,
-    T_ITEM_LEAD_INGOT,
-    T_ITEM_NICKEL_INGOT,
-    T_ITEM_SILVER_INGOT,
-    T_ITEM_GOLD_INGOT,
-    T_ITEM_BRONZE_INGOT,
-    T_ITEM_BRASS_INGOT,
-    T_ITEM_STEEL_INGOT,
-    T_ITEM_CHARCOAL,
-    T_ITEM_QUICKLIME,
     T_LAVA,
     T_CRUDE_OIL,
     T_BRINE,
-    T_ITEM_OIL_BUCKET,
-    T_ITEM_BRINE_BUCKET,
     T_ITEM_TORCH,
     T_LAMP,
     T_FOXFIRE,
-    T_TOOL_FIRST /* then one per tool kind and tier, in item order (T_COUNT) */
+    /* Item model materials (itemmodel.h): greyscale and near white, so the
+     * box's tint is its colour, and stretched over each face. */
+    T_MAT_WOOD,
+    T_MAT_METAL,
+    T_MAT_CAST,
+    T_MAT_ROCK,
+    T_MAT_CLOTH,
+    T_MAT_GLASS,
+    T_MAT_PLAIN,
+    T_MAT_FLESH,
+    T_MAT_GRAIN,
+    T_COUNT
 } tex_id;
 
-#define T_ITEM_MINERALS_END (T_ITEM_QUICKLIME + 1)
-#define T_COUNT (T_TOOL_FIRST + 5 * 4) /* item.h checks the 5 kinds x 4 tiers */
-_Static_assert(T_COUNT <= 256, "a texture layer is one byte in block_def, item_def and the vertex");
+_Static_assert(T_COUNT <= 256, "a texture layer is one byte in block_def and the vertex");
 #define T_MOB_FIRST T_WOLF_BODY_SIDE
 #define T_MOB_LAST T_MOB_SOLE
 

@@ -5,6 +5,7 @@
 #include "inventory.h"
 #include "invui.h"
 #include "item.h"
+#include "itemmodel.h"
 #include "mem.h"
 #include "save.h"
 #include "test_util.h"
@@ -97,14 +98,15 @@ static void test_ores(void)
     }
 }
 
-/* Minerals and metals: named, sprite in their own layer, a full stack, and
+/* Minerals and metals: named, a model of their own, a full stack, and
  * dense enough to sink in water except porous charcoal. */
 static void test_minerals(void)
 {
     for (item_id id = I_RAW_TIN; id < I_MINERALS_END; id++) {
         const item_def *d = item_get(id);
         CHECK(item_valid(id) && d->name[0] && d->desc[0] && d->stack == 64 && d->block == B_AIR);
-        CHECK(d->tex == T_ITEM_RAW_TIN + (int)(id - I_RAW_TIN));
+        item_model m = {0};
+        CHECK(itemmodel_build(id, &m) && m.hold == IM_HOLD_PALM);
         CHECK(id == I_CHARCOAL ? d->density < 1000.0f : d->density > 2000.0f);
     }
     /* Ingots weigh what the metal does: lead heavier than iron, gold the
@@ -266,16 +268,6 @@ static void test_textures(void)
             CHECK(colour_gap(rgb, other) > 0);
         }
     }
-    for (int l = T_ITEM_RAW_TIN; l < T_ITEM_MINERALS_END; l++) {
-        int rgb[3] = {0};
-        layer_stats(l, rgb, &op);
-        CHECK(op > 20 && op < 256);
-        for (int m = T_ITEM_RAW_TIN; m < l; m++) {
-            int other[3] = {0};
-            layer_stats(m, other, &op);
-            CHECK(colour_gap(rgb, other) > 0);
-        }
-    }
     /* Ores show their mineral: some texels differ from the rock around. */
     for (int l = T_TIN_ORE; l <= T_GRAPHITE_ORE; l++) {
         uint8_t a[4] = {0}, b[4] = {0};
@@ -384,31 +376,34 @@ static void test_save_every_block(void)
     column_free(c);
 }
 
-/* The shape each mineral sprite borrows: an ingot for the metals, a heap
- * for the powders, a raw lump for the rest. */
-static int sprite_shape(item_id id)
+/* The colours of a model, in box order, folded into one number. */
+static uint32_t model_colours(item_id id)
 {
-    if (id >= I_TIN_INGOT && id <= I_STEEL_INGOT) return T_ITEM_IRON_INGOT;
-    if (id == I_SULFUR || id == I_SALTPETER || id == I_SALT || id == I_QUICKLIME) return T_ITEM_GUNPOWDER;
-    return T_ITEM_RAW_IRON;
+    item_model m = {0};
+    itemmodel_build(id, &m);
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < m.n; i++) h = (h ^ m.box[i].rgb ^ (uint32_t)m.box[i].layer << 24) * 16777619u;
+    return h;
 }
 
-/* A recoloured sprite keeps its shape's outline texel for texel and
- * differs only in colour. */
+/* Every mineral and metal looks like itself: no two share their colours,
+ * and the ingots share one cast shape. */
 static void test_sprite_shapes(void)
 {
-    for (item_id id = I_RAW_TIN; id < I_MINERALS_END; id++) {
-        int layer = item_get(id)->tex, shape = sprite_shape(id), outline = 0, recoloured = 0;
-        for (int y = 0; y < 16; y++)
-            for (int x = 0; x < 16; x++) {
-                uint8_t a[4] = {0}, b[4] = {0};
-                texgen_texel(layer, x, y, a);
-                texgen_texel(shape, x, y, b);
-                outline += (a[3] != 0) != (b[3] != 0);
-                recoloured += a[3] && (a[0] != b[0] || a[1] != b[1] || a[2] != b[2]);
-            }
-        if (outline) fprintf(stderr, "  %s does not keep its shape\n", item_get(id)->name);
-        CHECK(outline == 0 && recoloured > 10);
+    for (item_id id = I_RAW_TIN; id < I_MINERALS_END; id++)
+        for (item_id other = I_RAW_TIN; other < id; other++) {
+            if (model_colours(id) == model_colours(other))
+                fprintf(stderr, "  %s looks like %s\n", item_get(id)->name, item_get(other)->name);
+            CHECK(model_colours(id) != model_colours(other));
+        }
+    item_model iron = {0};
+    itemmodel_build(I_IRON_INGOT, &iron);
+    for (item_id id = I_TIN_INGOT; id <= I_STEEL_INGOT; id++) {
+        item_model m = {0};
+        itemmodel_build(id, &m);
+        CHECK(m.n == iron.n);
+        for (int i = 0; i < m.n; i++)
+            for (int a = 0; a < 3; a++) CHECK(m.box[i].size[a] == iron.box[i].size[a]);
     }
 }
 

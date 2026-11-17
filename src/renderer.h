@@ -40,6 +40,7 @@ typedef struct {
 } render_opts;
 
 #define RENDER_MAX_ENTS 2048
+#define RENDER_MAX_VIEW_MODEL 24 /* the arm and a held item model */
 
 typedef struct {
     dvec3 eye;
@@ -51,7 +52,7 @@ typedef struct {
     int ent_opaque, ent_trans;
     /* The first-person arm and held item, in view space (x right, y up,
      * -z forward), drawn last over a cleared depth buffer. */
-    const entity_instance *view_model;
+    const entity_instance *view_model; /* at most RENDER_MAX_VIEW_MODEL */
     int view_model_count;
     float time;          /* s, drives animated textures */
     float daylight;      /* 0 night .. 1 noon: scales the light */

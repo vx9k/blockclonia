@@ -10,11 +10,13 @@ layout(location = 1) in vec3 i_pos;    // centre relative to the camera
 layout(location = 2) in uint i_tex;    // layers: side | top << 8 | bottom << 16 | front << 24 | metric << 31
 layout(location = 3) in vec4 i_rot;    // unit quaternion
 layout(location = 4) in vec4 i_scale;  // xyz: size in metres, w: brightness
+layout(location = 5) in uint i_tint;   // rgb subtracted from white (entity.h), so 0 is none
 
 layout(location = 0) out vec2 f_uv;
 layout(location = 1) flat out uint f_layer;
 layout(location = 2) out mediump vec2 f_shade;  // as block.vert: shade, fog
 layout(location = 3) out vec3 f_luv;
+layout(location = 4) out mediump vec3 f_tint;
 
 const float FACE_SHADE[6] = float[](0.80, 0.80, 1.00, 0.50, 0.65, 0.65);
 
@@ -53,4 +55,5 @@ void main()
     }
     f_shade = vec2(light, clamp((length(rel) - pc.fog.x) * pc.fog.y, 0.0, 1.0));
     f_luv = LIGHT_FULL;
+    f_tint = 1.0 - unpackUnorm4x8(i_tint).rgb;
 }

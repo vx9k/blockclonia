@@ -144,8 +144,9 @@ void mp_on_block_changed(mp *m, int x, int y, int z);
 
 /* Client: one fixed step of prediction. in is the movement input before
  * survival limits (both sides apply them, each from its copy of the
- * body), attack whether the break button is held. */
-void mp_client_step(mp *m, const player_input *in, int attack);
+ * body), attack whether the break button is held, aim whether the
+ * rifle is raised to the eye (it narrows the shot's spread). */
+void mp_client_step(mp *m, const player_input *in, int attack, int aim);
 /* Client: a click this frame, counted into the next inputs. */
 typedef enum { MP_CLICK_BREAK, MP_CLICK_PLACE, MP_CLICK_PICK, MP_CLICK_DROP, MP_CLICK_DROP_ALL } mp_click;
 void mp_client_click(mp *m, mp_click c);

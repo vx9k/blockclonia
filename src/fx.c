@@ -1,5 +1,6 @@
 #include "fx.h"
 #include "item.h"
+#include "itemmodel.h"
 #include "light.h"
 
 #include <math.h>
@@ -143,6 +144,9 @@ static uint32_t block_tex(uint8_t b)
     return (uint32_t)d->tex[0] | (uint32_t)d->tex[2] << 8 | (uint32_t)d->tex[3] << 16;
 }
 
+/* m: the longest side a dropped item is shown at, at least (a cartridge is 7 cm). */
+#define DROP_SIZE 0.25f
+
 static uint32_t same_tex(uint8_t layer) { return (uint32_t)layer * 0x010101u; }
 
 /* The output array is shared: opaque instances fill it from the front,
@@ -197,11 +201,24 @@ void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *cra
         quat q = quat_axis(0, 1, 0, it->spin);
         float light = lit(ph, p, daylight);
         int stacks = it->count > 32 ? 3 : (it->count > 1 ? 2 : 1); /* a pile looks like a pile */
+        item_model mdl = {0};
+        int has_model = itemmodel_build(it->id, &mdl);
         for (int k = 0; k < stacks; k++) {
             dvec3 pk = dv3(p.x + 0.05 * k, p.y + 0.04 * k, p.z - 0.04 * k);
-            if (!item_is_block(it->id)) {
-                /* Items are cards: their sprite on a thin slab, standing up. */
-                put_trans(&l, cube_at(pk, eye, same_tex(item_get(it->id)->tex), q, 0.32f, 0.32f, 0.02f, 1.1f * light));
+            if (has_model) {
+                /* Its model, centred where the item is, small things shown
+                 * larger so they can be found; tools and guns lie flat. */
+                const float at[3] = {(float)(pk.x - eye.x), (float)(pk.y - eye.y), (float)(pk.z - eye.z)};
+                float c[3] = {0.0f, 0.0f, 0.0f};
+                itemmodel_centre(&mdl, c);
+                float size = fminf(fmaxf(DROP_SIZE / itemmodel_extent(&mdl), 1.0f), 3.0f);
+                quat lie = mdl.hold == IM_HOLD_PALM ? q : quat_mul(q, quat_axis(1.0f, 0.0f, 0.0f, 1.5708f));
+                entity_instance im[IM_MAX_BOXES] = {0};
+                int nb = itemmodel_place(&mdl, c, at, lie, size, light, im, IM_MAX_BOXES);
+                for (int b = 0; b < nb; b++) {
+                    if (itemmodel_layer_clear((uint8_t)(im[b].tex & 255u))) put_trans(&l, im[b]);
+                    else put_opaque(&l, im[b]);
+                }
                 continue;
             }
             uint8_t b = (uint8_t)it->id; /* a block item's id is its block */

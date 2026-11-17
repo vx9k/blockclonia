@@ -3,14 +3,16 @@
  * the renderer's view-model pass. Animated: it sways with the stride,
  * lags the mouse a little, swings when hitting or placing, dips out and
  * back in when the held item changes, lifts food to the mouth when eating,
- * and sinks when sprinting. No window or GPU. */
+ * and sinks when sprinting. Picks, axes, shovels and the rifle take both
+ * hands, each arm reaching its grip by two-bone IK; the rifle comes up to
+ * the eye, its sights on the crosshair, as `aim` rises. No window or GPU. */
 #ifndef MC_VIEWMODEL_H
 #define MC_VIEWMODEL_H
 
 #include "entity.h"
 #include "item.h"
 
-#define VIEWMODEL_MAX 12 /* the forearm, the hand and a torch (torch_model.h) */
+#define VIEWMODEL_MAX 20 /* both forearms and hands, and an item model (itemmodel.h) */
 
 typedef struct {
     item_id held_id;      /* item in hand, 0 for the bare hand */
@@ -21,6 +23,7 @@ typedef struct {
     float sprint;         /* camera_anim.sprint: 0..1 */
     float look_dx, look_dy; /* mouse motion this frame, radians (for lag) */
     float eating;         /* 0..1 while an eat action plays, else 0 */
+    float aim;            /* 0 rifle at the hip .. 1 down its sights */
     float light;          /* brightness (daylight) */
     float dt;
 } viewmodel_input;
@@ -30,10 +33,16 @@ typedef struct {
     item_id shown_id;     /* the item drawn (changes while lowered) */
     float lag_x, lag_y;   /* smoothed mouse lag */
     float swing_t;        /* 0..1 progress of the current swing */
+    float aim_x, aim_v;   /* the rifle's mount: a spring following the aim, and its rate */
     float time;
 } viewmodel;
 
 void viewmodel_init(viewmodel *vm);
+
+/* The hands an item takes: 2 for picks, axes, shovels and the rifle, else
+ * 1. The view model's instances are each hand's forearm and fist (right
+ * hand first), then the item. */
+int viewmodel_hands(item_id id);
 
 /* Advances the animation and writes up to max instances; returns how many. */
 int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *out, int max);
