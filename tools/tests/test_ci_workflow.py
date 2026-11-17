@@ -216,6 +216,11 @@ class Packages(unittest.TestCase):
         self.assertIn('-DMC_PGO=ON -DMC_BOLT=ON', ubuntu)
         self.assertIn('-DMC_WERROR=ON', alpine)
 
+    def test_alpine_installs_the_runtime_files_clang_links_with(self):
+        # Without gcc, Alpine's clang can't find crtbeginS.o or libgcc and
+        # every link fails, starting with CMake's compiler check.
+        self.assertRegex(job(PACKAGE, 'alpine'), r'apk add --no-cache \\\n\s+clang22 lld22 llvm compiler-rt gcc ')
+
     def test_the_release_attests_both_kinds_of_package(self):
         publish = job(CI, 'release-publish')
         self.assertIn('dist/blockclonia_*.deb', publish)

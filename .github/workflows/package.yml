@@ -109,8 +109,10 @@ jobs:
           fi
       # Alpine's mimalloc 2.2 and GLFW 3.4 are older than the pinned 3.5
       # series, so MC_DEPS=AUTO builds both from source (GLFW needs the X11
-      # and Wayland headers). The container runs as root on the checkout, so
-      # git is told the mounted tree is safe.
+      # and Wayland headers). Alpine's clang links with gcc's crtbegin and
+      # libgcc, so gcc is installed for those files only; nothing compiles
+      # with it. The container runs as root on the checkout, so git is told
+      # the mounted tree is safe.
       - name: Build, test and package in Alpine 3.24
         env:
           MC_CPU: ${{ matrix.cpu }}
@@ -119,7 +121,7 @@ jobs:
             -e MC_CPU -e MC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}" \
             alpine:3.24 sh -euxc '
               apk add --no-cache \
-                clang22 lld22 llvm compiler-rt musl-dev linux-headers cmake samurai pkgconf git ca-certificates \
+                clang22 lld22 llvm compiler-rt gcc musl-dev linux-headers cmake samurai pkgconf git ca-certificates \
                 shaderc vulkan-loader-dev vulkan-headers sqlite-dev libsodium-dev enet-dev miniupnpc-dev zlib-ng-dev \
                 libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev wayland-dev libxkbcommon-dev \
                 mesa-vulkan-swrast vulkan-validation-layers xvfb-run xauth

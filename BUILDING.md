@@ -69,11 +69,13 @@ sudo apt install libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
 ### Alpine Linux
 
 Alpine's GLFW and mimalloc are older than 3.5, so the build downloads
-them, which needs the X11 and Wayland headers. Alpine has no BOLT, so
-release builds get PGO only.
+them, which needs the X11 and Wayland headers. Alpine's clang links with
+gcc's start-up files and `libgcc`, so `gcc` has to be installed too,
+though nothing is compiled with it. Alpine has no BOLT, so release builds
+get PGO only.
 
 ```sh
-doas apk add clang22 lld22 llvm compiler-rt musl-dev linux-headers cmake samurai pkgconf \
+doas apk add clang22 lld22 llvm compiler-rt gcc musl-dev linux-headers cmake samurai pkgconf \
              shaderc vulkan-loader-dev vulkan-headers sqlite-dev libsodium-dev enet-dev \
              miniupnpc-dev zlib-ng-dev libx11-dev libxrandr-dev libxinerama-dev \
              libxcursor-dev libxi-dev wayland-dev libxkbcommon-dev mesa-vulkan-swrast
