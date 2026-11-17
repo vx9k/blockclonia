@@ -34,7 +34,7 @@
     },
     {
       "name": "native",
-      "displayName": "Release tuned for this machine (-march/-mcpu=native); build on the device you play on, e.g. a Pi",
+      "displayName": "Release tuned for this machine (-march/-mcpu=native); build on the machine you play on",
       "inherits": "release",
       "cacheVariables": { "MC_CPU": "native" }
     },
@@ -77,26 +77,6 @@
       "cacheVariables": { "MC_WERROR": "ON", "MC_DEPS": "SYSTEM" }
     },
     {
-      "name": "pi4-aarch64",
-      "displayName": "Cross: Raspberry Pi 4, 64-bit Pi OS (set RPI_SYSROOT)",
-      "inherits": ["release", "linux-only"],
-      "toolchainFile": "${sourceDir}/cmake/toolchains/rpi-aarch64.cmake",
-      "cacheVariables": { "MC_CPU": "pi4" }
-    },
-    {
-      "name": "pi5-aarch64",
-      "displayName": "Cross: Raspberry Pi 5, 64-bit Pi OS",
-      "inherits": "pi4-aarch64",
-      "cacheVariables": { "MC_CPU": "pi5" }
-    },
-    {
-      "name": "pi4-armhf",
-      "displayName": "Cross: Raspberry Pi 4/5, 32-bit Pi OS (NEON, hard float)",
-      "inherits": ["release", "linux-only"],
-      "toolchainFile": "${sourceDir}/cmake/toolchains/rpi-armhf.cmake",
-      "cacheVariables": { "MC_CPU": "pi4" }
-    },
-    {
       "name": "macos",
       "displayName": "macOS with MoltenVK (Vulkan SDK or Homebrew vulkan-loader + molten-vk + shaderc)",
       "inherits": "release",
@@ -113,9 +93,6 @@
     { "name": "core", "configurePreset": "core" },
     { "name": "fuzz", "configurePreset": "fuzz" },
     { "name": "ci", "configurePreset": "ci" },
-    { "name": "pi4-aarch64", "configurePreset": "pi4-aarch64" },
-    { "name": "pi5-aarch64", "configurePreset": "pi5-aarch64" },
-    { "name": "pi4-armhf", "configurePreset": "pi4-armhf" },
     { "name": "macos", "configurePreset": "macos" }
   ],
   "testPresets": [
@@ -137,10 +114,6 @@
         "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
       }
     },
-    { "name": "ci", "inherits": "base", "configurePreset": "ci" },
-    { "name": "pi4-aarch64", "inherits": "base", "configurePreset": "pi4-aarch64",
-      "filter": { "include": { "label": "headless" } } },
-    { "name": "pi4-armhf", "inherits": "base", "configurePreset": "pi4-armhf",
-      "filter": { "include": { "label": "headless" } } }
+    { "name": "ci", "inherits": "base", "configurePreset": "ci" }
   ]
 }
