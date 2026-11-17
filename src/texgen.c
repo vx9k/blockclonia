@@ -38,6 +38,17 @@ typedef struct {
 } sprite;
 
 static const sprite SPRITES[] = {
+    {T_ITEM_TORCH,
+     {"................", "..........ff....", ".........fyyf...", "........fyWyf...", "........fyyf....",
+      ".......#hhf.....", "......#hh#......", ".....#w#........", "....#w#.........", "...#w#..........",
+      "..#w#...........", ".#w#............", "#w#.............", "##..............", "................",
+      "................"},
+     {{'#', {84, 58, 30, 255}},
+      {'w', {150, 110, 62, 255}},
+      {'h', {40, 30, 24, 255}},
+      {'f', {225, 90, 30, 255}},
+      {'y', {250, 185, 60, 255}},
+      {'W', {255, 245, 190, 255}}}},
     {T_ITEM_STICK,
      {"..............##", ".............#w#", "............#w#.", "...........#w#..", "..........#w#...",
       ".........#w#....", "........#w#.....", ".......#w#......", "......#w#.......", ".....#w#........",
@@ -602,6 +613,20 @@ static rgba texel(int layer, int x, int y)
     }
     case T_CRUDE_OIL: return shade(28, 22, 16, 240, n / 4);
     case T_BRINE: return shade(55, 105, 150, 205, n / 2);
+    case T_LAMP: {
+        /* A copper frame round a glass chimney with the flame inside. */
+        int frame = x <= 1 || x >= 14 || y <= 1 || y >= 14;
+        if (frame) return shade(175, 105, 60, 255, n / 2);
+        int dx = x * 2 - 15, dy = y * 2 - 17, d2 = dx * dx + dy * dy;
+        if (d2 < 20) return shade(255, 240, 170, 255, n / 4);
+        if (d2 < 60) return shade(250, 190, 90, 255, n / 3);
+        return shade(225, 200, 150, 255, n / 2);
+    }
+    case T_FOXFIRE: {
+        /* Pale green threads through dark rotten matter. */
+        int glow = px_noise(layer, x / 2, y, 100) > 30 || px_noise(layer, x, y / 2, 100) > 55;
+        return glow ? shade(150, 235, 160, 255, n / 2) : shade(45, 40, 32, 255, n);
+    }
     default: return (rgba){255, 0, 255, 255};
     }
 }

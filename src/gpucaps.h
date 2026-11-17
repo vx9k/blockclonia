@@ -53,7 +53,8 @@
 #define GPUCAP_TIMESTAMPS  (1u << 6) /* GPU frame time from timestamp queries */
 #define GPUCAP_PCACHE      (1u << 7) /* pipeline cache kept on disk between runs */
 #define GPUCAP_RELAXED     (1u << 8) /* FIFO_RELAXED present mode with vsync on */
-#define GPUCAP_COUNT 9
+#define GPUCAP_LIGHT4      (1u << 9) /* light texels in 4-bit B4G4R4A4, not RGBA8 (format support) */
+#define GPUCAP_COUNT 10
 /* clang-format on */
 #define GPUCAP_ALL ((1u << GPUCAP_COUNT) - 1u)
 
@@ -80,6 +81,11 @@ typedef struct {
     int portability_subset; /* VK_KHR_portability_subset is listed: MoltenVK */
     int present_relaxed; /* the surface offers VK_PRESENT_MODE_FIFO_RELAXED_KHR */
     int pipeline_cache;  /* a cache file path is configured */
+    /* B4G4R4A4_UNORM_PACK16 with optimal tiling can be a sampled, linearly
+     * filtered 3D image and a copy destination. Vulkan requires the format
+     * for 2D sampling only, and Metal has no such format on Intel and AMD
+     * Macs, so MoltenVK may leave it out. */
+    int light_4bit;
 } gpu_offer;
 
 typedef struct {

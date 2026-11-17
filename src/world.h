@@ -77,9 +77,28 @@ typedef struct {
     uint32_t trans_quads;
     uint16_t face_end[6];  /* opaque quads grouped by face, see mesh_counts */
     uint8_t block;         /* which vertex pool block holds it */
+    uint32_t light_slot;   /* the renderer's light texels for it */
+    uint16_t *props;       /* models in it (mesh_extra), owned by the renderer */
+    uint16_t prop_count;
 } section_mesh;
 
 typedef enum { COL_LOADING, COL_READY } col_state;
+
+/* A column's light, by section (light.h). A section whose footprint is
+ * one value throughout (open sky above the ground, solid rock below)
+ * keeps no array: cells[sy] is NULL and fill[sy] is that value. */
+typedef struct column_light {
+    uint16_t *cells[SECTIONS]; /* LIGHT_SEC_VOL each, or NULL */
+    uint16_t fill[SECTIONS];
+} column_light;
+
+/* What a finished mesh brings besides its vertices. */
+typedef struct {
+    const uint16_t *light; /* LIGHT_TEX^3 texels (light.h), NULL when they are all light_fill */
+    uint16_t light_fill;
+    const uint16_t *props; /* cells drawn as models, not faces (torches): x | z << 4 | y << 8 */
+    int prop_count;
+} mesh_extra;
 
 typedef struct column {
     int cx, cz;
@@ -98,10 +117,19 @@ typedef struct column {
     uint16_t solid_count[SECTIONS]; /* non-air blocks, 0 = skip meshing */
     uint16_t opaque_count[SECTIONS];/* opaque blocks, for the enclosed test */
     section_mesh mesh[SECTIONS];
+    column_light light;    /* the column's light and a one-block border; valid once lit */
+    uint8_t lit;           /* light computed at least once: meshing waits for it */
+    uint8_t light_dirty;   /* light may have changed since the last light job started */
+    uint8_t light_urgent;  /* and the player's own edit changed it: re-mesh first */
+    uint8_t lighting;      /* a light job is in flight */
 } column;
+
+/* A section the renderer holds something for: vertices or props. */
+static inline int mesh_held(const section_mesh *m) { return m->vtx_capacity || m->prop_count; }
 
 struct jobs;
 struct save_db;
+struct light_emitter;
 
 #define WORLD_URGENT 64
 #define WORLD_ANCHORS 8
@@ -120,8 +148,9 @@ typedef struct world {
     struct save_db *db;  /* NULL: saving disabled; not owned */
     int save_failed;     /* a column could not be saved: unloads keep edited columns until a save succeeds */
     struct jobs *jobs;
-    int gen_in_flight, mesh_in_flight;
+    int gen_in_flight, mesh_in_flight, light_in_flight;
     int max_gen_in_flight, max_mesh_in_flight;
+    int light_pending;   /* some column may need its light computed */
     int (*spiral)[2];    /* column offsets sorted by distance (load ring) */
     int spiral_count;
     int gen_cursor;      /* spiral entries before this are loaded or loading */
@@ -134,7 +163,8 @@ typedef struct world {
      * if it could not take the mesh this frame (the section is re-meshed
      * later). */
     void *render_user;
-    int (*on_mesh_ready)(void *user, column *c, int sy, const uint32_t *verts, const mesh_counts *mc);
+    int (*on_mesh_ready)(void *user, column *c, int sy, const uint32_t *verts, const mesh_counts *mc,
+                         const mesh_extra *x);
     void (*on_mesh_free)(void *user, section_mesh *m);
     /* Called whenever a block changes, for physics wake-ups. */
     void *edit_user;
@@ -148,6 +178,12 @@ typedef struct world {
      * -1 to abandon the whole save. */
     void *save_user;
     int (*on_save)(void *user);
+    /* Light sources besides blocks (the heat field's hot cells), asked for
+     * on the main thread when a column's light job starts: those in the
+     * box x0 <= x < x0 + 48, z0 <= z < z0 + 48, y < top, written to out
+     * in that box's coordinates (at most cap). Returns how many. */
+    const void *glow_user;
+    int (*glow)(const void *user, int x0, int z0, int top, struct light_emitter *out, int cap);
     /* Test hook: replaces terrain generation when set. */
     void (*generator)(uint32_t seed, column *c);
     /* A multiplayer client's world comes from the host: when set, a column
@@ -225,6 +261,13 @@ void world_schedule(world *w);
  * and at spawn so the player never falls through ungenerated terrain. Also
  * moves the streaming centre there, so it works for teleports too. */
 void world_load_blocking(world *w, double px, double pz, int radius);
+
+/* The light of a cell (light.h): open sky where nothing is loaded or lit
+ * yet, so nothing turns black while the world streams in. */
+uint16_t world_light(const world *w, int x, int y, int z);
+/* Light around x, z may have changed for a reason other than a block edit
+ * (a hot cell's glow): the columns it can reach relight. */
+void world_light_touch(world *w, int x, int z);
 
 /* Surface height (first air above ground) at x,z, or -1 if not loaded. */
 int world_surface_y(const world *w, int x, int z);

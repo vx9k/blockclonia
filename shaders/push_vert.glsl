@@ -11,3 +11,13 @@ layout(push_constant) uniform PushVert {
 const uint FIRE_FIRST = 32u;
 const uint WATER_LAYER = 14u;
 const uint LEAVES_LAYER = 8u;
+
+// The light atlas's size in texels, inverted (renderer.c, light_plan): set
+// when the pipeline is built, so turning a texel position into a texture
+// coordinate costs one multiply.
+layout(constant_id = 0) const float LIGHT_INV_X = 1.0;
+layout(constant_id = 1) const float LIGHT_INV_Y = 1.0;
+layout(constant_id = 2) const float LIGHT_INV_Z = 1.0;
+// Slot 0 of the atlas is full light; this is a point inside it, for what
+// brings its own brightness (flames, entities).
+#define LIGHT_FULL (9.0 * vec3(LIGHT_INV_X, LIGHT_INV_Y, LIGHT_INV_Z))

@@ -1,5 +1,6 @@
 #include "world.h"
 #include "jobs.h"
+#include "light.h"
 #include "log.h"
 #include "mathlib.h"
 #include "mem.h"
@@ -27,6 +28,7 @@ column *column_alloc(int cx, int cz)
 void column_free(column *c)
 {
     if (!c) return;
+    light_free(&c->light);
     mem_free(c->blocks);
     mem_free(c->meta);
     mem_free(c);
@@ -231,6 +233,36 @@ static void mark_section(world *w, int cx, int cz, int sy, int urgent)
     }
 }
 
+/* Light changes at most LIGHT_MAX blocks (counted along the axes) from
+ * where it changes, and sky light that a removed roof lets down the
+ * column spreads no farther sideways: every column whose footprint lies
+ * within that relights. */
+static void light_touch(world *w, int x, int z, int urgent)
+{
+    int cx = chunk_of(x), cz = chunk_of(z);
+    for (int dz = -1; dz <= 1; dz++)
+        for (int dx = -1; dx <= 1; dx++) {
+            int x0 = (cx + dx) * CHUNK_W - 1, z0 = (cz + dz) * CHUNK_W - 1;
+            int ddx = x < x0 ? x0 - x : (x > x0 + LIGHT_FOOT - 1 ? x - (x0 + LIGHT_FOOT - 1) : 0);
+            int ddz = z < z0 ? z0 - z : (z > z0 + LIGHT_FOOT - 1 ? z - (z0 + LIGHT_FOOT - 1) : 0);
+            if (ddx + ddz > LIGHT_MAX) continue;
+            column *c = world_column(w, cx + dx, cz + dz);
+            if (!c) continue;
+            c->light_dirty = 1;
+            c->light_urgent = (uint8_t)(c->light_urgent | urgent);
+            w->light_pending = 1;
+        }
+}
+
+void world_light_touch(world *w, int x, int z) { light_touch(w, x, z, 0); }
+
+uint16_t world_light(const world *w, int x, int y, int z)
+{
+    const column *c = world_column(w, chunk_of(x), chunk_of(z));
+    if (!c || !c->lit) return LIGHT_OPEN_SKY;
+    return light_get(&c->light, x & (CHUNK_W - 1), y, z & (CHUNK_W - 1));
+}
+
 static int set_block(world *w, int x, int y, int z, uint8_t id, uint8_t meta, int urgent)
 {
     if (y < 0 || y >= WORLD_H || id >= B_COUNT) return 0;
@@ -275,6 +307,8 @@ static int set_block(world *w, int x, int y, int z, uint8_t id, uint8_t meta, in
         if (ny > 1) mark_section(w, cx, cz, ys[1], urgent);
     }
 
+    if (block_opaque(id) != block_opaque(old) || light_emission(id) != light_emission(old))
+        light_touch(w, x, z, urgent);
     if (w->on_block_changed) w->on_block_changed(w->edit_user, x, y, z, old, id);
     return 1;
 }
@@ -350,6 +384,8 @@ static void gen_done(job *j)
             c->version[s] = ++w->version_counter;
         }
         w->sched_pending = 1;
+        c->light_dirty = 1;
+        w->light_pending = 1;
     }
     mem_free(g);
 }
@@ -436,7 +472,7 @@ static int unload_column(world *w, column *c)
     }
     if (w->on_mesh_free)
         for (int s = 0; s < SECTIONS; s++)
-            if (c->mesh[s].vtx_capacity) w->on_mesh_free(w->render_user, &c->mesh[s]);
+            if (mesh_held(&c->mesh[s])) w->on_mesh_free(w->render_user, &c->mesh[s]);
     detach(w, c);
     column_free(c);
     return 1;
@@ -448,7 +484,7 @@ static int unload_column(world *w, column *c)
 static void move_far(world *w, column *c)
 {
     for (int s = 0; s < SECTIONS; s++) {
-        if (c->mesh[s].vtx_capacity && w->on_mesh_free) w->on_mesh_free(w->render_user, &c->mesh[s]);
+        if (mesh_held(&c->mesh[s]) && w->on_mesh_free) w->on_mesh_free(w->render_user, &c->mesh[s]);
         memset(&c->mesh[s], 0, sizeof c->mesh[s]);
         c->meshing[s] = 0;
         c->dirty[s] = 1;
@@ -467,7 +503,12 @@ typedef struct mesh_job {
     uint32_t *verts;
     mesh_counts mc;
     struct mesh_job *retry_next;
+    uint16_t *props;
+    int prop_count;
+    int light_uniform;
+    uint16_t light_fill;
     mesh_input in;
+    uint16_t light[LIGHT_TEX_VOL];
 } mesh_job;
 
 static void mesh_run(job *j)
@@ -479,11 +520,25 @@ static void mesh_run(job *j)
         m->verts = mem_alloc(sizeof(uint32_t) * 4 * quads);
         memcpy(m->verts, scratch, sizeof(uint32_t) * 4 * quads);
     }
+    m->light_uniform = light_fix_texels(m->in.blocks, m->light, &m->light_fill);
+    /* Torches are drawn as models: the renderer gets their cells. */
+    int n = 0;
+    for (int y = 0; y < SECTION_H; y++)
+        for (int z = 0; z < CHUNK_W; z++)
+            for (int x = 0; x < CHUNK_W; x++) n += m->in.blocks[mesh_pidx(x, y, z)] == B_TORCH;
+    if (!n) return;
+    m->props = mem_alloc(mem_array_size((size_t)n, sizeof *m->props));
+    for (int y = 0; y < SECTION_H; y++)
+        for (int z = 0; z < CHUNK_W; z++)
+            for (int x = 0; x < CHUNK_W; x++)
+                if (m->in.blocks[mesh_pidx(x, y, z)] == B_TORCH)
+                    m->props[m->prop_count++] = (uint16_t)(x | z << 4 | y << 8);
 }
 
 static void mesh_free(mesh_job *m)
 {
     mem_free(m->verts);
+    mem_free(m->props);
     mem_free(m);
 }
 
@@ -497,7 +552,8 @@ static int deliver(world *w, mesh_job *m)
         if (c && c->pending_version[m->sy] == m->version) c->meshing[m->sy] = 0;
         return 1;
     }
-    if (w->on_mesh_ready && !w->on_mesh_ready(w->render_user, c, m->sy, m->verts, &m->mc)) return 0;
+    mesh_extra x = {m->light_uniform ? NULL : m->light, m->light_fill, m->props, m->prop_count};
+    if (w->on_mesh_ready && !w->on_mesh_ready(w->render_user, c, m->sy, m->verts, &m->mc, &x)) return 0;
     c->meshing[m->sy] = 0;
     return 1;
 }
@@ -643,7 +699,7 @@ static int schedule_section(world *w, column *c, int sy, int urgent)
     if (!c->dirty[sy] || c->meshing[sy]) return 0;
     c->dirty[sy] = 0;
     if (c->solid_count[sy] == 0 || section_enclosed(w, c, sy)) {
-        if (c->mesh[sy].vtx_capacity && w->on_mesh_free) w->on_mesh_free(w->render_user, &c->mesh[sy]);
+        if (mesh_held(&c->mesh[sy]) && w->on_mesh_free) w->on_mesh_free(w->render_user, &c->mesh[sy]);
         memset(&c->mesh[sy], 0, sizeof c->mesh[sy]);
         return 0;
     }
@@ -657,6 +713,7 @@ static int schedule_section(world *w, column *c, int sy, int urgent)
     m->sy = sy;
     m->version = c->version[sy];
     gather(w, c->cx, c->cz, sy, &m->in);
+    light_copy_texels(&c->light, sy, m->light);
     c->meshing[sy] = 1;
     c->pending_version[sy] = m->version;
     w->mesh_in_flight++;
@@ -674,7 +731,7 @@ static void schedule_meshes(world *w, int backlog)
     /* The player's own edits jump the queue. */
     for (int i = 0; i < w->urgent_count; i++) {
         column *c = world_column(w, w->urgent[i][0], w->urgent[i][1]);
-        if (c && neighbours_ready(w, c->cx, c->cz)) schedule_section(w, c, w->urgent[i][2], 1);
+        if (c && c->lit && neighbours_ready(w, c->cx, c->cz)) schedule_section(w, c, w->urgent[i][2], 1);
     }
     w->urgent_count = 0;
     if (!w->sched_pending || backlog) return;
@@ -685,7 +742,7 @@ static void schedule_meshes(world *w, int backlog)
         int dx = w->spiral[i][0], dz = w->spiral[i][1];
         if (dx * dx + dz * dz > w->radius * w->radius) break; /* spiral is sorted by distance */
         column *c = world_column(w, w->center_cx + dx, w->center_cz + dz);
-        if (!c || !neighbours_ready(w, c->cx, c->cz)) continue;
+        if (!c || !c->lit || !neighbours_ready(w, c->cx, c->cz)) continue;
         /* Nearest the camera's height first: ey, ey+1, ey-1, ey+2, ... */
         for (int k = 0; k < 2 * SECTIONS; k++) {
             int sy = w->eye_sy + ((k & 1) ? (k + 1) / 2 : -(k / 2));
@@ -701,8 +758,129 @@ static void schedule_meshes(world *w, int backlog)
     if (!capped) w->sched_pending = 0; /* full pass found nothing left to start */
 }
 
+/* ------------------------------------------------------------- light */
+
+#define LIGHT_GLOW_MAX 4096 /* hot cells a snapshot takes; the heat field holds 16384 in all */
+
+typedef struct {
+    job base;
+    world *w;
+    int cx, cz;
+    int urgent;
+    int top;
+    uint8_t *blocks; /* the snapshot, LIGHT_REGION^2 * top */
+    light_emitter *extra;
+    int extra_count;
+    uint16_t *foot; /* the result */
+} light_job;
+
+static void light_run(job *j)
+{
+    light_job *l = (light_job *)j;
+    l->foot = mem_alloc(sizeof(uint16_t) * LIGHT_FOOT * LIGHT_FOOT * WORLD_H);
+    light_region(l->blocks, l->top, l->extra, l->extra_count, l->foot);
+    mem_free(l->blocks);
+    l->blocks = NULL;
+}
+
+static void light_done(job *j)
+{
+    light_job *l = (light_job *)j;
+    world *w = l->w;
+    w->light_in_flight--;
+    w->light_pending = 1;
+    column *c = world_column(w, l->cx, l->cz);
+    if (c && c->lighting) {
+        c->lighting = 0;
+        uint64_t changed = light_store(l->foot, &c->light);
+        if (!c->lit) {
+            c->lit = 1; /* its sections are dirty since it loaded */
+            w->sched_pending = 1;
+        } else {
+            /* A section's texels reach one cell into the sections above
+             * and below. */
+            for (int s = 0; s < SECTIONS; s++)
+                if (changed >> s & 1)
+                    for (int k = -1; k <= 1; k++) mark_section(w, c->cx, c->cz, s + k, l->urgent);
+        }
+    }
+    mem_free(l->foot);
+    mem_free(l->extra);
+    mem_free(l);
+}
+
+/* Copies a column and its eight neighbours up to the highest section any
+ * of them uses, for a worker to light. Past the world's edge is rock. */
+static void start_light(world *w, column *c)
+{
+    const column *cols[3][3] = {{0}};
+    int top = 0;
+    for (int dz = -1; dz <= 1; dz++)
+        for (int dx = -1; dx <= 1; dx++) {
+            const column *n = world_column(w, c->cx + dx, c->cz + dz);
+            cols[dz + 1][dx + 1] = n;
+            if (!n) continue;
+            for (int s = SECTIONS - 1; s >= 0; s--)
+                if (n->solid_count[s]) {
+                    if ((s + 1) * SECTION_H > top) top = (s + 1) * SECTION_H;
+                    break;
+                }
+        }
+    light_job *l = mem_calloc(1, sizeof *l);
+    l->base.run = light_run;
+    l->base.done = light_done;
+    l->w = w;
+    l->cx = c->cx;
+    l->cz = c->cz;
+    l->urgent = c->light_urgent;
+    l->top = top;
+    l->blocks = mem_alloc((size_t)LIGHT_REGION * LIGHT_REGION * (size_t)(top ? top : 1));
+    for (int y = 0; y < top; y++)
+        for (int zi = 0; zi < 3; zi++)
+            for (int z = 0; z < CHUNK_W; z++) {
+                uint8_t *dst = &l->blocks[((size_t)y * LIGHT_REGION + (size_t)(zi * CHUNK_W + z)) * LIGHT_REGION];
+                for (int xi = 0; xi < 3; xi++) {
+                    const column *n = cols[zi][xi];
+                    if (n) memcpy(dst + xi * CHUNK_W, &n->blocks[col_index(0, y, z)], CHUNK_W);
+                    else memset(dst + xi * CHUNK_W, B_STONE, CHUNK_W);
+                }
+            }
+    if (w->glow) {
+        l->extra = mem_alloc(sizeof *l->extra * LIGHT_GLOW_MAX);
+        l->extra_count = w->glow(w->glow_user, (c->cx - 1) * CHUNK_W, (c->cz - 1) * CHUNK_W, top, l->extra,
+                                 LIGHT_GLOW_MAX);
+    }
+    c->light_dirty = 0;
+    c->light_urgent = 0;
+    c->lighting = 1;
+    w->light_in_flight++;
+    if (l->urgent) jobs_submit_front(w->jobs, &l->base);
+    else jobs_submit(w->jobs, &l->base);
+}
+
+/* Starts light jobs for the columns that need one, nearest first. They
+ * wait for the same neighbours meshing does. */
+static void schedule_lights(world *w)
+{
+    if (!w->light_pending) return;
+    int capped = 0;
+    for (int i = 0; i < w->spiral_count; i++) {
+        int dx = w->spiral[i][0], dz = w->spiral[i][1];
+        if (dx * dx + dz * dz > w->radius * w->radius) break;
+        column *c = world_column(w, w->center_cx + dx, w->center_cz + dz);
+        if (!c || !c->light_dirty || c->lighting || !neighbours_ready(w, c->cx, c->cz)) continue;
+        if (w->light_in_flight >= w->max_gen_in_flight) {
+            capped = 1;
+            break;
+        }
+        start_light(w, c);
+    }
+    if (!capped) w->light_pending = 0;
+}
+
 void world_schedule(world *w)
 {
+    schedule_lights(w);
     mesh_job **pp = &w->retry;
     while (*pp) {
         mesh_job *m = *pp;
@@ -983,7 +1161,7 @@ void world_destroy(world *w)
         lost += c->unsaved && w->db;
         if (w->on_mesh_free)
             for (int s = 0; s < SECTIONS; s++)
-                if (c->mesh[s].vtx_capacity) w->on_mesh_free(w->render_user, &c->mesh[s]);
+                if (mesh_held(&c->mesh[s])) w->on_mesh_free(w->render_user, &c->mesh[s]);
         column_free(c);
     }
     if (lost) log_error("%d edited columns could not be saved; their latest changes are lost", lost);

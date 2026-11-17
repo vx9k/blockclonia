@@ -197,6 +197,25 @@ and heads it off; once down, you come round within seconds.
   ground under your feet, through clothing that stops insulating when it
   gets wet.
 
+## Light
+
+- **Block light is coloured**: every cell carries four 4-bit levels,
+  red, green and blue from block sources and one for the sky, flooded
+  outward a level per block on worker threads and kept per 16³ section.
+  A change to what lets light through or gives it off relights only the
+  columns within 15 blocks of it.
+- **Sources**: torches (warm, 14), oil lamps (15, steady), campfires,
+  lava (deep red-orange), foxfire, a dim green fungus on the floors of
+  caves more than 24 m down, and any solid hotter than about 500 °C,
+  so rock that has just set from lava glows red until it cools.
+- **The sky** lights everything that sees it and fades a level per block
+  under cover, scaled by the daylight; block light doesn't follow the
+  sun, so a lit room stays lit at night.
+- **The GPU samples it**: each section's light is one 18³ box in a 3D
+  texture (4 bits a channel where the GPU can filter that format),
+  filtered between cells, so light falls off smoothly across a face.
+  Items, mobs and players take the light of the cell they're in.
+
 ## Health
 
 ![the H panel](docs/health.png)
@@ -262,6 +281,8 @@ or burns.
 | 1 splint | 2 sticks, 1 plant fibre | |
 | 1 bucket | 3 planks, 1 plant fibre | |
 | 1 campfire | 4 sticks, 1 log | |
+| 4 torches | 1 stick, 1 coal or charcoal | |
+| 2 oil lamps | 1 glass, 1 copper ingot, 1 bucket of crude oil | |
 | 1 glass | 2 sand | a burning campfire nearby |
 | 1 brick | 2 dirt, 1 sand | a burning campfire nearby |
 | 1 furnace | 8 stone | |
@@ -419,6 +440,7 @@ entirely.
 | Dynamic rendering (`dynrend`; 1.3, or the KHR extension on 1.2; needs `sync2`) | No render pass or per-image framebuffers to create and rebuild on a resize |
 | Host image copy for the block textures and the font (`hostcopy`, 1.4; only where the driver says device access stays optimal) | Textures go straight from the CPU into the image, with no staging buffer or upload command buffer |
 | GPU timestamps around each frame (`timestamps`; reset from the CPU) | F3 shows the GPU time of a frame next to the CPU time spent recording it |
+| Light in a 3D texture of 18³ boxes, one per section, sampled once per pixel; B4G4R4A4 where the GPU filters it (`light4`), RGBA8 otherwise | Smooth coloured light for one texture fetch, with no per-vertex light in the 4-byte vertex; half the memory with `light4` |
 | Pipeline cache kept on disk between runs (`pcache`) | Pipelines build from it where the driver has no shader cache of its own (Intel with Mesa's cache off: 40 ms to 3 ms) |
 
 By default the renderer negotiates the highest API version the loader,
@@ -431,7 +453,7 @@ the startup GPU log line and in the F3 overlay.
 Optional features the device offers at that version are enabled when the
 device is created, and listed next to the version. `MC_VK_DISABLE` turns
 them off for testing, as a comma list of `mdi`, `dynrend`, `sync2`,
-`aniso`, `hostcopy`, `budget`, `timestamps`, `pcache` and `relaxed`, or
+`aniso`, `hostcopy`, `budget`, `timestamps`, `pcache`, `relaxed` and `light4`, or
 `all`; unknown names are logged and ignored. `MC_VK_API=1.2
 MC_VK_DISABLE=all` is the plainest path, the one a bare 1.2 driver takes.
 

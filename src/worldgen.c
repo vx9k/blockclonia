@@ -560,6 +560,25 @@ static uint32_t lcg(uint32_t *s)
 /* Veins are short random walks from hashed starts, replacing their host
  * rock only and clipped to the column (like trees), so no neighbour data
  * is needed. */
+/* Foxfire: fungus glowing on the floor of caves deep enough to stay damp
+ * and dark, more than FOXFIRE_DEPTH under the ground. It grows in patches
+ * (a 4 x 4 m cell in 23 has some), three floor blocks in four, so deep
+ * caves are never quite black and a dim green marks the way. */
+#define FOXFIRE_DEPTH 24
+static void place_foxfire(uint32_t seed, column *c, const int (*hm)[CHUNK_W + 2])
+{
+    int bx = c->cx * CHUNK_W, bz = c->cz * CHUNK_W;
+    for (int z = 0; z < CHUNK_W; z++)
+        for (int x = 0; x < CHUNK_W; x++) {
+            if (hash2i(seed ^ 0x5F0F17E5u, (bx + x) >> 2, (bz + z) >> 2) % 23u) continue;
+            for (int y = 2; y < hm[z + 1][x + 1] - FOXFIRE_DEPTH; y++) {
+                uint8_t *floor = &c->blocks[col_index(x, y - 1, z)];
+                if (c->blocks[col_index(x, y, z)] != B_AIR || !(block_get(*floor)->flags & BF_OPAQUE)) continue;
+                if (hash2i(seed ^ 0x0F0F1235u ^ (uint32_t)y * 0x9E3779B9u, bx + x, bz + z) % 4u) *floor = B_FOXFIRE;
+            }
+        }
+}
+
 static void place_ores(uint32_t seed, column *c)
 {
     for (int o = 0; o < (int)(sizeof ORES / sizeof ORES[0]); o++) {
@@ -754,6 +773,7 @@ void worldgen_column(uint32_t seed, column *c)
 
     place_ores(seed, c);
     carve_caves(seed, c, (const hm_row *)hm);
+    place_foxfire(seed, c, (const hm_row *)hm);
 
     /* Trees only where the whole canopy fits in this column: avoids needing
      * neighbour data on worker threads, at the cost of no trees on the

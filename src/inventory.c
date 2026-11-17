@@ -179,6 +179,11 @@ const recipe g_recipes[] = {
     {{I_CARTRIDGE, 4}, {{I_COPPER_INGOT, 1}, {I_GUNPOWDER, 1}}, 0},
     {{I_RIFLE, 1}, {{I_IRON_INGOT, 4}, {B_PLANKS, 2}}, STATION_FURNACE},
     {{B_FURNACE, 1}, {{B_STONE, 8}}, 0},
+    /* A stick with a head of coal or charcoal dust bound in resin; a
+     * lamp's copper frame holds a glass chimney over an oil reservoir. */
+    {{B_TORCH, 4}, {{I_STICK, 1}, {I_COAL, 1}}, 0},
+    {{B_TORCH, 4}, {{I_STICK, 1}, {I_CHARCOAL, 1}}, 0},
+    {{B_LAMP, 2}, {{B_GLASS, 1}, {I_COPPER_INGOT, 1}, {I_OIL_BUCKET, 1}}, 0},
     /* Crushed apples ferment to cider; boiled over a fire, the vapour
      * condensed into a glass bottle is a ~40% brandy. */
     {{I_SPIRITS, 1}, {{I_APPLE, 4}, {B_GLASS, 1}}, STATION_FIRE},

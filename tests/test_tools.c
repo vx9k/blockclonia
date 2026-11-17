@@ -241,6 +241,9 @@ static void test_materials(void)
         [B_LAVA] = {-1, -1, MAT_WATER, 1.0f, 0.0f},
         [B_CRUDE_OIL] = {-1, -1, MAT_WATER, 1.0f, 0.0f},
         [B_BRINE] = {-1, -1, MAT_WATER, 1.0f, 0.0f},
+        [B_TORCH] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.0f},
+        [B_LAMP] = {-1, -1, MAT_GLASS, 1.0f, 0.0f},
+        [B_FOXFIRE] = {TOOL_SHOVEL, -1, MAT_DIRT, 0.7f, 0.1f},
     };
     int bad = 0;
     for (int b = 0; b < B_COUNT; b++) {

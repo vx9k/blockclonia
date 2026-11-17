@@ -4,6 +4,8 @@
  * melting and freezing (thermo.c). */
 #include "fluid.h"
 #include "inventory.h"
+#include "jobs.h"
+#include "light.h"
 #include "mem.h"
 #include "survival.h"
 #include "test_util.h"
@@ -509,6 +511,49 @@ static void test_lava_heat(void)
 
 /* Fuel touching lava catches after its contact time, burns as a fire, and
  * doesn't pass it on; fuel a block away never catches. */
+/* Rock that sets from lava glows red hot, lights its column, and goes
+ * dark as it cools. */
+static void test_lava_glow(void)
+{
+    test_world tw = {0};
+    tw_init(&tw);
+    thermo *th = thermo_create(7);
+    hooks h = {0};
+    attach(&tw, &h, th);
+    world *w = &tw.w;
+    tw.w.glow = thermo_glow;
+    tw.w.glow_user = th;
+    dvec3 eye = dv3(6.5, GROUND + 1.6, 0.5);
+    lava_pool(w);
+    advance(th, w, 1.0, 0.5, eye);
+    light_emitter e[16] = {{0}};
+    CHECK(thermo_glow(th, -24, -24, WORLD_H, e, 16) == 0); /* lava is a block light, not a glow */
+    world_set(w, 0, GROUND, 0, B_STONE, 0);
+    world_column(w, 0, 0)->light_dirty = 0;
+    advance(th, w, 0.5, 0.5, eye);
+    CHECK(world_column(w, 0, 0)->light_dirty && world_column(w, -1, -1)->light_dirty);
+    int n = thermo_glow(th, -24, -24, WORLD_H, e, 16);
+    CHECK(n == 1 && e[0].x == 24 && e[0].y == GROUND && e[0].z == 24);
+    CHECK(LIGHT_R(e[0].light) >= 10 && LIGHT_SKY(e[0].light) == 0);
+    CHECK(thermo_glow(th, 0, 1, WORLD_H, e, 16) == 0);      /* outside the box */
+    CHECK(thermo_glow(th, -24, -24, GROUND, e, 16) == 0);   /* above its top */
+    CHECK(thermo_glow(th, -24, -24, WORLD_H, e, 0) == 0);   /* no room */
+    /* The world's light job takes it as a source. */
+    for (int i = 0; i < 200; i++) {
+        world_update(w, 0.5, GROUND + 2.0, 0.5);
+        jobs_poll(w->jobs, -1);
+        world_schedule(w);
+    }
+    CHECK(LIGHT_R(world_light(w, 0, GROUND + 1, 0)) == LIGHT_R(e[0].light) - 1);
+    /* Mined out, the hot rock's cell is air: no glow, and the columns relight. */
+    world_set(w, 0, GROUND, 0, B_AIR, 0);
+    world_column(w, 0, 0)->light_dirty = 0;
+    advance(th, w, 0.5, 0.5, eye);
+    CHECK(thermo_glow(th, -24, -24, WORLD_H, e, 16) == 0 && world_column(w, 0, 0)->light_dirty);
+    thermo_destroy(th);
+    tw_free(&tw);
+}
+
 static void test_lava_ignites(void)
 {
     test_world tw = {0};
@@ -653,6 +698,7 @@ void test_thermo_all(void)
     test_freezing();
     test_limits();
     test_lava_heat();
+    test_lava_glow();
     test_lava_ignites();
     test_lava_body();
     test_lava_lake();

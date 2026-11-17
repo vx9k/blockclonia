@@ -13,6 +13,7 @@
 #include "inventory.h"
 #include "invui.h"
 #include "jobs.h"
+#include "light.h"
 #include "log.h"
 #include "mem.h"
 #include "menu.h"
@@ -914,6 +915,8 @@ typedef struct {
     int inv_was_open, panel_was_open;
     double title_t, save_t;
     int fps_frames;
+    float *gpu_samples;       /* --frames: GPU frame times over the run's second half, ms */
+    int gpu_sample_count;
     int last_step;            /* stride half-cycles, for footsteps */
     sound *snd;
     audio_device *audio;
@@ -1254,6 +1257,8 @@ static void open_world(game *g, const char *dir, int backdrop)
     g->hooks = (world_hooks){&g->ph, g->th, &g->w, NULL, 0, g->snd, g->fx};
     g->w.edit_user = &g->hooks;
     g->w.on_block_changed = on_block_changed;
+    g->w.glow = thermo_glow;
+    g->w.glow_user = g->th;
     g->w.on_column_unload = on_column_unload;
     g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, g->db, &g->mp};
     log_set_fatal_hook(save_on_fatal, &g->sc);
@@ -1410,6 +1415,8 @@ static void open_remote_world(game *g, uint32_t seed)
     g->hooks = (world_hooks){&g->ph, g->th, &g->w, g->mp, 1, g->snd, g->fx};
     g->w.edit_user = &g->hooks;
     g->w.on_block_changed = on_block_changed;
+    g->w.glow = thermo_glow;
+    g->w.glow_user = g->th;
     g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, NULL, &g->mp};
     renderer_bind_world(g->rd, &g->w);
     memset(&g->pl, 0, sizeof g->pl);
@@ -1938,7 +1945,8 @@ static void add_players(game *g, dvec3 eye, double alpha, double now, float ligh
         memmove(g->ents + *n_op + VIEWMODEL_FIGURE, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
         const float feet[3] = {(float)(av[i].pos.x - eye.x), (float)(av[i].pos.y - eye.y),
                                (float)(av[i].pos.z - eye.z)};
-        *n_op += viewmodel_figure(feet, av[i].yaw, av[i].pitch, av[i].sneaking, av[i].dead, light, g->ents + *n_op,
+        float lit = light_at(&g->w, av[i].pos.x, av[i].pos.y + 1.0, av[i].pos.z, light);
+        *n_op += viewmodel_figure(feet, av[i].yaw, av[i].pitch, av[i].sneaking, av[i].dead, lit, g->ents + *n_op,
                                   VIEWMODEL_FIGURE);
     }
 }
@@ -1956,7 +1964,8 @@ static void add_mobs(game *g, dvec3 eye, double alpha, float light, double now, 
         if (dv3_len(dv3(p.x - eye.x, p.y - eye.y, p.z - eye.z)) > 160.0) continue;
         memmove(g->ents + *n_op + MOB_FIGURE, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
         const float feet[3] = {(float)(p.x - eye.x), (float)(p.y - eye.y), (float)(p.z - eye.z)};
-        int k = mob_figure(m, feet, light, (float)fmod(now, 3600.0), g->ents + *n_op, MOB_FIGURE);
+        float lit = light_at(&g->w, p.x, p.y + 0.5, p.z, light);
+        int k = mob_figure(m, feet, lit, (float)fmod(now, 3600.0), g->ents + *n_op, MOB_FIGURE);
         /* Close the gap if the figure came out short. */
         if (k < MOB_FIGURE)
             memmove(g->ents + *n_op + k, g->ents + *n_op + MOB_FIGURE, sizeof g->ents[0] * (size_t)n_tr);
@@ -2024,7 +2033,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
                               g->look_dx,
                               g->look_dy,
                               g->eat_anim > 0.0f ? 1.0f - g->eat_anim : 0.0f,
-                              v.daylight,
+                              light_at(&g->w, v.eye.x, v.eye.y, v.eye.z, v.daylight),
                               (float)dt};
         v.view_model = g->vm_ents;
         v.view_model_count = viewmodel_build(&g->vm, &vi, g->vm_ents, VIEWMODEL_MAX);
@@ -2036,7 +2045,8 @@ static render_view build_view(game *g, double now, double dt, double alpha)
         }
     }
     int n_op = 0, n_tr = 0;
-    fx_build_entities(g->fx, &g->ph, &g->crack, v.eye, alpha, v.time, g->ents, RENDER_MAX_ENTS, &n_op, &n_tr);
+    fx_build_entities(g->fx, &g->ph, &g->crack, v.eye, alpha, v.time, v.daylight, g->ents, RENDER_MAX_ENTS, &n_op,
+                      &n_tr);
     if (g->mp) add_players(g, v.eye, alpha, now, v.daylight, &n_op, n_tr);
     if (!on_title) add_mobs(g, v.eye, alpha, v.daylight, now, &n_op, n_tr);
     v.ents = g->ents;
@@ -2483,10 +2493,36 @@ static void frame_render(game *g, double now, double dt)
     renderer_end_frame(g->rd, &g->w, &g->ph, &v, alpha);
 }
 
+static int cmp_float(const void *a, const void *b)
+{
+    float x = *(const float *)a, y = *(const float *)b;
+    return (x > y) - (x < y);
+}
+
+/* The GPU frame times a --frames run sampled: median and range. */
+static void log_gpu_times(game *g)
+{
+    int n = g->gpu_sample_count;
+    if (n > 0) {
+        qsort(g->gpu_samples, (size_t)n, sizeof *g->gpu_samples, cmp_float);
+        log_info("GPU frame time over %d frames: median %.3f ms (min %.3f, max %.3f)", n, (double)g->gpu_samples[n / 2],
+                 (double)g->gpu_samples[0], (double)g->gpu_samples[n - 1]);
+    }
+    mem_free(g->gpu_samples);
+    g->gpu_samples = NULL;
+}
+
 /* The window title (frame rate and a few counters) and the autosave. */
 static void frame_bookkeeping(game *g, double now)
 {
     if (g->frame < INT_MAX) g->frame++; /* int overflow is UB; only --frames and the demo read it */
+    /* A --frames run measures the GPU once the terrain has streamed in,
+     * so shader changes can be compared run against run. */
+    if (g->o.frames && g->frame > g->o.frames / 2) {
+        if (!g->gpu_samples) g->gpu_samples = mem_calloc((size_t)g->o.frames, sizeof *g->gpu_samples);
+        float ms = renderer_stats(g->rd).gpu_ms;
+        if (ms > 0.0f && g->gpu_sample_count < g->o.frames) g->gpu_samples[g->gpu_sample_count++] = ms;
+    }
     g->fps_frames++;
     if (now - g->title_t >= 0.5) {
         double fps = g->fps_frames / (now - g->title_t);
@@ -2626,6 +2662,7 @@ int main(int argc, char **argv)
             os_sleep(now + 1.0 / fps - glfwGetTime());
         }
     }
+    log_gpu_times(g);
     game_shutdown(g);
     if (g->o.mem_stats) mem_print_stats();
     return 0;

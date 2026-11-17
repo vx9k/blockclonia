@@ -210,8 +210,9 @@ typedef struct {
 } mesh_watch;
 
 /* cppcheck-suppress constParameterCallback */
-static int watch_mesh(void *user, column *c, int sy, const uint32_t *verts, const mesh_counts *mc)
+static int watch_mesh(void *user, column *c, int sy, const uint32_t *verts, const mesh_counts *mc, const mesh_extra *x)
 {
+    (void)x;
     mesh_watch *m = user;
     uint32_t n = (mc->opaque + mc->trans) * 4;
     for (int i = 0; i < 2; i++)

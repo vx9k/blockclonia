@@ -179,4 +179,14 @@ const block_def g_blocks[B_COUNT] = {
                      0.15f, BM_WATER, 1.0f, 0.0f, 0, 0},
     [B_BRINE] = {"brine", BF_FLUID | BF_TRANSLUCENT, ALL(T_BRINE), 0, 1190.0f, 0.0f, 0.0f, 0.0f, 3300.0f, 0.55f,
                  BM_WATER, 1.0f, 0.0f, 0, 0},
+    /* Light sources (light.c gives their colours). A torch is pine and a
+     * pitch-soaked head: nothing to stand on, gone at a touch. The lamp is
+     * a copper frame round a glass chimney; foxfire is fungus grown
+     * through rotten matter on a cave floor, soft and wet. */
+    [B_TORCH] = {"torch", 0, ALL(T_ITEM_TORCH), 0, 500.0f, 0.5f, 0.2f, 0.05f, 1700.0f, 0.15f, BM_WOOD, 1.0f, 0.0f, 0,
+                 0},
+    [B_LAMP] = {"oil lamp", BF_SOLID, ALL(T_LAMP), 0, 1500.0f, 0.6f, 0.2f, 0.3f, 600.0f, 1.0f, BM_GLASS, 1.0f, 0.0f, 0,
+                0},
+    [B_FOXFIRE] = {"foxfire", BF_SOLID | BF_OPAQUE, ALL(T_FOXFIRE), 2, 1100.0f, 0.6f, 0.1f, 0.5f, 2500.0f, 0.4f,
+                   BM_DIRT, 0.7f, 0.1f, 0, 0},
 };
