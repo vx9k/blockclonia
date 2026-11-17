@@ -369,6 +369,7 @@ static void test_obsidian_shatters(void)
 static void test_save_every_block(void)
 {
     column *c = column_alloc(0, 0), *back = column_alloc(0, 0);
+    memset(c->blocks, B_AIR, COL_VOL); /* column_alloc leaves the blocks to the generator */
     for (int b = 1; b < B_COUNT; b++)
         for (int z = 0; z < CHUNK_W; z++) c->blocks[col_index(b % CHUNK_W, 1 + b / CHUNK_W, z)] = (uint8_t)b;
     uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
