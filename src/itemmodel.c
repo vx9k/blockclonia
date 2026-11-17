@@ -414,7 +414,7 @@ static void cartridge(item_model *m)
 
 /* A bolt-action rifle, 1.1 m, muzzle up y and its top toward -x: stock,
  * wrist and fore-end in walnut, receiver, barrel, the bolt's handle,
- * trigger guard, magazine and sights. */
+ * trigger guard, magazine and iron sights (viewmodel.c aims down them). */
 static void rifle(item_model *m)
 {
     m->hold = IM_HOLD_GUN;
@@ -429,7 +429,10 @@ static void rifle(item_model *m)
     box(m, 0.034f, 0.375f, 0.0f, 0.014f, 0.006f, 0.006f, T_MAT_METAL, 0x5A5C60u);
     box(m, 0.035f, 0.46f, 0.0f, 0.022f, 0.08f, 0.03f, T_MAT_METAL, GUNMETAL);
     box(m, -0.048f, 1.09f, 0.0f, 0.012f, 0.012f, 0.006f, T_MAT_METAL, GUNMETAL);
-    box(m, -0.046f, 0.53f, 0.0f, 0.01f, 0.02f, 0.02f, T_MAT_METAL, GUNMETAL);
+    /* The rear sight is a notch, two posts 9 mm apart: down the sights the
+     * front post stands in the gap. */
+    for (int s = -1; s <= 1; s += 2)
+        box(m, -0.047f, 0.53f, (float)s * 0.0075f, 0.012f, 0.02f, 0.006f, T_MAT_METAL, GUNMETAL);
     m->grip[0] = 0.0f;
     m->grip[1] = 0.34f;
 }

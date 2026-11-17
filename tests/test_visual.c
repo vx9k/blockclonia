@@ -41,8 +41,9 @@ static float dist3(const float a[3], const float b[3])
 static quat inst_q(const entity_instance *e) { return (quat){e->rot[0], e->rot[1], e->rot[2], e->rot[3]}; }
 
 /* Finite, unit quaternions, positive sizes, every corner in front of the
- * near plane. */
-static int vm_sane(const entity_instance *e, int n)
+ * near plane (unless near is 0: a rifle's stock is behind the eye, under
+ * the cheek, and the near plane cuts it). */
+static int vm_sane_near(const entity_instance *e, int n, int near)
 {
     for (int i = 0; i < n; i++) {
         const float *f = &e[i].pos[0];
@@ -59,11 +60,13 @@ static int vm_sane(const entity_instance *e, int n)
                           (c & 4 ? 0.5f : -0.5f) * e[i].scale[2]};
             float r[3] = {0};
             quat_apply(inst_q(&e[i]), v, r);
-            if (!(e[i].pos[2] + r[2] < NEAR_Z)) return 0;
+            if (near && !(e[i].pos[2] + r[2] < NEAR_Z)) return 0;
         }
     }
     return 1;
 }
+
+static int vm_sane(const entity_instance *e, int n) { return vm_sane_near(e, n, 1); }
 
 /* A centre inside a 70 degree vertical view on a 4:3 or wider screen. */
 static int in_view(const float p[3])
@@ -152,17 +155,16 @@ static void test_vm_parts(void)
     float span = fmaxf(hi[0] - lo[0], fmaxf(hi[1] - lo[1], hi[2] - lo[2]));
     CHECK(span > 0.02f && span < 0.2f);
     CHECK(vm_sane(out, n));
-    /* A tool is held by its handle: its boxes run up and away from the hand,
-     * the head well beyond the grip. */
-    in.held_id = item_tool_id(TOOL_PICKAXE, TIER_IRON);
+    /* A knife is held by its handle: its blade runs on from the fist. */
+    in.held_id = item_tool_id(TOOL_KNIFE, TIER_IRON);
     n = vm_run(&vm, &in, 0.5f, out);
-    item_model pick = {0};
-    CHECK(itemmodel_build(in.held_id, &pick));
-    CHECK(n == HELD + pick.n && vm_sane(out, n));
+    item_model knife = {0};
+    CHECK(itemmodel_build(in.held_id, &knife));
+    CHECK(n == HELD + knife.n && vm_sane(out, n));
     float reach = 0.0f;
     for (int i = HELD; i < n; i++) reach = fmaxf(reach, dist3(out[i].pos, out[HAND].pos));
-    CHECK(reach > 0.25f && reach < 0.6f);
-    CHECK(dist3(out[HELD].pos, out[HAND].pos) < 0.25f); /* the handle in the hand */
+    CHECK(reach > 0.15f && reach < 0.4f);
+    CHECK(dist3(out[HELD].pos, out[HAND].pos) < 0.1f); /* the handle in the hand */
 
     /* Brightness passes through; 0 means "not set" (full brightness). */
     in.light = 0.3f;
@@ -431,9 +433,18 @@ static void test_vm_robust(void)
     int ok = 1, seen = 0, frames_up = 0;
     for (int i = 0; i < 6000; i++) {
         if (xs(&s) % 90u == 0u) {
-            static const item_id IDS[] = {0,       B_STONE,        B_GLASS, B_CAMPFIRE, I_STICK,
-                                          I_APPLE, I_WATER_BUCKET, 99,      I_RIFLE};
-            in.held_id = IDS[xs(&s) % 9u];
+            static const item_id IDS[] = {0,
+                                          B_STONE,
+                                          B_GLASS,
+                                          B_CAMPFIRE,
+                                          I_STICK,
+                                          I_APPLE,
+                                          I_WATER_BUCKET,
+                                          99,
+                                          I_RIFLE,
+                                          I_TOOL_FIRST + TOOL_AXE * TIER_COUNT + TIER_STONE,
+                                          I_TOOL_FIRST + TOOL_SHOVEL * TIER_COUNT + TIER_IRON};
+            in.held_id = IDS[xs(&s) % 11u];
         }
         in.dt = 0.004f + 0.04f * frnd(&s);
         in.stride = fmodf(in.stride + 6.0f * in.dt, 2.0f * (float)MC_PI);
@@ -444,16 +455,203 @@ static void test_vm_robust(void)
         in.look_dx = (frnd(&s) - 0.5f) * 20.0f * in.dt;
         in.look_dy = (frnd(&s) - 0.5f) * 20.0f * in.dt;
         in.eating = (i / 500) % 4 == 3 ? fmodf((float)(i % 500) / 200.0f, 1.0f) : 0.0f;
+        if (xs(&s) % 60u == 0u) in.aim = frnd(&s) < 0.5f ? 0.0f : frnd(&s);
         n = viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
-        ok &= n >= 2 && n <= VIEWMODEL_MAX && vm_sane(out, n);
+        ok &= n >= 2 && n <= VIEWMODEL_MAX && vm_sane_near(out, n, vm.shown_id != I_RIFLE);
         if (vm.equip >= 1.0f && in.eating == 0.0f) {
             frames_up++;
             for (int k = 1; k < n; k++) seen += in_view(out[k].pos);
-            ok &= in_view(out[HAND].pos) && (n < 3 || in_view(out[HELD].pos));
+            int item = 2 * viewmodel_hands(vm.shown_id), shown = 0; /* the first of the item's parts */
+            for (int k = item; k < n; k++) shown |= in_view(out[k].pos);
+            ok &= (item == 4 || in_view(out[HAND].pos)) && (n <= item || shown);
         }
     }
     CHECK(ok);
     CHECK(frames_up > 2000 && seen >= frames_up);
+}
+
+/* Distance from p to the line through a box's centre along its own y,
+ * the long axis of a haft or a rifle. */
+static float off_axis(const float p[3], const entity_instance *box)
+{
+    const float up[3] = {0.0f, 1.0f, 0.0f};
+    float a[3] = {0}, d[3] = {p[0] - box->pos[0], p[1] - box->pos[1], p[2] - box->pos[2]};
+    quat_apply(inst_q(box), up, a);
+    float t = d[0] * a[0] + d[1] * a[1] + d[2] * a[2];
+    for (int k = 0; k < 3; k++) d[k] -= a[k] * t;
+    return sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+}
+
+#define R_HAND 1 /* two hands: right forearm, right fist, left forearm, left fist, item */
+#define L_HAND 3
+#define ITEM 4
+
+static void test_vm_two_hands(void)
+{
+    entity_instance out[VIEWMODEL_MAX] = {{0}};
+    CHECK(viewmodel_hands(item_tool_id(TOOL_AXE, TIER_IRON)) == 2 && viewmodel_hands(I_RIFLE) == 2);
+    CHECK(viewmodel_hands(item_tool_id(TOOL_SHOVEL, TIER_STONE)) == 2 && viewmodel_hands(0) == 1);
+    CHECK(viewmodel_hands(item_tool_id(TOOL_KNIFE, TIER_IRON)) == 1 && viewmodel_hands(B_STONE) == 1);
+
+    /* An axe at rest: both fists close round the haft (box 0 of the
+     * model), the left lower down it than the right, the head in view and
+     * well past the hands. The forearms run from the fists back out of the
+     * bottom of the view, as far as the arms reach. */
+    viewmodel vm;
+    viewmodel_init(&vm);
+    viewmodel_input in = vm_input(item_tool_id(TOOL_AXE, TIER_IRON));
+    item_model axe = {0};
+    CHECK(itemmodel_build(in.held_id, &axe));
+    int n = vm_run(&vm, &in, 0.5f, out);
+    CHECK(n == ITEM + axe.n && vm_sane(out, n));
+    CHECK(off_axis(out[R_HAND].pos, &out[ITEM]) < 0.02f && off_axis(out[L_HAND].pos, &out[ITEM]) < 0.02f);
+    CHECK(out[L_HAND].pos[1] < out[R_HAND].pos[1] - 0.1f);
+    CHECK(in_view(out[R_HAND].pos) && in_view(out[ITEM + 1].pos));
+    CHECK(dist3(out[ITEM + 1].pos, out[R_HAND].pos) > 0.3f);
+    for (int s = 0; s < 2; s++) {
+        const float *f = out[2 * s].pos, *h = out[2 * s + 1].pos;
+        CHECK(f[1] < h[1] && f[2] > h[2] && dist3(f, h) < 0.25f);
+    }
+    const float rest_head[3] = {out[ITEM + 1].pos[0], out[ITEM + 1].pos[1], out[ITEM + 1].pos[2]};
+    const float rest_r[3] = {out[R_HAND].pos[0], out[R_HAND].pos[1], out[R_HAND].pos[2]};
+
+    /* One hit: the head goes up past the hands (wind-up), comes down below
+     * where it was carried, the right fist slides down to the left one, and
+     * after 0.8 s it's back where it started. The edge (box 3, the model's
+     * +x) is lower than the poll (box 4) when it lands, so it leads. */
+    viewmodel twin = vm; /* the same, never hit: breathing moves both alike */
+    in.swing = 1.0f;
+    viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
+    in.swing = 0.0f;
+    entity_instance tout[VIEWMODEL_MAX] = {{0}};
+    viewmodel_build(&twin, &in, tout, VIEWMODEL_MAX);
+    float top = -9.0f, low = 9.0f, closest = 9.0f;
+    int edge_leads = 0, sane = 1;
+    for (int i = 0; i < 48; i++) {
+        n = viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
+        sane &= vm_sane(out, n) && n == ITEM + axe.n;
+        top = fmaxf(top, out[ITEM + 1].pos[1]);
+        if (out[ITEM + 1].pos[1] < low) {
+            low = out[ITEM + 1].pos[1];
+            edge_leads = out[ITEM + 3].pos[1] < out[ITEM + 4].pos[1];
+        }
+        closest = fminf(closest, dist3(out[R_HAND].pos, out[L_HAND].pos));
+        sane &= off_axis(out[R_HAND].pos, &out[ITEM]) < 0.02f && off_axis(out[L_HAND].pos, &out[ITEM]) < 0.02f;
+    }
+    CHECK(sane && edge_leads);
+    CHECK(top > rest_head[1] + 0.1f && low < rest_head[1] - 0.1f);
+    CHECK(closest < 0.15f);
+    vm_run(&twin, &in, 48.0f * VM_DT, tout);
+    vm_run(&vm, &in, 0.2f, out);
+    vm_run(&twin, &in, 0.2f, tout);
+    CHECK(dist3(out[ITEM + 1].pos, tout[ITEM + 1].pos) < 1e-4f && dist3(out[R_HAND].pos, tout[R_HAND].pos) < 1e-4f);
+    CHECK(dist3(out[R_HAND].pos, rest_r) < 0.01f);
+
+    /* Holding the button on a block chops again and again, never jumping
+     * more than a few centimetres a frame. */
+    in.swinging = 1;
+    float jump = 0.0f, prev[3] = {rest_head[0], rest_head[1], rest_head[2]}, prev_t = vm.swing_t;
+    float lowest = 9.0f;
+    int chops = 0;
+    for (int i = 0; i < 180; i++) {
+        viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
+        if (vm.swing_t < prev_t) {
+            chops++;
+            jump = fmaxf(jump, dist3(out[ITEM + 1].pos, prev));
+        }
+        prev_t = vm.swing_t;
+        memcpy(prev, out[ITEM + 1].pos, sizeof prev);
+        if (i > 100) lowest = fminf(lowest, out[ITEM + 1].pos[1]);
+    }
+    CHECK(chops >= 3 && jump < 0.03f && lowest < rest_head[1] - 0.1f);
+    in.swinging = 0;
+
+    /* A shovel: both fists on the shaft (box 3 of the model, after the D
+     * grip), its blade facing up rather than edge on. */
+    viewmodel_init(&vm);
+    in = vm_input(item_tool_id(TOOL_SHOVEL, TIER_IRON));
+    item_model shovel = {0};
+    CHECK(itemmodel_build(in.held_id, &shovel));
+    n = vm_run(&vm, &in, 0.5f, out);
+    CHECK(n == ITEM + shovel.n && vm_sane(out, n));
+    CHECK(off_axis(out[R_HAND].pos, &out[ITEM + 3]) < 0.03f);
+    const float blade_normal[3] = {0.0f, 0.0f, 1.0f};
+    float bn[3] = {0};
+    quat_apply(inst_q(&out[ITEM + 5]), blade_normal, bn);
+    CHECK(fabsf(bn[1]) > 0.5f);
+}
+
+static void test_vm_rifle(void)
+{
+    entity_instance out[VIEWMODEL_MAX] = {{0}};
+    item_model rifle = {0};
+    CHECK(itemmodel_build(I_RIFLE, &rifle));
+    /* The model's boxes: 1 the wrist of the stock, 2 the fore-end, 4 the
+     * barrel, 10 the front post, 11 and 12 the rear sight's posts. */
+    viewmodel vm;
+    viewmodel_init(&vm);
+    viewmodel_input in = vm_input(I_RIFLE);
+    int n = vm_run(&vm, &in, 0.5f, out);
+    CHECK(n == ITEM + rifle.n && vm_sane_near(out, n, 0));
+    /* At the hip: the right fist on the wrist, the left under the fore-end,
+     * the muzzle ahead, the sights well off the line of sight. */
+    CHECK(off_axis(out[R_HAND].pos, &out[ITEM + 1]) < 0.07f && off_axis(out[L_HAND].pos, &out[ITEM + 2]) < 0.07f);
+    CHECK(out[ITEM + 10].pos[2] < out[ITEM + 1].pos[2] - 0.5f);
+    float hip_off = hypotf(out[ITEM + 10].pos[0], out[ITEM + 10].pos[1]);
+    CHECK(hip_off > 0.1f);
+
+    /* Aimed: the front post sits on the line of sight, far out and just
+     * under it, the rear posts either side of the line, and the hands stay
+     * on the rifle. */
+    in.aim = 1.0f;
+    n = vm_run(&vm, &in, 0.5f, out);
+    CHECK(n == ITEM + rifle.n && vm_sane_near(out, n, 0));
+    const float *post = out[ITEM + 10].pos;
+    CHECK(post[2] < -0.6f && fabsf(post[0] / post[2]) < 0.004f && fabsf(post[1] / post[2]) < 0.02f);
+    CHECK(post[1] < 0.0f);
+    CHECK(out[ITEM + 11].pos[0] * out[ITEM + 12].pos[0] < 0.0f);
+    CHECK(fabsf(out[ITEM + 11].pos[0] + out[ITEM + 12].pos[0]) < 0.002f);
+    CHECK(off_axis(out[R_HAND].pos, &out[ITEM + 1]) < 0.07f && off_axis(out[L_HAND].pos, &out[ITEM + 2]) < 0.07f);
+    /* Halfway up, it's between the two. */
+    in.aim = 0.5f;
+    vm_run(&vm, &in, 0.1f, out);
+    float mid_off = hypotf(out[ITEM + 10].pos[0], out[ITEM + 10].pos[1]);
+    CHECK(mid_off > 0.01f && mid_off < hip_off);
+
+    /* A shot: the muzzle climbs within a tenth of a second and settles
+     * back on the line within half a second. */
+    in.aim = 1.0f;
+    vm_run(&vm, &in, 0.5f, out);
+    const float aimed[3] = {post[0], post[1], post[2]};
+    viewmodel still = vm;
+    in.swing = 1.0f;
+    viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
+    in.swing = 0.0f;
+    float climb = 0.0f;
+    for (int i = 0; i < 6; i++) {
+        viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
+        climb = fmaxf(climb, out[ITEM + 10].pos[1] - aimed[1]);
+    }
+    CHECK(climb > 0.03f);
+    vm_run(&vm, &in, 0.5f, out);
+    entity_instance sout[VIEWMODEL_MAX] = {{0}};
+    vm_run(&still, &in, 0.5f + 7.0f * VM_DT, sout);
+    CHECK(dist3(out[ITEM + 10].pos, sout[ITEM + 10].pos) < 1e-4f);
+
+    /* Garbage aim is treated as none. */
+    in.aim = NAN;
+    n = vm_run(&vm, &in, 0.5f, out);
+    CHECK(vm_sane_near(out, n, 0) && hypotf(out[ITEM + 10].pos[0], out[ITEM + 10].pos[1]) > 0.1f);
+    /* Aiming means nothing with any other item in hand. */
+    viewmodel_init(&vm);
+    in = vm_input(item_tool_id(TOOL_AXE, TIER_IRON));
+    vm_run(&vm, &in, 0.5f, out);
+    viewmodel unaimed = vm;
+    entity_instance uout[VIEWMODEL_MAX] = {{0}};
+    vm_run(&unaimed, &in, 0.5f, uout);
+    in.aim = 1.0f;
+    vm_run(&vm, &in, 0.5f, out);
+    CHECK(dist3(out[ITEM + 1].pos, uout[ITEM + 1].pos) < 1e-4f);
 }
 
 void test_visual_all(void)
@@ -463,4 +661,6 @@ void test_visual_all(void)
     test_vm_swing();
     test_vm_motion();
     test_vm_robust();
+    test_vm_two_hands();
+    test_vm_rifle();
 }

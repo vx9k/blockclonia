@@ -120,7 +120,7 @@ static void injure(combat *c, health *h, int part, float damage, int edged)
 }
 
 combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *t, int who, inventory *inv, dvec3 eye,
-                        vec3 dir, double block_dist, int attack_click, int use_click, float dt)
+                        vec3 dir, double block_dist, int attack_click, float aim, float dt)
 {
     combat_out o = {0};
     if (who < 0 || who >= PHYS_MAX_PLAYERS) return o;
@@ -129,15 +129,18 @@ combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *
     const item_stack *held = inv_held(inv);
     item_id id = held->count ? held->id : 0;
 
-    if (use_click && id == I_RIFLE) {
+    if (attack_click && id == I_RIFLE) {
         if (!inv_take(inv, I_CARTRIDGE, 1)) {
             o.msg = "No cartridges";
             return o;
         }
         if (c->count < COMBAT_SHOTS) {
-            /* A little spread: a rifle held standing, not clamped in a vice. */
-            vec3 d = v3(dir.x + (frand(c) - 0.5f) * 0.004f, dir.y + (frand(c) - 0.5f) * 0.004f,
-                        dir.z + (frand(c) - 0.5f) * 0.004f);
+            /* Spread: aimed, a rifle held standing (4 mrad, not clamped in a
+             * vice); from the hip the eye isn't behind the sights and shots
+             * wander by a few degrees. */
+            float a = isfinite(aim) ? fminf(fmaxf(aim, 0.0f), 1.0f) : 0.0f;
+            float sp = 0.004f + HIP_SPREAD * (1.0f - a);
+            vec3 d = v3(dir.x + (frand(c) - 0.5f) * sp, dir.y + (frand(c) - 0.5f) * sp, dir.z + (frand(c) - 0.5f) * sp);
             c->b[c->count++] = (bullet){eye,
                                         dv3((double)d.x * BULLET_SPEED, (double)d.y * BULLET_SPEED,
                                             (double)d.z * BULLET_SPEED),

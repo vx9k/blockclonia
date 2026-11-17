@@ -1,6 +1,8 @@
 /* Creatures and fighting: mobs that stand, wander and hunt, blows and
  * bullets, what they do to mobs and players, and eating what a boar leaves. */
 #include "combat.h"
+#include "fx.h"
+#include "interact.h"
 #include "mem.h"
 #include "mob.h"
 #include "test_util.h"
@@ -99,9 +101,9 @@ static void test_blows(void)
     mobs_add(&ms, MOB_BOAR, dv3(10.5, GROUND, 8.5));
     CHECK(combat_aim(&ms, &tg, 0, eye, east, 5.0));
     CHECK(!combat_aim(&ms, &tg, 0, eye, east, 1.0)); /* a block in front shields it */
-    combat_out o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 1, 0, 1.0f / 60.0f);
+    combat_out o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 1, 0.0f, 1.0f / 60.0f);
     CHECK(o.struck && ms.count == 1 && ms.m[0].hp < 20.0f && ms.m[0].flee_t > 0.0f); /* a fist hurts a little */
-    o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 1, 0, 1.0f / 60.0f);
+    o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 1, 0.0f, 1.0f / 60.0f);
     CHECK(!o.struck); /* too soon after the last blow */
 
     /* An iron sword kills it in a few blows and wears; it leaves meat. */
@@ -110,7 +112,7 @@ static void test_blows(void)
     int blows = 0;
     for (int i = 0; i < 600 && ms.count; i++) {
         ms.m[0].body.pos = dv3(10.5, GROUND, 8.5); /* held still: knockback and fleeing are not the test */
-        o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 1, 0, 1.0f / 60.0f);
+        o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 1, 0.0f, 1.0f / 60.0f);
         blows += o.struck;
     }
     CHECK(ms.count == 0 && blows >= 2 && blows <= 3 && o.killed);
@@ -150,10 +152,10 @@ static void test_rifle(void)
     dvec3 eye = dv3(8.5, GROUND + 1.2, 8.5);
     vec3 east = v3(1.0f, 0.0f, 0.0f);
 
-    combat_out o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 0, 1, 1.0f / 60.0f);
+    combat_out o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 1, 1.0f, 1.0f / 60.0f);
     CHECK(!o.fired && o.msg && c.count == 0); /* no cartridges */
     inv_add(&inv, I_CARTRIDGE, 2);
-    o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 0, 1, 1.0f / 60.0f);
+    o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 1, 1.0f, 1.0f / 60.0f);
     CHECK(o.fired && c.count == 1 && inv_count(&inv, I_CARTRIDGE) == 1 && inv.slot[0].wear == 1);
 
     /* The bullet crosses 22 m in a few steps and wounds the player there,
@@ -165,18 +167,87 @@ static void test_rifle(void)
     /* A wall stops the next one; glass would have shattered. */
     world_set(&t.w, 14, GROUND + 1, 8, B_STONE, 0);
     c.cooldown[0] = 0.0f;
-    o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 0, 1, 1.0f / 60.0f);
+    o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 1, 1.0f, 1.0f / 60.0f);
     CHECK(o.fired);
     for (int i = 0; i < 30 && c.count; i++) combat_step(&c, &ms, &t.ph, &tg);
     CHECK(c.count == 0 && other->wound_count == 1 && world_get(&t.w, 14, GROUND + 1, 8) == B_STONE);
     world_set(&t.w, 14, GROUND + 1, 8, B_GLASS, 0);
     inv_add(&inv, I_CARTRIDGE, 1);
     c.cooldown[0] = 0.0f;
-    combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 0, 1, 1.0f / 60.0f);
+    combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 1, 1.0f, 1.0f / 60.0f);
     for (int i = 0; i < 30 && c.count; i++) combat_step(&c, &ms, &t.ph, &tg);
     CHECK(world_get(&t.w, 14, GROUND + 1, 8) == B_AIR);
     mem_free(h);
     mem_free(other);
+    tw_free(&t);
+}
+
+/* The rifle fires on the attack button, its shots spread wider from the
+ * hip than down the sights, and it neither digs nor swings at a block. */
+static void test_rifle_aim(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    mobs ms = {0};
+    mobs_init(&ms, 12);
+    combat c = {0};
+    combat_init(&c, 12);
+    player pl = {0};
+    player_spawn(&pl, &t.w, 8.5, 8.5);
+    health *h = new_body(7);
+    player *tp[1] = {&pl};
+    health *th[1] = {h};
+    combat_targets tg = {tp, th, 1};
+    inventory inv = {0};
+    inv_init(&inv);
+    inv_add(&inv, I_RIFLE, 1);
+    inv_add(&inv, I_CARTRIDGE, 64);
+    dvec3 eye = dv3(8.5, GROUND + 1.2, 8.5);
+    vec3 east = v3(1.0f, 0.0f, 0.0f);
+    float worst[2] = {0.0f, 0.0f}, mean[2] = {0.0f, 0.0f};
+    for (int k = 0; k < 2; k++)
+        for (int i = 0; i < 30; i++) {
+            c.cooldown[0] = 0.0f;
+            c.count = 0;
+            combat_out o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 1, k ? 0.0f : 1.0f, 1.0f / 60.0f);
+            CHECK(o.fired && c.count == 1);
+            double v = dv3_len(c.b[0].vel);
+            float off = (float)(hypot(c.b[0].vel.y, c.b[0].vel.z) / v);
+            worst[k] = fmaxf(worst[k], off);
+            mean[k] += off / 30.0f;
+        }
+    /* Aimed, within 4 mrad; from the hip several times wider. */
+    CHECK(worst[0] < 0.004f && mean[1] > 4.0f * mean[0] && worst[1] < 0.05f);
+    /* Garbage aim fires from the hip. */
+    c.cooldown[0] = 0.0f;
+    c.count = 0;
+    CHECK(combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 1, NAN, 1.0f / 60.0f).fired);
+    /* The use button no longer fires it. */
+    c.cooldown[0] = 0.0f;
+    CHECK(!combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 0, 1.0f, 1.0f / 60.0f).fired);
+
+    /* Held on a block, the rifle doesn't dig it or swing; a stick does. */
+    fx_state *fx = mem_alloc(sizeof *fx);
+    fx_init(fx, 5);
+    t.ph.pls[0] = &pl;
+    t.ph.pl_count = 1;
+    world_set(&t.w, 10, GROUND, 8, B_DIRT, 0);
+    pl.pos = dv3(8.5, GROUND, 8.5);
+    dvec3 at = dv3(8.5, GROUND + PLAYER_EYE, 8.5);
+    vec3 dir = v3(0.8f, -0.6f, 0.0f);
+    ray_hit hit = physics_raycast(&t.w, at, dir, 5.0);
+    CHECK(hit.hit && hit.id == B_DIRT);
+    interact s = {0};
+    interact_init(&s, 4);
+    interact_input dig = {.attack = 1, .attack_click = 1, .use_click = 1, .can_act = 1, .speed = 1.0f, .dt = 0.1f};
+    for (int i = 0; i < 5; i++) interact_frame(&s, &t.w, &t.ph, NULL, &pl, &inv, fx, at, dir, hit, &dig);
+    CHECK(s.progress == 0.0f && s.swing == 0.0f && world_get(&t.w, 10, GROUND, 8) == B_DIRT);
+    inv_init(&inv);
+    inv_add(&inv, I_STICK, 1);
+    interact_frame(&s, &t.w, &t.ph, NULL, &pl, &inv, fx, at, dir, hit, &dig);
+    CHECK(s.progress > 0.0f);
+    mem_free(fx);
+    mem_free(h);
     tw_free(&t);
 }
 
@@ -185,4 +256,5 @@ void test_combat_all(void)
     test_mobs();
     test_blows();
     test_rifle();
+    test_rifle_aim();
 }

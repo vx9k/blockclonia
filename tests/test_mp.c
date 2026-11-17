@@ -55,7 +55,7 @@ static void frame(host_side *h, client_side *c, const player_input *move)
     mp_poll(c->m, now);
     mp_host_step(h->m, &idle);
     if (c->w.grid) {
-        mp_client_step(c->m, move ? move : &idle, 0);
+        mp_client_step(c->m, move ? move : &idle, 0, 0);
         world_update(&c->w, c->pl.pos.x, c->pl.pos.y, c->pl.pos.z);
         jobs_poll(c->js, 0);
     }

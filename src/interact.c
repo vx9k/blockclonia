@@ -191,8 +191,12 @@ interact_out interact_frame(interact *s, world *w, physics *ph, thermo *th, cons
     s->swing = s->swing > 0.0f ? fmaxf(0.0f, s->swing - in->dt * 3.5f) : 0.0f;
     s->swinging = 0;
 
+    /* The rifle's buttons fire and aim (combat.c), so it neither digs nor
+     * uses what it points at. */
+    const item_stack *carried = inv_held(inv);
+    int gun = carried->count && carried->id == I_RIFLE;
     int breakable = hit.hit && block_get(hit.id)->hardness >= 0.0f && hit.id != B_BEDROCK;
-    if (in->attack && in->can_act && breakable) {
+    if (in->attack && !gun && in->can_act && breakable) {
         int same = s->has_target && s->target.x == hit.block.x && s->target.y == hit.block.y &&
                    s->target.z == hit.block.z && s->target_id == hit.id;
         if (!same) {
@@ -231,10 +235,10 @@ interact_out interact_frame(interact *s, world *w, physics *ph, thermo *th, cons
         s->has_target = 0;
         s->progress = 0.0f;
         s->repeat = 0.0f;
-        if (in->attack_click) s->swing = 1.0f; /* a swing at nothing */
+        if (in->attack_click && !gun) s->swing = 1.0f; /* a swing at nothing */
     }
 
-    if (in->use_click && in->can_act) use_item(s, w, ph, th, pl, inv, eye, dir, hit, &o);
+    if (in->use_click && !gun && in->can_act) use_item(s, w, ph, th, pl, inv, eye, dir, hit, &o);
     if (in->pick_click && hit.hit) pick(inv, pl, hit.id);
 
     if (in->drop && in->can_act) {

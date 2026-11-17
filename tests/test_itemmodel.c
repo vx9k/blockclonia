@@ -433,6 +433,7 @@ typedef struct {
     uint8_t lo[3], hi[3];
 } colour_case;
 
+/* clang-format off */
 static const colour_case COLOURS[] = {
     {I_RAW_GOLD, 1, {200, 150, 0}, {255, 220, 100}},     /* native gold */
     {I_RAW_GOLD, 1, {200, 200, 190}, {255, 255, 255}},   /* in white quartz */
@@ -455,6 +456,7 @@ static const colour_case COLOURS[] = {
     {I_COPPER_INGOT, 1, {180, 90, 50}, {240, 160, 120}},
     {I_GUNPOWDER, 0, {30, 30, 30}, {80, 80, 80}},
 };
+/* clang-format on */
 
 static int rgb_in(uint32_t rgb, const colour_case *c)
 {
@@ -572,7 +574,7 @@ static void test_material_layers(void)
 {
     /* Each material looks different from the others: their 16x16
      * patterns differ texel by texel. */
-    const uint8_t mats[] = {T_MAT_WOOD, T_MAT_METAL, T_MAT_CAST,  T_MAT_ROCK, T_MAT_CLOTH,
+    const uint8_t mats[] = {T_MAT_WOOD,  T_MAT_METAL, T_MAT_CAST,  T_MAT_ROCK, T_MAT_CLOTH,
                             T_MAT_GLASS, T_MAT_PLAIN, T_MAT_FLESH, T_MAT_GRAIN};
     for (size_t i = 0; i < sizeof mats; i++)
         for (size_t j = 0; j < i; j++) {
@@ -635,11 +637,12 @@ static float parts_span(const entity_instance *e, int from, int n)
 static void test_held(void)
 {
     entity_instance out[VIEWMODEL_MAX] = {{0}};
-    /* Every item fits the view model with the sleeve and the hand. */
+    /* Every item fits the view model with a forearm and a fist for each
+     * hand it takes. */
     for (item_id id = ITEM_FIRST; id < ITEM_END; id++) {
         item_model m = {0};
         itemmodel_build(id, &m);
-        CHECK(held_parts(id, out) == 2 + m.n);
+        CHECK(held_parts(id, out) == 2 * viewmodel_hands(id) + m.n);
     }
     /* A cartridge is shown larger than it is, a bucket smaller. */
     item_model m = {0};
