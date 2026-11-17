@@ -19,8 +19,9 @@ include(FetchContent)
 
 # Pinned releases. To pin by content as well, set the *_SHA256 variables to
 # the archive's hash (sha256sum of the downloaded tarball).
-set(MC_MIMALLOC_VERSION 3.5.3 CACHE STRING "mimalloc release used when fetching")
-set(MC_MIMALLOC_SHA256 "" CACHE STRING "Optional SHA256 of the mimalloc archive")
+set(MC_MIMALLOC_VERSION 3.6.1 CACHE STRING "mimalloc release used when fetching")
+set(MC_MIMALLOC_SHA256 "2672e6a99d4579fb4bb32d9de0d63aa424ce600d31fbfaf06eb74d940d2e07a6"
+    CACHE STRING "Optional SHA256 of the mimalloc archive")
 set(MC_GLFW_VERSION 3.5.1 CACHE STRING "GLFW release used when fetching")
 set(MC_GLFW_SHA256 "" CACHE STRING "Optional SHA256 of the GLFW archive")
 set(MC_MINIAUDIO_VERSION 0.11.25 CACHE STRING "miniaudio release used when fetching")
@@ -73,10 +74,11 @@ add_library(mc::mimalloc ALIAS mc_mimalloc)
 
 # The game targets mimalloc 3.x (the pinned release). AUTO only takes a
 # system copy at least as new as MC_MIMALLOC_MIN_AUTO and otherwise builds
-# the pinned release. SYSTEM still accepts 2.1+ so distributions that ship
+# the pinned release. 3.6 fixes the rollback of failed huge allocations and
+# stops over-allocating naturally aligned blocks (mem_alloc_aligned). SYSTEM still accepts 2.1+ so distributions that ship
 # an older mimalloc can package the game: mem.c needs mi_option_arena_reserve
 # and mi_option_arena_eager_commit, which appeared in 2.1.0 and remain in 3.x.
-set(MC_MIMALLOC_MIN_AUTO 3.5 CACHE STRING "Oldest system mimalloc MC_DEPS=AUTO will use")
+set(MC_MIMALLOC_MIN_AUTO 3.6 CACHE STRING "Oldest system mimalloc MC_DEPS=AUTO will use")
 if(MC_DEPS STREQUAL "AUTO")
   # The minimum goes in the call: CMake loads a package's targets only when
   # its version file accepts it, so a rejected system copy leaves no
@@ -113,14 +115,21 @@ elseif(MC_DEPS STREQUAL "SYSTEM")
                       "(Debian/Ubuntu: libmimalloc-dev) or use MC_DEPS=AUTO.")
 else()
   # Variables set inside a function only reach the subproject added from it;
-  # CMP0077 makes them override mimalloc's option() defaults.
+  # CMP0077 makes them override mimalloc's option() defaults, and CMP0126
+  # its set(... CACHE) ones (MI_SECURE).
   function(_mc_fetch_mimalloc)
     set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+    set(CMAKE_POLICY_DEFAULT_CMP0126 NEW)
     set(MI_BUILD_TESTS OFF)
     set(MI_BUILD_OBJECT OFF)
     # Newer mimalloc releases can add -march=armv8.1-a (LSE atomics) on
     # arm64, which faults on the Pi 4's Cortex-A72 (ARMv8.0). MC_CPU decides.
     set(MI_OPT_ARCH OFF)
+    # Guard pages around mimalloc's own metadata, so a heap overflow from a
+    # malformed world file or packet can't quietly rewrite the allocator's
+    # state. Free lists stay unencoded, which is what keeps the cost near
+    # 1% (none measurable in --bench); ON would encode them too.
+    set(MI_SECURE MINIMAL)
     if(ANDROID)
       set(MI_BUILD_SHARED OFF)
       set(MI_BUILD_STATIC ON)

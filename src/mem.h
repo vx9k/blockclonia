@@ -41,7 +41,7 @@ void mem_print_stats(void);
 /* Resident and committed bytes of the process, from mimalloc; 0 when
  * unknown (sanitizer builds). */
 void mem_process_info(size_t *rss, size_t *commit);
-/* "mimalloc 3.5.3" (the linked library's version), or "libc". */
+/* "mimalloc 3.6.1" (the linked library's version), or "libc". */
 void mem_version_string(char *buf, size_t n);
 
 #ifndef MC_MEM_LIBC

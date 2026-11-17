@@ -52,7 +52,7 @@ typedef struct {
     int ui_quads;
     size_t rss, commit;        /* bytes; 0 if unknown */
     const char *gpu;
-    const char *versions;      /* "mimalloc 3.5.3, GLFW 3.5.1 ..." */
+    const char *versions;      /* "mimalloc 3.6.1, GLFW 3.5.1 ..." */
     const char *api;           /* "Vulkan 1.4: ..." (renderer features in use) */
     const char *audio;         /* output device, or "off" */
     int snd_voices;
