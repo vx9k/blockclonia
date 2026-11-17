@@ -14,6 +14,7 @@ pages say why and how. When a plan changes, update both.
 | [animals.md](animals.md) | New animals (cats among them) and needs-and-senses behaviour |
 | [farming.md](farming.md) | Crops, kept animals, cooking, preserving, nutrition |
 | [building.md](building.md) | Shapes beyond the cube, doors, chests, beds, mortar |
+| [ballistics.md](ballistics.md) | Ammunition, flight, penetration, wounds, weapons built from parts |
 | [ui.md](ui.md) | The "field kit" redesign and its accessibility rules |
 | [multiplayer.md](multiplayer.md) | How sessions work and what is left |
 | [android.md](android.md) | What an Android build needs |
