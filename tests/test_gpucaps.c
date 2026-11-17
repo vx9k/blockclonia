@@ -22,7 +22,6 @@ static gpu_offer full_offer(void)
     o.timestamp_compute_and_graphics = 1;
     o.timestamp_valid_bits = 36;
     o.timestamp_period = 52.08f;
-    o.timeline_semaphore = o.host_query_reset = 1;
     o.dynamic_rendering = o.synchronization2 = 1;
     o.khr_dynamic_rendering = o.khr_synchronization2 = 1;
     o.host_image_copy = 1;
@@ -44,14 +43,21 @@ static void test_versions(void)
     CHECK(gpucaps_instance_api(0, GPU_API(1, 4), 0) == GPU_API(1, 0)); /* never below 1.0 */
     /* Device: min(device, instance). */
     CHECK(gpucaps_device_api(GPU_API(1, 4) | 363u, GPU_API(1, 2)) == GPU_API(1, 2));
-    CHECK(gpucaps_device_api(GPU_API(1, 2) | 255u, GPU_API(1, 4)) == GPU_API(1, 2)); /* Raspberry Pi 4 */
+    CHECK(gpucaps_device_api(GPU_API(1, 2) | 255u, GPU_API(1, 4)) == GPU_API(1, 2));
+    /* The floor: 1.2 on both sides, whatever the patch level. */
+    CHECK(gpucaps_usable(GPU_API(1, 2), GPU_API(1, 2)));
+    CHECK(gpucaps_usable(GPU_API(1, 4) | 363u, GPU_API(1, 3) | 275u));
+    CHECK(gpucaps_usable(GPU_API(1, 2) | 255u, GPU_API(1, 4)));
+    CHECK(!gpucaps_usable(GPU_API(1, 1) | 128u, GPU_API(1, 4))); /* an old driver */
+    CHECK(!gpucaps_usable(GPU_API(1, 4), GPU_API(1, 1) | 121u)); /* an old loader */
+    CHECK(!gpucaps_usable(GPU_API(1, 4), gpucaps_instance_api(0, GPU_API(1, 4), 0))); /* a 1.0 loader */
+    CHECK(!gpucaps_usable(GPU_API(1, 0), GPU_API(1, 0)));
     CHECK(GPU_API_MAJOR(GPU_API(1, 3) | 275u) == 1 && GPU_API_MINOR(GPU_API(1, 3) | 275u) == 3);
 }
 
 /* The renderer's sequence: instance from the loader, the headers and
  * MC_VK_API, then the device's offer, here one with no optional features.
- * The renderer used to request 1.0 and show "Vulkan 1.0" whatever the
- * system offered. */
+ * Returns 0 where the renderer refuses the device as older than 1.2. */
 static uint32_t renderer_api(uint32_t loader, uint32_t headers, const char *env, uint32_t device, char *s, size_t n)
 {
     uint32_t cap = 0;
@@ -60,6 +66,7 @@ static uint32_t renderer_api(uint32_t loader, uint32_t headers, const char *env,
     memset(&o, 0, sizeof o);
     o.instance_api = gpucaps_instance_api(loader, headers, cap);
     o.device_api = device;
+    if (!gpucaps_usable(device, o.instance_api)) return 0;
     gpu_choice c = {0};
     gpucaps_choose(&o, 0, &c);
     CHECK(c.enabled == 0 && c.instance_api == o.instance_api);
@@ -70,18 +77,21 @@ static uint32_t renderer_api(uint32_t loader, uint32_t headers, const char *env,
 static void test_renderer_versions(void)
 {
     char s[64] = {0};
-    uint32_t v14 = GPU_API(1, 4) | 357u, v13 = GPU_API(1, 3) | 275u, pi = GPU_API(1, 3) | 239u;
+    uint32_t v14 = GPU_API(1, 4) | 357u, v13 = GPU_API(1, 3) | 275u, old = GPU_API(1, 3) | 239u;
     /* Loader and headers 1.4.357, Mesa 26 at 1.4.363. */
     CHECK(renderer_api(v14, v14, NULL, GPU_API(1, 4) | 363u, s, sizeof s) == GPU_API(1, 4));
     CHECK(strcmp(s, "Vulkan 1.4") == 0);
     CHECK(renderer_api(v13, v13, NULL, GPU_API(1, 4) | 363u, s, sizeof s) == GPU_API(1, 3)); /* Ubuntu 24.04 */
-    CHECK(renderer_api(pi, pi, NULL, GPU_API(1, 2) | 255u, s, sizeof s) == GPU_API(1, 2)); /* Pi 4, bookworm */
+    CHECK(renderer_api(old, old, NULL, GPU_API(1, 2) | 255u, s, sizeof s) == GPU_API(1, 2)); /* a 1.2 driver */
     CHECK(strcmp(s, "Vulkan 1.2") == 0);
-    /* A 1.0 loader (no vkEnumerateInstanceVersion) and MC_VK_API=1.0. */
-    CHECK(renderer_api(0, v14, NULL, GPU_API(1, 4), s, sizeof s) == GPU_API(1, 0));
-    CHECK(renderer_api(v14, v14, "1.0", GPU_API(1, 4), s, sizeof s) == GPU_API(1, 0));
-    CHECK(strcmp(s, "Vulkan 1.0") == 0);
-    /* A malformed MC_VK_API caps nothing. */
+    CHECK(renderer_api(v14, v14, "1.2", GPU_API(1, 4), s, sizeof s) == GPU_API(1, 2));
+    CHECK(strcmp(s, "Vulkan 1.2") == 0);
+    /* Refused: a 1.0 loader (no vkEnumerateInstanceVersion), a 1.1 driver. */
+    CHECK(renderer_api(0, v14, NULL, GPU_API(1, 4), s, sizeof s) == 0);
+    CHECK(renderer_api(v14, v14, NULL, GPU_API(1, 1) | 128u, s, sizeof s) == 0);
+    /* MC_VK_API below the floor, or malformed, caps nothing. */
+    CHECK(renderer_api(v14, v14, "1.0", GPU_API(1, 4), s, sizeof s) == GPU_API(1, 4));
+    CHECK(renderer_api(v14, v14, "1.1", GPU_API(1, 4), s, sizeof s) == GPU_API(1, 4));
     CHECK(renderer_api(v14, v14, "1.5", GPU_API(1, 4), s, sizeof s) == GPU_API(1, 4));
     CHECK(renderer_api(v14, v14, "", GPU_API(1, 4), s, sizeof s) == GPU_API(1, 4));
 }
@@ -89,12 +99,13 @@ static void test_renderer_versions(void)
 static void test_parse_api(void)
 {
     uint32_t v = 7;
-    CHECK(gpucaps_parse_api("1.0", &v) && v == GPU_API(1, 0));
+    CHECK(gpucaps_parse_api("1.2", &v) && v == GPU_API(1, 2));
     CHECK(gpucaps_parse_api(" 1.3 ", &v) && v == GPU_API(1, 3));
     CHECK(gpucaps_parse_api("1.4", &v) && v == GPU_API(1, 4));
     v = 7;
     CHECK(!gpucaps_parse_api("1.5", &v) && v == 7);
     CHECK(!gpucaps_parse_api("2.0", &v));
+    CHECK(!gpucaps_parse_api("1.0", &v) && !gpucaps_parse_api("1.1", &v) && v == 7); /* below the floor */
     CHECK(!gpucaps_parse_api("1.", &v));
     CHECK(!gpucaps_parse_api("1.2x", &v));
     CHECK(!gpucaps_parse_api("", &v));
@@ -110,8 +121,11 @@ static void test_parse_disable(void)
     CHECK(gpucaps_parse_disable(" MDI , DynRend,aniso ", unk, sizeof unk) ==
           (GPUCAP_MDI | GPUCAP_DYNREND | GPUCAP_ANISO));
     CHECK(unk[0] == '\0');
-    CHECK(gpucaps_parse_disable("sync2,timeline,hostcopy,budget,timestamps,pcache", unk, sizeof unk) ==
-          (GPUCAP_SYNC2 | GPUCAP_TIMELINE | GPUCAP_HOSTCOPY | GPUCAP_BUDGET | GPUCAP_TIMESTAMPS | GPUCAP_PCACHE));
+    CHECK(gpucaps_parse_disable("sync2,hostcopy,budget,timestamps,pcache", unk, sizeof unk) ==
+          (GPUCAP_SYNC2 | GPUCAP_HOSTCOPY | GPUCAP_BUDGET | GPUCAP_TIMESTAMPS | GPUCAP_PCACHE));
+    /* Required since 1.2, so no longer switches. */
+    CHECK(gpucaps_parse_disable("timeline,hostreset", unk, sizeof unk) == 0);
+    CHECK(strcmp(unk, "timeline,hostreset") == 0);
     CHECK(gpucaps_parse_disable("all", unk, sizeof unk) == GPUCAP_ALL);
     CHECK(gpucaps_parse_disable("mdi,bogus,,warp", unk, sizeof unk) == GPUCAP_MDI);
     CHECK(strcmp(unk, "bogus,warp") == 0);
@@ -153,22 +167,17 @@ static void test_choose_versions(void)
 {
     gpu_offer o = full_offer();
     gpu_choice c = {0};
-    uint32_t always = GPUCAP_MDI | GPUCAP_ANISO | GPUCAP_TIMESTAMPS | GPUCAP_PCACHE | GPUCAP_RELAXED;
+    uint32_t always = GPUCAP_MDI | GPUCAP_ANISO | GPUCAP_TIMESTAMPS | GPUCAP_PCACHE | GPUCAP_RELAXED | GPUCAP_BUDGET;
 
-    o.instance_api = GPU_API(1, 0); /* MC_VK_API=1.0 on a 1.4 device */
-    gpucaps_choose(&o, 0, &c);
-    CHECK(c.device_api == GPU_API(1, 0));
-    CHECK(c.enabled == always);
-
+    /* Below the floor nothing is offered (the renderer refuses it). */
     o.instance_api = GPU_API(1, 1);
     gpucaps_choose(&o, 0, &c);
-    CHECK(c.enabled == (always | GPUCAP_BUDGET));
+    CHECK(c.device_api == GPU_API(1, 1) && c.enabled == 0);
 
-    /* 1.2: timeline and host reset core; sync2 and dynamic rendering
-     * through the KHR extensions. */
+    /* 1.2: sync2 and dynamic rendering through the KHR extensions. */
     o.instance_api = GPU_API(1, 2);
     gpucaps_choose(&o, 0, &c);
-    CHECK(c.enabled == (always | GPUCAP_BUDGET | GPUCAP_TIMELINE | GPUCAP_HOSTRESET | GPUCAP_SYNC2 | GPUCAP_DYNREND));
+    CHECK(c.enabled == (always | GPUCAP_SYNC2 | GPUCAP_DYNREND));
     CHECK(c.dynrend_khr && c.sync2_khr);
     o.khr_dynamic_rendering = o.khr_synchronization2 = 0;
     gpucaps_choose(&o, 0, &c);
@@ -185,17 +194,16 @@ static void test_choose_versions(void)
     CHECK(c.enabled == GPUCAP_ALL);
 }
 
-/* A Vulkan 1.0 device with no optional features gets the plain path. */
+/* A Vulkan 1.2 device with no optional features gets the plain path. */
 static void test_choose_minimal(void)
 {
     gpu_offer o = {0};
     memset(&o, 0, sizeof o);
     o.instance_api = GPU_API(1, 4);
-    o.device_api = GPU_API(1, 0);
+    o.device_api = GPU_API(1, 2);
     o.timestamp_valid_bits = 64; /* but timestampComputeAndGraphics is false */
     o.timestamp_period = 1.0f;
-    o.host_image_copy = o.timeline_semaphore = o.dynamic_rendering = o.synchronization2 = 1; /* not at 1.0 */
-    o.ext_memory_budget = 1;
+    o.host_image_copy = o.dynamic_rendering = o.synchronization2 = 1; /* 1.3 and 1.4, and no KHR extensions */
     gpu_choice c = {0};
     gpucaps_choose(&o, 0, &c);
     CHECK(c.enabled == 0);
@@ -204,7 +212,7 @@ static void test_choose_minimal(void)
     CHECK(c.timestamp_mask == 0);
     char s[160] = {0};
     gpucaps_summary(&c, s, sizeof s);
-    CHECK(strcmp(s, "Vulkan 1.0") == 0);
+    CHECK(strcmp(s, "Vulkan 1.2") == 0);
 }
 
 static void test_dependencies(void)
@@ -237,18 +245,14 @@ static void test_dependencies(void)
     gpucaps_choose(&o, GPUCAP_DYNREND, &c);
     CHECK((c.enabled & GPUCAP_SYNC2) && !(c.enabled & GPUCAP_DYNREND));
 
-    /* Host query reset only matters with timestamps. */
     o = full_offer();
     o.timestamp_compute_and_graphics = 0;
     gpucaps_choose(&o, 0, &c);
-    CHECK(!(c.enabled & (GPUCAP_TIMESTAMPS | GPUCAP_HOSTRESET)));
+    CHECK(!(c.enabled & GPUCAP_TIMESTAMPS));
     o = full_offer();
     o.timestamp_valid_bits = 0; /* the queue cannot time */
     gpucaps_choose(&o, 0, &c);
     CHECK(!(c.enabled & GPUCAP_TIMESTAMPS));
-    o = full_offer();
-    gpucaps_choose(&o, GPUCAP_TIMESTAMPS, &c);
-    CHECK(!(c.enabled & GPUCAP_HOSTRESET));
 
     /* Anisotropy of 1 is no anisotropy. */
     o = full_offer();
@@ -280,9 +284,9 @@ static void test_overrides(void)
 {
     gpu_offer o = full_offer();
     gpu_choice c = {0};
-    uint32_t off = gpucaps_parse_disable("mdi,dynrend,sync2,timeline,aniso,hostcopy,budget,timestamps,pcache", NULL, 0);
+    uint32_t off = gpucaps_parse_disable("mdi,dynrend,sync2,aniso,hostcopy,budget,timestamps,pcache", NULL, 0);
     gpucaps_choose(&o, off, &c);
-    CHECK(c.enabled == GPUCAP_RELAXED); /* hostreset went with timestamps */
+    CHECK(c.enabled == GPUCAP_RELAXED);
     CHECK(c.disabled == off);
     gpucaps_choose(&o, GPUCAP_ALL, &c);
     CHECK(c.enabled == 0);
@@ -290,13 +294,13 @@ static void test_overrides(void)
     o.host_image_copy = 0;
     gpucaps_choose(&o, GPUCAP_HOSTCOPY, &c);
     CHECK(!(c.disabled & GPUCAP_HOSTCOPY));
-    /* MC_VK_API=1.1 as the renderer applies it. */
+    /* MC_VK_API=1.2 as the renderer applies it: the KHR paths, no 1.4. */
     uint32_t cap = 0;
-    CHECK(gpucaps_parse_api("1.1", &cap));
+    CHECK(gpucaps_parse_api("1.2", &cap));
     o = full_offer();
     o.instance_api = gpucaps_instance_api(GPU_API(1, 4), GPU_API(1, 4), cap);
     gpucaps_choose(&o, 0, &c);
-    CHECK(c.device_api == GPU_API(1, 1) && !(c.enabled & (GPUCAP_TIMELINE | GPUCAP_DYNREND | GPUCAP_HOSTCOPY)));
+    CHECK(c.device_api == GPU_API(1, 2) && c.dynrend_khr && !(c.enabled & GPUCAP_HOSTCOPY));
 }
 
 static void test_summary(void)
@@ -307,13 +311,13 @@ static void test_summary(void)
     char s[256] = {0};
     gpucaps_choose(&o, 0, &c);
     gpucaps_summary(&c, s, sizeof s);
-    CHECK(strcmp(s, "Vulkan 1.4: multi-draw indirect, dynamic rendering, synchronization2, timeline semaphores, "
-                    "pipeline cache, 8x anisotropic, host image copy, memory budget, GPU timestamps") == 0);
+    CHECK(strcmp(s, "Vulkan 1.4: multi-draw indirect, dynamic rendering, synchronization2, pipeline cache, "
+                    "8x anisotropic, host image copy, memory budget, GPU timestamps") == 0);
     o.instance_api = GPU_API(1, 2);
     gpucaps_choose(&o, GPUCAP_MDI | GPUCAP_PCACHE, &c);
     gpucaps_summary(&c, s, sizeof s);
-    CHECK(strcmp(s, "Vulkan 1.2: dynamic rendering (KHR), synchronization2 (KHR), timeline semaphores, "
-                    "8x anisotropic, memory budget, GPU timestamps") == 0);
+    CHECK(strcmp(s, "Vulkan 1.2: dynamic rendering (KHR), synchronization2 (KHR), 8x anisotropic, "
+                    "memory budget, GPU timestamps") == 0);
     /* Truncation keeps a terminated prefix. */
     char small[12] = {0};
     memset(small, 'x', sizeof small);

@@ -7,7 +7,7 @@ if(NOT CMAKE_TOOLCHAIN_FILE)
 endif()
 project(blockclonia
   VERSION 0.1.0
-  DESCRIPTION "Minecraft-style voxel sandbox for low-end hardware (C11, Vulkan 1.0)"
+  DESCRIPTION "Minecraft-style voxel sandbox for low-end hardware (C11, Vulkan 1.2)"
   LANGUAGES C)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

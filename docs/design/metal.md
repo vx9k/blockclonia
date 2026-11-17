@@ -15,7 +15,7 @@ Language versions too (SPIRV-Cross, or by hand), and every renderer
 feature would have to be built twice, without `gpucaps` and its
 `MC_VK_API`/`MC_VK_DISABLE` testing. Nobody working on the project has a
 Mac, so none of it could be run or checked by eye. The renderer is
-already a good fit for MoltenVK: Vulkan 1.0 at its core, optional
+already a good fit for MoltenVK: Vulkan 1.2 at its core, optional
 features negotiated, 1-pixel lines only, no `discard`, no geometry
 shaders, and a 32-bit float depth buffer, which Apple GPUs have.
 

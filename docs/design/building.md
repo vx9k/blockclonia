@@ -20,7 +20,7 @@ lose support collapse. Nothing opens, stores items, or gives off light.
   collision uses the same boxes.
 - This touches the 4-byte vertex format and chunk meshing, so it is
   designed first and reviewed carefully (the mesher's rules are in
-  `mesher.h`). Shapes cost nothing on the Vulkan 1.0 path.
+  `mesher.h`). Shapes cost nothing on the bare Vulkan 1.2 path.
 
 ## Things that open, hold and light
 

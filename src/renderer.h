@@ -3,12 +3,12 @@
  * constants instead of uniform buffers, reversed-Z depth, no discard, CPU
  * frustum culling, fog.
  *
- * The baseline is Vulkan 1.0 with no optional features (Raspberry Pi 4,
- * lavapipe). Where the device offers more, it is used (gpucaps.h decides):
- * multi-draw indirect (all terrain in one call per pool block and pass),
- * 1.3 dynamic rendering and synchronization2, a 1.2 timeline semaphore for
- * frame pacing, a pipeline cache kept on disk, anisotropic filtering, 1.4
- * host image copies, VK_EXT_memory_budget and GPU timestamps. MC_VK_API and
+ * The baseline is Vulkan 1.2 with no optional features, whose timeline
+ * semaphore paces the frames. Where the device offers more, it is used
+ * (gpucaps.h decides): multi-draw indirect (all terrain in one call per
+ * pool block and pass), 1.3 dynamic rendering and synchronization2, a
+ * pipeline cache kept on disk, anisotropic filtering, 1.4 host image
+ * copies, VK_EXT_memory_budget and GPU timestamps. MC_VK_API and
  * MC_VK_DISABLE turn them off for testing the fallbacks. */
 #ifndef MC_RENDERER_H
 #define MC_RENDERER_H

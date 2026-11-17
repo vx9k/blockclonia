@@ -1,6 +1,6 @@
 ---
 name: general-dev
-description: Default tier for everyday engineering. Use for implementing a contained feature, refactoring within one or a few modules, debugging a bug that reproduces (a failing test, a crash with a clear stack, wrong behaviour in one system), adding or fixing tests, and reviewing a diff for correctness and style. Route here when the change is well understood and its effects stay local. Escalate to deep-reasoning instead for architecture decisions, bugs that cross many files or resist reproduction, changes to save/settings file formats, file access or dependency fetching, the Vulkan 1.0 baseline or synchronization, threading, and anything security-sensitive. Use docs-writer for prose-only edits.
+description: Default tier for everyday engineering. Use for implementing a contained feature, refactoring within one or a few modules, debugging a bug that reproduces (a failing test, a crash with a clear stack, wrong behaviour in one system), adding or fixing tests, and reviewing a diff for correctness and style. Route here when the change is well understood and its effects stay local. Escalate to deep-reasoning instead for architecture decisions, bugs that cross many files or resist reproduction, changes to save/settings file formats, file access or dependency fetching, the Vulkan 1.2 baseline or synchronization, threading, and anything security-sensitive. Use docs-writer for prose-only edits.
 model: sonnet
 effort: medium
 tools: Read, Edit, Write, Bash

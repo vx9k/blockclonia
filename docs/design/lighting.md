@@ -36,10 +36,10 @@ holds the reasoning and the detail.
   (`thermo_day_time`), with warm, low light at dawn and dusk and
   moonlight at night. Shadows from the sun are an optional
   capability.
-- **Weak hardware first:** everything on the Vulkan 1.0 path with no
-  optional features, at the Raspberry Pi 4's frame budget. Anything
+- **Weak hardware first:** everything on the bare Vulkan 1.2 path with
+  no optional features, at an integrated GPU's frame budget. Anything
   heavier (sun shadows, smoother light) is a `GPUCAP_*` feature with a
-  1.0 fallback, per `gpucaps.c`.
+  fallback on bare 1.2, per `gpucaps.c`.
 
 ## Design
 
@@ -63,8 +63,8 @@ holds the reasoning and the detail.
      smooth light for free and leaves the vertex alone;
    - (c) a larger vertex.
 
-   Options (a) and (b) both work on Vulkan 1.0. Measure memory and
-   frame time on the Pi and lavapipe before choosing. The 4-byte vertex
+   Options (a) and (b) both work on Vulkan 1.2. Measure memory and
+   frame time on an integrated GPU and lavapipe before choosing. The 4-byte vertex
    is kept unless the numbers say otherwise.
 3. **Colour.** Block light carries a hue per emitter type, mixed in the
    shader. Either stay single-channel and tint by the nearest emitter,
@@ -99,5 +99,5 @@ come from state the game already has.
 - Light across a column border matches on both sides.
 - Light never leaks through opaque blocks.
 - The renderer runs with `--validate` and zero messages at
-  `MC_VK_API=1.0` and on lavapipe, and the frame time on the Pi stays
-  within budget.
+  `MC_VK_API=1.2` and on lavapipe, and the frame time on an integrated
+  GPU stays within budget.

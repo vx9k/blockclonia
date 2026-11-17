@@ -16,8 +16,9 @@ with touch controls in place of the keyboard and mouse.
 - Android NDK (r27 or newer) and the Android SDK, with the CMake and
   Ninja packages from the SDK manager. Target API 26 or newer for
   AAudio, so the audio path matches what miniaudio uses on desktop.
-- A device with a Vulkan 1.1 driver. Vulkan 1.0 phones exist, and the
-  renderer already has a 1.0 fallback (`MC_VK_API=1.0`), but test it
+- A device with a Vulkan 1.2 driver, the renderer's minimum. Older
+  phones (1.0 and 1.1) are refused; test the bare path (`MC_VK_API=1.2
+  MC_VK_DISABLE=all`)
   on one before claiming it works.
 - Gradle with the Android Gradle Plugin for the package, plus a signing
   key kept outside the repository.
@@ -123,5 +124,5 @@ with touch controls in place of the keyboard and mouse.
       code paths on Android
 - [ ] Pause and resume: save on pause, rebuild the surface on resume
 - [ ] APK with `AAudio` sound, signed in CI from a secret key
-- [ ] Runs on one real Vulkan 1.1 phone and one Vulkan 1.0 device, with
+- [ ] Runs on one real Vulkan 1.2 phone and one 1.3 or newer device, with
       the F3 numbers in the README
