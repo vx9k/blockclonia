@@ -72,6 +72,14 @@ static const mp_chat_line *last_chat(const mp *m)
     return n ? &l[n - 1] : &NONE;
 }
 
+/* Whether a stack of `count` of `id` lies in the world. */
+static int has_items(const physics *ph, item_id id, int count)
+{
+    for (int i = 0; i < ph->item_count; i++)
+        if (ph->items[i].id == id && ph->items[i].count == count) return 1;
+    return 0;
+}
+
 /* A block the host sets reaches the client within 200 frames. */
 static int edit_follows(host_side *h, client_side *c, int x, int y, int z, uint8_t id)
 {
@@ -377,11 +385,12 @@ void test_mp_all(void)
     /* A dropped item reaches the client with its whole id: every item id is
      * past the one byte the snapshot once carried. It is dropped where the
      * client stands, the one spot sure to be open air whatever terrain this
-     * platform's maths grew. */
+     * platform's maths grew. Snapshots travel unreliably, and the macOS
+     * loopback drops a run of them while terrain streams, so the client is
+     * waited on rather than given a fixed 30 frames. */
     physics_drop_item(&h.t.ph, dv3(c.pl.pos.x, c.pl.pos.y + 1.0, c.pl.pos.z), dv3(0, 0, 0), I_IRON_INGOT, 3, 30.0f);
-    for (int i = 0; i < 30; i++) frame(&h, &c, NULL);
     int ingot = 0;
-    for (int i = 0; i < c.ph.item_count; i++) ingot |= c.ph.items[i].id == I_IRON_INGOT && c.ph.items[i].count == 3;
+    for (int f = 0; f < 300 && !(ingot = has_items(&c.ph, I_IRON_INGOT, 3)); f++) frame(&h, &c, NULL);
     CHECK(I_IRON_INGOT > 255 && ingot);
 
     /* The client leaves: what it carried does not fall out (rejoining
