@@ -1,14 +1,17 @@
-# Builds, tests and packages the Raspberry Pi .debs. ci.yml calls it twice:
-# for every run, from the commit under test (versioned "+git.<date>.<sha>",
-# feeding the nightly), and for a release, from its tag (the plain version).
+# Builds, tests and packages blockclonia for every supported Linux. ci.yml
+# calls it twice: for every run, from the commit under test (versioned
+# "+git.<date>.<sha>", feeding the nightly), and for a release, from its tag
+# (the plain version).
 #
-#   pi-arm64  native arm64 runner inside Debian trixie (the base of
-#             Raspberry Pi OS trixie), tuned for the Pi 4, with ThinLTO
-#             and BOLT; a .deb that installs on 64-bit Pi OS.
-#   pi-armhf  clang cross build for 32-bit Pi OS in Debian trixie, tests
-#             under qemu-user; an armhf .deb. ThinLTO but no BOLT, which
-#             has no 32-bit ARM support.
-name: Pi packages
+#   ubuntu  Ubuntu 26.04 on x86_64 and arm64, native runners: Release flags
+#           with ThinLTO, PGO and BOLT, -Werror, system packages only; unit
+#           tests, --bench and a lavapipe render under Xvfb with validation,
+#           all on the optimised binary; a .deb per architecture.
+#   alpine  Alpine Linux (musl) on x86_64 and arm64, in a container started
+#           with docker run (GitHub's JavaScript actions don't run inside an
+#           Alpine arm64 container); PGO without BOLT, which Alpine doesn't
+#           package; the same tests; a tarball per architecture.
+name: Linux packages
 
 on:
   workflow_call:
@@ -26,10 +29,16 @@ permissions:
   contents: read
 
 jobs:
-  pi-arm64:
-    runs-on: ubuntu-26.04-arm # GitHub-hosted arm64; free for public repositories
-    container: debian:trixie
-    # mimalloc and GLFW build from source before the game.
+  ubuntu:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x86-64-v2 (SSE4.2, 2009 on) runs on every CPU that drives a
+          # Vulkan 1.2 GPU; arm64 keeps the compiler's ARMv8.0 default.
+          - { arch: amd64, runner: ubuntu-26.04, cpu: x86-64-v2 }
+          - { arch: arm64, runner: ubuntu-26.04-arm, cpu: "" }
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -41,50 +50,47 @@ jobs:
           persist-credentials: false
       - name: Install packages
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            clang lld llvm libc6-dev cmake ninja-build ca-certificates glslc file \
-            dpkg-dev \
-            libvulkan-dev libsqlite3-dev libsodium-dev pkg-config \
-            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev libwayland-bin libxkbcommon-dev \
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld llvm dpkg-dev \
+            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev libminiupnpc-dev zlib1g-dev \
             mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
           # dpkg-dev is for dpkg-shlibdeps, which writes the package's exact
-          # Depends: from the binary (it pulls in GNU binutils for its own
-          # objdump; the build itself never uses them).
+          # Depends: from the binary.
           # BOLT and clang's profile runtime (for PGO) come per LLVM version
-          # (bolt-19 and libclang-rt-19-dev for trixie's clang 19).
+          # (bolt-21 and libclang-rt-21-dev for clang 21).
           v=$(clang --version | sed -n 's/.*clang version \([0-9]*\).*/\1/p' | head -n 1)
-          apt-get install -y --no-install-recommends "bolt-$v" "libclang-rt-$v-dev"
+          sudo apt-get install -y --no-install-recommends "bolt-$v" "libclang-rt-$v-dev"
       - name: Version the package
         env:
           RELEASE: ${{ inputs.release }}
         run: |
           # A release keeps its plain version; anything else names its commit.
-          # Container steps run under sh (dash), so no bash substrings.
           if [ -z "$RELEASE" ]; then
             echo "MC_PACKAGE_VERSION_SUFFIX=+git.$(date -u +%Y%m%d).$(echo "$GITHUB_SHA" | cut -c1-7)" >> "$GITHUB_ENV"
           fi
-      # trixie ships mimalloc 3.0.x and GLFW 3.4, both older than the
-      # pinned 3.5 series, so MC_DEPS=AUTO builds mimalloc 3.5.3 and GLFW
-      # 3.5.1 from source here (GLFW needs the X11 and Wayland headers).
       # ON: a package without PGO or BOLT fails the build instead of shipping.
-      - run: cmake --preset release -DMC_CPU=pi4 -DMC_DEPS=AUTO -DMC_WERROR=ON -DMC_PGO=ON -DMC_BOLT=ON -DMC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}"
-      - run: cmake --build --preset release
-      - run: ctest --preset release
-      - run: cd build/release && cpack -G DEB
+      - run: cmake --preset ci -DMC_CPU="${{ matrix.cpu }}" -DMC_PGO=ON -DMC_BOLT=ON -DMC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}"
+      - run: cmake --build --preset ci
+      - run: ctest --preset ci
+      - run: cd build/ci && cpack -G DEB
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ inputs.artifact-prefix }}-pi-arm64
-          path: build/release/*.deb
+          name: ${{ inputs.artifact-prefix }}-ubuntu-${{ matrix.arch }}
+          path: build/ci/*.deb
           if-no-files-found: error
           retention-days: 14
 
-  pi-armhf:
-    runs-on: ubuntu-26.04
-    container: debian:trixie
-    # The tests run under qemu-arm, several times slower than native.
-    timeout-minutes: 60
+  alpine:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-26.04, cpu: x86-64-v2 }
+          - { arch: aarch64, runner: ubuntu-26.04-arm, cpu: "" }
+    runs-on: ${{ matrix.runner }}
+    # mimalloc and GLFW build from source before the game.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
@@ -93,33 +99,39 @@ jobs:
           ref: ${{ inputs.release != '' && format('refs/tags/v{0}', inputs.release) || '' }}
           # Nothing here pushes: keep the token out of .git/config.
           persist-credentials: false
-      - name: Install packages
-        run: |
-          dpkg --add-architecture armhf
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            cmake ninja-build ca-certificates glslc qemu-user \
-            clang lld llvm libc6-dev:armhf libgcc-14-dev:armhf \
-            libvulkan-dev:armhf libsqlite3-dev:armhf libsodium-dev:armhf pkg-config libwayland-bin \
-            libx11-dev:armhf libxrandr-dev:armhf libxinerama-dev:armhf \
-            libxcursor-dev:armhf libxi-dev:armhf \
-            libwayland-dev:armhf libxkbcommon-dev:armhf
       - name: Version the package
         env:
           RELEASE: ${{ inputs.release }}
         run: |
           # A release keeps its plain version; anything else names its commit.
-          # Container steps run under sh (dash), so no bash substrings.
           if [ -z "$RELEASE" ]; then
             echo "MC_PACKAGE_VERSION_SUFFIX=+git.$(date -u +%Y%m%d).$(echo "$GITHUB_SHA" | cut -c1-7)" >> "$GITHUB_ENV"
           fi
-      - run: cmake --preset pi4-armhf -DMC_DEPS=AUTO -DMC_WERROR=ON -DMC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}"
-      - run: cmake --build --preset pi4-armhf
-      - run: ctest --preset pi4-armhf # unit + bench under qemu-arm
-      - run: cd build/pi4-armhf && cpack -G DEB
+      # Alpine's mimalloc 2.2 and GLFW 3.4 are older than the pinned 3.5
+      # series, so MC_DEPS=AUTO builds both from source (GLFW needs the X11
+      # and Wayland headers). The container runs as root on the checkout, so
+      # git is told the mounted tree is safe.
+      - name: Build, test and package in Alpine 3.24
+        env:
+          MC_CPU: ${{ matrix.cpu }}
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src \
+            -e MC_CPU -e MC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}" \
+            alpine:3.24 sh -euxc '
+              apk add --no-cache \
+                clang22 lld22 llvm compiler-rt musl-dev linux-headers cmake samurai pkgconf git ca-certificates \
+                shaderc vulkan-loader-dev vulkan-headers sqlite-dev libsodium-dev enet-dev miniupnpc-dev zlib-ng-dev \
+                libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev wayland-dev libxkbcommon-dev \
+                mesa-vulkan-swrast vulkan-validation-layers xvfb-run xauth
+              git config --global --add safe.directory /src
+              cmake --preset release -DMC_DEPS=AUTO -DMC_WERROR=ON -DMC_CPU="$MC_CPU" -DMC_PGO=ON -DMC_BOLT=OFF \
+                -DMC_PACKAGE_VERSION_SUFFIX="$MC_PACKAGE_VERSION_SUFFIX"
+              cmake --build --preset release
+              ctest --preset release
+              cd build/release && cpack -G TGZ'
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ inputs.artifact-prefix }}-pi-armhf
-          path: build/pi4-armhf/*.deb
+          name: ${{ inputs.artifact-prefix }}-alpine-${{ matrix.arch }}
+          path: build/release/*.tar.gz
           if-no-files-found: error
           retention-days: 14
