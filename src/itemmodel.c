@@ -50,13 +50,19 @@ static im_box *box(item_model *m, float x, float y, float z, float sx, float sy,
 }
 
 static void turn(im_box *b, float ax, float ay, float az, float a)
-{ b->rot = quat_norm(quat_mul(quat_axis(ax, ay, az, a), b->rot)); }
+{
+    quat q = quat_axis(ax, ay, az, a);
+    b->rot = quat_norm(quat_mul(q, b->rot));
+}
 
 /* ------------------------------------------------------------ tools */
 
 /* Tools stand head up: the handle runs up y from its foot at 0. */
 static void handle(item_model *m, float from, float to, float w)
-{ box(m, 0.0f, (from + to) * 0.5f, 0.0f, w, to - from, w, T_MAT_WOOD, ASH); }
+{
+    float mid = (from + to) * 0.5f;
+    box(m, 0.0f, mid, 0.0f, w, to - from, w, T_MAT_WOOD, ASH);
+}
 
 /* A stone head is lashed on with fibre, crossed over the handle. */
 static void lash(item_model *m, float y)
@@ -579,7 +585,10 @@ void itemmodel_centre(const item_model *m, float out[3])
 }
 
 float itemmodel_extent(const item_model *m)
-{ return fmaxf(m->hi[0] - m->lo[0], fmaxf(m->hi[1] - m->lo[1], m->hi[2] - m->lo[2])); }
+{
+    float x = m->hi[0] - m->lo[0];
+    return fmaxf(x, fmaxf(m->hi[1] - m->lo[1], m->hi[2] - m->lo[2]));
+}
 
 int itemmodel_place(const item_model *m, const float origin[3], const float at[3], quat rot, float scale, float light,
                     entity_instance *out, int max)

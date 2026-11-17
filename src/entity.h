@@ -19,7 +19,10 @@ typedef struct {
 
 /* The tint field for colour 0xRRGGBB. */
 static inline uint32_t entity_tint(uint32_t rgb)
-{ return (~rgb & 0xFF0000u) >> 16 | (~rgb & 0xFF00u) | (~rgb & 0xFFu) << 16; }
+{
+    uint32_t c = ~rgb;
+    return (c & 0xFF0000u) >> 16 | (c & 0xFF00u) | (c & 0xFFu) << 16;
+}
 
 /* Pixel art drawn to a box's size, as the creatures are. Without it every
  * face stretches its whole 16-texel layer, which suits items and blocks.

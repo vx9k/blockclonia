@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 
+/* clang-format off */
 static const item_def ITEMS[I_TOOL_FIRST - ITEM_FIRST] = {
     [I_STICK - ITEM_FIRST] = {.name = "Stick",
                               .stack = 64,
@@ -129,6 +130,7 @@ static const item_def ITEMS[I_TOOL_FIRST - ITEM_FIRST] = {
                                 .desc = "Apple brandy. A drink (H, then L), or to clean wounds.",
                                 .density = 950.0f},
 };
+/* clang-format on */
 
 /* The items after the tools, from I_RAW_TIN. Dropped minerals sink at the
  * density of the mineral, ingots at the metal's; charcoal is porous enough
