@@ -1,5 +1,6 @@
 /* The view model and the other animation state (viewmodel.c). */
 #include "item.h"
+#include "itemmodel.h"
 #include "test_util.h"
 #include "viewmodel.h"
 
@@ -133,18 +134,34 @@ static void test_vm_parts(void)
 
     in.held_id = I_APPLE;
     n = vm_run(&vm, &in, 0.5f, out);
-    CHECK(n == 3 && vm.shown_id == I_APPLE);
-    CHECK(out[HELD].tex == (uint32_t)T_ITEM_APPLE * 0x010101u);
-    CHECK(out[HELD].scale[2] < 0.05f && out[HELD].scale[0] > 0.2f); /* a thin card */
-    /* The card's face, not its edge, is toward the eye: the angle between
-     * its normal and the line of sight is under 60 degrees. */
-    float nz[3] = {0.0f, 0.0f, 1.0f}, r[3] = {0};
-    quat_apply(inst_q(&out[HELD]), nz, r);
-    float cosang = fabsf(r[0] * out[HELD].pos[0] + r[1] * out[HELD].pos[1] + r[2] * out[HELD].pos[2]) /
-                   sqrtf(out[HELD].pos[0] * out[HELD].pos[0] + out[HELD].pos[1] * out[HELD].pos[1] +
-                         out[HELD].pos[2] * out[HELD].pos[2]);
-    CHECK(cosang > 0.5f);
-    CHECK(vm_sane(out, n) && in_view(out[HELD].pos));
+    item_model apple = {0};
+    CHECK(itemmodel_build(I_APPLE, &apple));
+    CHECK(n == HELD + apple.n && vm.shown_id == I_APPLE);
+    /* The apple's own boxes, tinted, sized to sit in the palm, by the hand. */
+    float lo[3] = {9.0f, 9.0f, 9.0f}, hi[3] = {-9.0f, -9.0f, -9.0f};
+    for (int i = 0; i < apple.n; i++) {
+        CHECK(out[HELD + i].tex == (uint32_t)apple.box[i].layer * 0x010101u);
+        CHECK(out[HELD + i].tint == entity_tint(apple.box[i].rgb));
+        CHECK(in_view(out[HELD + i].pos) && dist3(out[HELD + i].pos, out[HAND].pos) < 0.25f);
+        for (int a = 0; a < 3; a++) {
+            lo[a] = fminf(lo[a], out[HELD + i].pos[a]);
+            hi[a] = fmaxf(hi[a], out[HELD + i].pos[a]);
+        }
+    }
+    float span = fmaxf(hi[0] - lo[0], fmaxf(hi[1] - lo[1], hi[2] - lo[2]));
+    CHECK(span > 0.02f && span < 0.2f);
+    CHECK(vm_sane(out, n));
+    /* A tool is held by its handle: its boxes run up and away from the hand,
+     * the head well beyond the grip. */
+    in.held_id = item_tool_id(TOOL_PICKAXE, TIER_IRON);
+    n = vm_run(&vm, &in, 0.5f, out);
+    item_model pick = {0};
+    CHECK(itemmodel_build(in.held_id, &pick));
+    CHECK(n == HELD + pick.n && vm_sane(out, n));
+    float reach = 0.0f;
+    for (int i = HELD; i < n; i++) reach = fmaxf(reach, dist3(out[i].pos, out[HAND].pos));
+    CHECK(reach > 0.25f && reach < 0.6f);
+    CHECK(dist3(out[HELD].pos, out[HAND].pos) < 0.25f); /* the handle in the hand */
 
     /* Brightness passes through; 0 means "not set" (full brightness). */
     in.light = 0.3f;
@@ -356,16 +373,18 @@ static void test_vm_motion(void)
     in.eating = 0.5f;
     ymin = 1.0f;
     ymax = -1.0f;
+    item_model apple = {0};
+    itemmodel_build(I_APPLE, &apple);
     int n3 = 1;
     for (int k = 0; k < 60; k++) {
-        n3 &= viewmodel_build(&vm, &in, out, VIEWMODEL_MAX) == 3;
+        n3 &= viewmodel_build(&vm, &in, out, VIEWMODEL_MAX) == HELD + apple.n;
         ymin = fminf(ymin, out[HELD].pos[1]);
         ymax = fmaxf(ymax, out[HELD].pos[1]);
     }
     CHECK(n3);
     CHECK(dist3(out[HELD].pos, mouth) < dist3(rest_out[HELD].pos, mouth) - 0.25f);
     CHECK(ymax - ymin > 0.01f);
-    CHECK(vm_sane(out, 3) && in_view(out[HELD].pos));
+    CHECK(vm_sane(out, HELD + apple.n) && in_view(out[HELD].pos));
     in.eating = 0.99f; /* on its way back down */
     viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
     CHECK(dist3(out[HELD].pos, rest_out[HELD].pos) < 0.05f);
@@ -411,8 +430,9 @@ static void test_vm_robust(void)
     int ok = 1, seen = 0, frames_up = 0;
     for (int i = 0; i < 6000; i++) {
         if (xs(&s) % 90u == 0u) {
-            static const item_id IDS[] = {0, B_STONE, B_GLASS, B_CAMPFIRE, I_STICK, I_APPLE, I_WATER_BUCKET, 99};
-            in.held_id = IDS[xs(&s) % 8u];
+            static const item_id IDS[] = {0,       B_STONE,        B_GLASS, B_CAMPFIRE, I_STICK,
+                                          I_APPLE, I_WATER_BUCKET, 99,      I_RIFLE};
+            in.held_id = IDS[xs(&s) % 9u];
         }
         in.dt = 0.004f + 0.04f * frnd(&s);
         in.stride = fmodf(in.stride + 6.0f * in.dt, 2.0f * (float)MC_PI);
@@ -424,7 +444,7 @@ static void test_vm_robust(void)
         in.look_dy = (frnd(&s) - 0.5f) * 20.0f * in.dt;
         in.eating = (i / 500) % 4 == 3 ? fmodf((float)(i % 500) / 200.0f, 1.0f) : 0.0f;
         n = viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
-        ok &= n >= 2 && n <= 3 && vm_sane(out, n);
+        ok &= n >= 2 && n <= VIEWMODEL_MAX && vm_sane(out, n);
         if (vm.equip >= 1.0f && in.eating == 0.0f) {
             frames_up++;
             for (int k = 1; k < n; k++) seen += in_view(out[k].pos);

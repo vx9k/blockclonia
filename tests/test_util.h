@@ -90,5 +90,6 @@ void test_materials_all(void);
 void test_strata_all(void);
 void test_fluid_all(void);
 void test_liquids_all(void);
+void test_itemmodel_all(void);
 
 #endif

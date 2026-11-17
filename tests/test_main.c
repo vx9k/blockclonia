@@ -2022,6 +2022,7 @@ int main(void)
     test_visual_all();
     test_sound_all();
     test_gpucaps_all();
+    test_itemmodel_all();
     test_light_all();
     test_lightfx_all();
     test_bloom_all();

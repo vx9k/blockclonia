@@ -66,6 +66,9 @@ static const uint32_t SPV_BLOCK_FRAG[] =
 static const uint32_t SPV_ENTITY_VERT[] =
 #include "entity.vert.inc"
 ;
+static const uint32_t SPV_ENTITY_FRAG[] =
+#include "entity.frag.inc"
+    ;
 static const uint32_t SPV_LINE_VERT[] =
 #include "line.vert.inc"
 ;
@@ -151,8 +154,8 @@ typedef struct {
     uint64_t serial;              /* frames submitted before the free */
 } pool_free;
 
-_Static_assert(sizeof(entity_instance) == 48, "entity_instance is the instance vertex layout");
-_Static_assert(T_FIRE0 == 32 && T_WATER == 14 && T_LEAVES == 8, "update the layer constants in push_vert.glsl");
+_Static_assert(sizeof(entity_instance) == 52, "entity_instance is the instance vertex layout");
+_Static_assert(T_FIRE0 == 22 && T_WATER == 14 && T_LEAVES == 8, "update the layer constants in push_vert.glsl");
 _Static_assert(TEX_SIZE == 16, "update TEXELS in block.frag");
 
 typedef struct {
@@ -195,7 +198,9 @@ _Static_assert(sizeof(push_bloom) == 48, "bloom.frag's BloomPush");
 #define PUSH_FRAG_OFFSET 96u
 _Static_assert(sizeof(push_vert) == PUSH_FRAG_OFFSET, "push_vert must end where push_frag starts");
 _Static_assert(PUSH_FRAG_OFFSET + sizeof(push_frag) <= 128, "maxPushConstantsSize is at least 128");
-_Static_assert(MAX_VIS * 16u + (MAX_BODIES + RENDER_MAX_ENTS + TORCH_PARTS * MAX_PROPS + 16) * sizeof(entity_instance) +
+_Static_assert(MAX_VIS * 16u +
+                       (MAX_BODIES + RENDER_MAX_ENTS + TORCH_PARTS * MAX_PROPS + RENDER_MAX_VIEW_MODEL) *
+                           sizeof(entity_instance) +
                        sizeof(sky_star) + 16 + DYN_LINES_BYTES + 64 <=
                    DYN_SIZE,
                "per-frame dynamic buffer too small");
@@ -1586,6 +1591,7 @@ static void create_pipelines(renderer *r)
     VkShaderModule bvs = make_module(r, SPV_BLOCK_VERT, sizeof SPV_BLOCK_VERT);
     VkShaderModule bfs = make_module(r, SPV_BLOCK_FRAG, sizeof SPV_BLOCK_FRAG);
     VkShaderModule evs = make_module(r, SPV_ENTITY_VERT, sizeof SPV_ENTITY_VERT);
+    VkShaderModule efs = make_module(r, SPV_ENTITY_FRAG, sizeof SPV_ENTITY_FRAG);
     VkShaderModule lvs = make_module(r, SPV_LINE_VERT, sizeof SPV_LINE_VERT);
     VkShaderModule lfs = make_module(r, SPV_LINE_FRAG, sizeof SPV_LINE_FRAG);
 
@@ -1619,13 +1625,14 @@ static void create_pipelines(renderer *r)
     /* Entities: a static unit cube instanced per body, item or particle. */
     VkVertexInputBindingDescription ent_bind[2] = {{0, sizeof(uint32_t), VK_VERTEX_INPUT_RATE_VERTEX},
                                                    {1, sizeof(entity_instance), VK_VERTEX_INPUT_RATE_INSTANCE}};
-    VkVertexInputAttributeDescription ent_attr[5] = {{0, 0, VK_FORMAT_R32_UINT, 0},
+    VkVertexInputAttributeDescription ent_attr[6] = {{0, 0, VK_FORMAT_R32_UINT, 0},
                                                      {1, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(entity_instance, pos)},
                                                      {2, 1, VK_FORMAT_R32_UINT, offsetof(entity_instance, tex)},
                                                      {3, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
                                                       offsetof(entity_instance, rot)},
                                                      {4, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
-                                                      offsetof(entity_instance, scale)}};
+                                                      offsetof(entity_instance, scale)},
+                                                     {5, 1, VK_FORMAT_R32_UINT, offsetof(entity_instance, tint)}};
     VkVertexInputBindingDescription line_bind = {0, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX};
     VkVertexInputAttributeDescription line_attr = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0};
 
@@ -1654,11 +1661,11 @@ static void create_pipelines(renderer *r)
     d.fspec = &fspec[2];
     r->p_glow = make_pipeline(r, &d);
     pipe_desc e = {evs,
-                   bfs,
+                   efs,
                    ent_bind,
                    2,
                    ent_attr,
-                   5,
+                   6,
                    VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
                    1,
                    1,
@@ -1726,6 +1733,7 @@ static void create_pipelines(renderer *r)
     vkDestroyShaderModule(r->dev, bvs, r->ac);
     vkDestroyShaderModule(r->dev, bfs, r->ac);
     vkDestroyShaderModule(r->dev, evs, r->ac);
+    vkDestroyShaderModule(r->dev, efs, r->ac);
     vkDestroyShaderModule(r->dev, lvs, r->ac);
     vkDestroyShaderModule(r->dev, lfs, r->ac);
 }
@@ -2806,13 +2814,12 @@ static void write_screenshot(renderer *r, const gbuf *b)
 }
 
 /* Texture layers with transparent texels, judged by an entity's side face
- * (the item sprites, glass, ice, water, cracks and flames). */
+ * (glass, ice, the liquids, the torch, cracks and flames). */
 static int layer_has_alpha(uint32_t tex)
 {
     uint32_t l = tex & 255u;
-    return l == T_GLASS || l == T_ICE || l == T_WATER || (l >= T_ITEM_STICK && l <= T_ITEM_WATER_BUCKET) ||
-           l == T_ITEM_DEFIBRILLATOR || (l >= T_ITEM_COAL && l <= T_ITEM_COOKED_MEAT) || l >= T_ITEM_GUNPOWDER ||
-           (l >= T_CRACK0 && l <= T_FIRE3);
+    return l == T_GLASS || l == T_ICE || l == T_WATER || l == T_MAT_GLASS || l == T_CRUDE_OIL || l == T_BRINE ||
+           l == T_ITEM_TORCH || (l >= T_CRACK0 && l <= T_FIRE3);
 }
 
 /* The terrain draws of a frame. With multi-draw indirect, consecutive draws
@@ -3360,7 +3367,8 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
                                                 (uint32_t)bd->tex[3] << 16,
                                             {b->rot[0], b->rot[1], b->rot[2], b->rot[3]},
                                             {1.0f, 1.0f, 1.0f},
-                                            light_at(w, p.x + 0.5, p.y + 0.5, p.z + 0.5, daylight)};
+                                            light_at(w, p.x + 0.5, p.y + 0.5, p.z + 0.5, daylight),
+                                            0};
         }
         for (int i = 0; i < r->torch_count; i++) insts[n_opaque++] = r->torch_insts[i];
         for (int i = 0; i < ng_o; i++) insts[n_opaque++] = v->ents[i];
@@ -3464,7 +3472,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     /* The view model: its own projection (a fixed 70 degree view, so a wide
      * FOV setting does not stretch the arm) over a cleared depth buffer, so
      * it never sinks into walls. */
-    int nvm = v->view_model ? clampi(v->view_model_count, 0, 16) : 0;
+    int nvm = v->view_model ? clampi(v->view_model_count, 0, RENDER_MAX_VIEW_MODEL) : 0;
     if (nvm) {
         VkDeviceSize vm_off = (line_off + DYN_LINES_BYTES + 63) & ~(VkDeviceSize)63;
         /* Solid parts first, then anything with transparent texels (item
