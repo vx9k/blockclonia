@@ -1576,6 +1576,51 @@ static void test_review_fixes(void)
     tw_free(&t);
 }
 
+static void test_mem(void)
+{
+    /* The version goes into the F3 screen and crash reports; 3.x and 2.x
+     * encode it differently (mem.c), so a wrong decode shows up here. */
+    char v[64] = {0};
+    mem_version_string(v, sizeof v);
+    if (strcmp(v, "libc") != 0) {
+        CHECK(strncmp(v, "mimalloc ", 9) == 0);
+        char *end = v + 9;
+        unsigned long major = strtoul(end, &end, 10);
+        CHECK(*end == '.');
+        unsigned long minor = strtoul(end + 1, &end, 10);
+        CHECK(*end == '.');
+        unsigned long patch = strtoul(end + 1, &end, 10);
+        CHECK(*end == '\0' && major >= 2 && major <= 9 && minor <= 99 && patch <= 99);
+    }
+    /* One value from each encoding mimalloc has used; 3208 came out as
+     * "32.0.8" when only two were known. */
+    static const struct {
+        int v;
+        const char *s;
+    } KNOWN[] = {{224, "mimalloc 2.2.4"},
+                 {3208, "mimalloc 3.2.8"},
+                 {3115, "mimalloc 3.1.15"},
+                 {30601, "mimalloc 3.6.1"},
+                 {30512, "mimalloc 3.5.12"}};
+    for (size_t i = 0; i < sizeof KNOWN / sizeof KNOWN[0]; i++) {
+        char s[64] = {0};
+        mem_format_mimalloc_version(KNOWN[i].v, s, sizeof s);
+        CHECK(strcmp(s, KNOWN[i].s) == 0);
+    }
+#ifndef MC_MEM_LIBC
+    /* 3.6 stopped over-allocating naturally aligned blocks; they must still
+     * come back aligned, and keep their contents through a realloc. */
+    for (size_t align = 16; align <= 4096; align *= 4) {
+        unsigned char *p = mem_alloc_aligned(align, align);
+        CHECK(((uintptr_t)p & (align - 1)) == 0);
+        memset(p, 0x5A, align);
+        p = mem_realloc_aligned(p, align * 3, align);
+        CHECK(((uintptr_t)p & (align - 1)) == 0 && p[0] == 0x5A && p[align - 1] == 0x5A);
+        mem_free(p);
+    }
+#endif
+}
+
 static void test_sysinfo(void)
 {
     /* Detection reads something on any machine the tests run on. */
@@ -1943,6 +1988,7 @@ int main(void)
     test_ui();
     test_settings();
     test_menu_worlds();
+    test_mem();
     test_sysinfo();
     test_settings_file();
     test_menu();
