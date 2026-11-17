@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include "bloom.h"
 #include "gpucaps.h"
 #include "gpupool.h"
 #include "light.h"
@@ -89,6 +90,9 @@ static const uint32_t SPV_STAR_VERT[] =
 static const uint32_t SPV_STAR_FRAG[] =
 #include "star.frag.inc"
     ;
+static const uint32_t SPV_BLOOM_FRAG[] =
+#include "bloom.frag.inc"
+    ;
 
 #define VK_CHECK(x)                                                              \
     do {                                                                         \
@@ -118,6 +122,7 @@ typedef struct {
     gbuf dyn;                     /* per-frame section origins, body instances, lines */
     gbuf ui;                      /* overlay quads, written in place by the game */
     int timed;                    /* its last submission wrote both timestamps */
+    int bloom_timed;              /* ... and the two around bloom */
     gbuf ind;                     /* multi-draw indirect commands for the terrain (GPUCAP_MDI) */
     uint32_t ind_cap;             /* commands ind holds; 0 without GPUCAP_MDI */
     gbuf lstage;                  /* light texels on their way to the atlas */
@@ -177,7 +182,15 @@ typedef struct {
 typedef struct {
     float texel[2];
     float radius, ghost; /* pixels */
+    float bloom;         /* how much of the blurred glow is added */
+    float pad[3];
 } push_post;
+
+typedef struct {
+    float step[2]; /* bloom.frag: a source pixel, or a texel along the blur */
+    float weight[BLOOM_TAPS], offset[BLOOM_TAPS];
+} push_bloom;
+_Static_assert(sizeof(push_bloom) == 48, "bloom.frag's BloomPush");
 
 #define PUSH_FRAG_OFFSET 96u
 _Static_assert(sizeof(push_vert) == PUSH_FRAG_OFFSET, "push_vert must end where push_frag starts");
@@ -233,9 +246,25 @@ struct renderer {
     VkFramebuffer scene_fb;
     VkRenderPass scene_pass;     /* VkRenderPass path: as `pass`, but left SHADER_READ_ONLY */
     VkSampler sampler_linear;
-    VkDescriptorSet post_dset;   /* from ui_dpool */
+    VkDescriptorSet post_dset;   /* the scene and bloom[0] */
     VkPipelineLayout post_layout;
     VkPipeline p_post;
+    /* Bloom (bloom.h): two quarter-resolution images the glow is blurred
+     * between, made with the scene image. The post pass's set layout has
+     * two images; the blur's sets read one image through both. */
+    VkImage bloom_img[2];
+    VkDeviceMemory bloom_mem[2];
+    VkImageView bloom_view[2];
+    VkFramebuffer bloom_fb[2];
+    VkExtent2D bloom_extent;
+    VkRenderPass bloom_pass; /* VkRenderPass path: one RGBA8 target, left SHADER_READ_ONLY */
+    VkDescriptorSetLayout post_dsl;
+    VkDescriptorPool post_dpool;
+    VkDescriptorSet bloom_dset[2]; /* reading bloom[0], bloom[1] */
+    VkPipeline p_glow, p_entity_glow, p_bloom_extract, p_bloom_blur;
+    uint32_t glow_mask[BLOOM_MASK_WORDS];
+    int bloom_mode; /* the setting */
+    bloom_auto bloom_auto;
 
     VkRenderPass pass;
     VkDescriptorSetLayout dsl;
@@ -988,13 +1017,96 @@ static void destroy_swap_resources(renderer *r)
     r->scene_view = VK_NULL_HANDLE;
     r->scene = VK_NULL_HANDLE;
     r->scene_mem = VK_NULL_HANDLE;
+    for (int i = 0; i < 2; i++) {
+        vkDestroyFramebuffer(r->dev, r->bloom_fb[i], r->ac);
+        vkDestroyImageView(r->dev, r->bloom_view[i], r->ac);
+        vkDestroyImage(r->dev, r->bloom_img[i], r->ac);
+        vkFreeMemory(r->dev, r->bloom_mem[i], r->ac);
+        r->bloom_fb[i] = VK_NULL_HANDLE;
+        r->bloom_view[i] = VK_NULL_HANDLE;
+        r->bloom_img[i] = VK_NULL_HANDLE;
+        r->bloom_mem[i] = VK_NULL_HANDLE;
+    }
+    /* A new size costs differently: Auto measures again. */
+    bloom_auto_reset(&r->bloom_auto);
 }
 
 /* Makes the blur's scene image at the swapchain's size, on the first frame
  * that needs it (one allocation, a one-off cost while play goes on). The
  * device is idle whenever it was last dropped, so rewriting post_dset
  * cannot touch a frame in flight. Returns 0 where the format can't do it. */
-static int scene_ready(renderer *r)
+/* An image for scene_ready: device local, sampled and drawn into. */
+static void post_image(renderer *r, VkFormat fmt, VkExtent2D ext, VkImage *img, VkDeviceMemory *mem, VkImageView *view)
+{
+    VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                            .imageType = VK_IMAGE_TYPE_2D,
+                            .format = fmt,
+                            .extent = {ext.width, ext.height, 1},
+                            .mipLevels = 1,
+                            .arrayLayers = 1,
+                            .samples = VK_SAMPLE_COUNT_1_BIT,
+                            .tiling = VK_IMAGE_TILING_OPTIMAL,
+                            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+    VK_CHECK(vkCreateImage(r->dev, &ii, r->ac, img));
+    VkMemoryRequirements req = {0};
+    vkGetImageMemoryRequirements(r->dev, *img, &req);
+    VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                               .allocationSize = req.size,
+                               .memoryTypeIndex = find_memtype(r, req.memoryTypeBits,
+                                                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0)};
+    VK_CHECK(vkAllocateMemory(r->dev, &ai, r->ac, mem));
+    VK_CHECK(vkBindImageMemory(r->dev, *img, *mem, 0));
+    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                .image = *img,
+                                .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                                .format = fmt,
+                                .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    VK_CHECK(vkCreateImageView(r->dev, &vi, r->ac, view));
+}
+
+/* Bloom's images, a quarter of the size, and the post sets. They start
+ * SHADER_READ_ONLY, as every frame leaves them, so the post pass may
+ * sample bloom[0] before bloom has ever run. Outside a render pass. */
+static void bloom_ready(renderer *r, VkCommandBuffer cmd)
+{
+    r->bloom_extent = (VkExtent2D){(r->extent.width + 3) / 4, (r->extent.height + 3) / 4};
+    for (int i = 0; i < 2; i++) {
+        post_image(r, VK_FORMAT_R8G8B8A8_UNORM, r->bloom_extent, &r->bloom_img[i], &r->bloom_mem[i], &r->bloom_view[i]);
+        if (r->bloom_pass) {
+            VkFramebufferCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+                                          .renderPass = r->bloom_pass,
+                                          .attachmentCount = 1,
+                                          .pAttachments = &r->bloom_view[i],
+                                          .width = r->bloom_extent.width,
+                                          .height = r->bloom_extent.height,
+                                          .layers = 1};
+            VK_CHECK(vkCreateFramebuffer(r->dev, &fi, r->ac, &r->bloom_fb[i]));
+        }
+        image_barrier(r, cmd, r->bloom_img[i], VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_UNDEFINED,
+                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, VK_ACCESS_SHADER_READ_BIT,
+                      VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    }
+    const VkImageView reads[3][2] = {{r->scene_view, r->bloom_view[0]},
+                                     {r->bloom_view[0], r->bloom_view[0]},
+                                     {r->bloom_view[1], r->bloom_view[1]}};
+    const VkDescriptorSet sets[3] = {r->post_dset, r->bloom_dset[0], r->bloom_dset[1]};
+    VkDescriptorImageInfo dii[3][2] = {{{0}}};
+    VkWriteDescriptorSet w[6] = {{0}};
+    for (int k = 0; k < 6; k++) {
+        dii[k / 2][k % 2] = (VkDescriptorImageInfo){r->sampler_linear, reads[k / 2][k % 2],
+                                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        w[k] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                      .dstSet = sets[k / 2],
+                                      .dstBinding = (uint32_t)(k % 2),
+                                      .descriptorCount = 1,
+                                      .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                      .pImageInfo = &dii[k / 2][k % 2]};
+    }
+    vkUpdateDescriptorSets(r->dev, 6, w, 0, NULL);
+}
+
+static int scene_ready(renderer *r, VkCommandBuffer cmd)
 {
     if (!r->scene_ok) return 0;
     if (r->scene) return 1;
@@ -1034,14 +1146,7 @@ static int scene_ready(renderer *r)
                                       .layers = 1};
         VK_CHECK(vkCreateFramebuffer(r->dev, &fi, r->ac, &r->scene_fb));
     }
-    VkDescriptorImageInfo dii = {r->sampler_linear, r->scene_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet w = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                              .dstSet = r->post_dset,
-                              .dstBinding = 0,
-                              .descriptorCount = 1,
-                              .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                              .pImageInfo = &dii};
-    vkUpdateDescriptorSets(r->dev, 1, &w, 0, NULL);
+    bloom_ready(r, cmd);
     return 1;
 }
 
@@ -1265,6 +1370,46 @@ static VkRenderPass create_render_pass(renderer *r, int scene)
     return p;
 }
 
+/* Bloom's quarter-resolution targets: written whole (nothing loaded),
+ * after the reads of the last use (this frame's blur or the previous
+ * frame's post pass) and left for the next one to sample. */
+static VkRenderPass create_bloom_pass(renderer *r)
+{
+    VkAttachmentDescription att = {.format = VK_FORMAT_R8G8B8A8_UNORM,
+                                   .samples = VK_SAMPLE_COUNT_1_BIT,
+                                   .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                                   .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                                   .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                                   .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                                   .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                                   .finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkAttachmentReference cref = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription sub = {.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                .colorAttachmentCount = 1,
+                                .pColorAttachments = &cref};
+    VkSubpassDependency dep[2] = {{.srcSubpass = VK_SUBPASS_EXTERNAL,
+                                   .dstSubpass = 0,
+                                   .srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                   .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                   .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT},
+                                  {.srcSubpass = 0,
+                                   .dstSubpass = VK_SUBPASS_EXTERNAL,
+                                   .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                   .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                   .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                                   .dstAccessMask = VK_ACCESS_SHADER_READ_BIT}};
+    VkRenderPassCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+                                 .attachmentCount = 1,
+                                 .pAttachments = &att,
+                                 .subpassCount = 1,
+                                 .pSubpasses = &sub,
+                                 .dependencyCount = 2,
+                                 .pDependencies = dep};
+    VkRenderPass p = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateRenderPass(r->dev, &ci, r->ac, &p));
+    return p;
+}
+
 /* Pipelines build from the cache file of the last run where it was written
  * by this driver on this device; the file is untrusted, so anything torn,
  * oversized or foreign (gpucaps_pipeline_cache_load) starts an empty
@@ -1330,10 +1475,13 @@ typedef struct {
     const VkVertexInputAttributeDescription *attrs;
     uint32_t attr_count;
     VkPrimitiveTopology topology;
-    int depth_test, depth_write, blend; /* blend 1: alpha, 2: added (light) */
+    int depth_test, depth_write, blend; /* blend 1: alpha, 2: added (light), 3: glow (alpha only) */
     VkCullModeFlags cull;
     VkPipelineLayout layout;      /* 0: the world layout */
     const VkSpecializationInfo *vspec;
+    const VkSpecializationInfo *fspec;
+    VkFormat color_fmt; /* 0: the swapchain's, with depth; else this alone, for `pass` */
+    VkRenderPass pass;
 } pipe_desc;
 
 static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
@@ -1347,7 +1495,8 @@ static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
          .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
          .module = d->fs,
-         .pName = "main"},
+         .pName = "main",
+         .pSpecializationInfo = d->fspec},
     };
     VkPipelineVertexInputStateCreateInfo vin = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
                                                 .vertexBindingDescriptionCount = d->binding_count,
@@ -1368,16 +1517,20 @@ static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
                                                 .depthTestEnable = (VkBool32)d->depth_test,
                                                 .depthWriteEnable = (VkBool32)d->depth_write,
                                                 .depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL};
+    /* Alpha holds bloom's glow (block.frag): a blended surface dims the
+     * glow behind it by its coverage, added light keeps the larger glow,
+     * and the glow pass writes nothing else. */
     VkPipelineColorBlendAttachmentState cba = {
         .blendEnable = (VkBool32)(d->blend != 0),
         .srcColorBlendFactor = d->blend == 2 ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_SRC_ALPHA,
         .dstColorBlendFactor = d->blend == 2 ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
         .colorBlendOp = VK_BLEND_OP_ADD,
-        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-        .alphaBlendOp = VK_BLEND_OP_ADD,
-        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
-                          VK_COLOR_COMPONENT_A_BIT};
+        .srcAlphaBlendFactor = d->blend == 1 ? VK_BLEND_FACTOR_ZERO : VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = d->blend == 1 ? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA : VK_BLEND_FACTOR_ONE,
+        .alphaBlendOp = d->blend >= 2 ? VK_BLEND_OP_MAX : VK_BLEND_OP_ADD,
+        .colorWriteMask = d->blend == 3 ? VK_COLOR_COMPONENT_A_BIT
+                                        : VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                              VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT};
     VkPipelineColorBlendStateCreateInfo cb = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
                                               .attachmentCount = 1, .pAttachments = &cba};
     VkDynamicState dyn[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
@@ -1387,8 +1540,8 @@ static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
      * (no stencil attachment; the depth format may carry one, unused). */
     VkPipelineRenderingCreateInfo rend = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
                                           .colorAttachmentCount = 1,
-                                          .pColorAttachmentFormats = &r->swap_fmt,
-                                          .depthAttachmentFormat = r->depth_fmt};
+                                          .pColorAttachmentFormats = d->color_fmt ? &d->color_fmt : &r->swap_fmt,
+                                          .depthAttachmentFormat = d->color_fmt ? VK_FORMAT_UNDEFINED : r->depth_fmt};
     VkGraphicsPipelineCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
                                        .pNext = r->begin_rendering ? &rend : NULL,
                                        .stageCount = 2,
@@ -1402,7 +1555,7 @@ static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
                                        .pColorBlendState = &cb,
                                        .pDynamicState = &dy,
                                        .layout = d->layout ? d->layout : r->layout,
-                                       .renderPass = r->pass,
+                                       .renderPass = d->pass ? d->pass : r->pass,
                                        .subpass = 0};
     VkPipeline p = VK_NULL_HANDLE;
     VK_CHECK(vkCreateGraphicsPipelines(r->dev, r->pcache, 1, &ci, r->ac, &p));
@@ -1453,6 +1606,17 @@ static void create_pipelines(renderer *r)
                                       {1, sizeof(float), sizeof(float)},
                                       {2, 2 * sizeof(float), sizeof(float)}};
     VkSpecializationInfo spec = {3, se, sizeof inv, inv};
+    /* block.frag: the glowing layers, then what alpha holds (opaque,
+     * blended, the glow pass). */
+    uint32_t fconst[3][BLOOM_MASK_WORDS + 1] = {{0}};
+    VkSpecializationMapEntry fe[BLOOM_MASK_WORDS + 1] = {{0}};
+    for (uint32_t i = 0; i <= BLOOM_MASK_WORDS; i++) fe[i] = (VkSpecializationMapEntry){i, i * 4u, 4u};
+    VkSpecializationInfo fspec[3] = {{0}};
+    for (uint32_t m = 0; m < 3; m++) {
+        memcpy(fconst[m], r->glow_mask, sizeof r->glow_mask);
+        fconst[m][BLOOM_MASK_WORDS] = m;
+        fspec[m] = (VkSpecializationInfo){BLOOM_MASK_WORDS + 1, fe, sizeof fconst[m], fconst[m]};
+    }
     /* Entities: a static unit cube instanced per body, item or particle. */
     VkVertexInputBindingDescription ent_bind[2] = {{0, sizeof(uint32_t), VK_VERTEX_INPUT_RATE_VERTEX},
                                                    {1, sizeof(entity_instance), VK_VERTEX_INPUT_RATE_INSTANCE}};
@@ -1478,11 +1642,18 @@ static void create_pipelines(renderer *r)
                    0,
                    VK_CULL_MODE_BACK_BIT,
                    VK_NULL_HANDLE,
-                   &spec};
+                   &spec,
+                   &fspec[0],
+                   VK_FORMAT_UNDEFINED,
+                   VK_NULL_HANDLE};
     r->p_opaque = make_pipeline(r, &d);
     d.depth_write = 0;
     d.blend = 1;
+    d.fspec = &fspec[1];
     r->p_trans = make_pipeline(r, &d);
+    d.blend = 3;
+    d.fspec = &fspec[2];
+    r->p_glow = make_pipeline(r, &d);
     pipe_desc e = {evs,
                    bfs,
                    ent_bind,
@@ -1495,11 +1666,18 @@ static void create_pipelines(renderer *r)
                    0,
                    VK_CULL_MODE_BACK_BIT,
                    VK_NULL_HANDLE,
-                   &spec};
+                   &spec,
+                   &fspec[0],
+                   VK_FORMAT_UNDEFINED,
+                   VK_NULL_HANDLE};
     r->p_entity = make_pipeline(r, &e);
     e.depth_write = 0;
     e.blend = 1;
+    e.fspec = &fspec[1];
     r->p_entity_trans = make_pipeline(r, &e);
+    e.blend = 3;
+    e.fspec = &fspec[2];
+    r->p_entity_glow = make_pipeline(r, &e);
     pipe_desc l = {lvs,
                    lfs,
                    &line_bind,
@@ -1512,7 +1690,10 @@ static void create_pipelines(renderer *r)
                    0,
                    VK_CULL_MODE_NONE,
                    VK_NULL_HANDLE,
-                   NULL};
+                   NULL,
+                   NULL,
+                   VK_FORMAT_UNDEFINED,
+                   VK_NULL_HANDLE};
     r->p_line_world = make_pipeline(r, &l);
     l.depth_test = 0;
     r->p_line_screen = make_pipeline(r, &l);
@@ -1535,7 +1716,10 @@ static void create_pipelines(renderer *r)
                     2,
                     VK_CULL_MODE_NONE,
                     VK_NULL_HANDLE,
-                    NULL};
+                    NULL,
+                    NULL,
+                    VK_FORMAT_UNDEFINED,
+                    VK_NULL_HANDLE};
     r->p_star = make_pipeline(r, &sd);
     vkDestroyShaderModule(r->dev, svs, r->ac);
     vkDestroyShaderModule(r->dev, sfs, r->ac);
@@ -1571,23 +1755,70 @@ static void create_ui_pipeline(renderer *r)
     VkVertexInputAttributeDescription attr[3] = {{0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(ui_vertex, x)},
                                                  {1, 0, VK_FORMAT_R16G16_UNORM, offsetof(ui_vertex, u)},
                                                  {2, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(ui_vertex, rgba)}};
-    pipe_desc d = {
-        vs, fs, &bind, 1, attr, 3, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, 0, 1, VK_CULL_MODE_NONE, r->ui_layout, NULL};
+    pipe_desc d = {vs,
+                   fs,
+                   &bind,
+                   1,
+                   attr,
+                   3,
+                   VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                   0,
+                   0,
+                   1,
+                   VK_CULL_MODE_NONE,
+                   r->ui_layout,
+                   NULL,
+                   NULL,
+                   VK_FORMAT_UNDEFINED,
+                   VK_NULL_HANDLE};
     r->p_ui = make_pipeline(r, &d);
     vkDestroyShaderModule(r->dev, vs, r->ac);
     vkDestroyShaderModule(r->dev, fs, r->ac);
 
-    /* The blur: one image-sampler set, like the font's, and its own
+    /* The blur and bloom: two images (the post pass's scene and glow) and
      * fragment-stage constants; no vertex input. */
-    VkPushConstantRange ppr = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push_post)};
+    VkDescriptorSetLayoutBinding pb[2] = {b, b};
+    pb[1].binding = 1;
+    dl.bindingCount = 2;
+    dl.pBindings = pb;
+    VK_CHECK(vkCreateDescriptorSetLayout(r->dev, &dl, r->ac, &r->post_dsl));
+    VkPushConstantRange ppr = {VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                               sizeof(push_bloom) > sizeof(push_post) ? sizeof(push_bloom) : sizeof(push_post)};
+    pl.pSetLayouts = &r->post_dsl;
     pl.pPushConstantRanges = &ppr;
     VK_CHECK(vkCreatePipelineLayout(r->dev, &pl, r->ac, &r->post_layout));
     vs = make_module(r, SPV_POST_VERT, sizeof SPV_POST_VERT);
     fs = make_module(r, SPV_POST_FRAG, sizeof SPV_POST_FRAG);
-    pipe_desc p = {
-        vs,  fs, NULL, 0, NULL, 0, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, 0, 0, VK_CULL_MODE_NONE, r->post_layout,
-        NULL};
+    pipe_desc p = {vs,
+                   fs,
+                   NULL,
+                   0,
+                   NULL,
+                   0,
+                   VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                   0,
+                   0,
+                   0,
+                   VK_CULL_MODE_NONE,
+                   r->post_layout,
+                   NULL,
+                   NULL,
+                   VK_FORMAT_UNDEFINED,
+                   VK_NULL_HANDLE};
     r->p_post = make_pipeline(r, &p);
+    vkDestroyShaderModule(r->dev, fs, r->ac);
+    /* bloom.frag into the quarter-resolution images: extract, then blur. */
+    fs = make_module(r, SPV_BLOOM_FRAG, sizeof SPV_BLOOM_FRAG);
+    uint32_t mode[2] = {0, 1};
+    VkSpecializationMapEntry me = {0, 0, sizeof(uint32_t)};
+    VkSpecializationInfo ms[2] = {{1, &me, sizeof mode[0], &mode[0]}, {1, &me, sizeof mode[1], &mode[1]}};
+    p.fs = fs;
+    p.color_fmt = VK_FORMAT_R8G8B8A8_UNORM;
+    p.pass = r->bloom_pass;
+    p.fspec = &ms[0];
+    r->p_bloom_extract = make_pipeline(r, &p);
+    p.fspec = &ms[1];
+    r->p_bloom_blur = make_pipeline(r, &p);
     vkDestroyShaderModule(r->dev, vs, r->ac);
     vkDestroyShaderModule(r->dev, fs, r->ac);
 }
@@ -1722,22 +1953,33 @@ static void create_font(renderer *r)
                                 .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
     VK_CHECK(vkCreateImageView(r->dev, &vi, r->ac, &r->font_view));
 
-    /* Two sets: the font, and the blur's scene image (written by scene_ready). */
-    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2};
+    /* The font's set; the post pass's are in post_dpool. */
+    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
     VkDescriptorPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-                                     .maxSets = 2,
+                                     .maxSets = 1,
                                      .poolSizeCount = 1,
                                      .pPoolSizes = &ps};
     VK_CHECK(vkCreateDescriptorPool(r->dev, &pi, r->ac, &r->ui_dpool));
-    VkDescriptorSetLayout layouts[2] = {r->ui_dsl, r->ui_dsl};
-    VkDescriptorSet sets[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
     VkDescriptorSetAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                                        .descriptorPool = r->ui_dpool,
-                                       .descriptorSetCount = 2,
-                                       .pSetLayouts = layouts};
+                                       .descriptorSetCount = 1,
+                                       .pSetLayouts = &r->ui_dsl};
+    VK_CHECK(vkAllocateDescriptorSets(r->dev, &dai, &r->ui_dset));
+    /* Three two-image sets, written by scene_ready: the post pass's (the
+     * scene, bloom[0]; bloom's extract reads the scene through it too) and
+     * one per blur pass. */
+    ps.descriptorCount = 6;
+    pi.maxSets = 3;
+    VK_CHECK(vkCreateDescriptorPool(r->dev, &pi, r->ac, &r->post_dpool));
+    VkDescriptorSetLayout layouts[3] = {r->post_dsl, r->post_dsl, r->post_dsl};
+    VkDescriptorSet sets[3] = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
+    dai.descriptorPool = r->post_dpool;
+    dai.descriptorSetCount = 3;
+    dai.pSetLayouts = layouts;
     VK_CHECK(vkAllocateDescriptorSets(r->dev, &dai, sets));
-    r->ui_dset = sets[0];
-    r->post_dset = sets[1];
+    r->post_dset = sets[0];
+    r->bloom_dset[0] = sets[1];
+    r->bloom_dset[1] = sets[2];
     /* The blur samples between pixels and must not wrap at the screen's edges. */
     VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
                               .magFilter = VK_FILTER_LINEAR,
@@ -2142,26 +2384,33 @@ static void create_queries(renderer *r)
     if (!(r->caps.enabled & GPUCAP_TIMESTAMPS)) return;
     VkQueryPoolCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
                                 .queryType = VK_QUERY_TYPE_TIMESTAMP,
-                                .queryCount = FRAMES * 2};
+                                .queryCount = FRAMES * 4};
     VK_CHECK(vkCreateQueryPool(r->dev, &qi, r->ac, &r->queries));
     /* 1.2 core, so loaded rather than linked. */
     r->reset_queries = (PFN_vkResetQueryPool)vkGetDeviceProcAddr(r->dev, "vkResetQueryPool");
     if (!r->reset_queries) log_fatal("the Vulkan driver has no vkResetQueryPool");
-    r->reset_queries(r->dev, r->queries, 0, FRAMES * 2);
+    r->reset_queries(r->dev, r->queries, 0, FRAMES * 4);
 }
 
 /* Called once the slot's frame has finished, so the results are there. */
 static void read_gpu_time(renderer *r, frame *f)
 {
-    uint32_t q = (uint32_t)(f - r->frames) * 2;
+    uint32_t q = (uint32_t)(f - r->frames) * 4;
     if (f->timed) {
-        uint64_t t[2] = {0};
-        if (vkGetQueryPoolResults(r->dev, r->queries, q, 2, sizeof t, t, sizeof t[0], VK_QUERY_RESULT_64_BIT) ==
-            VK_SUCCESS)
+        uint64_t t[4] = {0};
+        uint32_t n = f->bloom_timed ? 4 : 2;
+        if (vkGetQueryPoolResults(r->dev, r->queries, q, n, sizeof t, t, sizeof t[0], VK_QUERY_RESULT_64_BIT) ==
+            VK_SUCCESS) {
             r->gpu_ms = (float)((double)((t[1] - t[0]) & r->caps.timestamp_mask) * r->caps.timestamp_ms_per_tick);
-        r->reset_queries(r->dev, r->queries, q, 2);
+            float bloom_ms = (float)((double)((t[3] - t[2]) & r->caps.timestamp_mask) * r->caps.timestamp_ms_per_tick);
+            if (f->bloom_timed && r->bloom_mode == BLOOM_AUTO && bloom_auto_add(&r->bloom_auto, bloom_ms))
+                log_info("bloom (auto): %.3f ms a frame at %ux%u, %s", (double)r->bloom_auto.median, r->extent.width,
+                         r->extent.height, r->bloom_auto.on ? "kept on" : "turned off (over 0.3 ms)");
+        }
+        r->reset_queries(r->dev, r->queries, q, 4);
     }
     f->timed = 0;
+    f->bloom_timed = 0;
 }
 
 static void create_frames(renderer *r, uint32_t pool_mb)
@@ -2297,6 +2546,7 @@ static int on_mesh_ready(void *user, column *c, int sy, const uint32_t *verts, c
     m->vtx_capacity = got;
     m->opaque_quads = mc->opaque;
     m->trans_quads = mc->trans;
+    m->glow = (uint8_t)bloom_quads_glow(verts + mc->opaque * 4u, mc->trans, r->glow_mask);
     memcpy(m->face_end, mc->face_end, sizeof m->face_end);
     m->block = (uint8_t)blk;
     m->light_slot = light_upload(r, f, x);
@@ -2321,6 +2571,9 @@ renderer *renderer_create(GLFWwindow *win, const render_opts *o)
     r->vsync = o->vsync;
     r->filtering = !!o->filtering;
     r->smooth_light = !!o->smooth_light;
+    r->bloom_mode = o->bloom;
+    bloom_auto_reset(&r->bloom_auto);
+    bloom_glow_mask(r->glow_mask);
     r->radius = o->render_radius < 32 ? o->render_radius : 32;
     r->shot_usage = o->screenshots;
 
@@ -2333,6 +2586,7 @@ renderer *renderer_create(GLFWwindow *win, const render_opts *o)
     if (!r->begin_rendering) {
         r->pass = create_render_pass(r, 0);
         r->scene_pass = create_render_pass(r, 1);
+        r->bloom_pass = create_bloom_pass(r);
     }
     VkFormatProperties fp = {0};
     vkGetPhysicalDeviceFormatProperties(r->pd, r->swap_fmt, &fp);
@@ -2417,13 +2671,19 @@ void renderer_destroy(renderer *r)
     vkDestroyPipeline(r->dev, r->p_ui, r->ac);
     vkDestroyPipelineLayout(r->dev, r->ui_layout, r->ac);
     vkDestroyPipeline(r->dev, r->p_post, r->ac);
+    vkDestroyPipeline(r->dev, r->p_bloom_extract, r->ac);
+    vkDestroyPipeline(r->dev, r->p_bloom_blur, r->ac);
     vkDestroyPipelineLayout(r->dev, r->post_layout, r->ac);
+    vkDestroyDescriptorPool(r->dev, r->post_dpool, r->ac);
+    vkDestroyDescriptorSetLayout(r->dev, r->post_dsl, r->ac);
     vkDestroySampler(r->dev, r->sampler_linear, r->ac);
     vkDestroyDescriptorSetLayout(r->dev, r->ui_dsl, r->ac);
     vkDestroyPipeline(r->dev, r->p_opaque, r->ac);
     vkDestroyPipeline(r->dev, r->p_trans, r->ac);
     vkDestroyPipeline(r->dev, r->p_entity, r->ac);
     vkDestroyPipeline(r->dev, r->p_entity_trans, r->ac);
+    vkDestroyPipeline(r->dev, r->p_glow, r->ac);
+    vkDestroyPipeline(r->dev, r->p_entity_glow, r->ac);
     vkDestroyPipeline(r->dev, r->p_line_world, r->ac);
     vkDestroyPipeline(r->dev, r->p_star, r->ac);
     buffer_destroy(r, &r->stars);
@@ -2437,6 +2697,7 @@ void renderer_destroy(renderer *r)
     vkDestroySwapchainKHR(r->dev, r->swap, r->ac);
     vkDestroyRenderPass(r->dev, r->pass, r->ac);
     vkDestroyRenderPass(r->dev, r->scene_pass, r->ac);
+    vkDestroyRenderPass(r->dev, r->bloom_pass, r->ac);
     vkDestroyPipelineCache(r->dev, r->pcache, r->ac);
     vkDestroyDevice(r->dev, r->ac);
     vkDestroySurfaceKHR(r->inst, r->surf, r->ac);
@@ -2461,6 +2722,13 @@ void renderer_set_vsync(renderer *r, int on)
 
 void renderer_set_filtering(renderer *r, int enabled) { r->filtering = !!enabled; }
 void renderer_set_smooth_light(renderer *r, int enabled) { r->smooth_light = !!enabled; }
+
+void renderer_set_bloom(renderer *r, int mode)
+{
+    /* Choosing Auto again measures again. */
+    if (mode == BLOOM_AUTO && r->bloom_mode != BLOOM_AUTO) bloom_auto_reset(&r->bloom_auto);
+    r->bloom_mode = mode;
+}
 
 const char *renderer_device_name(const renderer *r) { return r->props.deviceName; }
 
@@ -2747,6 +3015,73 @@ static void end_pass(const renderer *r, VkCommandBuffer cmd, int scene)
                   VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 }
 
+/* Starts (begin 1) or ends drawing into bloom image i. With dynamic
+ * rendering the barriers do what create_bloom_pass's dependencies do. */
+static void bloom_target(const renderer *r, VkCommandBuffer cmd, int i, int begin)
+{
+    if (!r->begin_rendering) {
+        if (!begin) {
+            vkCmdEndRenderPass(cmd);
+            return;
+        }
+        VkRenderPassBeginInfo rp = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+                                    .renderPass = r->bloom_pass,
+                                    .framebuffer = r->bloom_fb[i],
+                                    .renderArea = {{0, 0}, r->bloom_extent}};
+        vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
+        return;
+    }
+    if (!begin) {
+        r->end_rendering(cmd);
+        image_barrier(r, cmd, r->bloom_img[i], VK_IMAGE_ASPECT_COLOR_BIT, 1, 1,
+                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        return;
+    }
+    image_barrier(r, cmd, r->bloom_img[i], VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+    VkRenderingAttachmentInfo color = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                                       .imageView = r->bloom_view[i],
+                                       .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                       .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                                       .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
+    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                          .renderArea = {{0, 0}, r->bloom_extent},
+                          .layerCount = 1,
+                          .colorAttachmentCount = 1,
+                          .pColorAttachments = &color};
+    r->begin_rendering(cmd, &ri);
+}
+
+/* Bloom from the finished scene image: its glowing pixels into bloom[0],
+ * blurred across into bloom[1] and down into bloom[0], which the post pass
+ * adds. Leaves the viewport and scissor at the bloom size. */
+static void draw_bloom(const renderer *r, VkCommandBuffer cmd)
+{
+    VkViewport vp = {0, 0, (float)r->bloom_extent.width, (float)r->bloom_extent.height, 0.0f, 1.0f};
+    VkRect2D sc = {{0, 0}, r->bloom_extent};
+    push_bloom pb = {0};
+    bloom_kernel(BLOOM_SIGMA, pb.weight, pb.offset);
+    const float steps[3][2] = {{1.0f / (float)r->extent.width, 1.0f / (float)r->extent.height},
+                               {1.0f / (float)r->bloom_extent.width, 0.0f},
+                               {0.0f, 1.0f / (float)r->bloom_extent.height}};
+    const VkDescriptorSet reads[3] = {r->post_dset, r->bloom_dset[0], r->bloom_dset[1]};
+    for (int k = 0; k < 3; k++) {
+        int dst = k == 1;
+        bloom_target(r, cmd, dst, 1);
+        vkCmdSetViewport(cmd, 0, 1, &vp);
+        vkCmdSetScissor(cmd, 0, 1, &sc);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, k ? r->p_bloom_blur : r->p_bloom_extract);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->post_layout, 0, 1, &reads[k], 0, NULL);
+        memcpy(pb.step, steps[k], sizeof pb.step);
+        vkCmdPushConstants(cmd, r->post_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pb, &pb);
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+        bloom_target(r, cmd, dst, 0);
+    }
+}
+
 /* Submits the frame's command buffer: it waits for the acquired image and
  * signals render_done for the present and the frame's serial on the
  * timeline. */
@@ -2824,7 +3159,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     VK_CHECK(vkBeginCommandBuffer(cmd, &bi));
-    uint32_t query = (uint32_t)r->frame_index * 2;
+    uint32_t query = (uint32_t)r->frame_index * 4;
     if (r->queries) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, r->queries, query);
 
     int copied = 0;
@@ -2881,9 +3216,13 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     /* The sky behind everything keeps its colour when the fog darkens in a cave. */
     for (int i = 0; i < 3; i++) clears[0].color.float32[i] = r->swap_srgb ? srgb_to_linear(sky[i]) : sky[i];
     if (v->underwater) memcpy(clears[0].color.float32, pf.color, 3 * sizeof(float));
-    clears[0].color.float32[3] = 1.0f;
+    /* Bloom draws the world through the scene image, whose alpha marks the
+     * glow: the sky starts with none. Auto measures it with timestamps. */
+    int bloom = r->scene_ok && bloom_active(r->bloom_mode, &r->bloom_auto, r->queries != VK_NULL_HANDLE);
+    int post = (v->blur > 0.01f || v->doubled > 0.01f || bloom) && scene_ready(r, cmd);
+    bloom = bloom && post;
+    clears[0].color.float32[3] = bloom ? 0.0f : 1.0f;
     clears[1].depthStencil = (VkClearDepthStencilValue){0.0f, 0}; /* reversed Z */
-    int post = (v->blur > 0.01f || v->doubled > 0.01f) && scene_ready(r);
     begin_pass(r, cmd, clears, post);
     VkViewport viewport = {0, 0, (float)r->extent.width, (float)r->extent.height, 0.0f, 1.0f};
     VkRect2D scissor = {{0, 0}, r->extent};
@@ -3012,6 +3351,29 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         st.draw_calls++;
     }
 
+    /* Bloom's glow pass: lava and flames are blended, so their alpha above
+     * was coverage; their glow goes into alpha alone, here. Only sections
+     * holding any are drawn twice. */
+    if (bloom) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_glow);
+        vkCmdBindVertexBuffers(cmd, 1, 1, &f->dyn.buf, &zero);
+        tp.bound = -1;
+        for (int i = nvis - 1; i >= 0; i--) {
+            const section_mesh *m = r->vis[i].m;
+            if (!m->trans_quads || !m->glow) continue;
+            pass_draw(&tp, m->block, m->vtx_offset + m->opaque_quads * 4, m->trans_quads, (uint32_t)i);
+        }
+        pass_flush(&tp);
+        if (n_trans) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_entity_glow);
+            VkBuffer bufs[2] = {r->cube.buf, f->dyn.buf};
+            VkDeviceSize offs[2] = {0, ent_off};
+            vkCmdBindVertexBuffers(cmd, 0, 2, bufs, offs);
+            vkCmdDrawIndexed(cmd, 36, (uint32_t)n_trans, 0, 0, (uint32_t)(total - n_trans));
+            st.draw_calls++;
+        }
+    }
+
     /* Selection outline and crosshair. */
     dyn_used = (dyn_used + 15) & ~(VkDeviceSize)15;
     float *lines = (float *)(dyn + dyn_used);
@@ -3090,6 +3452,11 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
             vkCmdBindVertexBuffers(cmd, 0, 2, bufs, offs);
             vkCmdDrawIndexed(cmd, 36, (uint32_t)vm_cards, 0, 0, (uint32_t)vm_solid);
             st.draw_calls++;
+            if (bloom) { /* a held torch's flames: as the glow pass above */
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_entity_glow);
+                vkCmdDrawIndexed(cmd, 36, (uint32_t)vm_cards, 0, 0, (uint32_t)vm_solid);
+                st.draw_calls++;
+            }
         }
         vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buf, &line_off); /* the crosshair's vertices */
     }
@@ -3100,17 +3467,33 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
      * it looks the same at any resolution; the two images drift slowly
      * apart and together as the eyes try to fuse them. */
     if (post) {
+        /* Bloom's cost, for Auto: everything between the world and the
+         * frame on screen that drawing straight to it would not do. */
+        int timed = bloom && r->queries;
+        if (timed) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, r->queries, query + 2);
         end_pass(r, cmd, 1);
+        if (bloom) {
+            draw_bloom(r, cmd);
+            st.draw_calls += 3;
+        }
         begin_pass(r, cmd, clears, 0);
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
         float px = (float)r->extent.height / 1080.0f;
         push_post pp = {{1.0f / (float)r->extent.width, 1.0f / (float)r->extent.height},
                         clampf(v->blur, 0.0f, 1.0f) * 7.0f * px,
-                        clampf(v->doubled, 0.0f, 1.0f) * 40.0f * px * (0.8f + 0.2f * sinf(v->time * 0.9f))};
+                        clampf(v->doubled, 0.0f, 1.0f) * 40.0f * px * (0.8f + 0.2f * sinf(v->time * 0.9f)),
+                        bloom ? BLOOM_STRENGTH : 0.0f,
+                        {0.0f, 0.0f, 0.0f}};
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_post);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->post_layout, 0, 1, &r->post_dset, 0, NULL);
         vkCmdPushConstants(cmd, r->post_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pp, &pp);
         vkCmdDraw(cmd, 3, 1, 0, 0);
         st.draw_calls++;
+        if (timed) {
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, r->queries, query + 3);
+            f->bloom_timed = 1;
+        }
     }
     if (!v->hide_crosshair) {
         push_vert cp = {0};

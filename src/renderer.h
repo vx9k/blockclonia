@@ -33,6 +33,7 @@ typedef struct {
     int screenshots;     /* a screenshot is planned: readable swapchain from the start */
     int filtering;       /* trilinear + up to 8x anisotropic minification (see renderer_set_filtering) */
     int smooth_light;    /* see renderer_set_smooth_light */
+    int bloom;           /* BLOOM_OFF, BLOOM_ON or BLOOM_AUTO (bloom.h) */
     /* Pipeline cache file, kept between runs so pipelines build faster.
      * NULL: "blockclonia.pipelines" in the working directory; "": none. */
     const char *pipeline_cache;
@@ -126,6 +127,9 @@ void renderer_set_filtering(renderer *r, int enabled);
 /* On, light blends across each face from the cells around its corners; off,
  * a face takes the light of the cell in front of it, in flat steps. */
 void renderer_set_smooth_light(renderer *r, int enabled);
+/* BLOOM_OFF, BLOOM_ON or BLOOM_AUTO, which keeps bloom on where the GPU's
+ * timestamps show it costing under BLOOM_BUDGET_MS (off without them). */
+void renderer_set_bloom(renderer *r, int mode);
 const char *renderer_device_name(const renderer *r);
 /* "Vulkan 1.3: multi-draw indirect, dynamic rendering, ...": the API
  * version in use and the optional features the renderer turned on. */

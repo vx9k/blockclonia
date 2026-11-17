@@ -1,4 +1,5 @@
 /* Unit tests for the engine core (no GPU, no window). */
+#include "bloom.h"
 #include "camera.h"
 #include "debug.h"
 #include "fx.h"
@@ -1674,6 +1675,7 @@ static void test_settings(void)
     s.volume_body = 0;
     s.mute_unfocused = 0;
     s.smooth_light = 0;
+    s.bloom = BLOOM_ON;
     int n = settings_format(&s, buf, (int)sizeof buf);
     CHECK(n > 0 && n < (int)sizeof buf);
     CHECK(strstr(buf, "smooth_light 0\n") != NULL); /* saved under its key */
@@ -1692,6 +1694,11 @@ static void test_settings(void)
     CHECK(settings_parse(&t, "smooth_light 2\n") == 0 && t.smooth_light == 0);
     settings_default(&t);
     CHECK(settings_parse(&t, "fov 80\nbrightness 10\n") == 2 && t.smooth_light == 1);
+    /* Bloom starts on Auto and takes Off, On and Auto only. */
+    CHECK(t.bloom == BLOOM_AUTO);
+    CHECK(settings_parse(&t, "bloom 0\n") == 1 && t.bloom == BLOOM_OFF);
+    CHECK(settings_parse(&t, "bloom 1\n") == 1 && t.bloom == BLOOM_ON);
+    CHECK(settings_parse(&t, "bloom 3\nbloom -1\n") == 0 && t.bloom == BLOOM_ON);
     /* A tiny buffer truncates instead of overflowing. */
     char tiny[8] = {0};
     CHECK(settings_format(&s, tiny, (int)sizeof tiny) == 7 && tiny[7] == '\0');
@@ -2017,6 +2024,7 @@ int main(void)
     test_gpucaps_all();
     test_light_all();
     test_lightfx_all();
+    test_bloom_all();
     test_png_all();
     test_health_debug_all();
     test_defib_all();

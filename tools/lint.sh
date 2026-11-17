@@ -36,11 +36,11 @@ cppcheck --project="$out/clang/compile_commands.json" --enable=all --inconclusiv
   --template='{file}:{line}: {severity}: {message} [{id}]' || fail=1
 
 step "shaders (glslc -Werror, cross-stage link)"
-for s in block.vert block.frag entity.vert line.vert line.frag ui.vert ui.frag star.vert star.frag; do
+for s in block.vert block.frag entity.vert line.vert line.frag ui.vert ui.frag star.vert star.frag post.vert post.frag bloom.frag; do
   glslc -Werror -O --target-env=vulkan1.2 -I "$src/shaders" -o /dev/null "$src/shaders/$s" || fail=1
 done
 if command -v glslangValidator >/dev/null; then
-  for pair in "block.vert block.frag" "entity.vert block.frag" "line.vert line.frag" "ui.vert ui.frag" "star.vert star.frag"; do
+  for pair in "block.vert block.frag" "entity.vert block.frag" "line.vert line.frag" "ui.vert ui.frag" "star.vert star.frag" "post.vert post.frag" "post.vert bloom.frag"; do
     (cd "$src/shaders" && glslangValidator -V --target-env vulkan1.2 -l $pair -o /dev/null >/dev/null) \
       || { echo "link failed: $pair"; fail=1; }
   done
