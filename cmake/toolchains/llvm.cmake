@@ -1,7 +1,6 @@
 # The LLVM toolchain blockclonia builds with: clang, lld and LLVM's
 # binutils (llvm-ar, llvm-ranlib, llvm-nm, llvm-objcopy, llvm-strip).
-# CMakeLists.txt uses it whenever no other toolchain file is given; the
-# Raspberry Pi toolchains include it after naming their target.
+# CMakeLists.txt uses it whenever no other toolchain file is given.
 #
 # One toolchain everywhere means one set of warnings and one LTO format:
 # clang's ThinLTO bitcode needs LLVM's archiver and linker, which is why ar,

@@ -2,7 +2,6 @@
 # CMakePresets.json for the supported configurations (`cmake --list-presets`).
 cmake_minimum_required(VERSION 3.21...3.31)
 # Every build uses LLVM (cmake/toolchains/llvm.cmake): clang, lld, llvm-ar.
-# The Raspberry Pi toolchains include it themselves.
 if(NOT CMAKE_TOOLCHAIN_FILE)
   set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/toolchains/llvm.cmake")
 endif()
@@ -13,12 +12,13 @@ project(blockclonia
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-# clang 14 is Debian bookworm's, the oldest toolchain CI builds with.
+# clang 21 is Ubuntu 26.04's, the oldest toolchain CI builds with (Alpine has
+# 22, Xcode reports AppleClang and is not checked here).
 if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
   message(FATAL_ERROR "blockclonia builds with clang (LLVM), not ${CMAKE_C_COMPILER_ID}; see BUILDING.md")
 endif()
-if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_VERSION VERSION_LESS 14)
-  message(FATAL_ERROR "clang ${CMAKE_C_COMPILER_VERSION} is too old: blockclonia needs clang 14 or newer")
+if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_VERSION VERSION_LESS 21)
+  message(FATAL_ERROR "clang ${CMAKE_C_COMPILER_VERSION} is too old: blockclonia needs clang 21 or newer")
 endif()
 
 set(CMAKE_C_STANDARD 11)
@@ -42,8 +42,8 @@ option(MC_LTO         "Link-time optimisation in Release/MinSizeRel builds" ON)
 option(MC_WERROR      "Treat compiler and shader warnings as errors (CI)" OFF)
 option(MC_NATIVE      "Deprecated alias for MC_CPU=native" OFF)
 set(MC_CPU "" CACHE STRING
-  "CPU to optimise for: empty = compiler default, native, pi4, pi5, x86-64-v2, x86-64-v3")
-set_property(CACHE MC_CPU PROPERTY STRINGS "" native pi4 pi5 x86-64-v2 x86-64-v3)
+  "CPU to optimise for: empty = compiler default, native, x86-64-v2, x86-64-v3")
+set_property(CACHE MC_CPU PROPERTY STRINGS "" native x86-64-v2 x86-64-v3)
 set(MC_DISCORD_APP_ID "" CACHE STRING
   "Discord application ID for the status the player can turn on (empty: no Discord status)")
 if(NOT MC_DISCORD_APP_ID MATCHES "^[0-9]*$")
@@ -65,40 +65,18 @@ set_property(CACHE MC_PGO PROPERTY STRINGS OFF ON AUTO)
 if(MC_NATIVE)
   set(MC_CPU native)
 endif()
-# Decide arm32 vs arm64 from the compiler, not the kernel: 32-bit Raspberry
-# Pi OS on a Pi 4/5 runs a 64-bit kernel, so CMAKE_SYSTEM_PROCESSOR says
-# "aarch64" while gcc produces armhf code.
-set(MC_ARM32 OFF)
 set(MC_ARM64 OFF)
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|arm)")
-  if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-    set(MC_ARM64 ON)
-  else()
-    set(MC_ARM32 ON)
-  endif()
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)")
+  set(MC_ARM64 ON)
 endif()
 
 set(MC_CPU_FLAGS "")
 if(MC_CPU STREQUAL "")
 elseif(MC_CPU STREQUAL "native")
-  if(MC_ARM32 OR MC_ARM64)
+  if(MC_ARM64)
     set(MC_CPU_FLAGS -mcpu=native)
   else()
     set(MC_CPU_FLAGS -march=native)
-  endif()
-elseif(MC_CPU MATCHES "^pi[45]$")
-  if(MC_CPU STREQUAL "pi4")
-    set(_core cortex-a72)
-  else()
-    set(_core cortex-a76)
-  endif()
-  if(MC_ARM64)
-    set(MC_CPU_FLAGS -mcpu=${_core})
-  elseif(MC_ARM32)
-    # V3DV (the Pi's Vulkan driver) only exists on Pi 4/5, so NEON is safe.
-    set(MC_CPU_FLAGS -mcpu=${_core} -mfpu=neon-fp-armv8 -mfloat-abi=hard)
-  else()
-    message(FATAL_ERROR "MC_CPU=${MC_CPU} needs an ARM compiler (use a cmake/toolchains/rpi-*.cmake toolchain)")
   endif()
 elseif(MC_CPU MATCHES "^x86-64-v[234]$")
   set(MC_CPU_FLAGS -march=${MC_CPU} -mtune=generic)
@@ -232,6 +210,14 @@ if(MC_BUILD_GAME)
     add_executable(blockclonia src/main.c src/renderer.c src/audio_null.c)
   endif()
   target_link_libraries(blockclonia PRIVATE mccore Vulkan::Vulkan mc::glfw mc_warnings)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # musl (Alpine) gives threads it didn't size a 128 KB stack, and takes a
+    # bigger default only from the program's PT_GNU_STACK header. Mesa starts
+    # its shader-compiler threads that way, and LLVM's AArch64 backend
+    # overflowed 128 KB compiling lavapipe's first pipeline. glibc sizes such
+    # threads from RLIMIT_STACK (8 MB) and ignores this header.
+    target_link_options(blockclonia PRIVATE LINKER:-z,stack-size=8388608)
+  endif()
   target_compile_definitions(blockclonia PRIVATE MC_DISCORD_APP_ID="${MC_DISCORD_APP_ID}")
   if(MC_VK_MIMALLOC AND NOT MC_MEM_LIBC)
     # renderer.c's VkAllocationCallbacks; libc builds (sanitizer, fuzz) lack the aligned mem_* calls.

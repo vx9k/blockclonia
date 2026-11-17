@@ -27,49 +27,27 @@ set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
 set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_CURRENT_LIST_DIR}/CPackOptions.cmake")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 
-# The package file names the target, not the build machine.
+# The package file names the target, not the build machine: Debian's
+# architecture names for the .deb, Alpine's (the kernel's) for its tarball.
 if(MC_ARM64)
   set(_arch arm64)
-elseif(MC_ARM32)
-  set(_arch armhf)
-elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
-  set(_arch amd64)
 else()
-  set(_arch i386)
+  set(_arch amd64)
 endif()
 set(CPACK_SYSTEM_NAME "${CMAKE_SYSTEM_NAME}-${_arch}")
 
-if(APPLE)
+if(EXISTS /etc/alpine-release)
+  # A tarball of /usr: the binary links Alpine's musl and its packages.
+  set(CPACK_SYSTEM_NAME "alpine-${CMAKE_SYSTEM_PROCESSOR}")
+  set(CPACK_GENERATOR TGZ)
+elseif(APPLE)
   set(CPACK_GENERATOR TGZ)
 else()
   set(CPACK_GENERATOR TGZ DEB)
   set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE ${_arch})
   set(CPACK_DEBIAN_PACKAGE_SECTION games)
   set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
-  find_program(MC_DPKG_SHLIBDEPS dpkg-shlibdeps)
-  if(MC_DPKG_SHLIBDEPS AND NOT CMAKE_CROSSCOMPILING)
-    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON) # exact Depends: from the binary
-  else()
-    # Cross builds: dpkg-shlibdeps cannot inspect foreign binaries.
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libvulkan1")
-    if(mimalloc_FOUND) # system (shared) mimalloc; a fetched one is linked in
-      if(mimalloc_VERSION VERSION_LESS 3.0)
-        string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", libmimalloc2.0")
-      else()
-        string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", libmimalloc3")
-      endif()
-    endif()
-    if(glfw3_FOUND)
-      string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", libglfw3")
-    endif()
-    if(MC_SQLITE_SYSTEM)
-      string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", libsqlite3-0")
-    endif()
-    string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", libsodium23")
-    if(MC_ENET_LIBRARY)
-      string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", libenet7")
-    endif()
-  endif()
+  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON) # exact Depends: from the binary, through dpkg-shlibdeps
   set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "mesa-vulkan-drivers | vulkan-icd")
 endif()
 

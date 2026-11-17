@@ -419,7 +419,7 @@ on older Mesa takes.
 ## Building
 
 [BUILDING.md](BUILDING.md) has the requirements, the steps for Debian,
-Ubuntu, Arch, the Raspberry Pi and macOS, the build presets, and
+Ubuntu, Alpine, Arch and macOS, the build presets, and
 troubleshooting. The build uses LLVM throughout (clang, lld, and PGO
 and BOLT for release builds when they are installed). In short, on Debian or Ubuntu:
 
@@ -680,7 +680,7 @@ src/mem.c         mimalloc wrappers    src/log.c       logging, save-on-fatal ho
 src/bench.c       --bench
 shaders/          GLSL, compiled to SPIR-V and embedded at build time
 tests/            unit tests and the save-file fuzzers
-cmake/            dependencies, shaders, warnings, packaging, Pi toolchains
+cmake/            dependencies, shaders, warnings, packaging, toolchain
 tools/lint.sh     the lint gate CI runs
 tools/release.*   the weekly release (version, changelog, tag, publish)
 tools/pr_check.py the pull request rules (title, test ratio)

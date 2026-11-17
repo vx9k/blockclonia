@@ -268,6 +268,14 @@ class Publish(unittest.TestCase):
         for arch in arches:
             (self.work / 'dist' / f'blockclonia_26.11.1_{arch}.deb').write_text('')
 
+    def tarballs(self, *arches):
+        for arch in arches:
+            (self.work / 'dist' / f'blockclonia-26.11.1-alpine-{arch}.tar.gz').write_text('')
+
+    def every_package(self):
+        self.debs('amd64', 'arm64')
+        self.tarballs('x86_64', 'aarch64')
+
     def publish(self):
         return subprocess.run(['bash', 'tools/release.sh', 'publish'], cwd=self.work, env=self.env,
                               capture_output=True, text=True)
@@ -276,30 +284,49 @@ class Publish(unittest.TestCase):
         return self.calls.read_text().splitlines() if self.calls.exists() else []
 
     def test_a_new_release_is_drafted_filled_and_then_published(self):
-        self.debs('arm64', 'armhf')
+        self.every_package()
         run = self.publish()
         self.assertEqual(run.returncode, 0, run.stderr)
         calls = self.gh_calls()
         self.assertTrue(calls[1].startswith('release create v26.11.1 --draft --verify-tag'))
-        self.assertIn('blockclonia_26.11.1_arm64.deb', calls[2])
-        self.assertIn('blockclonia_26.11.1_armhf.deb', calls[2])
+        for name in ['blockclonia_26.11.1_amd64.deb', 'blockclonia_26.11.1_arm64.deb',
+                     'blockclonia-26.11.1-alpine-x86_64.tar.gz', 'blockclonia-26.11.1-alpine-aarch64.tar.gz']:
+            self.assertIn(name, calls[2])
         self.assertEqual(calls[3], 'release edit v26.11.1 --draft=false --latest')
         self.assertEqual((self.tmp / 'notes.md').read_text(), '## 26.11.1 — 2026-11-16\n\n- Notes.\n')
 
     def test_a_missing_package_stops_before_github_is_touched(self):
         self.debs('arm64')
+        self.tarballs('x86_64', 'aarch64')
+        self.assertNotEqual(self.publish().returncode, 0)
+        self.assertEqual(self.gh_calls(), [])
+
+    def test_the_debs_alone_are_not_a_release(self):
+        # Alpine is a supported platform: a release without its tarballs
+        # would leave it out.
+        self.debs('amd64', 'arm64')
+        self.tarballs('x86_64')
+        run = self.publish()
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('Alpine tarballs', run.stderr)
+        self.assertEqual(self.gh_calls(), [])
+
+    def test_another_versions_packages_do_not_count(self):
+        self.debs('amd64', 'arm64')
+        self.tarballs('x86_64')
+        (self.work / 'dist' / 'blockclonia-26.11.0-alpine-aarch64.tar.gz').write_text('')
         self.assertNotEqual(self.publish().returncode, 0)
         self.assertEqual(self.gh_calls(), [])
 
     def test_a_rerun_fills_an_existing_draft_without_creating_another(self):
-        self.debs('arm64', 'armhf')
+        self.every_package()
         self.releases.write_text('[{"tag_name": "v26.11.1", "draft": true}]')
         self.assertEqual(self.publish().returncode, 0)
         self.assertFalse(any(call.startswith('release create') for call in self.gh_calls()))
         self.assertIn('release edit v26.11.1 --draft=false --latest', self.gh_calls())
 
     def test_a_published_release_is_left_alone(self):
-        self.debs('arm64', 'armhf')
+        self.every_package()
         self.releases.write_text('[{"tag_name": "v26.11.1", "draft": false}]')
         self.assertEqual(self.publish().returncode, 0)
         self.assertEqual(len(self.gh_calls()), 1)

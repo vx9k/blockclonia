@@ -2,28 +2,22 @@
 #
 # Every build uses LLVM (clang, lld, llvm-ar; cmake/toolchains/llvm.cmake).
 #
-#   linux     Ubuntu 26.04, Release flags with ThinLTO, PGO and BOLT,
-#             -Werror, system packages only; unit tests, --bench, and a
-#             120-frame render on Mesa lavapipe (software Vulkan) under Xvfb
-#             with validation, all on the optimised binary.
-#   old-vulkan-ubuntu, old-vulkan-debian
-#             the build and tests against the oldest Vulkan headers the
-#             code supports: 1.3.275 (Ubuntu 24.04, system packages) and
-#             1.3.239 (Debian bookworm), so the VK_API_VERSION_1_4 guards
-#             keep compiling.
+#   package   Ubuntu 26.04 and Alpine Linux, each on x86_64 and arm64:
+#             the optimised build, unit tests, --bench and a 120-frame render
+#             on Mesa lavapipe (software Vulkan) under Xvfb with validation,
+#             then a .deb or tarball (package.yml).
 #   sanitize  ASan + UBSan.
 #   lint      tools/lint.sh: clang-tidy, cppcheck, shader checks, and
 #             clang-format on the lines this change touches; and the tests
 #             of the CI and release tools.
-#   package   the Raspberry Pi .debs (package.yml).
-#   macos     experimental: the game through MoltenVK (Homebrew) and the
-#             unit tests on Apple Silicon, plus a best-effort render.
+#   macos     the game through MoltenVK (Homebrew) and the unit tests on
+#             Apple Silicon, plus a best-effort render.
 #   ci-passed the one check the ruleset requires; it stands for the rest.
-#   nightly   on pushes to main that pass, publishes the .debs as a
+#   nightly   on pushes to main that pass, publishes the packages as a
 #             nightly-<date>-<commit> prerelease and prunes the older ones.
 #   release   weekly: versions, tags and publishes the checked main
 #             revision (tools/release.sh), with release-package and
-#             release-publish building and attesting its .debs.
+#             release-publish building and attesting its packages.
 name: CI
 
 on:
@@ -49,74 +43,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  linux:
-    runs-on: ubuntu-26.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          # Nothing here pushes: keep the token out of .git/config.
-          persist-credentials: false
-      - name: Install packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang lld llvm \
-            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev libminiupnpc-dev zlib1g-dev \
-            mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
-          # BOLT and clang's profile runtime (for PGO) come per LLVM version
-          # (bolt-21 and libclang-rt-21-dev for clang 21).
-          v=$(clang --version | sed -n 's/.*clang version \([0-9]*\).*/\1/p' | head -n 1)
-          sudo apt-get install -y --no-install-recommends "bolt-$v" "libclang-rt-$v-dev"
-      # ON: fail here, not quietly skip, if PGO or BOLT cannot run.
-      - run: cmake --preset ci -DMC_PGO=ON -DMC_BOLT=ON
-      - run: cmake --build --preset ci
-      - run: ctest --preset ci
-
-  old-vulkan-ubuntu:
-    runs-on: ubuntu-24.04 # Vulkan headers 1.3.275, GLFW 3.3, mimalloc 2.1
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          # Nothing here pushes: keep the token out of .git/config.
-          persist-credentials: false
-      - name: Install packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang lld llvm \
-            ninja-build glslc libvulkan-dev libglfw3-dev libmimalloc-dev libsqlite3-dev libsodium-dev libenet-dev libminiupnpc-dev zlib1g-dev \
-            mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
-      - run: cmake --preset ci
-      - run: cmake --build --preset ci
-      - run: ctest --preset ci
-
-  old-vulkan-debian:
-    runs-on: ubuntu-26.04
-    container: debian:bookworm # Vulkan headers 1.3.239
-    # mimalloc and GLFW build from source before the game.
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          # Nothing here pushes: keep the token out of .git/config.
-          persist-credentials: false
-      - name: Install packages
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            clang lld llvm libc6-dev cmake ninja-build ca-certificates glslc \
-            libvulkan-dev libsqlite3-dev libsodium-dev pkg-config \
-            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev libwayland-bin libxkbcommon-dev \
-            mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
-      # bookworm's mimalloc 2.0 is too old even for MC_DEPS=SYSTEM, so AUTO
-      # builds the pinned mimalloc and GLFW from source, as pi-arm64 does.
-      - run: cmake --preset release -DMC_DEPS=AUTO -DMC_WERROR=ON
-      - run: cmake --build --preset release
-      - run: ctest --preset release
-
   sanitize:
     runs-on: ubuntu-26.04
     # Instrumented tests run a few times slower; GLFW and mimalloc build too.
@@ -174,9 +100,6 @@ jobs:
 
   macos:
     runs-on: macos-26
-    # Experimental: a failure here neither fails the run nor blocks a merge,
-    # so ci-passed does not wait for it.
-    continue-on-error: true
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -219,11 +142,11 @@ jobs:
           if-no-files-found: ignore
 
   # The one check the ruleset needs from this workflow: it fails unless every
-  # job above succeeded (macos aside), so a new job is required as soon as it
+  # job above succeeded, so a new job is required as soon as it
   # is listed here, and a skipped or cancelled one cannot pass for green.
   ci-passed:
     name: CI passed
-    needs: [linux, old-vulkan-ubuntu, old-vulkan-debian, sanitize, lint, package]
+    needs: [sanitize, lint, package, macos]
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -309,7 +232,7 @@ jobs:
         id: prepare
         run: bash tools/release.sh prepare
 
-  # The release's own .debs, built from its tag so they carry its version.
+  # The release's own packages, built from its tag so they carry its version.
   release-package:
     needs: [release]
     if: needs.release.outputs.version != ''
@@ -346,7 +269,9 @@ jobs:
       - name: Attest the release packages
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: dist/blockclonia_*.deb
+          subject-path: |
+            dist/blockclonia_*.deb
+            dist/blockclonia-*.tar.gz
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
