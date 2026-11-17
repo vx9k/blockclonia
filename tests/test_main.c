@@ -1585,6 +1585,21 @@ static void test_mem(void)
     unsigned major = 0, minor = 0, patch = 0;
     CHECK(strcmp(v, "libc") == 0 || sscanf(v, "mimalloc %u.%u.%u", &major, &minor, &patch) == 3);
     CHECK(major <= 9 && minor <= 99 && patch <= 99);
+    /* One value from each encoding mimalloc has used; 3208 came out as
+     * "32.0.8" when only two were known. */
+    static const struct {
+        int v;
+        const char *s;
+    } KNOWN[] = {{224, "mimalloc 2.2.4"},
+                 {3208, "mimalloc 3.2.8"},
+                 {3115, "mimalloc 3.1.15"},
+                 {30601, "mimalloc 3.6.1"},
+                 {30512, "mimalloc 3.5.12"}};
+    for (size_t i = 0; i < sizeof KNOWN / sizeof KNOWN[0]; i++) {
+        char s[64] = {0};
+        mem_format_mimalloc_version(KNOWN[i].v, s, sizeof s);
+        CHECK(strcmp(s, KNOWN[i].s) == 0);
+    }
 #ifndef MC_MEM_LIBC
     /* 3.6 stopped over-allocating naturally aligned blocks; they must still
      * come back aligned, and keep their contents through a realloc. */

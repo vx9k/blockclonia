@@ -86,15 +86,22 @@ void mem_process_info(size_t *rss, size_t *commit)
 #endif
 }
 
+void mem_format_mimalloc_version(int v, char *buf, size_t n)
+{
+    /* The encoding changed twice: 2.x is major*100 + minor*10 + patch (224),
+     * early 3.x major*1000 + minor*100 + patch (3208, Ubuntu 26.04's 3.2.8),
+     * and 3.6 on major*10000 + minor*100 + patch (30601). */
+    if (v >= 10000) snprintf(buf, n, "mimalloc %d.%d.%d", v / 10000, v / 100 % 100, v % 100);
+    else if (v >= 1000) snprintf(buf, n, "mimalloc %d.%d.%d", v / 1000, v / 100 % 10, v % 100);
+    else snprintf(buf, n, "mimalloc %d.%d.%d", v / 100, v / 10 % 10, v % 10);
+}
+
 void mem_version_string(char *buf, size_t n)
 {
 #ifdef MC_MEM_LIBC
     snprintf(buf, n, "libc");
 #else
-    /* 2.x reports major*100 + minor*10 + patch; 3.x major*10000 + minor*100 + patch. */
-    int v = mi_version();
-    if (v >= 10000) snprintf(buf, n, "mimalloc %d.%d.%d", v / 10000, v / 100 % 100, v % 100);
-    else snprintf(buf, n, "mimalloc %d.%d.%d", v / 100, v / 10 % 10, v % 10);
+    mem_format_mimalloc_version(mi_version(), buf, n);
 #endif
 }
 
