@@ -64,7 +64,7 @@ int survival_water_nearby(const world *w, const player *p, vec3 dir);
 
 /* The first water cell along a ray (buckets), stopping at solid blocks.
  * Returns 1 and the cell if found. */
-int survival_find_water(const world *w, dvec3 eye, vec3 dir, double reach, ipos *out);
+int survival_find_liquid(const world *w, dvec3 eye, vec3 dir, double reach, ipos *out);
 
 /* The player file: position, view, fly mode, the time of day (0..1) and
  * the inventory. decode

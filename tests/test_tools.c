@@ -238,6 +238,9 @@ static void test_materials(void)
         [B_ROCK_SALT] = {TOOL_PICKAXE, TIER_WOOD, MAT_STONE, 1.0f, 0.3f},
         [B_QUARTZ_ORE] = {TOOL_PICKAXE, TIER_IRON, MAT_STONE, 1.0f, 0.4f},
         [B_GRAPHITE_ORE] = {TOOL_PICKAXE, TIER_WOOD, MAT_STONE, 1.0f, 0.3f},
+        [B_LAVA] = {-1, -1, MAT_WATER, 1.0f, 0.0f},
+        [B_CRUDE_OIL] = {-1, -1, MAT_WATER, 1.0f, 0.0f},
+        [B_BRINE] = {-1, -1, MAT_WATER, 1.0f, 0.0f},
     };
     int bad = 0;
     for (int b = 0; b < B_COUNT; b++) {

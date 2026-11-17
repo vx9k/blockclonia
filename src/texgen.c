@@ -339,16 +339,35 @@ static const recolour MINERAL_ART[T_ITEM_MINERALS_END - T_ITEM_RAW_TIN] = {
     LUMP(C(15, 15, 15), C(35, 33, 32), C(80, 78, 76), C(25, 24, 24)), /* charcoal */
     HEAP(C(215, 213, 205), C(250, 250, 245)), /* quicklime */
 };
-#undef C
 #undef LUMP
 #undef INGOT
 #undef HEAP
+
+/* The other liquids' buckets: the water bucket with what is in it. */
+#define BUCKET(q, Q)                                                                                 \
+    {                                                                                                \
+        T_ITEM_WATER_BUCKET,                                                                         \
+        {                                                                                            \
+            {'#', C(70, 70, 76)}, {'b', C(110, 80, 45)}, {'q', q}, {'Q', Q}, {'w', C(170, 128, 76)}, \
+            { 'h', C(130, 136, 146) }                                                                \
+        }                                                                                            \
+    }
+static const recolour BUCKET_ART[] = {
+    BUCKET(C(25, 20, 15), C(70, 60, 50)),    /* crude oil */
+    BUCKET(C(60, 110, 150), C(225, 230, 235)), /* brine, a crust of salt */
+};
+#undef BUCKET
+#undef C
 
 static int sprite_texel(int layer, int x, int y, rgba *out)
 {
     if (tool_texel(layer, x, y, out)) return 1;
     int shape = layer;
     const pal_entry *pal = NULL;
+    if (layer >= T_ITEM_OIL_BUCKET && layer <= T_ITEM_BRINE_BUCKET) {
+        shape = BUCKET_ART[layer - T_ITEM_OIL_BUCKET].shape;
+        pal = BUCKET_ART[layer - T_ITEM_OIL_BUCKET].pal;
+    }
     if (layer >= T_ITEM_RAW_TIN && layer < T_ITEM_MINERALS_END) {
         shape = MINERAL_ART[layer - T_ITEM_RAW_TIN].shape;
         pal = MINERAL_ART[layer - T_ITEM_RAW_TIN].pal;
@@ -570,6 +589,14 @@ static rgba texel(int layer, int x, int y)
     case T_SNOW: return shade(240, 245, 250, 255, n / 3);
     case T_ICE: return shade(160, 190, 250, 190, n / 2);
     case T_WATER: return shade(30, 75, 185, 195, n / 2);
+    case T_LAVA: {
+        /* Glowing melt under a broken, darker skin that has started to
+         * cool: a coarse hash picks the skin plates. */
+        int skin = hash2i(0x1A7Au, x / 3, y / 3) % 5 == 0;
+        return skin ? shade(120, 35, 15, 255, n / 2) : shade(245, 120 + n, 25, 255, n / 3);
+    }
+    case T_CRUDE_OIL: return shade(28, 22, 16, 240, n / 4);
+    case T_BRINE: return shade(55, 105, 150, 205, n / 2);
     default: return (rgba){255, 0, 255, 255};
     }
 }

@@ -63,6 +63,10 @@ typedef enum {
     B_ROCK_SALT,
     B_QUARTZ_ORE,
     B_GRAPHITE_ORE,
+    /* Liquids besides water (fluid.c has how each flows). */
+    B_LAVA,      /* molten basalt, about 1100 C */
+    B_CRUDE_OIL, /* lighter than water: floats on it */
+    B_BRINE,     /* salt water, heavier than fresh: sinks under it */
     B_COUNT
 } block_id;
 
@@ -234,6 +238,11 @@ typedef enum {
     T_ITEM_STEEL_INGOT,
     T_ITEM_CHARCOAL,
     T_ITEM_QUICKLIME,
+    T_LAVA,
+    T_CRUDE_OIL,
+    T_BRINE,
+    T_ITEM_OIL_BUCKET,
+    T_ITEM_BRINE_BUCKET,
     T_TOOL_FIRST /* then one per tool kind and tier, in item order (T_COUNT) */
 } tex_id;
 

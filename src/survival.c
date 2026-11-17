@@ -32,7 +32,7 @@ void survival_env(const world *w, const player *p, const survival_before *b, int
         for (int k = 0; k < 3 && !e->in_fire; k++)
             e->in_fire = block_at(w, dv3(p->pos.x, p->pos.y - 0.05 + 0.5 * k, p->pos.z)) == B_CAMPFIRE;
     uint8_t eye = block_at(w, dv3(p->pos.x, p->pos.y + PLAYER_EYE, p->pos.z));
-    if (eye == B_WATER) e->airway = AIRWAY_WATER;
+    if (block_fluid(eye)) e->airway = AIRWAY_WATER; /* any liquid drowns */
     else if (block_solid(eye) && block_opaque(eye)) e->airway = AIRWAY_BLOCKED; /* buried */
     else e->airway = AIRWAY_AIR;
 }
@@ -126,7 +126,7 @@ void survival_on_break(health *h, uint8_t id)
     }
 }
 
-int survival_find_water(const world *w, dvec3 eye, vec3 dir, double reach, ipos *out)
+int survival_find_liquid(const world *w, dvec3 eye, vec3 dir, double reach, ipos *out)
 {
     int steps = (int)(reach / 0.1);
     for (int k = 0; k <= steps; k++) {
@@ -134,7 +134,7 @@ int survival_find_water(const world *w, dvec3 eye, vec3 dir, double reach, ipos 
         int x = (int)floor(eye.x + (double)dir.x * t), y = (int)floor(eye.y + (double)dir.y * t),
             z = (int)floor(eye.z + (double)dir.z * t);
         uint8_t id = world_get(w, x, y, z);
-        if (id == B_WATER) {
+        if (block_fluid(id)) {
             *out = (ipos){x, y, z};
             return 1;
         }
