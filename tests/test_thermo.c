@@ -589,6 +589,46 @@ static void test_lava_body(void)
     tw_free(&tw);
 }
 
+/* Cells in the field over a 17 x 17 lava lake `depth` deep after 864 s,
+ * with stone, sand and a film of oil set on it. */
+static int lava_lake(int depth, int checks)
+{
+    test_world tw = {0};
+    tw_init(&tw);
+    thermo *th = thermo_create(8);
+    hooks h = {0};
+    attach(&tw, &h, th);
+    world *w = &tw.w;
+    for (int y = GROUND - depth + 1; y <= GROUND; y++)
+        for (int z = -8; z <= 8; z++)
+            for (int x = -8; x <= 8; x++) world_set(w, x, y, z, B_LAVA, 0);
+    world_set(w, 0, GROUND + 1, 0, B_STONE, 0);
+    world_set(w, 3, GROUND + 1, 3, B_SAND, 0);
+    world_set(w, -3, GROUND + 1, -3, B_CRUDE_OIL, 2);
+    advance(th, w, 12.0, 1.0 / 60.0, dv3(0.5, GROUND + 3.0, 12.5));
+    int n = thermo_cell_count(th);
+    if (checks) {
+        CHECK(world_get(w, 0, GROUND + 1, 0) == B_STONE);
+        CHECK(world_get(w, 3, GROUND + 1, 3) == B_SAND);
+        CHECK(world_get(w, -3, GROUND + 1, -3) == B_CAMPFIRE && world_get_meta(w, -3, GROUND + 1, -3) == 1);
+        CHECK(thermo_block_temp(th, w, 0, GROUND + 1, 0) > thermo_ambient(th, w, 0.5, GROUND + 1.5, 0.5) + 1.0f);
+    }
+    detach(&tw);
+    thermo_destroy(th);
+    tw_free(&tw);
+    return n;
+}
+
+/* A lava lake joins the field by its surface only: eight more layers add
+ * their sides and the rock those warm (about 2000 cells), not also the
+ * 1575 of their interior. What isn't fuel never
+ * catches, and a thin film of oil burns as fewer units than a full cell. */
+static void test_lava_lake(void)
+{
+    int shallow = lava_lake(1, 1), deep = lava_lake(9, 0);
+    CHECK(deep > shallow && deep - shallow < 17 * 17 * 8);
+}
+
 /* The view from inside each liquid: lava and oil are nearly opaque. */
 static void test_liquid_view(void)
 {
@@ -615,5 +655,6 @@ void test_thermo_all(void)
     test_lava_heat();
     test_lava_ignites();
     test_lava_body();
+    test_lava_lake();
     test_liquid_view();
 }
