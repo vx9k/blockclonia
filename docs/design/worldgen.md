@@ -90,7 +90,17 @@ should look different for a reason you could explain.
       outcropping in cliffs; each ore where it really forms (tin in
       granite, galena in limestone, gold in quartz veins); soil depth
       from slope, climate and rock rather than a fixed number per
-      biome.
+      biome. Done: a basement of granite, basalt or plain stone whose
+      contacts dip with depth, raised through the beds in mountain
+      ranges and capped with obsidian on some basalt plateaus; over it
+      one sequence of 3 m beds (limestone, sandstone, shale, rock salt
+      deep in dry country) shared by every column and folded more in
+      ranges, so the bands line up across column borders and show in
+      cliffs and mesas; limestone baked to marble in ranges and over
+      granite. Each ore keeps to its host rocks, silver rides in lead
+      veins and gold in quartz. Soil is 0 to 5 m deep from rain, warmth,
+      slope and the rock under it, with podzol, peat, mud, clay, bauxite
+      laterite and saltpeter crusts where they form.
    5. Liquids: lava, crude oil and brine, with the water simulation
       generalised to more than one fluid (density, viscosity,
       temperature).

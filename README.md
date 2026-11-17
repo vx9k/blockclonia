@@ -19,7 +19,10 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
   and snow. Warped continents and coasts, eroded mountain ranges up to
   about 250 m with foothills and scree, terraced mesas in dry country,
   dunes, beaches of sand or gravel, cave tunnels and chambers that only
-  seldom open onto the surface, and veins of coal, copper and iron ore. It
+  seldom open onto the surface. Under the soil lie granite, basalt and
+  folded beds of limestone, sandstone, shale and rock salt, banded in every
+  cliff, and every ore sits in the rock it forms in: tin in granite,
+  lead and zinc in limestone, gold in quartz veins. It
   goes on for 2 billion blocks in every direction, as detailed at the edge
   as at spawn.
 

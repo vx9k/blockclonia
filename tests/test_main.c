@@ -2024,6 +2024,7 @@ int main(void)
     test_thoughts_all();
     test_drugs_all();
     test_materials_all();
+    test_strata_all();
     test_faint_all();
     test_fear_all();
     test_mobmodel_all();

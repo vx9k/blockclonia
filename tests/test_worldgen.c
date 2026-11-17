@@ -30,11 +30,23 @@ static uint64_t hash_columns(uint32_t seed)
 /* The ore bands in worldgen.c, widened by how far a vein can wander. */
 static int ore_band_ok(uint8_t b, int y)
 {
-    if (b == B_COAL_ORE) return y >= 8 - 9 && y < 180 + 9;
-    if (b == B_COPPER_ORE) return y >= 16 - 7 && y < 120 + 7;
-    if (b == B_IRON_ORE) return y >= 4 - 6 && y < 80 + 6;
+    static const struct {
+        uint8_t block;
+        int lo, hi;
+    } BAND[] = {
+        {B_COAL_ORE, 8 - 9, 180 + 9},     {B_COPPER_ORE, 4 - 7, 160 + 7},  {B_IRON_ORE, 4 - 6, 80 + 6},
+        {B_TIN_ORE, 8 - 5, 160 + 5},      {B_ZINC_ORE, 8 - 6, 150 + 6},    {B_LEAD_ORE, 8 - 6, 150 + 6},
+        {B_SILVER_ORE, 8 - 6, 90 + 6},    {B_NICKEL_ORE, 4 - 5, 100 + 5},  {B_TITANIUM_ORE, 4 - 5, 120 + 5},
+        {B_URANIUM_ORE, 0, 100 + 4},      {B_LITHIUM_ORE, 8 - 6, 160 + 6}, {B_SULFUR_ORE, 20 - 5, 240 + 5},
+        {B_QUARTZ_ORE, 4 - 10, 200 + 10}, {B_GOLD_ORE, 4 - 10, 140 + 10},  {B_GRAPHITE_ORE, 8 - 5, 180 + 5},
+    };
+    for (size_t i = 0; i < sizeof BAND / sizeof BAND[0]; i++)
+        if (b == BAND[i].block) return y >= BAND[i].lo && y < BAND[i].hi;
     return 1;
 }
+
+/* Rock and ore in place: what a cliff or a crag shows. */
+static int bare_rock(uint8_t b) { return block_get(b)->mat == BM_STONE && !item_valid(b); }
 
 /* What may stand on the ground: nothing that belongs to the ground. */
 static int above_ground(uint8_t b) { return b == B_AIR || b == B_WATER || b == B_ICE || b == B_LOG || b == B_LEAVES; }
@@ -110,7 +122,7 @@ static void test_climate(void)
 static void test_generators(void)
 {
     /* Worlds keep growing exactly as they began. */
-    CHECK(hash_columns(1337) == 0xd0676abc4d682334ull);
+    CHECK(hash_columns(1337) == 0xea54b4e0a12d5a50ull);
 
     long ore[3] = {0}, cave = 0, under = 0, bad_band = 0, hanging = 0, no_bedrock = 0, bad_ground = 0;
     long mouths = 0, mouth_cols = 0, cols = 0;
@@ -220,8 +232,8 @@ typedef struct {
     long cliffs, scree, sand_beach, desert_sand, snow, ice;
 } soil_tally;
 
-/* What the top block of the ground should be, or B_AIR where the biome
- * leaves a choice (grass or snow by the air, dirt or grass in scrub). */
+/* What the top block of the ground should be (B_ROCK for any bare rock),
+ * or B_AIR where the biome leaves a choice (grass or snow by the air, dirt or grass in scrub). */
 static uint8_t soil_want(worldgen_point p, int slope, int rise, soil_tally *t)
 {
     if (p.height < SEA_LEVEL) return slope > 5 ? B_ROCK : p.height <= SEA_LEVEL - 5 ? B_GRAVEL : B_SAND;
@@ -252,7 +264,7 @@ static void soil_column(int cx, int cz, int step, soil_tally *t)
             t->seen[p.b]++;
             if (top == B_AIR) continue; /* a cave mouth */
             uint8_t want = soil_want(p, slope, rise, t);
-            t->wrong += want != B_AIR && top != want;
+            t->wrong += want != B_AIR && (want == B_ROCK ? !bare_rock(top) : top != want);
             t->sand_beach += p.b == BIOME_BEACH && top == B_SAND;
             t->snow += top == B_SNOW;
             t->warm_snow += top == B_SNOW && p.temp >= 0.0f;

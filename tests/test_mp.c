@@ -375,9 +375,10 @@ void test_mp_all(void)
     CHECK(fabs(c.pl.pos.x) < WORLD_LIMIT && fabs(c.pl.pos.z) < WORLD_LIMIT);
 
     /* A dropped item reaches the client with its whole id: every item id is
-     * past the one byte the snapshot once carried. */
-    physics_drop_item(&h.t.ph, dv3(c.pl.pos.x + 1.0, c.pl.pos.y + 1.0, c.pl.pos.z), dv3(0, 0, 0), I_IRON_INGOT, 3,
-                      30.0f);
+     * past the one byte the snapshot once carried. It is dropped where the
+     * client stands, the one spot sure to be open air whatever terrain this
+     * platform's maths grew. */
+    physics_drop_item(&h.t.ph, dv3(c.pl.pos.x, c.pl.pos.y + 1.0, c.pl.pos.z), dv3(0, 0, 0), I_IRON_INGOT, 3, 30.0f);
     for (int i = 0; i < 30; i++) frame(&h, &c, NULL);
     int ingot = 0;
     for (int i = 0; i < c.ph.item_count; i++) ingot |= c.ph.items[i].id == I_IRON_INGOT && c.ph.items[i].count == 3;
