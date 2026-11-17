@@ -583,6 +583,9 @@ static void test_world_relight(void)
     CHECK(LIGHT_R(world_light(&t.w, 2, GROUND, 4)) == LIGHT_R(lava) - 8);
     /* Under the sky by day the lava's cell is as bright as the open air. */
     CHECK(light_at(&t.w, -5.5, GROUND + 0.5, 4.5, 1.0f) == 1.0f);
+    /* At night: -5.01 is in the lava's cell (-6), not truncated to -5. */
+    CHECK(light_at(&t.w, -5.01, GROUND + 0.5, 4.5, 0.0f) == light_brightness(lava, 0.0f));
+    CHECK(light_at(&t.w, -4.99, GROUND + 0.5, 4.5, 0.0f) < light_brightness(lava, 0.0f));
     world_set(&t.w, -6, GROUND, 4, B_AIR, 0);
     settle(&t.w);
     CHECK(LIGHT_R(world_light(&t.w, -6, GROUND, 4)) == 0 && LIGHT_R(world_light(&t.w, -3, GROUND, 4)) == 0);
