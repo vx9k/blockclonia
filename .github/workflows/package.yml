@@ -124,12 +124,17 @@ jobs:
                 clang22 lld22 llvm compiler-rt gcc musl-dev linux-headers cmake samurai pkgconf git ca-certificates \
                 shaderc vulkan-loader-dev vulkan-headers sqlite-dev libsodium-dev enet-dev miniupnpc-dev zlib-ng-dev \
                 libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev wayland-dev libxkbcommon-dev \
-                mesa-vulkan-swrast vulkan-validation-layers xvfb-run xauth
+                mesa-vulkan-swrast vulkan-validation-layers xvfb-run xauth gdb
               git config --global --add safe.directory /src
               cmake --preset release -DMC_DEPS=AUTO -DMC_WERROR=ON -DMC_CPU="$MC_CPU" -DMC_PGO=ON -DMC_BOLT=OFF \
                 -DMC_PACKAGE_VERSION_SUFFIX="$MC_PACKAGE_VERSION_SUFFIX"
               cmake --build --preset release
-              ctest --preset release
+              ctest --preset release || {
+                VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd.*.json) xvfb-run -a gdb -batch \
+                  -ex run -ex "info sharedlibrary" -ex "thread apply all bt 12" --args build/release/blockclonia \
+                  --frames 120 --radius 4 --size 640x360 --seed 42 --no-save --validate || true
+                exit 1
+              }
               cd build/release && cpack -G TGZ'
       - uses: actions/upload-artifact@v7
         with:
