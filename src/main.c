@@ -1,6 +1,7 @@
 /* blockclonia: entry point, input, and the fixed-timestep game loop. */
 #include "anim.h"
 #include "audio_device.h"
+#include "avatar.h"
 #include "bench.h"
 #include "camera.h"
 #include "combat.h"
@@ -78,6 +79,7 @@ typedef struct {
     int debug;           /* start with F3 on */
     const char *give;    /* items to start with: "stone:32,apple:3" */
     const char *mobs;    /* creatures to stand in front of the player: "wolf,boar" */
+    const char *figures; /* players' figures to stand in front: "walk,run" */
     int no_sound;
     int have_time;       /* --time */
     double time_of_day;  /* 0..1 */
@@ -220,6 +222,8 @@ static void usage(void)
            "  --debug           start with the F3 overlay on\n"
            "  --give LIST       start with items, e.g. log:8,sand:4 (names as shown in game)\n"
            "  --mobs LIST       stand creatures 4 m in front of you, e.g. wolf,boar\n"
+           "  --figures LIST    stand players' figures 4 m in front of you, moving on the\n"
+           "                    spot: stand, walk, jog, run, sneak, crouch or dead\n"
            "  --time HH         start at this hour of the day (0-23)\n"
            "  --demo            scripted structural-collapse demo\n"
            "  --health-panel    start with the health panel (H) open\n"
@@ -356,6 +360,8 @@ static int parse_value_option(options *o, const char *a, const char *v, int *ok)
         o->give = v;
     } else if (strcmp(a, "--mobs") == 0) {
         o->mobs = v;
+    } else if (strcmp(a, "--figures") == 0) {
+        o->figures = v;
     } else if (strcmp(a, "--hurt") == 0) {
         o->hurt = v;
     } else if (strcmp(a, "--join") == 0) {
@@ -736,6 +742,57 @@ static void place_mobs(mobs *ms, const world *w, const player *p, const char *li
     for (int i = 0; i < n; i++) mobs_add_ahead(ms, w, p, kinds[i], 4.0, 2.5 * (i - (n - 1) * 0.5));
 }
 
+/* A --figures figure: where it stands and how it moves. */
+#define MAX_FIGURES 8
+typedef struct {
+    double x, z, odo; /* odo: metres walked on the spot */
+    float speed, yaw;
+    int sneak, dead;
+    avatar_anim anim;
+} figure;
+
+/* --figures: a comma list of gaits, side by side 4 m in front, each
+ * figure walking on the spot; side on when moving, facing you when not. */
+static int place_figures(figure *f, const player *p, const char *list)
+{
+    static const struct {
+        const char *name;
+        float speed;
+        int sneak, dead;
+    } GAITS[] = {
+        {"stand", 0.0f, 0, 0},
+        {"walk", 1.4f, 0, 0},
+        {"jog", (float)WALK_SPEED, 0, 0},
+        {"run", (float)SPRINT_SPEED, 0, 0},
+        {"sneak", (float)SNEAK_SPEED, 1, 0},
+        {"crouch", 0.0f, 1, 0},
+        {"dead", 0.0f, 0, 1},
+    };
+    char buf[256] = {0};
+    snprintf(buf, sizeof buf, "%s", list);
+    char *save = NULL;
+    int n = 0;
+    for (const char *t = strtok_r(buf, ",", &save); t && n < MAX_FIGURES; t = strtok_r(NULL, ",", &save)) {
+        int k = -1;
+        for (int i = 0; i < (int)(sizeof GAITS / sizeof GAITS[0]); i++)
+            if (strcmp(t, GAITS[i].name) == 0) k = i;
+        if (k < 0) {
+            log_warn("--figures: no gait called '%s'", t);
+            continue;
+        }
+        f[n] = (figure){.speed = GAITS[k].speed, .sneak = GAITS[k].sneak, .dead = GAITS[k].dead};
+        n++;
+    }
+    double sy = sin((double)p->yaw), cy = cos((double)p->yaw);
+    for (int i = 0; i < n; i++) {
+        double aside = 1.2 * (i - (n - 1) * 0.5);
+        f[i].x = p->pos.x + sy * 4.0 + cy * aside;
+        f[i].z = p->pos.z - cy * 4.0 + sy * aside;
+        f[i].yaw = p->yaw + (f[i].speed > 0.0f ? 0.5f : 1.0f) * (float)MC_PI;
+    }
+    return n;
+}
+
 static void find_spawn(uint32_t seed, double *sx, double *sz)
 {
     /* Walk outwards until we find dry land. */
@@ -903,6 +960,9 @@ typedef struct {
     fx_crack crack;
     viewmodel vm;
     entity_instance vm_ents[VIEWMODEL_MAX];
+    avatar_anim avatars[NET_MAX_PLAYERS]; /* the other players' strides, by player id */
+    figure figs[MAX_FIGURES];             /* --figures */
+    int nfigs;
     float eat_anim;           /* 1 at the start of eating, easing to 0 */
     float fog[3];             /* the fog's colour, easing toward the light at the eye */
     int fog_set;
@@ -1310,6 +1370,7 @@ static void open_world(game *g, const char *dir, int backdrop)
     fx_init(g->fx, g->seed);
     mobs_init(&g->mobs, g->seed ^ 0x5EEDB0A5u);
     if (o->mobs && !backdrop) place_mobs(&g->mobs, &g->w, &g->pl, o->mobs);
+    if (o->figures && !backdrop) g->nfigs = place_figures(g->figs, &g->pl, o->figures);
     combat_init(&g->cb, g->seed ^ 0xC0BA7u);
     interact_init(&g->ia, g->seed ^ 0xA5A5u);
     viewmodel_init(&g->vm);
@@ -1941,19 +2002,36 @@ static void frame_interact(game *g, double dt)
 
 /* The other players as figures, among the opaque entities (which come
  * before the translucent ones). */
-static void add_players(game *g, dvec3 eye, double alpha, double now, float light, int *n_op, int n_tr)
+static void add_players(game *g, dvec3 eye, double alpha, double now, float light, float dt, int *n_op, int n_tr)
 {
     mp_avatar av[NET_MAX_PLAYERS];
     int count = mp_avatars(g->mp, now, alpha, av, NET_MAX_PLAYERS);
     for (int i = 0; i < count; i++) {
         int room = RENDER_MAX_ENTS - *n_op - n_tr;
-        if (room < VIEWMODEL_FIGURE) return;
-        memmove(g->ents + *n_op + VIEWMODEL_FIGURE, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
+        if (room < AVATAR_BOXES) return;
+        avatar_anim *a = &g->avatars[av[i].id >= 0 && av[i].id < NET_MAX_PLAYERS ? av[i].id : i];
+        avatar_anim_update(a, av[i].pos.x, av[i].pos.z, av[i].sneaking, av[i].flying, dt);
+        memmove(g->ents + *n_op + AVATAR_BOXES, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
         const float feet[3] = {(float)(av[i].pos.x - eye.x), (float)(av[i].pos.y - eye.y),
                                (float)(av[i].pos.z - eye.z)};
         float lit = light_at(&g->w, av[i].pos.x, av[i].pos.y + 1.0, av[i].pos.z, light);
-        *n_op += viewmodel_figure(feet, av[i].yaw, av[i].pitch, av[i].sneaking, av[i].dead, lit, g->ents + *n_op,
-                                  VIEWMODEL_FIGURE);
+        *n_op += avatar_build(a, feet, av[i].yaw, av[i].pitch, av[i].dead, lit, g->ents + *n_op, AVATAR_BOXES);
+    }
+}
+
+/* The --figures, on the ground where they stand, walking on the spot. */
+static void add_figures(game *g, dvec3 eye, float light, float dt, int *n_op, int n_tr)
+{
+    for (int i = 0; i < g->nfigs; i++) {
+        if (RENDER_MAX_ENTS - *n_op - n_tr < AVATAR_BOXES) return;
+        figure *f = &g->figs[i];
+        f->odo += (double)(f->speed * dt);
+        avatar_anim_update(&f->anim, f->odo, 0.0, f->sneak, 0, dt);
+        double y = (double)world_surface_y(&g->w, (int)floor(f->x), (int)floor(f->z));
+        memmove(g->ents + *n_op + AVATAR_BOXES, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
+        const float feet[3] = {(float)(f->x - eye.x), (float)(y - eye.y), (float)(f->z - eye.z)};
+        float lit = light_at(&g->w, f->x, y + 1.0, f->z, light);
+        *n_op += avatar_build(&f->anim, feet, f->yaw, 0.0f, f->dead, lit, g->ents + *n_op, AVATAR_BOXES);
     }
 }
 
@@ -2068,8 +2146,11 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     int n_op = 0, n_tr = 0;
     fx_build_entities(g->fx, &g->ph, &g->crack, v.eye, alpha, v.time, v.daylight, g->ents, RENDER_MAX_ENTS, &n_op,
                       &n_tr);
-    if (g->mp) add_players(g, v.eye, alpha, now, v.daylight, &n_op, n_tr);
-    if (!on_title) add_mobs(g, v.eye, alpha, v.daylight, now, &n_op, n_tr);
+    if (g->mp) add_players(g, v.eye, alpha, now, v.daylight, (float)dt, &n_op, n_tr);
+    if (!on_title) {
+        add_figures(g, v.eye, v.daylight, (float)dt, &n_op, n_tr);
+        add_mobs(g, v.eye, alpha, v.daylight, now, &n_op, n_tr);
+    }
     v.ents = g->ents;
     v.ent_opaque = n_op;
     v.ent_trans = n_tr;

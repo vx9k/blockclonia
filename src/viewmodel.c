@@ -21,7 +21,7 @@
 
 #define PI_F 3.14159265f
 
-/* Rest pose: the pivot (the back end of the sleeve, a stand-in for the
+/* Rest pose: the pivot (the back end of the forearm, a stand-in for the
  * shoulder pulled forward so the arm is on screen) and the arm's aim,
  * turned in toward the crosshair and raised a little. */
 static const float PIVOT[3] = {0.46f, -0.38f, -0.28f};
@@ -29,11 +29,13 @@ static const float PIVOT[3] = {0.46f, -0.38f, -0.28f};
 #define REST_PITCH 0.14f        /* rad, up */
 
 /* Parts along the arm's own axes (-z runs from the shoulder to the hand). */
-#define SLEEVE_LEN 0.5f
-#define SLEEVE_W 0.12f
-#define HAND_LEN 0.14f
-#define HAND_W 0.11f
-#define HAND_Z (-(SLEEVE_LEN + HAND_LEN * 0.5f - 0.005f)) /* overlaps the cuff by 5 mm */
+/* The arm is bare (the base layer is a singlet) and as thick as the
+ * figure's: a forearm 8.5 cm across and a fist 9 cm. */
+#define FOREARM_LEN 0.5f
+#define FOREARM_W 0.085f
+#define HAND_LEN 0.12f
+#define HAND_W 0.09f
+#define HAND_Z (-(FOREARM_LEN + HAND_LEN * 0.5f - 0.005f)) /* overlaps the wrist by 5 mm */
 #define BLOCK_SIZE 0.18f
 #define CARD_SIZE 0.30f
 #define CARD_THICK 0.02f
@@ -211,9 +213,9 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
 
     entity_instance parts[VIEWMODEL_MAX] = {0};
     int n = 0;
-    const float sleeve_at[3] = {0.0f, 0.0f, -SLEEVE_LEN * 0.5f};
+    const float forearm_at[3] = {0.0f, 0.0f, -FOREARM_LEN * 0.5f};
     const float hand_at[3] = {0.0f, 0.0f, HAND_Z};
-    parts[n++] = part(lag, base, arm, sleeve_at, quat_identity(), SLEEVE_W, SLEEVE_W, SLEEVE_LEN, same_tex(T_SLEEVE),
+    parts[n++] = part(lag, base, arm, forearm_at, quat_identity(), FOREARM_W, FOREARM_W, FOREARM_LEN, same_tex(T_SKIN),
                       light);
     parts[n++] = part(lag, base, arm, hand_at, quat_identity(), HAND_W, HAND_W, HAND_LEN, same_tex(T_SKIN), light);
 
@@ -274,51 +276,5 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
     if (!out || max <= 0) return 0;
     if (n > max) n = max;
     memcpy(out, parts, (size_t)n * sizeof parts[0]);
-    return n;
-}
-
-/* One cube of a figure: centre = feet + body * local, orientation body * own. */
-static entity_instance cube(const float feet[3], quat body, const float local[3], quat own, float sx, float sy,
-                            float sz, int layer, float light)
-{
-    entity_instance e = {0};
-    float r[3] = {0};
-    quat_apply(body, local, r);
-    vadd(e.pos, feet, r);
-    e.tex = same_tex(layer);
-    entity_set_rot(&e, quat_norm(quat_mul(body, own)));
-    e.scale[0] = sx;
-    e.scale[1] = sy;
-    e.scale[2] = sz;
-    e.light = light;
-    return e;
-}
-
-int viewmodel_figure(const float feet[3], float yaw, float pitch, int sneaking, int dead, float light,
-                     entity_instance *out, int max)
-{
-    /* Facing yaw: forward is -z turned toward +x, so -yaw about +y. Dead,
-     * the figure falls forward onto its front. */
-    quat body = quat_axis(0.0f, 1.0f, 0.0f, -yaw);
-    if (dead) body = quat_mul(body, quat_axis(1.0f, 0.0f, 0.0f, -0.5f * PI_F));
-    float low = sneaking ? 0.15f : 0.0f;
-    static const struct {
-        float at[3], size[3];
-        int layer;
-    } PARTS[VIEWMODEL_FIGURE] = {
-        {{-0.125f, 0.375f, 0.0f}, {0.24f, 0.75f, 0.24f}, T_SLEEVE},  /* legs */
-        {{0.125f, 0.375f, 0.0f}, {0.24f, 0.75f, 0.24f}, T_SLEEVE},
-        {{0.0f, 1.1f, 0.0f}, {0.5f, 0.7f, 0.26f}, T_SLEEVE},         /* torso */
-        {{-0.37f, 1.1f, 0.0f}, {0.22f, 0.7f, 0.22f}, T_SKIN},        /* arms */
-        {{0.37f, 1.1f, 0.0f}, {0.22f, 0.7f, 0.22f}, T_SKIN},
-        {{0.0f, 1.68f, 0.0f}, {0.42f, 0.42f, 0.42f}, T_SKIN},        /* head */
-    };
-    int n = 0;
-    for (int i = 0; i < VIEWMODEL_FIGURE && n < max; i++) {
-        float at[3] = {PARTS[i].at[0], PARTS[i].at[1] - (i >= 2 ? low : 0.0f), PARTS[i].at[2]};
-        quat own = i == 5 ? quat_axis(1.0f, 0.0f, 0.0f, pitch) : quat_identity();
-        out[n++] = cube(feet, body, at, own, PARTS[i].size[0], PARTS[i].size[1], PARTS[i].size[2], PARTS[i].layer,
-                        light);
-    }
     return n;
 }
