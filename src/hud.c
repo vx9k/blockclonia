@@ -464,8 +464,15 @@ static void vitals(ui *u, const health *h, float x, float y)
     float ta = h->air_temp;
     uint32_t tc = h->radiant > 1000.0f ? ui_rgba(255, 150, 60, 255)
                                        : (ta < 0.0f ? ui_rgba(150, 200, 255, 255) : (ta > 30.0f ? SEV[1] : C_TEXT));
-    ui_textf(u, x + 3, y + 43, 1, tc, "Air %.0f" UI_CH_DEGREE "C", (double)ta);
-    if (h->radiant > 1000.0f) ui_textf(u, x + 58, y + 43, 1, tc, "+%.1fkW", (double)(h->radiant / 1000.0f));
+    char air[24] = {0};
+    snprintf(air, sizeof air, "Air %.0f" UI_CH_DEGREE "C", (double)ta);
+    ui_text(u, x + 3, y + 43, 1, tc, air);
+    if (h->radiant > 1000.0f) {
+        /* After the reading, which runs to four digits by lava. */
+        float kx = fmaxf(x + 58, x + 3 + ui_text_width(air, 1) + 4);
+        double kw = (double)(h->radiant / 1000.0f);
+        ui_textf(u, kx, y + 43, 1, tc, kw < 10.0 ? "+%.1fkW" : "+%.0fkW", kw);
+    }
     if (h->wet >= 0.05f) snprintf(b, sizeof b, "Wet %d%%", (int)lroundf(h->wet * 100.0f));
     else snprintf(b, sizeof b, "Dry");
     ui_text(u, x + w - 3 - ui_text_width(b, 1), y + 43, 1, h->wet >= 0.05f ? ui_rgba(90, 160, 255, 255) : C_DIM, b);

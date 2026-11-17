@@ -66,4 +66,9 @@ void fluid_set(world *w, int x, int y, int z, uint8_t id, int level);
  * surroundings. A player's edit (player = 1) is re-meshed first. */
 void fluid_displace(world *w, int x, int y, int z, uint8_t id, int level, int player);
 
+/* How the world looks from inside liquid id: the colour the view fades to
+ * and the distance (m) at which it has faded completely. Water's for
+ * anything that isn't a liquid. */
+void fluid_view(uint8_t id, float rgb[3], float *range);
+
 #endif

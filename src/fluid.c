@@ -236,14 +236,19 @@ static uint32_t flow_period(uint8_t id)
 
 /* Lava touching water or brine sets at once: a full cell chills to glass
  * (obsidian), a thin flow, cooling right through, to basalt. As in-place
- * rock it is one mass with what it set on. The steam is thermo's to make. */
+ * rock it is one mass with what it set on. Its heat boils off about its
+ * own volume of the water: 2600 kg/m^3 x 1.2 kJ/kgK over 1000 K is
+ * 3.1 GJ, and a cubic metre of water takes 2.6 GJ to heat and boil. */
 static int quench(world *w, ipos p, int level)
 {
     static const int N[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
     for (int i = 0; i < 6; i++) {
-        uint8_t n = world_get(w, p.x + N[i][0], p.y + N[i][1], p.z + N[i][2]);
+        int nx = p.x + N[i][0], ny = p.y + N[i][1], nz = p.z + N[i][2];
+        uint8_t n = world_get(w, nx, ny, nz);
         if (n != B_WATER && n != B_BRINE) continue;
         world_set(w, p.x, p.y, p.z, level == FLUID_FULL ? B_OBSIDIAN_ROCK : B_BASALT_ROCK, 0);
+        int left = world_fluid_level(w, nx, ny, nz) - level;
+        fluid_set(w, nx, ny, nz, n, left > 0 ? left : 0);
         return 1;
     }
     return 0;
@@ -410,4 +415,27 @@ void fluid_tick(fluids *f, uint32_t order)
     fluid_begin_tick(f, order);
     fluid_run(f, FLUID_BUDGET);
     fluid_carry(f);
+}
+
+void fluid_view(uint8_t id, float rgb[3], float *range)
+{
+    /* Light lost per metre: clear water lets ~24 m be seen, brine with its
+     * silt a little less, crude oil and lava hardly any. */
+    static const struct {
+        uint8_t id;
+        float rgb[3], range;
+    } VIEW[] = {
+        {B_WATER, {0.10f, 0.25f, 0.55f}, 24.0f},
+        {B_BRINE, {0.20f, 0.32f, 0.45f}, 16.0f},
+        {B_CRUDE_OIL, {0.05f, 0.04f, 0.02f}, 1.5f},
+        {B_LAVA, {1.00f, 0.35f, 0.05f}, 0.6f},
+    };
+    for (int i = 0; i < (int)(sizeof VIEW / sizeof VIEW[0]); i++) {
+        if (VIEW[i].id != id) continue;
+        for (int k = 0; k < 3; k++) rgb[k] = VIEW[i].rgb[k];
+        *range = VIEW[i].range;
+        return;
+    }
+    for (int k = 0; k < 3; k++) rgb[k] = VIEW[0].rgb[k];
+    *range = VIEW[0].range;
 }

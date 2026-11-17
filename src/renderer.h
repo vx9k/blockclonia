@@ -55,6 +55,8 @@ typedef struct {
     int has_selection;
     ipos selection;
     int underwater;
+    float under_fog[3]; /* inside a liquid: the colour it fades to (fluid_view) */
+    float under_range;  /* and the distance to full fade, m */
     int hide_crosshair;
     /* Blurred and double vision, 0..1 (health_senses): the world is drawn
      * filtered, under a sharp crosshair and overlay; both 0 draws it

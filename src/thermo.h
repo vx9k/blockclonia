@@ -11,6 +11,10 @@
  *   upward by convection and lose it to the open air.
  * - Campfires are heat sources that burn their fuel (block meta) and turn
  *   to ash when it runs out.
+ * - Lava: held at THERMO_LAVA_C where it meets anything else, it heats
+ *   the air and rock around it, radiates from its open surface onto the
+ *   body, leaves rock that sets from it hot, and sets fuel touching it
+ *   alight as fires. Fires don't spread from block to block.
  * - Phase changes with latent heat: snow and ice melt into water (volume
  *   conserving: snow gives less water than ice), still surface water
  *   exposed to freezing air freezes.
@@ -30,6 +34,7 @@
 
 #define THERMO_MAX_CELLS 16384
 #define THERMO_DAY_START 0.33 /* 08:00 */
+#define THERMO_LAVA_C 1100.0  /* basaltic lava, degrees C */
 
 typedef struct thermo thermo;
 
@@ -58,8 +63,8 @@ float thermo_air(const thermo *t, const world *w, double x, double y, double z);
 /* Temperature of the block in a cell (its surface for the feet, its body
  * for melting), degrees C. Burning campfires report their flame. */
 float thermo_block_temp(const thermo *t, const world *w, int x, int y, int z);
-/* Radiant heat from burning campfires onto a body at p, W/m^2 of skin
- * facing them (0 with no fire in sight). */
+/* Radiant heat from burning campfires and open lava onto a body at p,
+ * W/m^2 of skin facing them (0 with neither in sight). */
 double thermo_radiant(const thermo *t, const world *w, dvec3 p);
 /* 1 if a burning campfire is within r metres of p (crafting glass, brick). */
 int thermo_near_fire(const thermo *t, const world *w, dvec3 p, double r);

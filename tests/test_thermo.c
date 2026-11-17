@@ -2,10 +2,14 @@
 #include "worldgen.h"
 /* Thermodynamics: the day clock, ambient air, the heat field, campfires,
  * melting and freezing (thermo.c). */
+#include "fluid.h"
 #include "inventory.h"
+#include "mem.h"
+#include "survival.h"
 #include "test_util.h"
 
 #include <math.h>
+#include <stdlib.h>
 
 /* World edits reach both physics and thermo, as in the game. */
 typedef struct {
@@ -449,6 +453,195 @@ static void test_climate_air(void)
     tw_free(&tw);
 }
 
+/* A 3 x 3 pool of lava in a stone rim on the flat ground at the origin. */
+static void lava_pool(world *w)
+{
+    for (int z = -2; z <= 2; z++)
+        for (int x = -2; x <= 2; x++) world_set(w, x, GROUND, z, abs(x) < 2 && abs(z) < 2 ? B_LAVA : B_STONE, 0);
+}
+
+static void test_lava_heat(void)
+{
+    test_world tw = {0};
+    tw_init(&tw);
+    thermo *th = thermo_create(5);
+    hooks h = {0};
+    attach(&tw, &h, th);
+    world *w = &tw.w;
+    dvec3 eye = dv3(6.5, GROUND + 1.6, 0.5);
+    thermo_set_day_time(th, 0.375);
+    lava_pool(w);
+    CHECK(thermo_block_temp(th, w, 0, GROUND, 0) == (float)THERMO_LAVA_C);
+    /* Air over the pool and the rock around it heat up; the rock slowly
+     * (2.4 MJ/K a cubic metre, a few W/K from the lava). */
+    advance(th, w, 60.0, 0.5, eye);
+    float air = thermo_air(th, w, 0.5, GROUND + 1.5, 0.5) - thermo_ambient(th, w, 0.5, GROUND + 1.5, 0.5);
+    float rim = thermo_block_temp(th, w, 2, GROUND, 0) - thermo_ambient(th, w, 2.5, GROUND + 0.5, 0.5);
+    float far = thermo_air(th, w, 9.5, GROUND + 1.5, 0.5) - thermo_ambient(th, w, 9.5, GROUND + 1.5, 0.5);
+    CHECK(air > 30.0f && air < 600.0f);
+    CHECK(rim > 2.0f && rim < 400.0f);
+    CHECK(fabsf(far) < 1.0f);
+    CHECK(thermo_cell_count(th) > 9 && thermo_cell_count(th) < 4000);
+
+    /* Radiant heat: tens of kW/m^2 a metre over the pool, falling off with
+     * distance, nothing from below its surface or behind a wall. */
+    double q1 = thermo_radiant(th, w, dv3(0.5, GROUND + 2.0, 0.5));
+    double q3 = thermo_radiant(th, w, dv3(0.5, GROUND + 4.0, 0.5));
+    double side = thermo_radiant(th, w, dv3(4.5, GROUND + 1.5, 0.5));
+    CHECK(q1 > 10000.0 && q1 < 70000.0);
+    CHECK(q3 > 1000.0 && q3 < q1 / 3.0);
+    CHECK(side > 0.0 && side < q3);
+    CHECK(thermo_radiant(th, w, dv3(0.5, GROUND + 0.5, 6.5)) < 1e-9); /* level with the surface */
+    CHECK(thermo_radiant(th, w, dv3(0.5, GROUND + 14.0, 0.5)) == 0.0); /* out of reach */
+    for (int y = GROUND + 1; y < GROUND + 4; y++)
+        for (int z = -2; z <= 2; z++) world_set(w, 4, y, z, B_STONE, 0);
+    CHECK(thermo_radiant(th, w, dv3(5.5, GROUND + 1.5, 0.5)) == 0.0); /* behind a wall */
+
+    /* Lava that sets stays hot, and cools over time. */
+    world_set(w, 1, GROUND, 1, B_OBSIDIAN_ROCK, 0);
+    float set = thermo_block_temp(th, w, 1, GROUND, 1);
+    CHECK(set > 800.0f);
+    world_set(w, 1, GROUND, 1, B_LAVA, 0);
+    detach(&tw);
+    thermo_destroy(th);
+    tw_free(&tw);
+}
+
+/* Fuel touching lava catches after its contact time, burns as a fire, and
+ * doesn't pass it on; fuel a block away never catches. */
+static void test_lava_ignites(void)
+{
+    test_world tw = {0};
+    tw_init(&tw);
+    thermo *th = thermo_create(6);
+    hooks h = {0};
+    attach(&tw, &h, th);
+    world *w = &tw.w;
+    dvec3 eye = dv3(0.5, GROUND + 1.6, 6.5);
+    lava_pool(w);
+    world_set(w, 0, GROUND + 1, 0, B_LOG, 0);      /* on the lava */
+    world_set(w, 1, GROUND + 1, 1, B_LEAVES, 0);   /* on the lava */
+    world_set(w, 0, GROUND + 1, 3, B_LOG, 0);      /* a metre off */
+    world_set(w, 0, GROUND + 2, 0, B_PLANKS, 0);   /* on the log */
+    advance(th, w, 2.5, 1.0 / 60.0, eye);          /* 180 s: the leaves, not the log */
+    CHECK(world_get(w, 1, GROUND + 1, 1) == B_CAMPFIRE);
+    CHECK(world_get(w, 0, GROUND + 1, 0) == B_LOG);
+    advance(th, w, 10.0, 1.0 / 60.0, eye);         /* 900 s */
+    CHECK(world_get(w, 0, GROUND + 1, 0) == B_CAMPFIRE);
+    CHECK(world_get_meta(w, 0, GROUND + 1, 0) == 4);
+    CHECK(world_get(w, 0, GROUND + 1, 3) == B_LOG);
+    CHECK(world_get(w, 0, GROUND + 2, 0) == B_PLANKS); /* fire doesn't spread */
+    CHECK(thermo_fire_count(th) == 2);
+    /* Crude oil on lava goes up almost at once, a full cell as four units. */
+    world_set(w, -1, GROUND + 1, -1, B_CRUDE_OIL, 0);
+    advance(th, w, 1.0, 1.0 / 60.0, eye);
+    CHECK(world_get(w, -1, GROUND + 1, -1) == B_CAMPFIRE);
+    CHECK(world_get_meta(w, -1, GROUND + 1, -1) == 4);
+    /* Brine puts a fire out as water does. */
+    world_set(w, 1, GROUND + 2, 1, B_BRINE, 0);
+    advance(th, w, 0.1, 1.0 / 60.0, eye);
+    CHECK(world_get(w, 1, GROUND + 1, 1) == B_ASH);
+    detach(&tw);
+    thermo_destroy(th);
+    tw_free(&tw);
+}
+
+/* A body in lava is immersed at its temperature, in water at the water's;
+ * a body over lava feels its heat. */
+static void test_lava_body(void)
+{
+    test_world tw = {0};
+    tw_init(&tw);
+    thermo *th = thermo_create(7);
+    hooks h = {0};
+    attach(&tw, &h, th);
+    world *w = &tw.w;
+    lava_pool(w);
+    world_set(w, 6, GROUND, 0, B_WATER, 0);
+    player p = {0};
+    player_spawn(&p, w, 6.5, 0.5);
+    advance(th, w, 1.0, 1.0 / 60.0, p.pos);
+    health_env e = {0};
+    p.pos = dv3(6.5, GROUND + 0.2, 0.5);
+    survival_thermal(th, w, &p, &e);
+    CHECK(e.water_temp == SURVIVAL_WATER_TEMP && e.radiant < 2000.0);
+    p.pos = dv3(0.5, GROUND + 0.2, 0.5);
+    survival_thermal(th, w, &p, &e);
+    CHECK(e.water_temp == THERMO_LAVA_C && e.radiant > 0.0);
+    p.pos = dv3(0.5, GROUND + 1.0, 0.5); /* standing on its surface: not in it, but scorched */
+    survival_thermal(th, w, &p, &e);
+    CHECK(e.water_temp == SURVIVAL_WATER_TEMP && e.radiant > 10000.0);
+    /* Two seconds waist-deep: full-thickness burns on the legs, where the
+     * same time in cool water leaves none. */
+    health *hot = new_body(11), *cool = new_body(11);
+    health_env in = calm_env();
+    in.submerged = 0.45;
+    in.water_temp = THERMO_LAVA_C;
+    live(hot, &in, 2.0);
+    in.water_temp = SURVIVAL_WATER_TEMP;
+    live(cool, &in, 2.0);
+    CHECK(hot->part[BP_LLEG].burn == 3 && hot->part[BP_RLEG].burn == 3);
+    CHECK(cool->part[BP_LLEG].burn == 0 && cool->part[BP_HEAD].burn == 0);
+    mem_free(hot);
+    mem_free(cool);
+    detach(&tw);
+    thermo_destroy(th);
+    tw_free(&tw);
+}
+
+/* Cells in the field over a 17 x 17 lava lake `depth` deep after 864 s,
+ * with stone, sand and a film of oil set on it. */
+static int lava_lake(int depth, int checks)
+{
+    test_world tw = {0};
+    tw_init(&tw);
+    thermo *th = thermo_create(8);
+    hooks h = {0};
+    attach(&tw, &h, th);
+    world *w = &tw.w;
+    for (int y = GROUND - depth + 1; y <= GROUND; y++)
+        for (int z = -8; z <= 8; z++)
+            for (int x = -8; x <= 8; x++) world_set(w, x, y, z, B_LAVA, 0);
+    world_set(w, 0, GROUND + 1, 0, B_STONE, 0);
+    world_set(w, 3, GROUND + 1, 3, B_SAND, 0);
+    world_set(w, -3, GROUND + 1, -3, B_CRUDE_OIL, 2);
+    advance(th, w, 12.0, 1.0 / 60.0, dv3(0.5, GROUND + 3.0, 12.5));
+    int n = thermo_cell_count(th);
+    if (checks) {
+        CHECK(world_get(w, 0, GROUND + 1, 0) == B_STONE);
+        CHECK(world_get(w, 3, GROUND + 1, 3) == B_SAND);
+        CHECK(world_get(w, -3, GROUND + 1, -3) == B_CAMPFIRE && world_get_meta(w, -3, GROUND + 1, -3) == 1);
+        CHECK(thermo_block_temp(th, w, 0, GROUND + 1, 0) > thermo_ambient(th, w, 0.5, GROUND + 1.5, 0.5) + 1.0f);
+    }
+    detach(&tw);
+    thermo_destroy(th);
+    tw_free(&tw);
+    return n;
+}
+
+/* A lava lake joins the field by its surface only: eight more layers add
+ * their sides and the rock those warm (about 2000 cells), not also the
+ * 1575 of their interior. What isn't fuel never
+ * catches, and a thin film of oil burns as fewer units than a full cell. */
+static void test_lava_lake(void)
+{
+    int shallow = lava_lake(1, 1), deep = lava_lake(9, 0);
+    CHECK(deep > shallow && deep - shallow < 17 * 17 * 8);
+}
+
+/* The view from inside each liquid: lava and oil are nearly opaque. */
+static void test_liquid_view(void)
+{
+    float c[4][3] = {{0}}, r[4] = {0}, d[3] = {0}, rd = 0.0f;
+    static const uint8_t LIQ[4] = {B_WATER, B_BRINE, B_CRUDE_OIL, B_LAVA};
+    for (int i = 0; i < 4; i++) fluid_view(LIQ[i], c[i], &r[i]);
+    CHECK(r[0] == 24.0f && r[1] < r[0] && r[2] < r[1] && r[3] < r[2] && r[3] > 0.0f);
+    CHECK(c[3][0] > c[3][2] && c[0][2] > c[0][0]); /* lava glows orange, water is blue */
+    CHECK(c[2][0] + c[2][1] + c[2][2] < 0.3f);    /* oil is dark */
+    fluid_view(B_STONE, d, &rd);
+    CHECK(rd == r[0] && d[2] == c[0][2]);
+}
+
 void test_thermo_all(void)
 {
     test_sun();
@@ -459,4 +652,9 @@ void test_thermo_all(void)
     test_melting();
     test_freezing();
     test_limits();
+    test_lava_heat();
+    test_lava_ignites();
+    test_lava_body();
+    test_lava_lake();
+    test_liquid_view();
 }

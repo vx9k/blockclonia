@@ -66,6 +66,12 @@
 #define FUEL_UNIT_S 3600.0          /* survival-clock s per fuel unit */
 #define FIRE_PIN_R 3                /* field cells kept around a burning fire */
 #define MAX_FIRES 256
+/* Lava's skin of crust radiates as a surface near 800 C though the melt
+ * under it is at 1100 (THERMO_LAVA_C): basaltic flows measure 700-900 C. */
+#define LAVA_SURFACE_K (800.0 + 273.15)
+#define LAVA_EMISSIVITY 0.9
+#define LAVA_REACH 10.0             /* m: lava surfaces that heat a body */
+#define LAVA_MIN_D 0.5              /* m: inside a lava cell's own metre */
 
 /* ---- the heat field
  *
@@ -148,7 +154,9 @@
 #define POND_R 4                    /* m around the player where still water may freeze */
 #define POND_COLS 9                 /* (x, z) columns per call */
 
-enum { K_GAS, K_SOLID, K_MELT, K_WATER };
+/* K_HOT: lava, a cell held at THERMO_LAVA_C (the melt is fed from below
+ * faster than the edges of the field can draw heat from it). */
+enum { K_GAS, K_SOLID, K_MELT, K_WATER, K_HOT };
 
 typedef struct {
     int x, y, z;
@@ -162,6 +170,7 @@ typedef struct {
     int32_t nb[6];     /* neighbour cell, -1 for the ambient */
     uint8_t mat, kind, freezable, shelter;
     uint8_t dyn;       /* bit f set for an air-air vertical face */
+    double exposed;    /* survival s a fuel cell has touched lava (ignition) */
 } cell;
 
 typedef struct {
@@ -215,6 +224,7 @@ static int kind_of(uint8_t id)
     if (id == B_AIR || id == B_CAMPFIRE) return K_GAS;
     if (id == B_WATER) return K_WATER;
     if (id == B_ICE || id == B_SNOW) return K_MELT;
+    if (id == B_LAVA) return K_HOT;
     return K_SOLID;
 }
 
@@ -337,6 +347,7 @@ static double initial_dev(uint8_t id, double amb)
     int k = kind_of(id);
     if (k == K_MELT) return fmin(0.0, -amb);
     if (k == K_WATER) return fmax(0.0, -amb);
+    if (k == K_HOT) return THERMO_LAVA_C - amb;
     return 0.0;
 }
 
@@ -433,11 +444,12 @@ static int fuel_of(const world *w, int x, int y, int z)
     return m ? m : CAMPFIRE_FUEL_MAX;
 }
 
+static int wets(uint8_t id) { return id == B_WATER || id == B_BRINE; }
+
 static int doused(const world *w, int x, int y, int z)
 {
-    return world_get(w, x + 1, y, z) == B_WATER || world_get(w, x - 1, y, z) == B_WATER ||
-           world_get(w, x, y, z + 1) == B_WATER || world_get(w, x, y, z - 1) == B_WATER ||
-           world_get(w, x, y + 1, z) == B_WATER;
+    return wets(world_get(w, x + 1, y, z)) || wets(world_get(w, x - 1, y, z)) || wets(world_get(w, x, y, z + 1)) ||
+           wets(world_get(w, x, y, z - 1)) || wets(world_get(w, x, y + 1, z));
 }
 
 static double flame_dist(const fire *f, dvec3 p)
@@ -483,8 +495,20 @@ static void burn_fires(thermo *t, world *w, double dts)
     }
 }
 
-/* Registers campfires in loaded columns near the player, a few columns per
- * call, so fires from saves are found without a full scan. */
+/* Lava with something besides lava beside it: only these cells join the
+ * field, so a lake costs its surface, not its volume. */
+static int lava_edge(const world *w, int x, int y, int z)
+{
+    for (int f = 0; f < 6; f++) {
+        uint8_t n = world_get(w, x + FACE[f][0], y + FACE[f][1], z + FACE[f][2]);
+        if (n != B_LAVA && n != B_UNLOADED) return 1;
+    }
+    return 0;
+}
+
+/* Registers campfires and the edges of lava in loaded columns near the
+ * player, a few columns per call, so fires from saves are found without a
+ * full scan. */
 static void scan_fires(thermo *t, const world *w, dvec3 player)
 {
     int side = 2 * SCAN_R + 1;
@@ -503,6 +527,15 @@ static void scan_fires(thermo *t, const world *w, dvec3 player)
             int i = (int)(hit - c->blocks);
             fire_register(t, cx * CHUNK_W + (i & (CHUNK_W - 1)), i / COL_AREA,
                           cz * CHUNK_W + ((i / CHUNK_W) & (CHUNK_W - 1)));
+            b = hit + 1;
+        }
+        for (b = c->blocks; b < end;) {
+            const uint8_t *hit = memchr(b, B_LAVA, (size_t)(end - b));
+            if (!hit) break;
+            int i = (int)(hit - c->blocks);
+            int x = cx * CHUNK_W + (i & (CHUNK_W - 1)), y = i / COL_AREA,
+                z = cz * CHUNK_W + ((i / CHUNK_W) & (CHUNK_W - 1));
+            if (lava_edge(w, x, y, z)) ensure(t, w, x, y, z);
             b = hit + 1;
         }
     }
@@ -535,6 +568,14 @@ static void scan_ponds(thermo *t, const world *w, dvec3 player)
 static double face_g(uint8_t a, uint8_t b)
 {
     int ka = kind_of(a), kb = kind_of(b);
+    /* Lava is a surface at its temperature: the other side's own film or
+     * half-cell limits the flow. */
+    if (ka == K_HOT && kb == K_HOT) return 0.0;
+    if (ka == K_HOT || kb == K_HOT) {
+        uint8_t o = ka == K_HOT ? b : a;
+        int ko = kind_of(o);
+        return ko == K_GAS || ko == K_WATER ? H_CONV : 2.0 * conductivity(o);
+    }
     if (ka == K_GAS && kb == K_GAS) return G_AIR;
     if (ka == K_GAS || kb == K_GAS) {
         uint8_t s = ka == K_GAS ? b : a;
@@ -625,6 +666,7 @@ static void refresh_ambient(thermo *t)
         double temp = c->amb + c->dev;
         if (c->kind == K_WATER && (c->lat > 0.0 || temp < 0.0)) c->dev = -c->amb;
         if (c->kind == K_MELT && (c->lat > 0.0 || temp > 0.0)) c->dev = -c->amb;
+        if (c->kind == K_HOT) c->dev = THERMO_LAVA_C - c->amb;
     }
 }
 
@@ -669,6 +711,8 @@ static void substep(thermo *t, double h)
             double hh = c->cap * (c->amb + c->dev) - c->lat + e;
             c->lat = c->freezable ? fmax(-hh, 0.0) : 0.0;
             c->dev = fmax(hh, 0.0) / c->cap - c->amb;
+        } else if (c->kind == K_HOT) {
+            c->dev = THERMO_LAVA_C - c->amb;
         } else {
             c->dev += e / c->cap;
         }
@@ -695,7 +739,9 @@ static void maintain(thermo *t, const world *w, dvec3 player, int have_player)
         if (fabs(t->cells[i].dev) <= SPREAD_K) continue;
         for (int f = 0; f < 6; f++) {
             const cell *c = &t->cells[i];
-            int ci = ensure(t, w, c->x + FACE[f][0], c->y + FACE[f][1], c->z + FACE[f][2]);
+            int nx = c->x + FACE[f][0], ny = c->y + FACE[f][1], nz = c->z + FACE[f][2];
+            if (world_get(w, nx, ny, nz) == B_LAVA) continue; /* lava joins at its edges (lava_edge) */
+            int ci = ensure(t, w, nx, ny, nz);
             if (ci >= 0) t->cells[ci].keep = t->stamp;
         }
     }
@@ -704,11 +750,57 @@ static void maintain(thermo *t, const world *w, dvec3 player, int have_player)
         const cell *c = &t->cells[i];
         int gone = world_get(w, c->x, c->y, c->z) == B_UNLOADED;
         int kept = c->keep == t->stamp;
-        int quiet = fabs(c->dev) < DROP_K && c->lat == 0.0;
+        int quiet = (fabs(c->dev) < DROP_K && c->lat == 0.0) || (c->kind == K_HOT && !lava_edge(w, c->x, c->y, c->z));
         /* 64 bits: a host's cells can lie by another player at the far edge. */
         int far = have_player &&
                   (llabs((long long)c->x - px) > FIELD_RANGE || llabs((long long)c->z - pz) > FIELD_RANGE);
         if (gone || (!kept && (quiet || far))) remove_cell(t, i);
+    }
+}
+
+/* What lava sets alight: survival s of contact to ignite, and the fuel
+ * units it then burns as (a campfire's: one per FUEL_UNIT_S). Thin
+ * leaves catch in a couple of real seconds, a log in about eight; crude
+ * oil, which gives off vapour far below lava's heat, at once. */
+static int fuel_block(uint8_t id, int level, double *ignite_s)
+{
+    switch (id) {
+    case B_LEAVES: *ignite_s = 120.0; return 1;
+    case B_PLANKS: *ignite_s = 300.0; return 2;
+    case B_LOG: *ignite_s = 600.0; return 4;
+    case B_PEAT: *ignite_s = 900.0; return 4;
+    case B_CRUDE_OIL: *ignite_s = 20.0; return (level + 1) / 2;
+    default: *ignite_s = 0.0; return 0;
+    }
+}
+
+/* Fuel touching lava heats at its face until it catches, then burns as a
+ * fire. The field's cells are a metre across, too coarse for the face of a
+ * log to reach its ignition point by conduction, so contact time stands in
+ * for it. Burning blocks don't set their neighbours alight. */
+static void ignite(thermo *t, world *w, double dts)
+{
+    int n = 0;
+    for (int i = 0; i < t->linked && n < MAX_CONVERT; i++) {
+        cell *c = &t->cells[i];
+        double need = 0.0;
+        if (c->kind != K_SOLID) continue;
+        int fuel = fuel_block(c->mat, world_fluid_level(w, c->x, c->y, c->z), &need);
+        if (!fuel) continue;
+        int hot = 0;
+        for (int f = 0; f < 6 && !hot; f++) hot = c->nb[f] >= 0 && t->cells[c->nb[f]].kind == K_HOT;
+        c->exposed = hot ? c->exposed + dts : 0.0;
+        if (c->exposed < need) continue;
+        block_edit *e = &t->edits[n++];
+        e->x = c->x;
+        e->y = c->y;
+        e->z = c->z;
+        e->id = B_CAMPFIRE;
+        e->meta = (uint8_t)(fuel >= CAMPFIRE_FUEL_MAX ? 0 : fuel);
+    }
+    for (int k = 0; k < n; k++) {
+        const block_edit *e = &t->edits[k];
+        world_set(w, e->x, e->y, e->z, e->id, e->meta);
     }
 }
 
@@ -799,26 +891,57 @@ float thermo_block_temp(const thermo *t, const world *w, int x, int y, int z)
 {
     uint8_t id = world_get(w, x, y, z);
     if (id == B_CAMPFIRE) return (float)(FLAME_K - 273.15);
+    if (id == B_LAVA) return (float)THERMO_LAVA_C;
     int i = find(t, x, y, z);
     double amb = cell_ambient(t, w, x, y, z, NULL);
     if (i >= 0) return (float)(amb + t->cells[i].dev);
     return (float)(amb + initial_dev(id, amb));
 }
 
-/* Line of sight from p to the flame centre through non-opaque blocks,
- * marched in 10 cm steps. */
-static int fire_visible(const world *w, const fire *f, dvec3 p, double d)
+/* Line of sight from p to c, a point in the source cell (fx, fy, fz),
+ * through non-opaque blocks, marched in steps of `step` metres. */
+static int visible(const world *w, dvec3 p, dvec3 c, int fx, int fy, int fz, double step)
 {
-    dvec3 c = dv3((double)f->x + 0.5, (double)f->y + 0.5, (double)f->z + 0.5);
     int sx = (int)floor(p.x), sy = (int)floor(p.y), sz = (int)floor(p.z);
-    int n = (int)ceil(d / 0.1);
+    int n = (int)ceil(dv3_len(dv3(c.x - p.x, c.y - p.y, c.z - p.z)) / step);
     for (int k = 1; k < n; k++) {
         dvec3 s = dv3_lerp(p, c, (double)k / n);
         int x = (int)floor(s.x), y = (int)floor(s.y), z = (int)floor(s.z);
-        if ((x == f->x && y == f->y && z == f->z) || (x == sx && y == sy && z == sz)) continue;
+        if ((x == fx && y == fy && z == fz) || (x == sx && y == sy && z == sz)) continue;
         if (block_opaque(world_get(w, x, y, z))) return 0;
     }
     return 1;
+}
+
+static int fire_visible(const world *w, const fire *f, dvec3 p)
+{
+    dvec3 c = dv3((double)f->x + 0.5, (double)f->y + 0.5, (double)f->z + 0.5);
+    return visible(w, p, c, f->x, f->y, f->z, 0.1);
+}
+
+/* Radiant flux from the open tops of lava cells in the field: each is a
+ * 1 m^2 grey surface at LAVA_SURFACE_K, seen at the cosine of its
+ * elevation (Lambert: E = M A cos / (pi d^2)). Sides are left out: a pool
+ * shows the sky its top. */
+static double lava_radiant(const thermo *t, const world *w, dvec3 p)
+{
+    double ts2 = LAVA_SURFACE_K * LAVA_SURFACE_K, sk2 = SKIN_K * SKIN_K;
+    double m = LAVA_EMISSIVITY * SIGMA * (ts2 * ts2 - sk2 * sk2), q = 0.0;
+    for (int i = 0; i < t->count; i++) {
+        const cell *c = &t->cells[i];
+        if (c->kind != K_HOT) continue;
+        double top = (double)c->y + (double)world_fluid_level(w, c->x, c->y, c->z) / FLUID_FULL;
+        dvec3 s = dv3((double)c->x + 0.5, top, (double)c->z + 0.5);
+        dvec3 v = dv3(p.x - s.x, p.y - s.y, p.z - s.z);
+        if (v.y <= 0.0 || fabs(v.x) > LAVA_REACH || fabs(v.z) > LAVA_REACH || v.y > LAVA_REACH) continue;
+        double d = fmax(dv3_len(v), LAVA_MIN_D);
+        if (d > LAVA_REACH || world_get(w, c->x, c->y, c->z) != B_LAVA) continue;
+        uint8_t above = world_get(w, c->x, c->y + 1, c->z);
+        if (block_opaque(above) || block_fluid(above)) continue;
+        if (!visible(w, p, s, c->x, c->y, c->z, 0.25)) continue;
+        q += m * (v.y / d) / (MC_PI * d * d);
+    }
+    return q;
 }
 
 double thermo_radiant(const thermo *t, const world *w, dvec3 p)
@@ -829,11 +952,11 @@ double thermo_radiant(const thermo *t, const world *w, dvec3 p)
         const fire *f = &t->fires[i];
         double d = flame_dist(f, p);
         if (d > FIRE_REACH || world_get(w, f->x, f->y, f->z) != B_CAMPFIRE) continue;
-        if (!fire_visible(w, f, p, d)) continue;
+        if (!fire_visible(w, f, p)) continue;
         d = fmax(d, FIRE_MIN_D);
         q += emit / (d * d);
     }
-    return q;
+    return q + lava_radiant(t, w, p);
 }
 
 int thermo_near_fire(const thermo *t, const world *w, dvec3 p, double r)
@@ -898,12 +1021,15 @@ void thermo_on_block_changed(thermo *t, const world *w, int x, int y, int z, uin
         c->lat = 0.0;
         c->freezable = 0;
         t->dirty = 1;
-        /* A doused or burnt-out fire leaves hot embers; anything else
-         * starts at the temperature of a fresh block. */
-        if (!(old_id == B_CAMPFIRE && new_id == B_ASH)) c->dev = initial_dev(new_id, c->amb);
+        c->exposed = 0.0;
+        /* A doused or burnt-out fire leaves hot embers and lava that set
+         * leaves hot rock; anything else starts at the temperature of a
+         * fresh block. */
+        if (!(old_id == B_CAMPFIRE && new_id == B_ASH) && old_id != B_LAVA) c->dev = initial_dev(new_id, c->amb);
+        if (new_id == B_LAVA) c->dev = initial_dev(new_id, c->amb);
         return;
     }
-    int wake = new_id == B_CAMPFIRE;
+    int wake = new_id == B_CAMPFIRE || new_id == B_LAVA;
     int k = kind_of(new_id);
     if (k == K_MELT || k == K_WATER) {
         double amb = cell_ambient(t, w, x, y, z, NULL);
@@ -945,6 +1071,7 @@ void thermo_step(thermo *t, world *w, double dt, dvec3 player)
     double h = fmin(dts / n, t->hmax);
     for (int s = 0; s < n; s++) substep(t, h);
     convert(t, w);
+    ignite(t, w, dts);
 }
 
 int thermo_add_fuel(thermo *t, world *w, int x, int y, int z, int units)

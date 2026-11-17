@@ -2004,7 +2004,9 @@ static render_view build_view(game *g, double now, double dt, double alpha)
         v.blur = hs.blur;
         v.doubled = hs.doubled;
     }
-    v.underwater = world_get(&g->w, (int)floor(v.eye.x), (int)floor(v.eye.y), (int)floor(v.eye.z)) == B_WATER;
+    uint8_t eye_block = world_get(&g->w, (int)floor(v.eye.x), (int)floor(v.eye.y), (int)floor(v.eye.z));
+    v.underwater = block_fluid(eye_block);
+    if (v.underwater) fluid_view(eye_block, v.under_fog, &v.under_range);
     v.time = (float)fmod(now, 3600.0);
     /* Brightness lifts the darkest light toward dusk; days are unchanged. */
     v.daylight = fmaxf(thermo_daylight(g->th), 0.006f * (float)g->st.brightness);
