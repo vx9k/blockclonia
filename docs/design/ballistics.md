@@ -13,9 +13,9 @@ gravity at a fixed 400 m/s, with no drag. Its damage falls with the
 energy it has left, and it stops at the first block, except glass and
 ice, which shatter. The rest of the game is simulated in SI units:
 structural collapse, heat, a body with organs and blood. Next to that,
-the rifle is the shallowest system in the game. The aim is depth on the
-order of Escape from Tarkov's: what the round is, how far it drops, what
-it goes through and what it does to a body all matter, and a weapon is
+the rifle is the shallowest system in the game. The aim is to give it
+the same depth: what the round is, how far it drops, what it goes
+through and what it does to a body all matter, and a weapon is
 something you maintain.
 
 It comes after the agreed roadmap (items and crafting, machines,
