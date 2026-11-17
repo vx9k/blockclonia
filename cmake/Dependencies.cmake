@@ -119,7 +119,8 @@ else()
     set(MI_BUILD_TESTS OFF)
     set(MI_BUILD_OBJECT OFF)
     # Newer mimalloc releases can add -march=armv8.1-a (LSE atomics) on
-    # arm64, which faults on the Pi 4's Cortex-A72 (ARMv8.0). MC_CPU decides.
+    # arm64, which faults on ARMv8.0 cores the arm64 packages still run on
+    # (Cortex-A72, Graviton 1). MC_CPU decides.
     set(MI_OPT_ARCH OFF)
     if(ANDROID)
       set(MI_BUILD_SHARED OFF)
@@ -269,8 +270,8 @@ elseif(MC_DEPS STREQUAL "SYSTEM")
   message(STATUS "blockclonia: zlib ${ZLIB_VERSION_STRING} (system; no zlib-ng found)")
 else()
   # Static, without its tests or install rules (which would end up in the
-  # game's packages). Its SIMD paths are chosen at run time, so the Pi
-  # builds stay safe on any ARM core.
+  # game's packages). Its SIMD paths are chosen at run time, so the arm64
+  # packages stay safe on any ARM core.
   function(_mc_fetch_zlibng)
     set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
     set(BUILD_SHARED_LIBS OFF)

@@ -6,7 +6,7 @@
 #                        and writes version=<version> to $GITHUB_OUTPUT;
 #                        nothing when no release is due.
 #   release.sh publish   (release-publish job) publishes the GitHub release of
-#                        $VERSION with the .debs in dist/.
+#                        $VERSION with the .debs and Alpine tarballs in dist/.
 #
 # Between the two, ci.yml builds the packages from the tag (package.yml).
 set -euo pipefail
@@ -64,10 +64,12 @@ prepare() {
 publish() {
   : "${VERSION:?}" "${GH_REPO:?}" "${GH_TOKEN:?}"
   shopt -s nullglob
-  local debs=(dist/blockclonia_"${VERSION}"_*.deb)
-  # One package for each Raspberry Pi OS architecture, from the tag.
-  if ((${#debs[@]} != 2)); then
-    echo "expected the arm64 and armhf packages of ${VERSION} in dist/, found: ${debs[*]:-none}" >&2
+  local debs=(dist/blockclonia_"${VERSION}"_*.deb) tarballs=(dist/blockclonia-"${VERSION}"-alpine-*.tar.gz)
+  # A .deb for each Ubuntu architecture and a tarball for each Alpine one,
+  # all from the tag.
+  if ((${#debs[@]} != 2 || ${#tarballs[@]} != 2)); then
+    echo "expected the amd64 and arm64 .debs and the x86_64 and aarch64 Alpine tarballs of ${VERSION} in dist/," \
+      "found: ${debs[*]:-} ${tarballs[*]:-}" >&2
     return 1
   fi
   local work=${RUNNER_TEMP:-$(mktemp -d)}
@@ -92,7 +94,7 @@ PY
     python3 tools/release.py --notes "$VERSION" > "$work/notes.md"
     gh release create "v${VERSION}" --draft --verify-tag --title "blockclonia ${VERSION}" --notes-file "$work/notes.md"
   fi
-  gh release upload "v${VERSION}" "${debs[@]}" --clobber
+  gh release upload "v${VERSION}" "${debs[@]}" "${tarballs[@]}" --clobber
   gh release edit "v${VERSION}" --draft=false --latest
 }
 

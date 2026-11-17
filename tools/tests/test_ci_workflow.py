@@ -13,8 +13,9 @@ WORKFLOWS = ROOT / '.github/workflows'
 CI = (WORKFLOWS / 'ci.yml').read_text()
 PACKAGE = (WORKFLOWS / 'package.yml').read_text()
 PR = (WORKFLOWS / 'pr.yml').read_text()
-# Jobs that run but may fail without blocking a merge.
-EXPERIMENTAL = {'macos'}
+# Jobs that run but may fail without blocking a merge: none, since every
+# supported platform (Ubuntu, Alpine, macOS) is required.
+EXPERIMENTAL = set()
 # Jobs that run after the gate.
 AFTER_GATE = {'ci-passed', 'nightly', 'release', 'release-package', 'release-publish'}
 
@@ -73,6 +74,13 @@ class CiPassed(unittest.TestCase):
     def test_experimental_jobs_cannot_fail_the_run(self):
         for name in EXPERIMENTAL:
             self.assertIn('    continue-on-error: true\n', job(CI, name))
+
+    def test_every_supported_platform_is_required(self):
+        self.assertTrue({'package', 'macos'} <= needs(CI, 'ci-passed'))
+        self.assertNotIn('\n    continue-on-error: true\n', job(CI, 'macos'))
+        # Only the MoltenVK render on a GPU-less VM may fail.
+        self.assertEqual(job(CI, 'macos').count('continue-on-error: true'), 1)
+        self.assertLess(job(CI, 'macos').index('ctest'), job(CI, 'macos').index('continue-on-error: true'))
 
     def test_it_is_the_name_the_ruleset_requires(self):
         self.assertRegex(job(CI, 'ci-passed'), r'(?m)^    name: CI passed$')
@@ -172,21 +180,64 @@ class Release(unittest.TestCase):
     def test_release_packages_keep_the_plain_version(self):
         # The suffix goes only on packages built from a commit, not a tag.
         self.assertEqual(PACKAGE.count('if [ -z "$RELEASE" ]; then'), 2)
-        self.assertEqual(PACKAGE.count('-DMC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}"'), 2)
+        self.assertEqual(PACKAGE.count('-DMC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}"'), 1)
+        self.assertIn('-e MC_PACKAGE_VERSION_SUFFIX="${MC_PACKAGE_VERSION_SUFFIX:-}"', PACKAGE)
+        self.assertIn('-DMC_PACKAGE_VERSION_SUFFIX="$MC_PACKAGE_VERSION_SUFFIX"', PACKAGE)
         cmake = (ROOT / 'cmake/Packaging.cmake').read_text()
         self.assertIn('set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}${MC_PACKAGE_VERSION_SUFFIX}")', cmake)
         self.assertLess(cmake.index('CPACK_PACKAGE_VERSION'), cmake.index('include(CPack)'))
 
 
+def matrix_arches(name):
+    return re.findall(r'- \{ arch: ([a-z0-9_]+), runner: (ubuntu-26\.04(?:-arm)?),', job(PACKAGE, name))
+
+
 class Packages(unittest.TestCase):
-    def test_both_pi_packages_are_built_and_uploaded(self):
-        self.assertEqual(set(jobs(PACKAGE)), {'pi-arm64', 'pi-armhf'})
-        for name in ['pi-arm64', 'pi-armhf']:
+    def test_ubuntu_and_alpine_are_built_and_uploaded(self):
+        self.assertEqual(set(jobs(PACKAGE)), {'ubuntu', 'alpine'})
+        for name in ['ubuntu', 'alpine']:
             body = job(PACKAGE, name)
-            self.assertIn(f'name: ${{{{ inputs.artifact-prefix }}}}-{name}', body)
+            self.assertIn(f'name: ${{{{ inputs.artifact-prefix }}}}-{name}-${{{{ matrix.arch }}}}', body)
             self.assertIn('if-no-files-found: error', body)
+            self.assertIn('fail-fast: false', body)
             self.assertIn("ref: ${{ inputs.release != '' && format('refs/tags/v{0}', inputs.release) || '' }}",
                           body)
+
+    def test_each_is_built_natively_on_x86_64_and_arm64(self):
+        self.assertEqual(matrix_arches('ubuntu'), [('amd64', 'ubuntu-26.04'), ('arm64', 'ubuntu-26.04-arm')])
+        self.assertEqual(matrix_arches('alpine'), [('x86_64', 'ubuntu-26.04'), ('aarch64', 'ubuntu-26.04-arm')])
+        self.assertNotIn('armhf', PACKAGE)
+        self.assertNotIn('qemu', PACKAGE)
+
+    def test_packages_are_tested_before_they_are_packed(self):
+        ubuntu, alpine = job(PACKAGE, 'ubuntu'), job(PACKAGE, 'alpine')
+        self.assertLess(ubuntu.index('ctest --preset ci'), ubuntu.index('cpack -G DEB'))
+        self.assertLess(alpine.index('ctest --preset release'), alpine.index('cpack -G TGZ'))
+        self.assertIn('-DMC_PGO=ON -DMC_BOLT=ON', ubuntu)
+        self.assertIn('-DMC_WERROR=ON', alpine)
+
+    def test_musl_threads_get_a_glibc_sized_default_stack(self):
+        # Mesa's shader-compiler threads take musl's default stack; at 128 KB
+        # LLVM's AArch64 backend overflowed it and the Alpine arm64 render
+        # crashed.
+        cmake = (ROOT / 'CMakeLists.txt').read_text()
+        self.assertIn('target_link_options(blockclonia PRIVATE LINKER:-z,stack-size=8388608)', cmake)
+        self.assertNotIn('gdb', job(PACKAGE, 'alpine'))
+
+    def test_alpine_installs_the_runtime_files_clang_links_with(self):
+        # Without gcc, Alpine's clang can't find crtbeginS.o or libgcc and
+        # every link fails, starting with CMake's compiler check.
+        self.assertRegex(job(PACKAGE, 'alpine'), r'apk add --no-cache \\\n\s+clang22 lld22 llvm compiler-rt gcc ')
+
+    def test_the_release_attests_both_kinds_of_package(self):
+        publish = job(CI, 'release-publish')
+        self.assertIn('dist/blockclonia_*.deb', publish)
+        self.assertIn('dist/blockclonia-*.tar.gz', publish)
+
+    def test_no_job_builds_for_a_dropped_platform(self):
+        for workflow in [CI, PACKAGE]:
+            for gone in ['old-vulkan', 'bookworm', 'ubuntu-24.04', 'pi-arm64', 'pi4-']:
+                self.assertNotIn(gone, workflow)
 
     def test_ci_builds_them_for_every_run(self):
         self.assertIn('uses: ./.github/workflows/package.yml', job(CI, 'package'))
@@ -227,7 +278,7 @@ class ContainerShell(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which('dash'), 'dash is not installed')
     def test_dash_writes_the_suffix_for_a_commit_and_none_for_a_tag(self):
-        for name in ['pi-arm64', 'pi-armhf']:
+        for name in ['ubuntu', 'alpine']:
             with tempfile.TemporaryDirectory() as tmp:
                 out = Path(tmp) / 'env'
                 env = {'PATH': os.environ['PATH'], 'GITHUB_ENV': str(out), 'GITHUB_SHA': 'abcdef0123456789'}
