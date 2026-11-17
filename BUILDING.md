@@ -17,15 +17,15 @@ lavapipe, slowly (see [No GPU](#no-gpu)).
 
 | System | Status |
 |---|---|
-| Linux x86-64 (Debian, Ubuntu, Arch, ...) | Supported, tested in CI on every change |
-| Raspberry Pi OS, 64-bit (Pi 4, Pi 5) | Supported, tested in CI, `.deb` packages built |
-| Raspberry Pi OS, 32-bit | Supported, tested in CI under emulation |
-| macOS on Apple Silicon | Experimental, through MoltenVK; built in CI, never played on a real Mac yet |
-| Windows | Not supported |
+| Ubuntu 26.04, x86-64 and arm64 | Supported, tested in CI on every change, `.deb` packages built |
+| Alpine Linux, x86-64 and arm64 | Supported, tested in CI on every change, tarballs built |
+| macOS on Apple Silicon | Supported through MoltenVK, built and unit-tested in CI on every change; not played on a real Mac yet |
+| Other Linux (Debian, Arch, ...) | Builds from source; not tested in CI |
+| 32-bit systems, Windows | Not supported |
 
 **To build it:**
 
-- LLVM: clang 14 or newer, lld and LLVM's binutils (`llvm-ar` and
+- LLVM: clang 21 or newer, lld and LLVM's binutils (`llvm-ar` and
   friends), plus CMake 3.21 or newer and Ninja. gcc is not supported; see
   [Toolchain](#toolchain). clang's profile runtime (for PGO) and BOLT
   (`llvm-bolt`, 18 or newer) are optional and make release builds faster;
@@ -44,7 +44,7 @@ to control that.
 
 ## Linux
 
-### Debian, Ubuntu, Raspberry Pi OS
+### Ubuntu, Debian
 
 ```sh
 sudo apt install clang lld llvm cmake ninja-build glslc libvulkan-dev \
@@ -52,7 +52,7 @@ sudo apt install clang lld llvm cmake ninja-build glslc libvulkan-dev \
                  mesa-vulkan-drivers
 v=$(clang --version | sed -n 's/.*clang version \([0-9]*\).*/\1/p')
 sudo apt install bolt-$v libclang-rt-$v-dev   # optional: BOLT and PGO
-cmake --preset native            # tuned for this machine (use this on a Pi)
+cmake --preset native            # tuned for this machine
 cmake --build --preset native
 ./build/native/blockclonia
 ```
@@ -65,6 +65,25 @@ development files:
 sudo apt install libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
                  libxi-dev libwayland-dev libwayland-bin libxkbcommon-dev
 ```
+
+### Alpine Linux
+
+Alpine's GLFW and mimalloc are older than 3.5, so the build downloads
+them, which needs the X11 and Wayland headers. Alpine has no BOLT, so
+release builds get PGO only.
+
+```sh
+doas apk add clang22 lld22 llvm compiler-rt musl-dev linux-headers cmake samurai pkgconf \
+             shaderc vulkan-loader-dev vulkan-headers sqlite-dev libsodium-dev enet-dev \
+             miniupnpc-dev zlib-ng-dev libx11-dev libxrandr-dev libxinerama-dev \
+             libxcursor-dev libxi-dev wayland-dev libxkbcommon-dev mesa-vulkan-swrast
+cmake --preset native
+cmake --build --preset native
+./build/native/blockclonia
+```
+
+Also install the Vulkan driver for your GPU: `mesa-vulkan-intel`,
+`mesa-vulkan-ati` or `mesa-vulkan-nouveau`.
 
 ### Arch Linux, CachyOS, Manjaro
 
@@ -81,20 +100,7 @@ cmake --build --preset native
 Also install the Vulkan driver for your GPU: `vulkan-intel`,
 `vulkan-radeon`, or NVIDIA's driver, which brings its own.
 
-### Raspberry Pi
-
-Build on the Pi itself with `--preset native`, as above. A Pi 4 needs a
-few minutes for the first build. For a lighter load, start the game with
-`--radius 4`.
-
-32-bit Pi OS's compiler has NEON turned off by default; configure with
-`-DMC_CPU=pi4` (or `pi5`) there.
-
-To build for a Pi on a faster machine, use the cross-compiling presets
-`pi4-aarch64`, `pi5-aarch64` or `pi4-armhf`. The header of
-`cmake/toolchains/rpi-aarch64.cmake` explains the setup.
-
-## macOS (Apple Silicon, experimental)
+## macOS (Apple Silicon)
 
 The renderer is written for Vulkan, which macOS doesn't have. MoltenVK
 translates it to Metal, Apple's graphics API. Install the tools with
@@ -107,8 +113,8 @@ cmake --build --preset macos
 ./build/macos/blockclonia
 ```
 
-CI builds this and runs the unit tests on every change, but nobody has
-played it on a Mac yet. If you try it, please report what happens,
+CI builds this and runs the unit tests on every change, and a failure
+blocks the change, but nobody has played it on a Mac yet. If you try it, please report what happens,
 working or not. A native Metal renderer is deferred;
 [docs/design/metal.md](docs/design/metal.md) explains why.
 
@@ -130,7 +136,7 @@ working or not. A native Metal renderer is deferred;
 
 Options you can add when configuring, with `-D`:
 
-- `MC_CPU=pi4|pi5|native|x86-64-v2` picks the CPU to tune for.
+- `MC_CPU=native|x86-64-v2|x86-64-v3` picks the CPU to tune for.
 - `MC_SOUND=OFF` builds without sound, so miniaudio isn't needed.
 - `MC_WERROR=ON` turns compiler warnings into errors.
 - `MC_PGO=AUTO|ON|OFF` compiles the game from a `--bench` profile

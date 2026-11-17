@@ -7,7 +7,7 @@ keep the rules here and tool-specific notes there.
 blockclonia is a voxel sandbox in C11 and Vulkan: streamed terrain, SI-unit
 physics with structural collapse and thermodynamics, a simulated human
 body, procedural textures and sound. It sizes itself to the machine
-(`sysinfo.c`: cores, RAM, CPU caches), from a Raspberry Pi up to a
+(`sysinfo.c`: cores, RAM, CPU caches), from a small laptop up to a
 workstation, rather than holding every machine to the smallest one's
 budgets.
 `README.md` covers what the game does, and
@@ -51,7 +51,8 @@ run (a screenshot through `--frames`/`--screenshot` is the cheapest proof).
 The compiler enforces most of these: `cmake/warnings.cmake` turns on
 `-Wconversion -Wsign-conversion -Wdouble-promotion -Wshadow -Wvla
 -Wframe-larger-than=16384` and more, and CI builds with `-Werror` on
-clang 14 (Debian bookworm) up to the newest Ubuntu's. `.clang-tidy` and `cppcheck` run in `tools/lint.sh`.
+clang 21 (Ubuntu 26.04), clang 22 (Alpine 3.24) and macOS's Apple clang.
+`.clang-tidy` and `cppcheck` run in `tools/lint.sh`.
 
 - **C11, no extensions.** No VLAs. Stack frames stay under 64 KB
   (threads get `OS_THREAD_STACK`, 4 MB, on every OS), so big buffers go
@@ -102,10 +103,10 @@ clang 14 (Debian bookworm) up to the newest Ubuntu's. `.clang-tidy` and `cppchec
   and every feature has a 1.0 fallback path. Add a feature by adding a
   `GPUCAP_*` bit, its rule in `gpucaps_choose`, a test in
   `tests/test_gpucaps.c`, and the fallback.
-- **Guard newer headers at compile time.** CI builds against Vulkan headers
-  1.3.239 (Debian bookworm) and 1.3.275 (Ubuntu 24.04), so anything from
-  1.4 goes under `#ifdef VK_API_VERSION_1_4`. Load entry points newer than
-  1.0 with `vkGetDeviceProcAddr`/`vkGetInstanceProcAddr`, never by linking.
+- **Load newer entry points at run time.** Every platform CI builds on
+  (Ubuntu 26.04, Alpine 3.24, Homebrew) ships Vulkan 1.4 headers, so no
+  header guards are needed, but load entry points newer than 1.0 with
+  `vkGetDeviceProcAddr`/`vkGetInstanceProcAddr`, never by linking.
 - **Test the fallbacks** on a capable machine with `MC_VK_API=1.0` (up to
   `1.4`) to cap the API version and `MC_VK_DISABLE=all` (or a comma list:
   `mdi,dynrend,sync2,timeline,aniso,hostcopy,budget,timestamps,pcache,hostreset,relaxed`).
@@ -226,9 +227,10 @@ from a job.
 - Open the pull request ready for review and turn on auto-merge
   (`gh pr merge --auto --squash`). It lands by itself, squashed under its
   title, once the two checks the `main` ruleset requires pass:
-  `CI passed`, which stands for every CI job but the experimental macOS
-  one, and `Title and 1:1 test ratio` (from `pr.yml`). Open a draft only
-  for work that is not meant to land yet.
+  `CI passed`, which stands for every CI job (Ubuntu and Alpine on
+  x86_64 and arm64, macOS, sanitizers and lint), and `Title and 1:1 test
+  ratio` (from `pr.yml`). Open a draft only for work that is not meant to
+  land yet.
 - The ruleset merges only a branch that holds `main`'s newest commit, so
   bring a waiting pull request up to date ("Update branch", or rebase).
   Before review starts you may rebase your own branch on `main` and push
@@ -326,9 +328,10 @@ run checks `main`'s head, and once `CI passed` is green the `release` job
 `project()` in `CMakeLists.txt`, writes the changelog entry at the top of
 `CHANGELOG.md` from the Conventional Commits since the last tag, commits
 `chore(release): <version> after green CI` onto `main` and tags it
-`v<version>`. The Raspberry Pi packages are then built from that tag,
-attested (`gh attestation verify <file> --repo vx9k/blockclonia`) and
-published as the GitHub release. A push to `main` releases at once only for
+`v<version>`. The packages (Ubuntu `.deb`s and Alpine tarballs, each
+for x86_64 and arm64) are then built from that tag, attested
+(`gh attestation verify <file> --repo vx9k/blockclonia`) and published
+as the GitHub release. A push to `main` releases at once only for
 a `fix(security):` commit, or when the weekly release was missed. "Run
 workflow" on the CI workflow releases by hand. Every green push to `main`
 also publishes a `nightly-<date>-<commit>` prerelease and deletes the

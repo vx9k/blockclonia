@@ -25,7 +25,7 @@ How to work:
    ASan build via `cmake --preset asan`, `--validate` for Vulkan). Fix the
    root cause and add a regression test that fails without the fix.
 3. For a design decision: lay out the realistic options with their costs
-   (performance on a Raspberry Pi 4, the Vulkan 1.0 baseline, save
+   (performance on integrated and older GPUs, the Vulkan baseline, save
    compatibility, determinism, code size), choose one, and say what
    would make you choose differently.
 4. For security-sensitive code: model the attacker concretely (a shared

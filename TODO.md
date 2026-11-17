@@ -11,7 +11,7 @@ unless it says otherwise.
 
 1. **The underground series** (see [World generation](#world-generation)):
    - [x] Each block's material class in the block table (#68)
-   - [ ] 32-bit item ids (#70, in review)
+   - [x] 32-bit item ids (#70)
    - [ ] Materials: 7 rocks, 4 soils, 15 new ores, raw items, ingots
          and alloys, smelting
    - [ ] Strata, ores in their host rock, soil depth
@@ -20,6 +20,10 @@ unless it says otherwise.
          dripstone, lava lakes
    - [ ] Delete the old per-file world importer
 2. **Rivers and lakes**, then a new terrain screenshot for the README.
+3. **Platforms:** Ubuntu 26.04 (x86_64 and arm64), Alpine Linux and macOS
+   only; the Raspberry Pi, armhf and older distributions are dropped.
+   - [ ] CI and packages for the supported platforms
+   - [ ] Vulkan 1.2 as the minimum, without the 1.0 fallbacks
 
 ## Next
 
@@ -80,7 +84,7 @@ daylight value for the whole world.
 **Design:** [docs/design/lighting.md](docs/design/lighting.md)
 
 - [ ] Choose how light reaches the shader (a second vertex stream or a
-      light texture per section), measured on the Pi and lavapipe
+      light texture per section), measured on integrated GPUs and lavapipe
 - [ ] Sky light and block light by flood fill on the workers, with
       incremental relighting on edits
 - [ ] Emitters: campfire, furnace, lava, torches, lamps; glow from

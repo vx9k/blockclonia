@@ -8,8 +8,8 @@ assignees: ''
 ---
 
 **What problem does it solve?**
-What you're trying to do and what gets in the way, for example "on a
-Raspberry Pi 4 the frame rate drops to 20 near water".
+What you're trying to do and what gets in the way, for example "on
+Intel integrated graphics the frame rate drops to 20 near water".
 
 **What you'd like**
 How it should behave in the game, or what should change in the engine
