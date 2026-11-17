@@ -267,6 +267,15 @@ static void test_avatar_poses(void)
     a.sneak = 1.0f;
     avatar_build(&a, FEET, 0.0f, 0.0f, 0, 1.0f, e, AVATAR_BOXES);
     CHECK(e[FACE].pos[1] < stand - 0.2f && e[FACE].pos[1] > 0.9f);
+    float crouched = e[FACE].pos[1];
+    /* Half eased into the sneak, the head is between the two heights. */
+    a.sneak = 0.5f;
+    avatar_build(&a, FEET, 0.0f, 0.0f, 0, 1.0f, e, AVATAR_BOXES);
+    CHECK(e[FACE].pos[1] < stand - 0.02f);
+    CHECK(e[FACE].pos[1] > crouched + 0.02f);
+    a.sneak = 1.0f;
+    avatar_build(&a, FEET, 0.0f, 0.0f, 0, 1.0f, e, AVATAR_BOXES);
+    CHECK(fabsf(e[FACE].pos[1] - crouched) < 1e-5f);
     /* The sneak eases in rather than snapping. */
     avatar_anim b = {0};
     avatar_anim_update(&b, 0.0, 0.0, 1, 0, 1.0f / 60.0f);
