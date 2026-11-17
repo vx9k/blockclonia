@@ -46,6 +46,9 @@ Not yet in order:
 - [Animals](#animals): more species, cats among them, and behaviour
   from needs and senses
 - [Farming and food](#farming-and-food)
+- [Weapons and ballistics](#weapons-and-ballistics): ammunition types,
+  simulated flight, penetration, wounds, and weapons built from parts
+  that wear and jam
 - [Building and furniture](#building-and-furniture)
 - [World generation](#world-generation): trees, ground plants,
   settlements
@@ -169,6 +172,27 @@ feed the body model.
 - [ ] Kept animals: feeding, breeding, fences
 - [ ] Oven, pot, flour and bread; spoilage and preserving
 - [ ] Nutrition beyond energy and water
+
+### Weapons and ballistics
+
+**Goal:** weapons as deep as the rest of the simulation: ammunition
+types, real flight, penetration and wounds through the health model,
+and weapons built from parts that wear, heat up and jam.
+**Status:** one rifle with two-handed aim and a spring mount. Its
+bullet has gravity but no drag, and it stops at the first block.
+**Design:** [docs/design/ballistics.md](docs/design/ballistics.md)
+
+- [ ] Ballistic flight: an ammunition table, G1/G7 drag, air density
+      from altitude and temperature, wind
+- [ ] Penetration and ricochet through blocks by material
+- [ ] Wound ballistics into the health model: the path, construction,
+      pass-throughs
+- [ ] The weapon as parts: barrel, magazine, receiver; reloading and
+      fire modes
+- [ ] Condition, barrel heat and malfunctions, with clearing and
+      cleaning
+- [ ] Sights and zeroing, then optics
+- [ ] Armour on the body (after clothing)
 
 ### Building and furniture
 
