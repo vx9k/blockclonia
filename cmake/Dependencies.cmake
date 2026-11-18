@@ -152,10 +152,11 @@ else()
 endif()
 
 # ---------------------------------------------------------------- SQLite
-# World saves (save_db.c), so the core needs it, game or not. 3.31 is the
-# oldest release with SQLITE_OPEN_NOFOLLOW and trusted_schema, which opening
-# shared world files safely relies on; Debian bookworm has 3.40.
-set(MC_SQLITE_MIN 3.31 CACHE STRING "Oldest system SQLite used")
+# World saves (save_db.c), so the core needs it, game or not. 3.37 is the
+# oldest release with STRICT tables, which world format 2 uses, after
+# SQLITE_OPEN_NOFOLLOW and trusted_schema (3.31), which opening shared
+# world files safely relies on; Debian bookworm has 3.40.
+set(MC_SQLITE_MIN 3.37 CACHE STRING "Oldest system SQLite used")
 add_library(mc_sqlite INTERFACE)
 add_library(mc::sqlite ALIAS mc_sqlite)
 set(MC_SQLITE_SYSTEM OFF)

@@ -1,6 +1,7 @@
 /* The world database (save_db.c): round trips, refusing files that are not
- * a world of this format or are reached through symlinks, rows of the
- * wrong type or size, importing the old one-file-per-column format, and a
+ * a world of a known format or are reached through symlinks, rows of the
+ * wrong type or size, upgrading an older format, tidying on close,
+ * importing the old one-file-per-column format, and a
  * world saving and loading through it with a worker thread. */
 #include "jobs.h"
 #include "mem.h"
@@ -39,6 +40,22 @@ static int raw_sql(const char *dir, const char *sql)
     int ok = sqlite3_open(p, &h) == SQLITE_OK && sqlite3_exec(h, sql, NULL, NULL, NULL) == SQLITE_OK;
     sqlite3_close(h);
     return ok;
+}
+
+/* An integer PRAGMA read straight from the file; -1 if it cannot be. */
+static long long raw_pragma(const char *dir, const char *name, const char *pragma)
+{
+    char p[512] = {0};
+    path_in(p, sizeof p, dir, name);
+    sqlite3 *h = NULL;
+    sqlite3_stmt *s = NULL;
+    long long v = -1;
+    if (sqlite3_open_v2(p, &h, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK &&
+        sqlite3_prepare_v2(h, pragma, -1, &s, NULL) == SQLITE_OK && sqlite3_step(s) == SQLITE_ROW)
+        v = sqlite3_column_int64(s, 0);
+    sqlite3_finalize(s);
+    sqlite3_close(h);
+    return v;
 }
 
 /* A VFS in front of the default one that fails reads or writes while a
@@ -227,7 +244,9 @@ static void test_refused(void)
     make_world(dir, sizeof dir, "altered",
                "DROP TABLE blobs; CREATE TABLE blobs(name TEXT PRIMARY KEY NOT NULL, data BLOB) WITHOUT ROWID");
     check_refused(dir);
-    make_world(dir, sizeof dir, "newer", "PRAGMA user_version = 2");
+    char newer[48] = {0};
+    snprintf(newer, sizeof newer, "PRAGMA user_version = %d", SAVE_DB_FORMAT + 1);
+    make_world(dir, sizeof dir, "newer", newer);
     check_refused(dir);
     make_world(dir, sizeof dir, "app", "PRAGMA application_id = 7");
     check_refused(dir);
@@ -255,19 +274,26 @@ static void test_bad_rows(void)
 {
     char dir[400] = {0};
     char sql[256] = {0};
-    snprintf(sql, sizeof sql,
-             "INSERT INTO columns VALUES (0, 0, 'text'), (1, 0, x'00'), (2, 0, zeroblob(%d));"
-             "INSERT OR REPLACE INTO meta VALUES ('seed', -5);"
-             "INSERT INTO blobs VALUES ('player', 'text')",
-             SAVE_MAX_FILE + 1);
-    make_world(dir, sizeof dir, "rows", sql);
+    make_world(dir, sizeof dir, "rows",
+               "INSERT INTO columns VALUES (1, 0, x'00');"
+               "INSERT OR REPLACE INTO meta VALUES ('seed', -5)");
+    /* The STRICT tables refuse wrong types, sizes and keys outright. */
+    snprintf(sql, sizeof sql, "INSERT INTO columns VALUES (2, 0, zeroblob(%d))", SAVE_MAX_FILE + 1);
+    CHECK(!raw_sql(dir, sql));
+    CHECK(!raw_sql(dir, "INSERT INTO columns VALUES (0, 0, 'text')"));
+    CHECK(!raw_sql(dir, "INSERT INTO columns VALUES (0, 0, x'')"));
+    CHECK(!raw_sql(dir, "INSERT INTO columns VALUES (125000000, 0, x'00')"));
+    CHECK(!raw_sql(dir, "INSERT INTO columns VALUES (0, -125000001, x'00')"));
+    CHECK(!raw_sql(dir, "INSERT INTO blobs VALUES ('player', 'text')"));
+    CHECK(!raw_sql(dir, "INSERT INTO meta VALUES ('k', 'text')"));
+    CHECK(!raw_sql(dir, "INSERT INTO meta VALUES ('', 1)"));
+    CHECK(raw_sql(dir, "INSERT INTO columns VALUES (124999999, -125000000, x'00')")); /* the edges are in */
     save_db *db = save_db_open(dir);
     CHECK(db != NULL);
     if (!db) return;
     uint8_t *b = NULL;
     uint32_t seed = 0;
-    CHECK(save_db_get_column(db, 0, 0, &b) == -2 && b == NULL); /* not a blob */
-    CHECK(save_db_get_column(db, 2, 0, &b) == -2 && b == NULL); /* too big */
+    CHECK(save_db_get_column(db, 0, 0, &b) == -1 && b == NULL); /* none was stored */
     long n = save_db_get_column(db, 1, 0, &b);                   /* a blob, but no column */
     column *c = column_alloc(1, 0);
     CHECK(n == 1 && save_decode_column(c, b, (size_t)n) == -1);
@@ -276,7 +302,8 @@ static void test_bad_rows(void)
     CHECK(save_db_get_seed(db, &seed) == -1);
     CHECK(save_db_set_seed(db, 5) == 0 && save_db_get_seed(db, &seed) == 0 && seed == 5);
     char buf[16] = {0};
-    CHECK(save_db_get_blob(db, "player", buf, sizeof buf) == -1);
+    CHECK(save_db_put_blob(db, "player", buf, 0) == 0); /* an empty blob is a blob */
+    CHECK(save_db_get_blob(db, "player", buf, sizeof buf) == 0);
     save_db_close(db);
 
     CHECK(raw_sql(dir, "INSERT OR REPLACE INTO meta VALUES ('seed', 4294967296)"));
@@ -515,14 +542,138 @@ static void test_unload_save_fails(void)
     fault_vfs_remove();
 }
 
+/* A world exactly as a format 1 build wrote it, with sql run on it after. */
+static void make_format1(char *dir, size_t cap, const char *name, const char *sql)
+{
+    sub_dir(dir, cap, name);
+    CHECK(raw_sql(dir, "PRAGMA application_id = 1296258892; PRAGMA user_version = 1;"
+                       "CREATE TABLE meta(key TEXT PRIMARY KEY NOT NULL, value INTEGER NOT NULL) WITHOUT ROWID;"
+                       "CREATE TABLE columns(cx INTEGER NOT NULL, cz INTEGER NOT NULL, data BLOB NOT NULL, "
+                       "PRIMARY KEY(cx, cz)) WITHOUT ROWID;"
+                       "CREATE TABLE blobs(name TEXT PRIMARY KEY NOT NULL, data BLOB NOT NULL) WITHOUT ROWID;"
+                       "INSERT INTO meta VALUES ('seed', 77);"
+                       "INSERT INTO blobs VALUES ('name', x'4F6C64')"));
+    if (sql) CHECK(raw_sql(dir, sql));
+}
+
+/* A format 1 world is upgraded on open, keeping every row and a copy of
+ * the old file; one with a row the new tables refuse is left alone. */
+static void test_upgrade(void)
+{
+    char dir[400] = {0}, p[512] = {0};
+    make_format1(dir, sizeof dir, "upgrade", NULL);
+    save_peek pk = {0};
+    save_db_peek(dir, &pk);
+    CHECK(pk.status == SAVE_PEEK_OK && pk.has_seed && pk.seed == 77 && strcmp(pk.name, "Old") == 0);
+    /* A column written through format 1's tables. */
+    column *c = edited_column(2, -3);
+    uint8_t *enc = mem_alloc(SAVE_MAX_FILE);
+    size_t len = save_encode_column(c, enc, SAVE_MAX_FILE);
+    save_db *db = NULL;
+    CHECK(len > 0);
+    {
+        path_in(p, sizeof p, dir, "world.db");
+        sqlite3 *h = NULL;
+        sqlite3_stmt *s = NULL;
+        CHECK(sqlite3_open(p, &h) == SQLITE_OK &&
+              sqlite3_prepare_v2(h, "INSERT INTO columns VALUES (2, -3, ?1)", -1, &s, NULL) == SQLITE_OK);
+        sqlite3_bind_blob(s, 1, enc, (int)len, SQLITE_STATIC);
+        CHECK(sqlite3_step(s) == SQLITE_DONE);
+        sqlite3_finalize(s);
+        sqlite3_close(h);
+    }
+    db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (db) {
+        uint32_t seed = 0;
+        uint8_t *b = NULL;
+        char name[8] = {0};
+        CHECK(save_db_get_seed(db, &seed) == 0 && seed == 77);
+        long n = save_db_get_column(db, 2, -3, &b);
+        CHECK(n == (long)len && b && memcmp(b, enc, len) == 0);
+        mem_free(b);
+        CHECK(save_db_get_blob(db, "name", name, sizeof name) == 3 && memcmp(name, "Old", 3) == 0);
+        CHECK(save_db_set_seed(db, 78) == 0); /* and it writes */
+        save_db_close(db);
+    }
+    CHECK(raw_pragma(dir, "world.db", "PRAGMA user_version") == SAVE_DB_FORMAT);
+    CHECK(raw_pragma(dir, "world.db", "PRAGMA auto_vacuum") == 2);
+    CHECK(!raw_sql(dir, "INSERT INTO columns VALUES (9, 9, 'text')")); /* STRICT now */
+    CHECK(raw_pragma(dir, "world.db.format1", "PRAGMA user_version") == 1);
+    CHECK(raw_pragma(dir, "world.db.format1", "SELECT value FROM meta WHERE key = 'seed'") == 77);
+    /* Opened again: nothing more to do, the copy stays as it was. */
+    db = save_db_open(dir);
+    CHECK(db != NULL);
+    save_db_close(db);
+    CHECK(raw_pragma(dir, "world.db.format1", "SELECT count(*) FROM columns") == 1);
+
+    /* A row format 2 refuses: the upgrade fails whole, the file unchanged. */
+    make_format1(dir, sizeof dir, "upbad", "INSERT INTO columns VALUES (0, 0, 'text')");
+    check_refused(dir);
+    CHECK(raw_pragma(dir, "world.db", "PRAGMA user_version") == 1);
+    CHECK(raw_pragma(dir, "world.db", "SELECT count(*) FROM columns") == 1);
+    /* Format 1 tables plus something else: refused, not upgraded. */
+    make_format1(dir, sizeof dir, "upextra", "CREATE INDEX i ON blobs(data)");
+    check_refused(dir);
+    /* No safe place for the copy (a symlink there): not upgraded. */
+    make_format1(dir, sizeof dir, "uplink", NULL);
+    char victim[400] = {0};
+    path_in(victim, sizeof victim, g_root, "victim.txt");
+    path_in(p, sizeof p, dir, "world.db.format1");
+    if (tmp_symlink(victim, p) == 1) {
+        check_refused(dir);
+        CHECK(raw_pragma(dir, "world.db", "PRAGMA user_version") == 1);
+    }
+    column_free(c);
+    mem_free(enc);
+}
+
+/* Closing hands freed pages back, and a damaged page refuses the file. */
+static void test_tidy_and_damage(void)
+{
+    char dir[400] = {0}, p[512] = {0};
+    make_world(dir, sizeof dir, "tidy", NULL);
+    save_db *db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (!db) return;
+    CHECK(save_db_begin(db) == 0);
+    for (int i = 0; i < 40; i++) {
+        column *c = edited_column(i, 0);
+        c->blocks[col_index(i % 16, GROUND + 1 + i, 7)] = B_STONE; /* no two alike */
+        CHECK(save_db_put_column(db, c) == 0);
+        column_free(c);
+    }
+    CHECK(save_db_commit(db) == 0);
+    save_db_close(db);
+    long long full = raw_pragma(dir, "world.db", "PRAGMA page_count");
+    CHECK(raw_sql(dir, "DELETE FROM columns WHERE cx >= 4"));
+    CHECK(raw_pragma(dir, "world.db", "PRAGMA freelist_count") * 4 > full);
+    db = save_db_open(dir);
+    CHECK(db != NULL);
+    save_db_close(db);
+    CHECK(raw_pragma(dir, "world.db", "PRAGMA freelist_count") == 0);
+    CHECK(raw_pragma(dir, "world.db", "PRAGMA page_count") < full);
+
+    /* Scribble over the middle of the file, as a bad sector would. */
+    path_in(p, sizeof p, dir, "world.db");
+    long long pages = raw_pragma(dir, "world.db", "PRAGMA page_count");
+    long long size = pages * raw_pragma(dir, "world.db", "PRAGMA page_size");
+    uint8_t *bytes = mem_alloc((size_t)size);
+    CHECK(file_bytes(p, bytes, (size_t)size) == size);
+    for (long long i = size / 2; i < size / 2 + 2048 && i < size; i++) bytes[i] = (uint8_t)(i * 37 + 11);
+    CHECK(save_write_file(p, bytes, (size_t)size) == 0);
+    mem_free(bytes);
+    check_refused(dir);
+}
+
 /* Deletes what the tests made (one level of subfolders). */
 static void clean_up(void)
 {
-    const char *subs[] = {"rt",    "garbage", "foreign", "trigger",    "index",   "view", "altered",
-                          "newer", "app",     "link0",   "link1",      "link2",   "rows", "old",
-                          "none",  "world",   "full",    "unreadable", "together"};
+    const char *subs[] = {"rt",   "garbage",    "foreign",  "trigger", "index", "view",    "altered", "newer",
+                          "app",  "link0",      "link1",    "link2",   "rows",  "old",     "none",    "world",
+                          "full", "unreadable", "together", "upgrade", "upbad", "upextra", "uplink",  "tidy"};
     const char *files[] = {"world.db",   "world.db-wal", "world.db-shm", "world.db-journal", "level.dat",
-                           "player.dat", "c.0.-1.bin",   "c.01.0.bin",   "c.3.3.bin"};
+                           "player.dat", "c.0.-1.bin",   "c.01.0.bin",   "c.3.3.bin",        "world.db.format1"};
     char d[400] = {0}, p[512] = {0};
     for (size_t i = 0; i < sizeof subs / sizeof subs[0]; i++) {
         path_in(d, sizeof d, g_root, subs[i]);
@@ -545,6 +696,8 @@ void test_save_db_all(void)
     test_roundtrip();
     test_refused();
     test_bad_rows();
+    test_upgrade();
+    test_tidy_and_damage();
     test_read_fails();
     test_import();
     test_save_with_player();

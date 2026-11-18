@@ -33,7 +33,7 @@ message saying so.
 - the Vulkan headers and loader, and `glslc` (from shaderc) to compile
   the shaders;
 - libsodium 1.0.18 or newer (multiplayer encryption);
-- GLFW 3.5, mimalloc 3.6, miniaudio 0.11, SQLite 3.31, ENet 1.3 and
+- GLFW 3.5, mimalloc 3.6, miniaudio 0.11, SQLite 3.37, ENet 1.3 and
   zlib-ng 2.0 (PNG screenshots) or newer.
 
 You don't have to install the last six yourself: when a system copy is

@@ -17,28 +17,56 @@
 #define DB_PATH_MAX 4096
 
 /* SQLITE_OPEN_NOFOLLOW and trusted_schema, which opening shared files
- * safely depends on, arrived in 3.31. */
-#if defined(SQLITE_VERSION_NUMBER) && SQLITE_VERSION_NUMBER < 3031000
-#error "SQLite 3.31 or newer is required"
+ * safely depends on, arrived in 3.31; STRICT tables in 3.37. */
+#if defined(SQLITE_VERSION_NUMBER) && SQLITE_VERSION_NUMBER < 3037000
+#error "SQLite 3.37 or newer is required"
 #endif
 
 /* The database header's application_id ("MCWL") and user_version say what
- * the file is before any table is read. FORMAT changes when the schema or
- * a row's meaning does. */
+ * the file is before any table is read. The format number changes when the
+ * schema or a row's meaning does, and an older world is upgraded to it. */
 #define APP_ID 0x4D43574C
-#define FORMAT 1
+#define FORMAT SAVE_DB_FORMAT
 
-/* The whole schema. A file is used only if it holds exactly these tables
- * with exactly this SQL: no triggers, views or indexes, which is what a
- * crafted file would run code or hide data through. WITHOUT ROWID keeps
- * the key in the table itself, so there are no automatic indexes either. */
-enum { TBL_META, TBL_COLUMNS, TBL_BLOBS, TBL_COUNT };
-static const char *const TABLE_NAMES[TBL_COUNT] = {"meta", "columns", "blobs"};
-static const char *const TABLE_SQL[TBL_COUNT] = {
-    "CREATE TABLE meta(key TEXT PRIMARY KEY NOT NULL, value INTEGER NOT NULL) WITHOUT ROWID",
-    ("CREATE TABLE columns(cx INTEGER NOT NULL, cz INTEGER NOT NULL, data BLOB NOT NULL, "
-     "PRIMARY KEY(cx, cz)) WITHOUT ROWID"),
-    "CREATE TABLE blobs(name TEXT PRIMARY KEY NOT NULL, data BLOB NOT NULL) WITHOUT ROWID",
+/* The bounds the schema's CHECKs hold rows to, spelled out because SQL
+ * cannot see the C constants: column keys inside +-WORLD_LIMIT, and no
+ * blob bigger than an encoded column. */
+#define COL_KEY_MIN "-125000000"
+#define COL_KEY_MAX "124999999"
+#define DATA_MAX "393280"
+_Static_assert(WORLD_LIMIT / CHUNK_W == 125000000, "update COL_KEY_MIN and COL_KEY_MAX");
+_Static_assert(SAVE_MAX_FILE == 393280, "update DATA_MAX");
+
+/* Every format's whole schema. A file is used only if it holds exactly the
+ * tables of its format with exactly this SQL: no triggers, views or
+ * indexes, which is what a crafted file would run code or hide data
+ * through. WITHOUT ROWID keeps the key in the table itself, so there are
+ * no automatic indexes either. From format 2 the tables are STRICT and
+ * CHECK their rows, so SQLite itself refuses a wrongly typed or oversized
+ * row; the decoders in save.c still check every field. */
+#define TBL_MAX 3
+typedef struct {
+    int count;
+    const char *name[TBL_MAX];
+    const char *sql[TBL_MAX];
+} schema;
+static const schema SCHEMA[FORMAT + 1] = {
+    [1] = {3,
+           {"meta", "columns", "blobs"},
+           {"CREATE TABLE meta(key TEXT PRIMARY KEY NOT NULL, value INTEGER NOT NULL) WITHOUT ROWID",
+            ("CREATE TABLE columns(cx INTEGER NOT NULL, cz INTEGER NOT NULL, data BLOB NOT NULL, "
+             "PRIMARY KEY(cx, cz)) WITHOUT ROWID"),
+            "CREATE TABLE blobs(name TEXT PRIMARY KEY NOT NULL, data BLOB NOT NULL) WITHOUT ROWID"}},
+    [2] = {3,
+           {"meta", "columns", "blobs"},
+           {("CREATE TABLE meta(key TEXT PRIMARY KEY NOT NULL CHECK(length(key) BETWEEN 1 AND 64), "
+             "value INTEGER NOT NULL) STRICT, WITHOUT ROWID"),
+            ("CREATE TABLE columns(cx INTEGER NOT NULL CHECK(cx BETWEEN " COL_KEY_MIN " AND " COL_KEY_MAX "), "
+             "cz INTEGER NOT NULL CHECK(cz BETWEEN " COL_KEY_MIN " AND " COL_KEY_MAX "), "
+             "data BLOB NOT NULL CHECK(length(data) BETWEEN 1 AND " DATA_MAX "), "
+             "PRIMARY KEY(cx, cz)) STRICT, WITHOUT ROWID"),
+            ("CREATE TABLE blobs(name TEXT PRIMARY KEY NOT NULL CHECK(length(name) BETWEEN 1 AND 80), "
+             "data BLOB NOT NULL CHECK(length(data) <= " DATA_MAX ")) STRICT, WITHOUT ROWID")}},
 };
 
 enum { S_GET_COLUMN, S_PUT_COLUMN, S_GET_BLOB, S_PUT_BLOB, S_GET_META, S_PUT_META, S_COUNT };
@@ -80,7 +108,7 @@ static int text_is(sqlite3_stmt *s, int col, const char *want)
 
 /* 1 if the schema is exactly ours, 0 if not; *empty says whether there is
  * none at all (a new file). -1 if it cannot be read. */
-static int schema_is_ours(sqlite3 *h, int *empty)
+static int schema_is_ours(sqlite3 *h, const schema *sc, int *empty)
 {
     sqlite3_stmt *s = NULL;
     if (sqlite3_prepare_v2(h, "SELECT type, name, tbl_name, sql FROM sqlite_master", -1, &s, NULL) != SQLITE_OK) {
@@ -92,9 +120,9 @@ static int schema_is_ours(sqlite3 *h, int *empty)
     while ((rc = sqlite3_step(s)) == SQLITE_ROW) {
         rows++;
         int k = -1;
-        for (int i = 0; i < TBL_COUNT; i++)
-            if (text_is(s, 0, "table") && text_is(s, 1, TABLE_NAMES[i]) && text_is(s, 2, TABLE_NAMES[i]) &&
-                text_is(s, 3, TABLE_SQL[i]))
+        for (int i = 0; i < sc->count; i++)
+            if (text_is(s, 0, "table") && text_is(s, 1, sc->name[i]) && text_is(s, 2, sc->name[i]) &&
+                text_is(s, 3, sc->sql[i]))
                 k = i;
         if (k < 0 || (seen & 1u << k)) ours = 0;
         else seen |= 1u << k;
@@ -102,7 +130,7 @@ static int schema_is_ours(sqlite3 *h, int *empty)
     sqlite3_finalize(s);
     if (rc != SQLITE_DONE) return -1;
     *empty = rows == 0;
-    return ours && seen == (1u << TBL_COUNT) - 1;
+    return ours && seen == (1u << sc->count) - 1;
 }
 
 /* What the security notes on sqlite.org advise for a database file that
@@ -135,33 +163,142 @@ static int harden(sqlite3 *h)
     return ok ? 0 : -1;
 }
 
-/* Checks the file is a world of this format, or makes it one if it is
- * new. Logs and returns -1 otherwise. */
+/* Runs statements one at a time: SQLITE_LIMIT_SQL_LENGTH is short, and
+ * applies to everything left in a string handed to exec. */
+static int exec_all(sqlite3 *h, const char *const *sql, int n)
+{
+    for (int i = 0; i < n; i++)
+        if (exec(h, sql[i]) != 0) return -1;
+    return 0;
+}
+
+/* Rebuilds every table of format `from` as the next format's table of the
+ * same name, copying the rows. Renaming the old table first keeps the new
+ * one's SQL exactly as written (a renamed table's SQL is rewritten). A row
+ * the new table's CHECKs refuse fails the whole upgrade. */
+static int rebuild_tables(sqlite3 *h, int from)
+{
+    const schema *a = &SCHEMA[from], *b = &SCHEMA[from + 1];
+    for (int i = 0; i < b->count; i++) {
+        char sql[4][160] = {{0}};
+        snprintf(sql[0], sizeof sql[0], "ALTER TABLE %s RENAME TO old_%s", a->name[i], a->name[i]);
+        snprintf(sql[2], sizeof sql[2], "INSERT INTO %s SELECT * FROM old_%s", b->name[i], a->name[i]);
+        snprintf(sql[3], sizeof sql[3], "DROP TABLE old_%s", a->name[i]);
+        const char *steps[4] = {sql[0], b->sql[i], sql[2], sql[3]};
+        if (exec_all(h, steps, 4) != 0) return -1;
+    }
+    return 0;
+}
+
+/* UPGRADE[v] takes a world from format v to v + 1, inside the upgrade's
+ * one transaction. Format 2 made the tables STRICT with CHECKs. */
+typedef int (*upgrade_fn)(sqlite3 *h, int from);
+static const upgrade_fn UPGRADE[FORMAT] = {[1] = rebuild_tables};
+
+/* Copies the open database into a new file at path (one that is not there
+ * yet: never over anything, and never through a symlink). */
+static int backup_to(sqlite3 *h, const char *path)
+{
+    if (os_path_kind(path) != OS_MISSING) return -1;
+    sqlite3 *d = NULL;
+    int rc = sqlite3_open_v2(path, &d, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOFOLLOW, NULL);
+    sqlite3_backup *b = rc == SQLITE_OK ? sqlite3_backup_init(d, "main", h, "main") : NULL;
+    if (b) {
+        rc = sqlite3_backup_step(b, -1);
+        sqlite3_backup_finish(b);
+    }
+    int ok = b && rc == SQLITE_DONE;
+    sqlite3_close(d);
+    if (!ok) remove(path);
+    return ok ? 0 : -1;
+}
+
+/* Upgrades a world of an older format, first copying it to
+ * world.db.format<N> beside it (kept if an earlier try already made it).
+ * Every step runs in one transaction, so a refused row or a full disk
+ * leaves the file as it was. */
+static int upgrade(sqlite3 *h, const char *path, int version)
+{
+    char bak[DB_PATH_MAX + 32] = {0};
+    int n = snprintf(bak, sizeof bak, "%s.format%d", path, version);
+    int kind = n > 0 && (size_t)n < sizeof bak ? os_path_kind(bak) : -1;
+    if (kind != OS_FILE && (kind != OS_MISSING || backup_to(h, bak) != 0)) {
+        log_error("%s: cannot keep a copy of the format %d world before upgrading it; not upgrading", path, version);
+        return -1;
+    }
+    int ok = exec(h, "BEGIN IMMEDIATE") == 0;
+    for (int v = version; ok && v < FORMAT; v++) ok = UPGRADE[v](h, v) == 0;
+    char sql[64] = {0};
+    snprintf(sql, sizeof sql, "PRAGMA user_version = %d", FORMAT);
+    ok = ok && exec(h, sql) == 0;
+    int empty = 0;
+    ok = ok && schema_is_ours(h, &SCHEMA[FORMAT], &empty) == 1;
+    if (!ok || exec(h, "COMMIT") != 0) {
+        log_error("%s: upgrading from world format %d failed (%s); the world is unchanged", path, version,
+                  sqlite3_errmsg(h));
+        exec(h, "ROLLBACK");
+        return -1;
+    }
+    /* Incremental vacuum (see save_db_close) can only be switched on by
+     * rewriting the file; a failure here costs only the reclaiming. */
+    sqlite3_limit(h, SQLITE_LIMIT_ATTACHED, 1); /* VACUUM builds the copy in an attached database */
+    if (exec(h, "PRAGMA auto_vacuum = INCREMENTAL") != 0 || exec(h, "VACUUM") != 0)
+        log_warn("%s: could not switch on incremental vacuum: %s", path, sqlite3_errmsg(h));
+    sqlite3_limit(h, SQLITE_LIMIT_ATTACHED, 0);
+    log_info("%s: upgraded from world format %d to %d (the old file is %s)", path, version, FORMAT, bak);
+    return 0;
+}
+
+/* Checks the file is a world of a format this build reads, upgrading an
+ * older one, or makes it one if it is new. Logs and returns -1 otherwise. */
 static int check_or_create(sqlite3 *h, const char *path)
 {
     sqlite3_int64 app = 0, version = 0;
     int empty = 0, ours = -1;
     if (pragma_int(h, "PRAGMA application_id", &app) == 0 && pragma_int(h, "PRAGMA user_version", &version) == 0)
-        ours = schema_is_ours(h, &empty);
+        ours = schema_is_ours(h, &SCHEMA[version >= 1 && version <= FORMAT ? version : FORMAT], &empty);
     if (ours < 0) {
         int busy = sqlite3_errcode(h) == SQLITE_BUSY || sqlite3_errcode(h) == SQLITE_LOCKED;
         log_error("%s: %s", path, busy ? "the world is open in another game" : sqlite3_errmsg(h));
         return -1;
     }
     if (empty && app == 0 && version == 0) {
-        char sql[512] = {0};
-        int n = snprintf(sql, sizeof sql,
-                         "BEGIN; %s; %s; %s; PRAGMA application_id = %d; PRAGMA user_version = %d; COMMIT",
-                         TABLE_SQL[0], TABLE_SQL[1], TABLE_SQL[2], APP_ID, FORMAT);
-        if (n > 0 && (size_t)n < sizeof sql && exec(h, sql) == 0) return 0;
+        /* auto_vacuum only takes effect before the first table. */
+        char head[96] = {0}, tail[96] = {0};
+        snprintf(head, sizeof head, "PRAGMA application_id = %d", APP_ID);
+        snprintf(tail, sizeof tail, "PRAGMA user_version = %d", FORMAT);
+        const schema *sc = &SCHEMA[FORMAT];
+        const char *steps[] = {
+            "PRAGMA auto_vacuum = INCREMENTAL", "BEGIN", sc->sql[0], sc->sql[1], sc->sql[2], head, tail, "COMMIT"};
+        _Static_assert(TBL_MAX == 3, "list every table above");
+        if (exec_all(h, steps, (int)(sizeof steps / sizeof steps[0])) == 0) return 0;
         log_error("%s: cannot create the world database: %s", path, sqlite3_errmsg(h));
         exec(h, "ROLLBACK");
         return -1;
     }
     if (app != APP_ID) log_error("%s is not a blockclonia world", path);
-    else if (version != FORMAT) log_error("%s has world format %lld; this build reads %d", path, version, FORMAT);
+    else if (version < 1 || version > FORMAT)
+        log_error("%s has world format %lld; this build reads up to %d", path, version, FORMAT);
     else if (!ours) log_error("%s has tables this build did not write; refusing it", path);
-    return app == APP_ID && version == FORMAT && ours ? 0 : -1;
+    if (app != APP_ID || version < 1 || version > FORMAT || !ours) return -1;
+    return version < FORMAT ? upgrade(h, path, (int)version) : 0;
+}
+
+/* A quick structural check of every page (no index cross-checks): a
+ * damaged file is refused with a clear reason, not found out mid-game. */
+static int intact(sqlite3 *h, const char *path)
+{
+    sqlite3_stmt *s = NULL;
+    int ok = sqlite3_prepare_v2(h, "PRAGMA quick_check(1)", -1, &s, NULL) == SQLITE_OK &&
+             sqlite3_step(s) == SQLITE_ROW && text_is(s, 0, "ok");
+    int busy = sqlite3_errcode(h) == SQLITE_BUSY || sqlite3_errcode(h) == SQLITE_LOCKED;
+    const char *why = s && sqlite3_column_type(s, 0) == SQLITE_TEXT ? (const char *)sqlite3_column_text(s, 0)
+                                                                    : sqlite3_errmsg(h);
+    if (!ok && busy) log_error("%s: the world is open in another game", path);
+    else if (!ok) log_error("%s is damaged (%s); refusing it", path, why);
+    sqlite3_finalize(s);
+    sqlite3_db_release_memory(h); /* the whole file passed through the cache; play reads little of it */
+    return ok ? 0 : -1;
 }
 
 /* The database and the files SQLite keeps beside it must be regular files
@@ -189,8 +326,8 @@ void save_db_set_cache_kb(int kb) { g_cache_kb = kb > 0 ? kb : 0; }
 
 save_db *save_db_open(const char *dir)
 {
-    if (sqlite3_libversion_number() < 3031000) {
-        log_error("SQLite %s is too old to open worlds safely (need 3.31)", sqlite3_libversion());
+    if (sqlite3_libversion_number() < 3037000) {
+        log_error("SQLite %s is too old to open worlds safely (need 3.37)", sqlite3_libversion());
         return NULL;
     }
     /* SQLITE_OPEN_NOFOLLOW refuses a symlink anywhere in the path, and
@@ -207,7 +344,7 @@ save_db *save_db_open(const char *dir)
 
     sqlite3 *h = NULL;
     int rc = sqlite3_open_v2(path, &h, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOFOLLOW, NULL);
-    if (rc != SQLITE_OK || harden(h) != 0 || check_or_create(h, path) != 0) {
+    if (rc != SQLITE_OK || harden(h) != 0 || intact(h, path) != 0 || check_or_create(h, path) != 0) {
         if (rc != SQLITE_OK) log_error("%s: %s", path, h ? sqlite3_errmsg(h) : sqlite3_errstr(rc));
         sqlite3_close(h);
         return NULL;
@@ -254,6 +391,14 @@ save_db *save_db_open(const char *dir)
 void save_db_close(save_db *db)
 {
     if (!db) return;
+    /* The pages freed by replaced columns are handed back once they are a
+     * quarter of the file. (No PRAGMA optimize: every lookup is by primary
+     * key, and the sqlite_stat1 table ANALYZE would add is not part of the
+     * schema a world may have.) */
+    sqlite3_int64 free_pages = 0, pages = 0;
+    if (pragma_int(db->h, "PRAGMA freelist_count", &free_pages) == 0 &&
+        pragma_int(db->h, "PRAGMA page_count", &pages) == 0 && free_pages * 4 > pages)
+        exec(db->h, "PRAGMA incremental_vacuum");
     for (int i = 0; i < S_COUNT; i++) sqlite3_finalize(db->st[i]);
     if (sqlite3_close(db->h) != SQLITE_OK) log_warn("world database did not close cleanly");
     mem_free(db->buf);
@@ -390,14 +535,14 @@ void save_db_peek(const char *dir, save_peek *p)
     int empty = 0, ours = -1;
     if (rc == SQLITE_OK && harden(h) == 0 && exec(h, "PRAGMA locking_mode = NORMAL") == 0 &&
         pragma_int(h, "PRAGMA application_id", &app) == 0 && pragma_int(h, "PRAGMA user_version", &version) == 0)
-        ours = schema_is_ours(h, &empty);
+        ours = schema_is_ours(h, &SCHEMA[version >= 1 && version <= FORMAT ? version : FORMAT], &empty);
     if (ours < 0) {
         int busy = h && (sqlite3_errcode(h) == SQLITE_BUSY || sqlite3_errcode(h) == SQLITE_LOCKED);
         p->status = busy ? SAVE_PEEK_IN_USE : SAVE_PEEK_BAD;
         sqlite3_close(h);
         return;
     }
-    if (app != APP_ID || version != FORMAT || !ours) {
+    if (app != APP_ID || version < 1 || version > FORMAT || !ours) {
         sqlite3_close(h);
         return;
     }

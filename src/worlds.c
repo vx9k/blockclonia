@@ -135,6 +135,10 @@ static int world_file(const char *name)
                                         "world.db-journal", "level.dat",    "player.dat"};
     for (size_t i = 0; i < sizeof FILES / sizeof FILES[0]; i++)
         if (strcmp(name, FILES[i]) == 0) return 1;
+    /* The copy kept from before an upgrade: world.db.format<digits>. */
+    const char *pre = "world.db.format";
+    size_t lp = strlen(pre), ln = strlen(name);
+    if (ln > lp && ln <= lp + 4 && strncmp(name, pre, lp) == 0 && strspn(name + lp, "0123456789") == ln - lp) return 1;
     int cx = 0, cz = 0;
     return save_column_name(name, &cx, &cz);
 }
