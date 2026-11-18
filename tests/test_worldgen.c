@@ -127,7 +127,7 @@ static void test_climate(void)
 static void test_generators(void)
 {
     /* Worlds keep growing exactly as they began. */
-    CHECK(hash_columns(1337) == 0x16293fedd9811a9cull);
+    CHECK(hash_columns(1337) == 0xbc3b53f430ec2608ull);
 
     long ore[3] = {0}, cave = 0, under = 0, bad_band = 0, hanging = 0, no_bedrock = 0, bad_ground = 0;
     long mouths = 0, mouth_cols = 0, cols = 0, fox = 0, bad_fox = 0;
@@ -327,7 +327,7 @@ static int tree_climate(biome b)
 static void test_trees(void)
 {
     long trunks[BIOME_COUNT] = {0}, ground[BIOME_COUNT] = {0}, kind[3][B_COUNT] = {{0}};
-    long snags = 0, young = 0, tall = 0;
+    long young = 0, tall = 0, hollow = 0, standing = 0;
     for (int i = 0; i < 160; i++) {
         int cx = (i * 1187) % 1500 - 750, cz = (i * 1733) % 1500 - 750;
         column *c = column_alloc(cx, cz);
@@ -349,9 +349,18 @@ static void test_trees(void)
                     while (top < WORLD_H - 1 && block_log(c->blocks[col_index(x, top + 1, z)])) top++;
                     worldgen_point p = worldgen_sample(1337, cx * CHUNK_W + x, cz * CHUNK_W + z);
                     kind[tree_climate(p.b)][b]++;
-                    snags += top + 1 < WORLD_H && c->blocks[col_index(x, top + 1, z)] == B_AIR;
                     young += top - y < 4;
                     tall += top - y >= 7;
+                    /* A standing trunk has rock under it as far as a
+                     * structure check looks, so no dig nearby drops it. */
+                    /* cppcheck-suppress knownConditionTrueFalse ; the loop above grows top */
+                    if (top - y >= 2) {
+                        int under_air = 0;
+                        for (int d = 1; d <= STRUCT_RADIUS + 1 && y - d > 0; d++)
+                            under_air += c->blocks[col_index(x, y - d, z)] == B_AIR;
+                        hollow += under_air > 0;
+                        standing++;
+                    }
                     break;
                 }
         column_free(c);
@@ -362,11 +371,13 @@ static void test_trees(void)
     CHECK(kind[1][B_SPRUCE_LOG] > kind[1][B_LOG] && kind[1][B_PINE_LOG] > 0);
     CHECK(kind[0][B_THORN_LOG] == 0 && kind[1][B_THORN_LOG] == 0 && kind[1][B_LOG] == 0);
     CHECK(kind[2][B_THORN_LOG] > 0);
-    /* Mostly grown trees, some young and short, a few tall, a few dead. */
+    /* Mostly grown trees, some young and short, a few tall. (Snags and
+     * fallen trunks: test_trees.c.) */
     long all = 0;
     for (int q = 0; q < 3; q++)
         for (int b = 0; b < B_COUNT; b++) all += kind[q][b];
-    CHECK(young > 0 && tall > 0 && snags > 0 && snags < all / 10 && young < all / 2);
+    CHECK(young > 0 && tall > 0 && young < all / 2 && all > 60);
+    CHECK(standing > 40 && hollow == 0);
     double forest = (double)(trunks[BIOME_FOREST] + trunks[BIOME_TAIGA]) /
                     (double)(ground[BIOME_FOREST] + ground[BIOME_TAIGA] + 1);
     double steppe = (double)trunks[BIOME_STEPPE] / (double)(ground[BIOME_STEPPE] + 1);
@@ -741,23 +752,24 @@ static void test_trees_stand(void)
  * distant canopy closes up. */
 static void test_leaf_textures(void)
 {
-    static const int LEAF[] = {T_LEAVES, T_BIRCH_LEAVES, T_SPRUCE_LEAVES, T_PINE_LEAVES, T_THORN_LEAVES};
     uint8_t *tex = mem_alloc(texgen_total_bytes());
     texgen_build(tex);
-    for (int i = 0; i < 5; i++) {
-        int gaps = 0;
+    for (int i = 0; i < TREE_KINDS; i++) {
+        int gaps = 0, layer = tree_tex_leaves(i);
+        CHECK(block_get(g_tree_leaves[i])->tex[0] == layer);
         for (int y = 0; y < TEX_SIZE; y++)
             for (int x = 0; x < TEX_SIZE; x++) {
                 uint8_t t[4] = {0};
-                texgen_texel(LEAF[i], x, y, t);
+                texgen_texel(layer, x, y, t);
                 gaps += t[3] < 128;
-                /* A gap keeps a leaf colour, for whatever draws it whole. */
-                CHECK(t[1] > t[2] && t[1] > 20);
+                /* A gap keeps a leaf colour, for whatever draws it whole,
+                 * never the black that would rim the leaves in the mips. */
+                CHECK(t[3] >= 128 || t[0] + t[1] + t[2] > 40);
             }
         CHECK(gaps > TEX_SIZE * TEX_SIZE / 10 && gaps < TEX_SIZE * TEX_SIZE * 2 / 5);
         int thin = 0;
         for (int m = 2; m < TEX_MIPS; m++) {
-            const uint8_t *mip = tex + texgen_offset(LEAF[i], m);
+            const uint8_t *mip = tex + texgen_offset(layer, m);
             int n = TEX_SIZE >> m;
             for (int t = 0; t < n * n; t++) thin += mip[4 * t + 3] < 128;
         }
@@ -765,7 +777,7 @@ static void test_leaf_textures(void)
     }
     /* Bark and stone stay solid. */
     uint8_t t[4] = {0};
-    texgen_texel(T_BIRCH_SIDE, 3, 3, t);
+    texgen_texel(tree_tex_bark(TREE_BIRCH, 0), 3, 3, t);
     CHECK(t[3] == 255 && t[0] > 150);
     mem_free(tex);
 }
@@ -774,19 +786,27 @@ static void test_leaf_textures(void)
  * leaves give apples. */
 static void test_tree_items(void)
 {
-    static const uint8_t LOGS[] = {B_LOG, B_BIRCH_LOG, B_SPRUCE_LOG, B_PINE_LOG, B_THORN_LOG};
-    for (int i = 0; i < 5; i++) {
-        CHECK(block_log(LOGS[i]) && !block_leaves(LOGS[i]) &&
-              block_leaves((uint8_t)(LOGS[i] == B_LOG ? B_LEAVES : LOGS[i] + 4)));
-        int planks = 0, charcoal = 0;
+    for (int i = 0; i < TREE_KINDS; i++) {
+        uint8_t log = g_tree_log[i], leaf = g_tree_leaves[i];
+        CHECK(block_log(log) && !block_leaves(log) && block_leaves(leaf) && !block_log(leaf));
+        CHECK(block_tree(log) == i && block_tree(leaf) == i && block_has_meta(log) && !block_has_meta(leaf));
+        int planks = 0, charcoal = 0, fibre = 0;
+        uint32_t r8 = 3;
+        for (int k = 0; k < 100; k++) {
+            item_stack o[3] = {{0}};
+            int n = item_drops(leaf, &r8, o);
+            for (int j = 0; j < n; j++) fibre += o[j].id == I_FIBRE;
+        }
+        CHECK(fibre > 20);
         for (int r = 0; r < g_recipe_count; r++) {
-            if (g_recipes[r].in[0].id != LOGS[i]) continue;
+            if (g_recipes[r].in[0].id != log) continue;
             planks += g_recipes[r].out.id == B_PLANKS && g_recipes[r].out.count == 4;
             charcoal += g_recipes[r].out.id == I_CHARCOAL;
         }
         CHECK(planks == 1 && charcoal == 1);
     }
-    CHECK(!block_log(B_PLANKS) && !block_leaves(B_GRASS) && !block_leaves(B_COUNT));
+    CHECK(!block_log(B_PLANKS) && !block_leaves(B_GRASS) && !block_leaves(B_COUNT) && block_tree(B_PLANKS) < 0);
+    CHECK(block_plant(B_VINES) && !block_solid(B_VINES) && block_tree(B_VINES) < 0);
     uint32_t rng = 11;
     int apples[2] = {0}, fibre = 0;
     for (int k = 0; k < 600; k++) {
@@ -839,7 +859,7 @@ static void test_plant_textures(void)
 static void test_plants(void)
 {
     long kinds[BIOME_COUNT][B_COUNT] = {{0}}, open[BIOME_COUNT] = {0};
-    int bad = 0, dry_reeds = 0, reeds = 0, shaded_ferns = 0;
+    int bad = 0, dry_reeds = 0, reeds = 0, shaded_ferns = 0, vines = 0;
     /* A spread of columns, and a shore at 24,-31 for the reeds. */
     for (int i = 0; i < 64; i++) {
         int cx = i < 48 ? (i * 1187) % 1500 - 750 : 24 + (i - 48) % 4;
@@ -852,6 +872,12 @@ static void test_plants(void)
                     uint8_t b = c->blocks[col_index(x, y, z)];
                     if (!block_plant(b)) continue;
                     uint8_t below = c->blocks[col_index(x, y - 1, z)], above = c->blocks[col_index(x, y + 1, z)];
+                    /* Vines hang from a tree, not from the ground. */
+                    if (b == B_VINES) {
+                        vines++;
+                        bad += !block_leaves(above) && !block_log(above) && above != B_VINES;
+                        continue;
+                    }
                     int m = block_get(below)->mat;
                     bad += !block_solid(below) || (m != BM_GRASS && m != BM_DIRT && m != BM_SAND);
                     bad += block_fluid(above);
@@ -877,7 +903,7 @@ static void test_plants(void)
                 }
         column_free(c);
     }
-    CHECK(bad == 0);
+    CHECK(bad == 0 && vines > 0);
     CHECK(reeds > 0 && dry_reeds == 0);
     long meadow_flowers = 0;
     for (int f = B_POPPY; f <= B_OXEYE; f++) meadow_flowers += kinds[BIOME_MEADOW][f];

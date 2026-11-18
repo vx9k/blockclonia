@@ -10,7 +10,7 @@ layout(set = 0, binding = 0) uniform mediump sampler2DArray u_tex;
 layout(set = 0, binding = 1) uniform mediump sampler3D u_light;
 
 layout(location = 0) in vec2 f_uv;  // highp: values reach 16 and pick exact texels
-layout(location = 1) flat in uint f_layer;  // layer | sun shading << 16 (block.vert)
+layout(location = 1) flat in uint f_layer;  // layer | sun shading << 16 | tint << 25 (block_vert.glsl)
 layout(location = 2) in mediump vec2 f_shade;  // x: shade, y: fog
 layout(location = 3) in vec3 f_luv;            // highp: hundreds of texels across
 #ifdef TINTED
@@ -45,6 +45,17 @@ const mediump float SUN_STEP = 1.0 / 1024.0;
 const mediump float BLOCK_GAIN = 0.07844;
 const mediump float TONE_KNEE = 0.75;
 const float HELD_FALL = 0.05 / 15.0;
+// A tree's tint (block_vert.glsl) in -1..1: a tenth brighter or darker,
+// warmer as it brightens. Maple leaves swing from deep red to orange and
+// yellow, as a stand of maples does in autumn (renderer.c checks the layer).
+const uint MAPLE_LEAVES = 206u;
+mediump vec3 tint(uint f, uint layer)
+{
+    mediump float v = float(int((f >> 25) & 15u) - 8) / 7.0;
+    mediump vec3 k = vec3(1.0 + 0.10 * v, 1.0 + 0.07 * v, 1.0 + 0.02 * v);
+    if (layer == MAPLE_LEAVES) k.g += 0.45 * (v + 1.0);
+    return k;
+}
 
 // Bloom (bloom.h): a bit per texture layer that glows, and what this
 // pipeline writes to alpha. 0 (opaque): the glow. 1 (blended): the texel's
@@ -91,6 +102,8 @@ void main()
     mediump vec4 c = texture(u_tex, vec3(uv, float(LAYER(f_layer))));
 #ifdef TINTED
     c.rgb *= f_tint;
+#else
+    if ((f_layer >> 25) != 0u) c.rgb *= tint(f_layer, LAYER(f_layer));
 #endif
     if (ALPHA_MODE == 2u) {
         o_color = vec4(0.0, 0.0, 0.0, glow(LAYER(f_layer), c.rgb) * c.a);
@@ -106,7 +119,7 @@ void main()
     // channels pay for an exp2.
     mediump vec4 l = texture(u_light, f_luv);
     mediump vec4 held = unpackUnorm4x8(pc.held);
-    mediump float sun_shift = float(f_layer >> 16);
+    mediump float sun_shift = float((f_layer >> 16) & 0x1FFu);
 #ifdef SHADOWS
     {
         // Four taps half a texel apart, each the hardware's 2x2 compare:

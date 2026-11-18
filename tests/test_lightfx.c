@@ -354,7 +354,7 @@ static void test_torch_model(void)
     /* Only what glows is marked so; the light around passes it by. */
     CHECK(!(m[0].tint & ENTITY_GLOWS) && !(m[1].tint & ENTITY_GLOWS));
     for (int i = 2; i < TORCH_PARTS; i++) CHECK(m[i].tint & ENTITY_GLOWS);
-    CHECK((m[0].tex & 255u) == T_LOG_SIDE && (m[0].tex & ENTITY_TEX_METRIC));
+    CHECK((m[0].tex & 255u) == (uint32_t)tree_tex_bark(TREE_OAK, 0) && (m[0].tex & ENTITY_TEX_METRIC));
     CHECK((m[3].tex & 255u) == T_LAVA && (m[4].tex & 255u) == T_FIRE0);
     /* The handle is the bottom part and the flame's layers climb. */
     CHECK(m[0].pos[1] < m[1].pos[1] && m[1].pos[1] < m[3].pos[1] && m[3].pos[1] < m[5].pos[1]);

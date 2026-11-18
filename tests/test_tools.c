@@ -263,6 +263,23 @@ static void test_materials(void)
         [B_DANDELION] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
         [B_CORNFLOWER] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
         [B_OXEYE] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
+        [B_VINES] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
+        [B_WILLOW_LOG] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.3f},
+        [B_MAPLE_LOG] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.3f},
+        [B_CHERRY_LOG] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.3f},
+        [B_REDWOOD_LOG] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.3f},
+        [B_PALM_LOG] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.3f},
+        [B_BAOBAB_LOG] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.3f},
+        [B_UMBRELLA_LOG] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.3f},
+        [B_MOUNTAIN_PINE_LOG] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.3f},
+        [B_WILLOW_LEAVES] = {-1, -1, MAT_LEAVES, 0.35f, 0.0f},
+        [B_MAPLE_LEAVES] = {-1, -1, MAT_LEAVES, 0.35f, 0.0f},
+        [B_CHERRY_BLOSSOM] = {-1, -1, MAT_LEAVES, 0.35f, 0.0f},
+        [B_REDWOOD_LEAVES] = {-1, -1, MAT_LEAVES, 0.4f, 0.0f},
+        [B_PALM_FRONDS] = {-1, -1, MAT_LEAVES, 0.4f, 0.0f},
+        [B_BAOBAB_LEAVES] = {-1, -1, MAT_LEAVES, 0.35f, 0.0f},
+        [B_UMBRELLA_LEAVES] = {-1, -1, MAT_LEAVES, 0.4f, 0.0f},
+        [B_MOUNTAIN_PINE_LEAVES] = {-1, -1, MAT_LEAVES, 0.4f, 0.0f},
     };
     int bad = 0;
     for (int b = 0; b < B_COUNT; b++) {
@@ -387,7 +404,7 @@ static void test_inv3_ids(void)
  * now and then, reeds always; shrubs give sticks; a flower is itself. */
 static void test_plant_blocks(void)
 {
-    for (int b = B_GRASS_TUFT; b <= B_OXEYE; b++) {
+    for (int b = B_GRASS_TUFT; b <= B_VINES; b++) {
         uint8_t id = (uint8_t)b;
         CHECK(block_plant(id) && !block_solid(id) && !block_opaque(id) && !block_leaves(id) && !block_log(id));
         CHECK(item_harvests(0, id) && block_get(id)->hardness > 0.0f && block_get(id)->hardness < 0.5f);

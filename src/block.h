@@ -93,8 +93,52 @@ typedef enum {
     B_DANDELION,
     B_CORNFLOWER,
     B_OXEYE,
+    B_VINES, /* hangs from a branch or leaves: a plant rooted above, not below */
+    /* The trees added with grown limbs (tree_kind order from TREE_WILLOW):
+     * the logs, then the leaves. */
+    B_WILLOW_LOG,
+    B_MAPLE_LOG,
+    B_CHERRY_LOG,
+    B_REDWOOD_LOG,
+    B_PALM_LOG,
+    B_BAOBAB_LOG,
+    B_UMBRELLA_LOG,
+    B_MOUNTAIN_PINE_LOG,
+    B_WILLOW_LEAVES,
+    B_MAPLE_LEAVES,
+    B_CHERRY_BLOSSOM,
+    B_REDWOOD_LEAVES,
+    B_PALM_FRONDS,
+    B_BAOBAB_LEAVES,
+    B_UMBRELLA_LEAVES,
+    B_MOUNTAIN_PINE_LEAVES,
     B_COUNT
 } block_id;
+
+/* The kinds of tree. Each has a log and leaves (g_tree_log, g_tree_leaves)
+ * and its own texture layers (tree_tex_*). */
+typedef enum {
+    TREE_OAK,
+    TREE_BIRCH,
+    TREE_SPRUCE,
+    TREE_PINE, /* the Scots pine */
+    TREE_THORN, /* the flat-crowned tree of dry country */
+    TREE_WILLOW,
+    TREE_MAPLE,
+    TREE_CHERRY,
+    TREE_REDWOOD,
+    TREE_PALM,
+    TREE_BAOBAB,
+    TREE_UMBRELLA, /* the umbrella pine of warm, dry hills */
+    TREE_MOUNTAIN_PINE,
+    TREE_KINDS
+} tree_kind;
+
+/* Bark comes in windows one block tall, cut from one strip TREE_BARK_WINDOWS
+ * blocks tall that tiles end to end: block y of a trunk shows window
+ * (y + the trunk's phase) % TREE_BARK_WINDOWS, so the furrows run on
+ * unbroken up the trunk and no two trunks line up. */
+#define TREE_BARK_WINDOWS 4
 
 /* Sentinel returned for positions in chunks that are not loaded. It is
  * solid for collisions (nothing falls into unloaded terrain) and anchors
@@ -113,16 +157,13 @@ enum {
 };
 
 /* Texture layers in the block texture array. */
-typedef enum {
+typedef enum { // NOLINT(cert-int09-c): the trees' runs are sized from TREE_KINDS
     T_STONE,
     T_DIRT,
     T_GRASS_TOP,
     T_GRASS_SIDE,
     T_SAND,
     T_GRAVEL,
-    T_LOG_SIDE,
-    T_LOG_TOP,
-    T_LEAVES,
     T_PLANKS,
     T_GLASS,
     T_BRICK,
@@ -238,19 +279,19 @@ typedef enum {
     T_SMOKE1,
     T_SMOKE2,
     T_FLASH,
-    /* The trees' bark and the birch's pale end grain; then their leaves,
-     * together, so the shaders sway them as one range. */
-    T_BIRCH_SIDE,
-    T_BIRCH_TOP,
-    T_SPRUCE_SIDE,
-    T_PINE_SIDE,
-    T_THORN_SIDE,
-    T_BIRCH_LEAVES,
-    T_SPRUCE_LEAVES,
-    T_PINE_LEAVES,
-    T_THORN_LEAVES,
-    /* The ground plants, in their blocks' order: together, so the shaders
-     * sway them as one range. */
+    /* The trees, every kind in tree_kind order in each run: the bark's
+     * windows, the bark turned on its side (on a fallen trunk), the bark
+     * under moss, the end grain, then the leaves. One run of layers, so the
+     * shaders tint it as one range, and the leaves together, so they sway
+     * as one. */
+    T_BARK_FIRST,
+    T_SIDEWAYS_FIRST = T_BARK_FIRST + (int)TREE_KINDS * TREE_BARK_WINDOWS,
+    T_MOSSY_FIRST = T_SIDEWAYS_FIRST + (int)TREE_KINDS,
+    T_END_FIRST = T_MOSSY_FIRST + (int)TREE_KINDS,
+    T_TREE_LEAVES_FIRST = T_END_FIRST + (int)TREE_KINDS,
+    T_TREE_LEAVES_LAST = T_TREE_LEAVES_FIRST + (int)TREE_KINDS - 1,
+    /* The ground plants, in their blocks' order, and the vines: together,
+     * so the shaders sway them as one range. */
     T_GRASS_TUFT,
     T_TALL_GRASS,
     T_FERN,
@@ -262,6 +303,7 @@ typedef enum {
     T_DANDELION,
     T_CORNFLOWER,
     T_OXEYE,
+    T_VINES,
     T_COUNT
 } tex_id;
 
@@ -270,10 +312,16 @@ _Static_assert(T_COUNT <= 256, "a texture layer is one byte in block_def and the
 #define T_MOB_LAST T_MOB_SOLE
 
 #define T_FIRE_FRAMES 4
-#define T_LEAVES_FIRST T_BIRCH_LEAVES
-#define T_LEAVES_LAST T_THORN_LEAVES
+#define T_TREE_FIRST T_BARK_FIRST
+#define T_TREE_LAST T_TREE_LEAVES_LAST
 #define T_PLANT_FIRST T_GRASS_TUFT
-#define T_PLANT_LAST T_OXEYE
+#define T_PLANT_LAST T_VINES
+
+static inline int tree_tex_bark(int kind, int window) { return T_BARK_FIRST + kind * TREE_BARK_WINDOWS + window; }
+static inline int tree_tex_sideways(int kind) { return T_SIDEWAYS_FIRST + kind; }
+static inline int tree_tex_mossy(int kind) { return T_MOSSY_FIRST + kind; }
+static inline int tree_tex_end(int kind) { return T_END_FIRST + kind; }
+static inline int tree_tex_leaves(int kind) { return T_TREE_LEAVES_FIRST + kind; }
 
 /* What a block is made of, as far as tools and sound care: the tool that
  * digs it and the noise it makes. */
@@ -335,18 +383,31 @@ static inline int block_opaque(uint8_t id)
 /* Liquids flow and keep their level in the cell's meta (world.h). */
 static inline int block_fluid(uint8_t id) { return id < B_COUNT && (g_blocks[id].flags & BF_FLUID); }
 
-/* A tree's trunk or branch, of any kind. */
-static inline int block_log(uint8_t id) { return id == B_LOG || (id >= B_BIRCH_LOG && id <= B_THORN_LOG); }
+extern const uint8_t g_tree_log[TREE_KINDS], g_tree_leaves[TREE_KINDS];
+/* Per block: 1 + the kind of tree whose log or leaves it is, else 0. */
+extern const uint8_t g_block_tree[B_COUNT];
 
-/* A ground plant: crossed quads, no collision, uprooted with its soil. */
-static inline int block_plant(uint8_t id) { return id >= B_GRASS_TUFT && id <= B_OXEYE; }
+/* The kind of tree a log or leaves belong to, or -1. */
+static inline int block_tree(uint8_t id) { return id < B_COUNT ? (int)g_block_tree[id] - 1 : -1; }
+
+/* A tree's trunk or branch, of any kind. */
+static inline int block_log(uint8_t id) { return block_tree(id) >= 0 && g_blocks[id].mat == BM_WOOD; }
+
+/* A ground plant: crossed quads, no collision, uprooted with its soil, or
+ * vines, which go with what they hang from. */
+static inline int block_plant(uint8_t id) { return id >= B_GRASS_TUFT && id <= B_VINES; }
+
+/* A log's meta: its axis in the low bits, or LOG_BRANCH for a limb grown
+ * on a tree, bark all round with no cut end; LOG_MOSS where moss grows. */
+enum { LOG_UP, LOG_X, LOG_Z, LOG_BRANCH };
+enum { LOG_MOSS = 4 }; /* a flag over the axis bits */
 
 /* Leaves of any tree: drawn cut out, so the sky shows between them. */
 static inline int block_leaves(uint8_t id) { return id < B_COUNT && g_blocks[id].mat == BM_LEAVES && !block_plant(id); }
 
 /* Blocks that keep a 0..7 value in the column's meta array: liquids (their
- * level, 0 = full) and campfires (fuel left, 0 = full). */
-static inline int block_has_meta(uint8_t id) { return block_fluid(id) || id == B_CAMPFIRE; }
+ * level, 0 = full), campfires (fuel left, 0 = full) and logs (LOG_*). */
+static inline int block_has_meta(uint8_t id) { return block_fluid(id) || id == B_CAMPFIRE || block_log(id); }
 
 #define CAMPFIRE_FUEL_MAX 8 /* meta 0 = 8 units; one unit burns for a survival-clock hour */
 

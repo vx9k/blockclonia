@@ -172,6 +172,8 @@ set(MC_CORE_SOURCES
   src/survival.c
   src/sysinfo.c
   src/texgen.c
+  src/treetex.c
+  src/trees.c
   src/thermo.c
   src/torch_model.c
   src/itemmodel.c
@@ -261,7 +263,7 @@ if(MC_BUILD_TESTS)
                           tests/test_health_debug.c tests/test_thoughts.c tests/test_drugs.c tests/test_faint.c tests/test_fear.c tests/test_dark.c tests/test_lamps.c tests/test_shadow.c tests/test_mobmodel.c tests/test_avatar.c tests/test_defib.c tests/test_paths.c
                           tests/test_save_db.c tests/test_worlds.c tests/test_backups.c tests/test_hud.c tests/test_cardio.c
                           tests/test_discord.c tests/test_netcrypto.c tests/test_wire.c tests/test_net.c tests/test_mp.c
-                          tests/test_worldgen.c tests/test_edge.c tests/test_tools.c tests/test_materials.c
+                          tests/test_worldgen.c tests/test_trees.c tests/test_edge.c tests/test_tools.c tests/test_materials.c
                           tests/test_strata.c tests/test_fluid.c tests/test_liquids.c
                           tests/test_combat.c tests/test_ballistics.c tests/test_muzzle.c tests/test_recoil.c tests/test_gamemode.c tests/test_invui.c
                           tests/test_plants.c
