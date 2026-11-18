@@ -12,7 +12,9 @@ The light engine is in (`light.c`, the light jobs in `world.c`, the atlas
 in `renderer.c`), and so is most of the visual polish (`lightfx.c`, `sky.c`,
 `torch_model.c`): the sun and moon's direction and colour, a soft tone
 curve, the held torch's light, light-tinted fog, darker nights (4% of
-noon) and the night sky. Bloom and a smooth-lighting toggle are next.
+noon) and the night sky, bloom and a smooth-lighting toggle. Sun and moon
+shadows, light shafts and the sky's gradient finished the series
+(2026-11-18); see "Shadows, shafts and sky" below.
 
 - **Per cell:** 16 bits, sky in bits 0-3 and red, green and blue in
   4-7, 8-11 and 12-15. That is B4G4R4A4's texel, so the shader reads
@@ -91,8 +93,36 @@ noon) and the night sky. Bloom and a smooth-lighting toggle are next.
    creatures already get a `light` multiplier in `entity_instance`).
 5. **Time of day** keeps scaling only the sky light, so a lit room
    stays lit at night.
-6. **Optional:** sun shadow maps (cascades, behind a `GPUCAP_*` bit),
-   and light shafts and bloom in the existing post-process pass.
+6. **Shadows, shafts and sky** (done; below).
+
+## Shadows, shafts and sky
+
+- **Shadow map:** one 2048² depth map (D16, or D32F where D16 can't be
+  sampled) 64 m around the eye, drawn from the sun (the moon at night)
+  before the scene, with only the face groups turned from the light so
+  lit faces never shadow themselves. Its texels are fixed in the world,
+  so shadows don't crawl as the player moves. The terrain samples it
+  with four hardware-PCF taps, a soft edge 18 cm wide fading out over
+  the map's outer eighth. One cascade keeps it cheap on integrated GPUs;
+  past 64 m the sun's face shading alone remains.
+- **How dark:** with shadows on, a face out of the sun keeps 30% of the
+  sky's light at full contrast (direct sun is most of a clear day's
+  light). Without them a face turned from the sun keeps 60%, since
+  nothing else is shadowed.
+- **Setting:** Off, On or Auto (the default). Auto times the pass with
+  GPU timestamps, like bloom, and keeps it while it costs under 0.5 ms
+  a frame. `MC_VK_DISABLE=shadow` turns it off; bare Vulkan 1.2 gets it
+  through the render-pass path.
+- **Light shafts:** the terrain shader takes eight taps along the line
+  from the eye to the fragment in the shadow map. The lit fraction,
+  times a forward-scattering lobe toward the sun and haze that thickens
+  with distance (0.01/m), adds sunlight tinted by the sky. Trunks and
+  canopies cast darker wedges through the air. A per-pixel offset turns
+  the steps into fine noise.
+- **Sky:** a full-screen triangle at the far plane fills what the world
+  leaves clear. The horizon keeps the fog's colour, so terrain fades
+  into it without a seam. It deepens to a blue overhead (Rayleigh), with
+  a warm glow around a low sun (Mie).
 
 ## Gameplay
 
