@@ -47,6 +47,8 @@ typedef struct {
     int n;
 } combat_targets;
 
+#define COMBAT_CYCLE_S 1.2f /* s from a shot to the next: recoil settles, the bolt is worked */
+
 typedef struct {
     int struck;          /* a blow landed (on a mob or a player) */
     int fired;           /* a shot went off */

@@ -197,7 +197,7 @@ combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *
             c->b[c->count++] = (bullet){from, dv3((double)d.x * v, (double)d.y * v, (double)d.z * v), BULLET_LIFE, who,
                                         CARTRIDGE_AMMO};
         }
-        c->cooldown[who] = 1.2f; /* working the action */
+        c->cooldown[who] = COMBAT_CYCLE_S;
         o.fired = 1;
         o.at = from;
         o.dir = bore;

@@ -27,6 +27,7 @@
 #include "os.h"
 #include "paths.h"
 #include "physics.h"
+#include "recoil.h"
 #include "renderer.h"
 #include "save.h"
 #include "save_db.h"
@@ -971,6 +972,8 @@ typedef struct {
     float eat_anim;           /* 1 at the start of eating, easing to 0 */
     float aim;                /* 0 rifle at the hip .. 1 down its sights */
     float flash;              /* the last muzzle flash's light, 1 when fired, fading */
+    recoil rc;                /* the muzzle's climb and the hold bringing it back */
+    float bolt_t;             /* 0..1 through the cycle after a shot, 1 when done */
     float fog[3];             /* the fog's colour, easing toward the light at the eye */
     int fog_set;
     uint32_t death_rng;
@@ -1379,6 +1382,8 @@ static void open_world(game *g, const char *dir, int backdrop)
     if (o->mobs && !backdrop) place_mobs(&g->mobs, &g->w, &g->pl, o->mobs);
     if (o->figures && !backdrop) g->nfigs = place_figures(g->figs, &g->pl, o->figures);
     combat_init(&g->cb, g->seed ^ 0xC0BA7u);
+    recoil_init(&g->rc, g->seed ^ 0x2EC011u);
+    g->bolt_t = 1.0f;
     g->cb.th = g->th;
     interact_init(&g->ia, g->seed ^ 0xA5A5u);
     viewmodel_init(&g->vm);
@@ -1936,6 +1941,13 @@ static void frame_interact(game *g, double dt)
     /* The rifle comes up to the eye in about a fifth of a second while the
      * right button is held, and down as fast when it's let go. */
     int raise = g_in.aim_down && !g->frozen && !g->hl.dead && held_gun(g);
+    /* Recoil climbs the look and the hold brings it back; the shot after
+     * waits on the bolt. */
+    float rdp = 0.0f, rdy = 0.0f;
+    recoil_step(&g->rc, (float)dt, &rdp, &rdy);
+    pl->pitch = clampf(pl->pitch + rdp, -1.55f, 1.55f);
+    pl->yaw += rdy;
+    g->bolt_t = held_gun(g) ? fminf(1.0f, g->bolt_t + (float)dt / COMBAT_CYCLE_S) : 1.0f;
     g->aim = clampf(g->aim + (raise ? 1.0f : -1.0f) * (float)dt / AIM_S, 0.0f, 1.0f);
     g->eye = dv3(pl->pos.x, pl->pos.y + PLAYER_EYE - (double)g->cam.crouch, pl->pos.z);
     g->look = look_dir(pl->yaw, pl->pitch);
@@ -1973,6 +1985,8 @@ static void frame_interact(game *g, double dt)
                 fx_muzzle(g->fx, co.at, dv3((double)co.dir.x, (double)co.dir.y, (double)co.dir.z),
                           ammo_get(CARTRIDGE_AMMO)->black);
                 g->flash = 1.0f;
+                recoil_fire(&g->rc, ammo_get(CARTRIDGE_AMMO), g->aim);
+                g->bolt_t = 0.0f;
             }
             if (co.struck) sound_play(g->snd, SND_HIT, &co.at, 0, 0.8f);
             if (co.struck || co.fired) {
@@ -2185,6 +2199,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
                               g->look_dy,
                               g->eat_anim > 0.0f ? 1.0f - g->eat_anim : 0.0f,
                               g->aim,
+                              g->bolt_t < 1.0f ? g->bolt_t : 0.0f,
                               lightfx_at(&v.lfx, eye_light, 0.3f),
                               (float)dt};
         v.view_model = g->vm_ents;

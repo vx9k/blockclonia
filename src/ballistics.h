@@ -37,6 +37,7 @@ typedef struct {
     uint8_t build; /* bullet_build */
     uint8_t black; /* fired with black powder, which leaves a thick white cloud */
     float tracer;  /* s its base burns, from leaving the muzzle; 0 for none */
+    float charge;  /* kg of powder, whose gas adds to the recoil */
 } ammo_def;
 
 const ammo_def *ammo_get(int kind); /* NULL past the table */

@@ -122,6 +122,9 @@ static const float GUN_HIP[3] = {0.12f, -0.15f, -0.22f};
 #define MOUNT_HZ 2.4f
 #define MOUNT_DAMP 0.6f
 static const float GUN_HAND[2][3] = {{0.035f, 0.33f, 0.0f}, {0.04f, 0.82f, 0.0f}}; /* wrist of the stock, fore-end */
+/* The bolt turns about the bore's axis and draws back along it. */
+#define BOLT_TURN 1.05f  /* rad, 60 degrees: the locking lugs clear */
+#define BOLT_THROW 0.09f /* m, enough to eject a 7 cm case and feed the next */
 /* The barrel's end, on the bore's axis (itemmodel.c's rifle). */
 static const float GUN_MUZZLE[3] = {-0.034f, 1.11f, 0.0f};
 
@@ -332,6 +335,7 @@ static void advance(viewmodel *vm, const viewmodel_input *in, float dt)
     /* The mount follows the aim on its spring, in steps short enough to
      * stay stable at any frame rate; another item drops it at once. */
     if (hold == HOLD_GUN) {
+        vm->bolt = finite_or0(in->bolt);
         float target = anim_clamp01(finite_or0(in->aim)), w = 2.0f * PI_F * MOUNT_HZ;
         int steps = (int)ceilf(dt * 240.0f);
         float h = steps > 0 ? dt / (float)steps : 0.0f;
@@ -383,6 +387,25 @@ static void gun_place(float aim, float sprint, float kick, float drift_x, float 
     at[2] += 0.035f * kick;
 }
 
+/* 0 before a, 1 after b, smooth between. */
+static float ease_in(float t, float a, float b)
+{
+    float x = clamp_range((t - a) / (b - a), 0.0f, 1.0f);
+    return x * x * (3.0f - 2.0f * x);
+}
+
+void viewmodel_bolt(float phase, float *to_knob, float *lift, float *slide)
+{
+    *to_knob = *lift = *slide = 0.0f;
+    if (!isfinite(phase) || phase <= 0.0f || phase >= 1.0f) return;
+    /* The first sixth is the recoil settling with the hand still on the
+     * wrist; then the hand goes to the knob, turns it up, draws the bolt
+     * back to throw the case, runs it home, turns it down and returns. */
+    *to_knob = ease_in(phase, 0.17f, 0.30f) - ease_in(phase, 0.85f, 1.0f);
+    *lift = ease_in(phase, 0.30f, 0.42f) - ease_in(phase, 0.74f, 0.85f);
+    *slide = ease_in(phase, 0.42f, 0.58f) - ease_in(phase, 0.58f, 0.74f);
+}
+
 void viewmodel_muzzle(float aim, float pos[3], float dir[3])
 {
     const float zero[3] = {0}, up[3] = {0.0f, 1.0f, 0.0f};
@@ -415,8 +438,35 @@ static int two_hands(const viewmodel *vm, int hold, float aim, float sprint, con
         float drift_y = (0.0012f * sinf(2.0f * PI_F * 0.42f * t) + 0.0008f * sinf(2.0f * PI_F * BREATH_HZ * t)) * held;
         gun_place(aim, sprint, kick, drift_x, drift_y, sway, &rot, at);
         memcpy(origin, GUN_EYE, sizeof origin);
+        float to_knob = 0.0f, lift = 0.0f, slide = 0.0f, hand[2][3] = {{0}};
+        memcpy(hand, GUN_HAND, sizeof hand);
+        viewmodel_bolt(vm->bolt, &to_knob, &lift, &slide);
+        if (mdl.bolt > 0 && mdl.bolt + 1 < mdl.n) {
+            /* The handle turns up about the bore (its top is -x) and draws
+             * back toward the butt; the right hand follows the knob. */
+            quat turn = quat_axis(0.0f, 1.0f, 0.0f, -BOLT_TURN * lift);
+            for (int b = mdl.bolt; b < mdl.bolt + 2; b++) {
+                im_box *bx = &mdl.box[b];
+                const float rel[3] = {bx->pos[0] - GUN_MUZZLE[0], 0.0f, bx->pos[2] - GUN_MUZZLE[2]};
+                float r[3] = {0};
+                quat_apply(turn, rel, r);
+                bx->pos[0] = GUN_MUZZLE[0] + r[0];
+                bx->pos[1] -= BOLT_THROW * slide;
+                bx->pos[2] = GUN_MUZZLE[2] + r[2];
+                bx->rot = quat_norm(quat_mul(turn, bx->rot));
+            }
+            /* The rifle comes down off the cheek, forward and canted to
+             * the right while the hand works it, so the arm passes under
+             * the eye instead of across it. */
+            rot = quat_mul(quat_axis(0.0f, 0.0f, 1.0f, -0.3f * to_knob), rot);
+            at[0] += 0.03f * to_knob;
+            at[1] -= 0.13f * to_knob;
+            at[2] -= 0.08f * to_knob;
+            const float *knob = mdl.box[mdl.bolt + 1].pos;
+            for (int i = 0; i < 3; i++) hand[0][i] += (knob[i] - hand[0][i]) * to_knob;
+        }
         for (int s = 0; s < 2; s++) {
-            const float d[3] = {GUN_HAND[s][0] - GUN_EYE[0], GUN_HAND[s][1] - GUN_EYE[1], GUN_HAND[s][2] - GUN_EYE[2]};
+            const float d[3] = {hand[s][0] - GUN_EYE[0], hand[s][1] - GUN_EYE[1], hand[s][2] - GUN_EYE[2]};
             float r[3] = {0};
             quat_apply(rot, d, r);
             vadd(grip[s], at, r);

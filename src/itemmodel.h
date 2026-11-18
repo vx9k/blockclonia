@@ -35,6 +35,7 @@ typedef struct {
     im_box box[IM_MAX_BOXES];
     int hold;
     float grip[3];         /* where the hand holds it */
+    int bolt;              /* first of a rifle's two bolt-handle boxes, else 0 (box 0 never is) */
     float lo[3], hi[3];    /* bounds of every box's corners */
 } item_model;
 
