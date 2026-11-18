@@ -2163,6 +2163,7 @@ int main(void)
     test_faint_all();
     test_fear_all();
     test_dark_all();
+    test_lamps_all();
     test_mobmodel_all();
     test_avatar_all();
     test_cardio_all();

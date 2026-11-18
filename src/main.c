@@ -17,6 +17,7 @@
 #include "inventory.h"
 #include "invui.h"
 #include "jobs.h"
+#include "lamps.h"
 #include "light.h"
 #include "lightfx.h"
 #include "log.h"
@@ -962,6 +963,7 @@ typedef struct {
     world w;
     physics ph;
     mobs mobs;                /* creatures (simulated here unless this is a client) */
+    lamps lamps;              /* lights that move, for the light jobs */
     combat cb;                /* blows and bullets in flight */
     thermo *th;
     world_hooks hooks;
@@ -1349,8 +1351,9 @@ static void open_world(game *g, const char *dir, int backdrop)
     g->hooks = (world_hooks){&g->ph, g->th, &g->w, NULL, 0, g->snd, g->fx};
     g->w.edit_user = &g->hooks;
     g->w.on_block_changed = on_block_changed;
-    g->w.glow = thermo_glow;
-    g->w.glow_user = g->th;
+    lamps_init(&g->lamps, thermo_glow, g->th);
+    g->w.glow = lamps_glow;
+    g->w.glow_user = &g->lamps;
     g->w.on_column_unload = on_column_unload;
     g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, g->db, &g->mp};
     log_set_fatal_hook(save_on_fatal, &g->sc);
@@ -1515,8 +1518,9 @@ static void open_remote_world(game *g, uint32_t seed)
     g->hooks = (world_hooks){&g->ph, g->th, &g->w, g->mp, 1, g->snd, g->fx};
     g->w.edit_user = &g->hooks;
     g->w.on_block_changed = on_block_changed;
-    g->w.glow = thermo_glow;
-    g->w.glow_user = g->th;
+    lamps_init(&g->lamps, thermo_glow, g->th);
+    g->w.glow = lamps_glow;
+    g->w.glow_user = &g->lamps;
     g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, NULL, &g->mp};
     renderer_bind_world(g->rd, &g->w);
     memset(&g->pl, 0, sizeof g->pl);
@@ -2760,8 +2764,35 @@ static int draw_overlay(game *g, double dt, double alpha)
     return u.quads;
 }
 
+/* The lights that move (lamps.h): what other players carry, light-giving
+ * items lying about, burning creatures and fresh muzzle flashes other
+ * than this player's own, which block.frag lights from the eye. */
+static void update_lamps(game *g, double now)
+{
+    if (g->mp) {
+        mp_avatar av[NET_MAX_PLAYERS];
+        int n = mp_avatars(g->mp, now, 1.0, av, NET_MAX_PLAYERS);
+        for (int i = 0; i < n; i++)
+            if (!av[i].dead)
+                lamps_add(&g->lamps, dv3(av[i].pos.x, av[i].pos.y + 1.2, av[i].pos.z), lightfx_carried(av[i].held));
+    }
+    for (int i = 0; i < g->ph.item_count; i++)
+        lamps_add(&g->lamps, g->ph.items[i].pos, lightfx_carried(g->ph.items[i].id));
+    const mobs *ms = g->client ? mp_client_mobs(g->mp) : &g->mobs;
+    for (int i = 0; ms && i < ms->count; i++)
+        if (ms->m[i].burn_t > 0.0f) {
+            dvec3 p = ms->m[i].body.pos;
+            lamps_add(&g->lamps, dv3(p.x, p.y + 0.5, p.z), LAMPS_FIRE);
+        }
+    dvec3 fl[COMBAT_FLASHES];
+    int k = combat_flashes(&g->cb, 0, (double)LAMPS_FLASH_S, fl, COMBAT_FLASHES);
+    for (int i = 0; i < k; i++) lamps_add(&g->lamps, fl[i], LAMPS_FLASH);
+    lamps_end(&g->lamps, &g->w);
+}
+
 static void frame_render(game *g, double now, double dt)
 {
+    update_lamps(g, now);
     if (g_in.want_shot) {
         renderer_request_screenshot(g->rd, "screenshot.png");
         g_in.want_shot = 0;

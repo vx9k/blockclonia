@@ -55,6 +55,11 @@ void lightfx_build(lightfx_frame *f, const float sun_dir[3], float daylight, uin
  * or two. A brighter light already held stays. */
 void lightfx_flash(lightfx_frame *f, float flash);
 
+/* The block light an item gives off when carried or lying about: its
+ * block's (a torch item's is the torch's) a level down, as the hand holds
+ * it half a metre from the eye; 0 for an item that gives none. */
+uint16_t lightfx_carried(uint32_t item);
+
 /* The light level 0..1 at a world position as an eye there meets it: the
  * cell's sky light shifted by daylight, its block light, and what the
  * body carries (held_item, 0 for none), whichever is brightest. Levels,

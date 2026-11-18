@@ -29,9 +29,19 @@ typedef struct {
     int ammo;            /* ammo_kind */
 } bullet;
 
+#define COMBAT_FLASHES 8
+
 typedef struct {
     bullet b[COMBAT_SHOTS];
     int count;
+    /* The latest shots, newest at flash_next - 1, for their flashes. */
+    struct {
+        dvec3 at;
+        double time; /* combat.time when it fired */
+        int owner; /* the player index that fired */
+        int used;    /* 0: an empty slot */
+    } flash[COMBAT_FLASHES];
+    int flash_next;
     float cooldown[PHYS_MAX_PLAYERS]; /* s until each player can strike or fire again */
     uint32_t rng;
     uint32_t wind_seed;
@@ -89,6 +99,12 @@ int combat_creatures(combat *c, mobs *ms, physics *ph, const combat_targets *t, 
 
 /* The damage a blow does with this item in hand (hit points; a fist is 1). */
 float combat_blow(item_id held);
+
+/* Where shots went off in the last `within` seconds of simulated time,
+ * except those of player skip (-1 for none): the muzzle flashes that
+ * light their surroundings (lamps.h). Writes at most max; returns how
+ * many. */
+int combat_flashes(const combat *c, int skip, double within, dvec3 *out, int max);
 
 /* Glowing streaks for the tracers in flight: each the stretch it covers in
  * one physics step, ending where it is `alpha` of the way into the next,

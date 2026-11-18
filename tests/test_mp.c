@@ -138,6 +138,29 @@ static void client_leave(host_side *h, client_side *c)
 
 /* The host's mode switch reaches the client's player; spectators fly and
  * are hidden from the others, and come back when switched out. */
+/* A burning creature burns on the client too: its flames and light. */
+static void check_burning(host_side *h, client_side *c, mob *on_host)
+{
+    const mobs *cm = mp_client_mobs(c->m);
+    CHECK(cm->count == 1 && cm->m[0].burn_t == 0.0f);
+    on_host->burn_t = MOB_BURN_S;
+    for (int i = 0; i < 100 && cm->m[0].burn_t == 0.0f; i++) frame(h, c, NULL);
+    CHECK(cm->count == 1 && cm->m[0].burn_t > 0.0f);
+}
+
+/* What the host holds reaches the client, for its light. */
+static void check_held(host_side *h, client_side *c)
+{
+    mp_avatar host = {0}, me = {0};
+    CHECK(avatar(c->m, 0, &host) && host.held == 0);
+    h->inv.selected = 0;
+    h->inv.slot[0] = (item_stack){0};
+    inv_add(&h->inv, B_TORCH, 1);
+    for (int i = 0; i < 100 && (!avatar(c->m, 0, &host) || host.held != B_TORCH); i++) frame(h, c, NULL);
+    CHECK(host.held == B_TORCH);
+    CHECK(avatar(h->m, 1, &me) && me.held == 0);
+}
+
 static void check_modes(host_side *h, client_side *c)
 {
     mp_avatar me = {0}, host = {0};
@@ -330,6 +353,7 @@ void test_mp_all(void)
     for (int i = 0; i < 300 && mp_client_mobs(c.m)->count == 0; i++) frame(&h, &c, NULL);
     CHECK(mp_client_mobs(c.m)->count == 1 && mp_client_mobs(c.m)->m[0].kind == MOB_BOAR);
     CHECK(mp_client_mobs(c.m)->m[0].nod > 0.0f && mp_client_mobs(c.m)->m[0].nod < 0.8f);
+    check_burning(&h, &c, &hm.m[hb]);
     hm.count = 0;
     /* Joined, with the fingerprint, and a warning that the key changed. */
     const mp_chat_line *lines = NULL;
@@ -365,6 +389,7 @@ void test_mp_all(void)
     CHECK(avatar(c.m, 0, &host) && hypot(host.pos.x - h.pl.pos.x, host.pos.z - h.pl.pos.z) < 0.05);
     CHECK(strcmp(host.name, "Host") == 0);
     CHECK(c.hl->t > 1.0); /* the body arrives from the host */
+    check_held(&h, &c);
 
     check_modes(&h, &c);
 

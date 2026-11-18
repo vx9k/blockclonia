@@ -28,6 +28,7 @@ typedef struct {
     float stride;        /* leg swing phase, radians (drawing) */
     float look;          /* head turned from the body, radians, in the sense of yaw (drawing) */
     float nod;           /* head lowered, radians: grazing, stalking (drawing) */
+    float burn_t;        /* s left of burning */
     uint32_t rng;
     uint8_t kind;
 } mob;
@@ -63,6 +64,10 @@ typedef struct {
 } mob_events;
 
 void mobs_init(mobs *s, uint32_t seed);
+
+/* s a creature burns on after leaving a fire or lava: fur and fat keep
+ * burning a while. Water puts it out at once. */
+#define MOB_BURN_S 5.0f
 
 /* One fixed physics step (PHYS_DT): spawning around the players, despawning
  * far from all of them, thinking and moving. players[i] may be NULL (a dead
@@ -108,8 +113,10 @@ int mobs_add(mobs *s, int kind, dvec3 pos);
 /* A mob as boxes covered in its pixel art (mobskin.c): body, shoulders,
  * head, snout, ears, tail and two-part legs, feet relative to the camera.
  * t is a clock in seconds for idle motion (a wagging tail). Writes up to
- * max instances and returns how many (MOB_FIGURE for a full figure). */
-#define MOB_FIGURE 15
+ * max instances and returns how many: MOB_BODY, and two flames more
+ * while it burns (MOB_FIGURE at most). */
+#define MOB_BODY 15
+#define MOB_FIGURE (MOB_BODY + 2)
 int mob_figure(const mob *m, const float feet[3], float light, float t, entity_instance *out, int max);
 
 #endif
