@@ -179,11 +179,14 @@ feed the body model.
 types, real flight, penetration and wounds through the health model,
 and weapons built from parts that wear, heat up and jam.
 **Status:** one rifle with two-handed aim and a spring mount. Its
-bullet has gravity but no drag, and it stops at the first block.
+bullet flies with G1/G7 drag, air density and wind, and stops at the
+first block.
 **Design:** [docs/design/ballistics.md](docs/design/ballistics.md)
 
-- [ ] Ballistic flight: an ammunition table, G1/G7 drag, air density
+- [x] Ballistic flight: an ammunition table, G1/G7 drag, air density
       from altitude and temperature, wind
+- [ ] Muzzle effects: a flash that lights the area, drifting
+      black-powder smoke, tracers
 - [ ] Penetration and ricochet through blocks by material
 - [ ] Wound ballistics into the health model: the path, construction,
       pass-throughs

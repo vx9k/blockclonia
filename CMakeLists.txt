@@ -140,6 +140,8 @@ set(MC_CORE_SOURCES
   src/mob.c
   src/mobskin.c
   src/combat.c
+  src/atmos.c
+  src/ballistics.c
   src/jobs.c
   src/light.c
   src/lightfx.c
@@ -256,7 +258,7 @@ if(MC_BUILD_TESTS)
                           tests/test_discord.c tests/test_netcrypto.c tests/test_wire.c tests/test_net.c tests/test_mp.c
                           tests/test_worldgen.c tests/test_edge.c tests/test_tools.c tests/test_materials.c
                           tests/test_strata.c tests/test_fluid.c tests/test_liquids.c
-                          tests/test_combat.c tests/test_invui.c
+                          tests/test_combat.c tests/test_ballistics.c tests/test_invui.c
                           tests/test_body_risks.c tests/test_png.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)

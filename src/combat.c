@@ -1,16 +1,25 @@
 #include "combat.h"
 #include "mathlib.h"
+#include "noise.h"
 
 #include <math.h>
 #include <string.h>
 
 #define BULLET_DAMAGE 14.0f
-#define BULLET_LIFE 2.0f
+#define BULLET_JOULES 2100.0 /* the energy BULLET_DAMAGE stands for: the black-powder rifle's at the muzzle */
+/* Only a backstop: a shot ends where it lands, hits or leaves the loaded
+ * world, so its range comes from the flight. The longest any round flies
+ * is about 35 s, a 7.62 mm shot at 37 degrees. */
+#define BULLET_LIFE 60.0f
+/* Steps of flight per physics step: a rifle bullet covers 7 to 14 m in
+ * one, too far for one straight segment to follow its drop. */
+#define BULLET_SUBSTEPS 4
 
 void combat_init(combat *c, uint32_t seed)
 {
     memset(c, 0, sizeof *c);
     c->rng = seed ? seed : 1u;
+    c->wind_seed = hash_u32(c->rng ^ 0xA1B5u);
 }
 
 static float frand(combat *c)
@@ -119,6 +128,16 @@ static void injure(combat *c, health *h, int part, float damage, int edged)
     if (part == BP_HEAD && damage >= BULLET_DAMAGE) health_blunt(h, part, 9.0);
 }
 
+/* Makes room for a shot when every slot is in flight by dropping the one
+ * fired longest ago, so a trigger pull that took a cartridge always fires. */
+static void shot_free_oldest(combat *c)
+{
+    int old = 0;
+    for (int i = 1; i < c->count; i++)
+        if (c->b[i].life < c->b[old].life) old = i;
+    c->b[old] = c->b[--c->count];
+}
+
 combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *t, int who, inventory *inv, dvec3 eye,
                         vec3 dir, double block_dist, int attack_click, float aim, float dt)
 {
@@ -134,6 +153,7 @@ combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *
             o.msg = "No cartridges";
             return o;
         }
+        if (c->count == COMBAT_SHOTS) shot_free_oldest(c);
         if (c->count < COMBAT_SHOTS) {
             /* Spread: aimed, a rifle held standing (4 mrad, not clamped in a
              * vice); from the hip the eye isn't behind the sights and shots
@@ -141,10 +161,9 @@ combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *
             float a = isfinite(aim) ? fminf(fmaxf(aim, 0.0f), 1.0f) : 0.0f;
             float sp = 0.004f + HIP_SPREAD * (1.0f - a);
             vec3 d = v3(dir.x + (frand(c) - 0.5f) * sp, dir.y + (frand(c) - 0.5f) * sp, dir.z + (frand(c) - 0.5f) * sp);
-            c->b[c->count++] = (bullet){eye,
-                                        dv3((double)d.x * BULLET_SPEED, (double)d.y * BULLET_SPEED,
-                                            (double)d.z * BULLET_SPEED),
-                                        BULLET_LIFE, who};
+            double v = (double)ammo_get(CARTRIDGE_AMMO)->muzzle;
+            c->b[c->count++] = (bullet){eye, dv3((double)d.x * v, (double)d.y * v, (double)d.z * v), BULLET_LIFE, who,
+                                        CARTRIDGE_AMMO};
         }
         c->cooldown[who] = 1.2f; /* working the action */
         o.fired = 1;
@@ -192,45 +211,75 @@ int combat_creatures(combat *c, mobs *ms, physics *ph, const combat_targets *t, 
     return ev.bite_count + combat_step(c, ms, ph, t);
 }
 
+/* Is the column holding `p` loaded? Past it there is no terrain to hit, so
+ * a shot that flew on would pass through hills that aren't there. */
+static int shot_in_world(const world *w, dvec3 p)
+{
+    int x = (int)floor(p.x), z = (int)floor(p.z);
+    return world_column(w, chunk_of(x), chunk_of(z)) != NULL;
+}
+
+/* One stretch of a bullet's flight, from its position to `to` at speed
+ * `speed`: 1 if it hit something (and *hits counts a body), else 0. */
+static int bullet_segment(combat *c, mobs *ms, physics *ph, const combat_targets *t, const bullet *b, dvec3 to,
+                          double speed, int *hits)
+{
+    dvec3 seg = dv3(to.x - b->pos.x, to.y - b->pos.y, to.z - b->pos.z);
+    double len = dv3_len(seg);
+    if (len < 1e-9) return 0;
+    vec3 dir = v3((float)(seg.x / len), (float)(seg.y / len), (float)(seg.z / len));
+    ray_hit wall = physics_raycast(ph->w, b->pos, dir, len);
+    double wall_d = len;
+    if (wall.hit) {
+        dvec3 c0 = dv3(wall.block.x + 0.5, wall.block.y + 0.5, wall.block.z + 0.5);
+        wall_d = fmin(len, dv3_len(dv3(c0.x - b->pos.x, c0.y - b->pos.y, c0.z - b->pos.z)));
+    }
+    int mi = -1, pl = -1;
+    double d = nearest_target(ms, t, b->owner, b->pos, dir, wall_d, &mi, &pl);
+    /* Damage is the energy it still carries. */
+    float dmg = BULLET_DAMAGE * (float)(0.5 * (double)ammo_get(b->ammo)->mass * speed * speed / BULLET_JOULES);
+    if (mi >= 0) {
+        mobs_hurt(ms, ph, mi, dmg, b->pos);
+        (*hits)++;
+        return 1;
+    }
+    if (pl >= 0) {
+        double y = b->pos.y + (double)dir.y * d;
+        injure(c, t->hl[pl], part_at(t->pl[pl], y, c), dmg, 1);
+        (*hits)++;
+        return 1;
+    }
+    if (wall.hit) {
+        /* Glass and ice shatter; everything else stops it. */
+        if (block_get(wall.id)->flags & BF_BRITTLE)
+            world_set(ph->w, wall.block.x, wall.block.y, wall.block.z, B_AIR, 0);
+        return 1;
+    }
+    return 0;
+}
+
 int combat_step(combat *c, mobs *ms, physics *ph, const combat_targets *t)
 {
     int hits = 0;
+    c->time += PHYS_DT;
     for (int i = 0; i < c->count; i++) {
         bullet *b = &c->b[i];
-        b->vel.y -= GRAVITY * PHYS_DT;
-        double speed = dv3_len(b->vel);
         b->life -= (float)PHYS_DT;
-        int done = b->life <= 0.0f || speed < 1.0;
+        const ammo_def *a = ammo_get(b->ammo);
+        int done = b->life <= 0.0f || !a;
         if (!done) {
-            double step = speed * PHYS_DT;
-            vec3 dir = v3((float)(b->vel.x / speed), (float)(b->vel.y / speed), (float)(b->vel.z / speed));
-            ray_hit wall = physics_raycast(ph->w, b->pos, dir, step);
-            double wall_d = step;
-            if (wall.hit) {
-                dvec3 c0 = dv3(wall.block.x + 0.5, wall.block.y + 0.5, wall.block.z + 0.5);
-                wall_d = fmin(step, dv3_len(dv3(c0.x - b->pos.x, c0.y - b->pos.y, c0.z - b->pos.z)));
-            }
-            int mi = -1, pl = -1;
-            double d = nearest_target(ms, t, b->owner, b->pos, dir, wall_d, &mi, &pl);
-            /* Damage falls with the square of the speed left: energy. */
-            float frac = (float)(speed * speed / (BULLET_SPEED * BULLET_SPEED));
-            if (mi >= 0) {
-                mobs_hurt(ms, ph, mi, BULLET_DAMAGE * frac, b->pos);
-                hits++;
-                done = 1;
-            } else if (pl >= 0) {
-                double y = b->pos.y + (double)dir.y * d;
-                injure(c, t->hl[pl], part_at(t->pl[pl], y, c), BULLET_DAMAGE * frac, 1);
-                hits++;
-                done = 1;
-            } else if (wall.hit) {
-                /* Glass and ice shatter; everything else stops it. */
-                if (block_get(wall.id)->flags & BF_BRITTLE)
-                    world_set(ph->w, wall.block.x, wall.block.y, wall.block.z, B_AIR, 0);
-                done = 1;
-            } else {
-                b->pos = dv3(b->pos.x + b->vel.x * PHYS_DT, b->pos.y + b->vel.y * PHYS_DT,
-                             b->pos.z + b->vel.z * PHYS_DT);
+            /* The air where it is, once a step: its temperature, height
+             * and the wind barely change over 14 m. */
+            float temp = c->th ? thermo_ambient(c->th, ph->w, b->pos.x, b->pos.y, b->pos.z) : 15.0f;
+            atmos_air air = atmos_at(b->pos.y, temp);
+            air.wind = atmos_wind_at(ph->w, c->wind_seed, c->time, b->pos);
+            for (int s = 0; s < BULLET_SUBSTEPS && !done; s++) {
+                dvec3 to = b->pos, vel = b->vel;
+                ballistics_step(a, &air, &to, &vel, PHYS_DT / BULLET_SUBSTEPS);
+                double speed = dv3_len(b->vel);
+                done = speed < 1.0 || !shot_in_world(ph->w, to) || bullet_segment(c, ms, ph, t, b, to, speed, &hits);
+                b->pos = to;
+                b->vel = vel;
             }
         }
         if (done) c->b[i--] = c->b[--c->count];

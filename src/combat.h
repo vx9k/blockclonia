@@ -1,28 +1,31 @@
 /* Fighting: blows with the hands, tools and blades, and rifle bullets in
  * flight. A blow lands on the nearest mob or player along the look ray, if
  * it is nearer than the block being looked at and within reach; a bullet
- * is a projectile under gravity, tested against blocks, mobs and players
- * along its path every physics step. Wounds to players go through the
+ * flies under gravity, drag and wind (ballistics.c), tested against
+ * blocks, mobs and players along its path every physics step. Wounds to players go through the
  * health model (cuts, blunt hits); mobs lose hit points. Runs on the
  * authority (a single-player game or the multiplayer host). No window or
  * GPU. */
 #ifndef MC_COMBAT_H
 #define MC_COMBAT_H
 
+#include "ballistics.h"
 #include "health.h"
 #include "inventory.h"
 #include "mob.h"
 #include "physics.h"
+#include "thermo.h"
 
 #define COMBAT_SHOTS 32
 #define COMBAT_REACH 3.0     /* m a blow reaches */
 #define HIP_SPREAD 0.06f    /* extra spread fired from the hip (about +-1.7 degrees) */
-#define BULLET_SPEED 400.0   /* m/s at the muzzle, a black-powder rifle */
+#define CARTRIDGE_AMMO AMMO_BLACK_LEAD /* what I_CARTRIDGE fires */
 
 typedef struct {
     dvec3 pos, vel;
     float life;          /* s left before it is dropped */
     int owner;           /* the player index that fired it */
+    int ammo;            /* ammo_kind */
 } bullet;
 
 typedef struct {
@@ -30,6 +33,9 @@ typedef struct {
     int count;
     float cooldown[PHYS_MAX_PLAYERS]; /* s until each player can strike or fire again */
     uint32_t rng;
+    uint32_t wind_seed;
+    double time;         /* s simulated, for the wind */
+    const thermo *th;    /* the air's temperature, or NULL for 15 C */
 } combat;
 
 /* The bodies that can be hit, by player index: pl[i] or hl[i] NULL for an
