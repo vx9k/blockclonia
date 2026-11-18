@@ -12,9 +12,11 @@
 
 #define OS_THREAD_LOCAL _Thread_local
 /* Stack for the threads os_thread_start makes: the same on every OS
- * (Linux gives 8 MB by default, macOS 512 KB), with room for the 64 KB
- * frames -Wframe-larger-than allows. */
-#define OS_THREAD_STACK (4u * 1024u * 1024u)
+ * (Linux gives 8 MB by default, macOS 512 KB, musl 128 KB), matching
+ * Linux's main thread, with room for about 30 of the 256 KB frames
+ * -Wframe-larger-than allows. It is address space; only the pages a
+ * thread touches take memory. */
+#define OS_THREAD_STACK (8u * 1024u * 1024u)
 
 /* Seconds on a monotonic clock with an arbitrary start. Lock-free and
  * allocation-free, so the audio callback may call it. */
