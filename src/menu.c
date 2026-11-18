@@ -322,6 +322,7 @@ static int settings_video(ctx *c, settings *s, float rx, float ry, float rw)
     changed |= cycle(c, rx, ry + 120, rw, "Smooth lighting", &s->smooth_light, ONOFF, 2);
     static const char *const BLOOM[] = {"Off", "On", "Auto"}; /* BLOOM_OFF, BLOOM_ON, BLOOM_AUTO */
     changed |= cycle(c, rx, ry + 140, rw, "Bloom", &s->bloom, BLOOM, 3);
+    changed |= cycle(c, rx, ry + 160, rw, "Light flicker", &s->flicker, ONOFF, 2);
     return changed;
 }
 

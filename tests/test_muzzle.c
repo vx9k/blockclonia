@@ -169,7 +169,7 @@ static void test_flash_light(void)
 {
     const float sun[3] = {0.0f, 1.0f, 0.0f};
     lightfx_frame f = {0};
-    lightfx_build(&f, sun, 0.0f, 0, 50, 0.0);
+    lightfx_build(&f, sun, 0.0f, 0, 50, 0.0, 1);
     lightfx_frame g = f;
     lightfx_flash(&g, 0.0f);
     CHECK(g.held[0] == f.held[0] && g.held[1] == f.held[1] && g.held[2] == f.held[2]);

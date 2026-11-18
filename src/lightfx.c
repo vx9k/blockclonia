@@ -35,7 +35,7 @@ float lightfx_flicker(double t)
 }
 
 void lightfx_build(lightfx_frame *f, const float sun_dir[3], float daylight, uint32_t held_item, int brightness,
-                   double time)
+                   double time, int flicker)
 {
     /* Light through a long path of air at sunrise and sunset has lost its
      * blue; moonlight looks blue to dark-adapted eyes (the Purkinje
@@ -60,7 +60,7 @@ void lightfx_build(lightfx_frame *f, const float sun_dir[3], float daylight, uin
     uint8_t block = held_item ? item_get(held_item)->block : B_AIR;
     if (held_item && item_is_block(held_item)) block = (uint8_t)held_item;
     uint16_t em = light_emission(block);
-    float flick = block == B_FOXFIRE ? 1.0f : lightfx_flicker(time);
+    float flick = block == B_FOXFIRE ? 1.0f : (flicker ? lightfx_flicker(time) : LIGHTFX_STEADY);
     const unsigned lv[3] = {LIGHT_R(em), LIGHT_G(em), LIGHT_B(em)};
     for (int i = 0; i < 3; i++) f->held[i] = lv[i] > 1 ? (float)(lv[i] - 1) / (float)LIGHT_MAX * flick : 0.0f;
     f->floor = clamp01((float)brightness / 100.0f) * LIGHTFX_FLOOR_MAX;
