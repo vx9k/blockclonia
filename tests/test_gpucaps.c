@@ -287,7 +287,8 @@ static void test_overrides(void)
 {
     gpu_offer o = full_offer();
     gpu_choice c = {0};
-    uint32_t off = gpucaps_parse_disable("mdi,dynrend,sync2,aniso,hostcopy,budget,timestamps,pcache,light4,shadow", NULL, 0);
+    uint32_t off = gpucaps_parse_disable("mdi,dynrend,sync2,aniso,hostcopy,budget,timestamps,pcache,light4,shadow",
+                                         NULL, 0);
     gpucaps_choose(&o, off, &c);
     CHECK(c.enabled == GPUCAP_RELAXED);
     CHECK(c.disabled == off);

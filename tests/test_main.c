@@ -1,6 +1,5 @@
 /* Unit tests for the engine core (no GPU, no window). */
 #include "bloom.h"
-#include "shadow.h"
 #include "camera.h"
 #include "debug.h"
 #include "fx.h"
@@ -17,6 +16,7 @@
 #include "physics.h"
 #include "save.h"
 #include "settings.h"
+#include "shadow.h"
 #include "survival.h"
 #include "sysinfo.h"
 #include "test_util.h"

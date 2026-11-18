@@ -1,9 +1,9 @@
 #include "settings.h"
 #include "bloom.h"
-#include "shadow.h"
 #include "mem.h"
 #include "os.h"
 #include "save.h"
+#include "shadow.h"
 
 #include <errno.h>
 #include <stdio.h>
