@@ -9,6 +9,7 @@ pages say why and how. When a plan changes, update both.
 | [worldgen.md](worldgen.md) | The generator overhaul (climate, landforms, underground, rivers, trees, plants) and settlements |
 | [lighting.md](lighting.md) | Sky and block light, glowing hot blocks, the sun and moon |
 | [rendering.md](rendering.md) | Occlusion culling, cheaper plants, distant terrain detail |
+| [performance.md](performance.md) | The optimisation series: noise, lighting, fluid, mesher, threads, GPU culling |
 | [items-crafting.md](items-crafting.md) | 3D item models, animated objects, hands-on crafting at stations |
 | [machines.md](machines.md) | Power sources, transmission, machines, refining |
 | [vehicles.md](vehicles.md) | Vehicles built from parts, from hand carts to engines |
