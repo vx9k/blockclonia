@@ -104,7 +104,7 @@ int worlds_create(const char *root, const char *name, uint32_t seed, const world
     ok = ok && save_db_set_seed(db, seed) == 0;
     ok = ok && save_db_set_meta(db, "generator", WORLDGEN_VERSION) == 0;
     ok = ok && save_db_set_meta(db, "created", (int64_t)time(NULL)) == 0;
-    ok = ok && save_db_put_blob(db, "name", name, strlen(name)) == 0;
+    ok = ok && save_db_set_text(db, "name", name, strlen(name)) == 0;
     world_rules plain = rules_new(MODE_SURVIVAL, 0);
     ok = ok && rules_save(db, rules ? rules : &plain) == 0;
     ok = ok && save_db_commit(db) == 0;
@@ -123,7 +123,7 @@ int worlds_rename(const char *dir, const char *name)
     if (!save_name_valid(name, strlen(name))) return -1;
     save_db *db = save_db_open(dir); /* refused if a game has the world open */
     if (!db) return -1;
-    int r = save_db_put_blob(db, "name", name, strlen(name));
+    int r = save_db_set_text(db, "name", name, strlen(name));
     save_db_close(db);
     return r;
 }

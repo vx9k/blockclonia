@@ -50,7 +50,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
             mem_free(bytes);
         }
     static uint8_t buf[PLAYER_FILE_SIZE + 1];
-    long n = save_db_get_blob(db, "player", buf, sizeof buf);
+    long n = save_db_get_player(db, SAVE_DB_LOCAL_PLAYER, buf, sizeof buf);
     if (n >= 0) {
         player p = {0};
         inventory inv = {0};

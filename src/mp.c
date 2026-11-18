@@ -274,12 +274,12 @@ int mp_ended(const mp *m, const char **why)
 
 /* ---------------------------------------------------------------- host */
 
-/* The database row of the player with this identity key. */
+/* The players row of the player with this identity key: the key in hex. */
 static void saved_name(const uint8_t *key, char *out, size_t cap)
 {
     char hex[2 * NC_KEY_BYTES + 1] = {0};
     nc_key_hex(key, hex);
-    snprintf(out, cap, "player:%s", hex);
+    snprintf(out, cap, "%s", hex);
 }
 
 /* What the world kept of this key from an earlier session: 1 with *pl and
@@ -291,7 +291,7 @@ static int load_saved(const mp *m, const uint8_t *key, player *pl, inventory *in
     char name[80] = {0};
     saved_name(key, name, sizeof name);
     uint8_t buf[PLAYER_FILE_SIZE + 1] = {0};
-    long n = save_db_get_blob(m->ctx.db, name, buf, sizeof buf);
+    long n = save_db_get_player(m->ctx.db, name, buf, sizeof buf);
     if (n <= 0) return 0;
     if (survival_decode_player(pl, inv, NULL, buf, (size_t)n) != 0) {
         log_warn("mp: the saved state of %.15s... is corrupt; a fresh start", name);
@@ -306,7 +306,7 @@ static int save_one(const mp *m, const uint8_t *key, const player *pl, const inv
     saved_name(key, name, sizeof name);
     uint8_t buf[PLAYER_FILE_SIZE] = {0};
     size_t n = survival_encode_player(pl, inv, thermo_day_time(m->ctx.th), buf, sizeof buf);
-    return n && save_db_put_blob(m->ctx.db, name, buf, n) == 0 ? 0 : -1;
+    return n && save_db_put_player(m->ctx.db, name, buf, n) == 0 ? 0 : -1;
 }
 
 int mp_save_players(const mp *m)
