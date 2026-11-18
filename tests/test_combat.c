@@ -17,7 +17,7 @@ static int step(test_world *t, mobs *ms, combat *c, player *pl, health *h, float
     ms->spawn_t = 1e9f;
     player *tp[1] = {pl};
     health *th[1] = {h};
-    combat_targets tg = {tp, th, 1};
+    combat_targets tg = {tp, th, 1, NULL};
     return combat_creatures(c, ms, &t->ph, &tg, daylight);
 }
 
@@ -89,7 +89,7 @@ static void test_blows(void)
     player_spawn(&pl, &t.w, 8.5, 8.5);
     player *tp[1] = {&pl};
     health *th[1] = {h};
-    combat_targets tg = {tp, th, 1};
+    combat_targets tg = {tp, th, 1, NULL};
     inventory inv = {0};
     inv_init(&inv);
     dvec3 eye = dv3(8.5, GROUND + PLAYER_EYE, 8.5);
@@ -145,7 +145,7 @@ static void test_rifle(void)
     player_spawn(&them, &t.w, 30.5, 8.5);
     player *tp[2] = {&pl, &them};
     health *th[2] = {h, other};
-    combat_targets tg = {tp, th, 2};
+    combat_targets tg = {tp, th, 2, NULL};
     inventory inv = {0};
     inv_init(&inv);
     inv_add(&inv, I_RIFLE, 1);
@@ -197,7 +197,7 @@ static void test_rifle_aim(void)
     health *h = new_body(7);
     player *tp[1] = {&pl};
     health *th[1] = {h};
-    combat_targets tg = {tp, th, 1};
+    combat_targets tg = {tp, th, 1, NULL};
     inventory inv = {0};
     inv_init(&inv);
     inv_add(&inv, I_RIFLE, 1);

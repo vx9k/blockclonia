@@ -190,6 +190,14 @@ static const line LINES[] = {
     {FEEL_FEAR, 3, B, "Teeth, and closing fast."},
     {FEEL_FEAR, 3, I, "It's coming for me!"},
     {FEEL_FEAR, 0, B, "Whatever it was, it's gone."},
+
+    {FEEL_DARK, 1, I, "It's getting hard to see."},
+    {FEEL_DARK, 1, B, "The shapes around you lose their edges."},
+    {FEEL_DARK, 2, I, "It's dark. I can barely see my hands."},
+    {FEEL_DARK, 2, B, "You strain to see in the dark."},
+    {FEEL_DARK, 3, I, "It's pitch black."},
+    {FEEL_DARK, 3, I, "I can't see a thing."},
+    {FEEL_DARK, 0, I, "Light, finally."},
 };
 #undef I
 #undef B
@@ -311,6 +319,8 @@ static int level_inside(const health *h, int f)
     case FEEL_DRUNK: return grade(h->bac, 0.4f, 1.2f, 2.2f);
     case FEEL_SWOON: return grade(h->vagal, 0.08f, 0.3f, 0.6f);
     case FEEL_FEAR: return grade(h->fear, 0.15f, 0.45f, 0.75f);
+    /* A moonlit field is level 2, a lightless cave 3. */
+    case FEEL_DARK: return grade(h->dark, 0.6f, 0.85f, 0.99f);
     case FEEL_DOPED: return grade(h->naloxone > 0.0f ? 0.03f * h->opioid : h->opioid, 4.0f, 15.0f, 30.0f);
     default: return 0;
     }
@@ -448,7 +458,7 @@ static const uint8_t TINT[FEEL_COUNT][3] = {
     [FEEL_COLD] = {150, 210, 255},  [FEEL_NUMB] = {170, 200, 240},  [FEEL_SICK] = {185, 215, 130},
     [FEEL_DRUNK] = {240, 200, 110}, [FEEL_DOPED] = {200, 170, 255}, [FEEL_SWOON] = {195, 195, 200},
     [FEEL_FAINT] = {195, 195, 200}, [FEEL_AIR] = {150, 225, 235},   [FEEL_BREATH] = {150, 225, 235},
-    [FEEL_FEAR] = {225, 160, 215},
+    [FEEL_FEAR] = {225, 160, 215},  [FEEL_DARK] = {150, 150, 175},
 };
 
 thought_style thoughts_style(const thought *t, const health *h)

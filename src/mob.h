@@ -40,6 +40,14 @@ typedef struct {
     float age;           /* s since mobs_init */
 } mobs;
 
+/* What a creature can tell about player i from the light around them
+ * (lightfx_seen at the eyes): how lit they are, 0..1, and how much of it
+ * is firelight, 0..1. */
+typedef struct {
+    float level;
+    float fire;
+} mob_sense;
+
 /* A wolf bit player `who` this step. */
 typedef struct {
     int who;
@@ -58,9 +66,18 @@ void mobs_init(mobs *s, uint32_t seed);
 
 /* One fixed physics step (PHYS_DT): spawning around the players, despawning
  * far from all of them, thinking and moving. players[i] may be NULL (a dead
- * or absent player). daylight is thermo_daylight. Bites are reported in ev
- * for the caller to apply to the right body. */
-void mobs_step(mobs *s, physics *ph, player *const *players, int n, float daylight, mob_events *ev);
+ * or absent player). daylight is thermo_daylight. sense[i] is what the
+ * light shows of player i (NULL: everyone in plain view, no fire): a
+ * player in the dark is noticed from closer, one carrying a torch from as
+ * far as by day, and a wolf that has not been hurt keeps out of
+ * firelight. Bites are reported in ev for the caller to apply to the
+ * right body. */
+void mobs_step(mobs *s, physics *ph, player *const *players, const mob_sense *sense, int n, float daylight,
+               mob_events *ev);
+
+/* How far a creature of kind notices a player lit to level (mob_sense):
+ * range in full light, less in the dark by how well its eyes cope. */
+double mobs_sight(int kind, double range, float level);
 
 /* The first mob along a ray within max_dist, -1 for none; *dist is set to
  * how far along the ray it was hit. */

@@ -1818,6 +1818,9 @@ static void step_parts(health *h, const health_env *e, double dt, float gh, int 
      * unconscious body feels nothing. */
     const float threat = awake ? fclamp(e->fear, 0.0f, 1.0f) : 0.0f;
     h->fear = lag(h->fear, threat, dt, 1.0);
+    /* The eyes take a few seconds to register a change of light, so a
+     * glance into a hole is not "pitch black" at once. */
+    h->dark = lag(h->dark, fclamp(e->dark, 0.0f, 1.0f), dt, 3.0);
     if (h->fear - h->fear_ref > 0.3f && h->surge < 5.0f) {
         /* Sized by what was seen, not by how far the feeling has caught up. */
         h->surge = minf(30.0f, 10.0f + 25.0f * (threat - h->fear_ref));
@@ -3042,6 +3045,7 @@ static const wire_field HEALTH_FIELDS[] = {
     H(blood_seen),
     H(fear),
     H(fear_ref),
+    H(dark),
     H(antibiotic),
     H(sepsis),
     WIRE_I32R(health, conscious, CONS_UNCONSCIOUS, CONS_ALERT),

@@ -1,5 +1,6 @@
 #include "mp.h"
 #include "gamemode.h"
+#include "lightfx.h"
 #include "log.h"
 #include "mem.h"
 #include "netkeys.h"
@@ -133,6 +134,7 @@ struct mp {
      * is the host's player, then the remotes in the order stepped. */
     player *tpl[PHYS_MAX_PLAYERS];
     health *thl[PHYS_MAX_PLAYERS];
+    mob_sense tsense[PHYS_MAX_PLAYERS]; /* what creatures make out of each in the light */
     int tn;
     uint8_t *buf;
     size_t buf_cap;
@@ -627,7 +629,7 @@ static void host_hands(mp *m, remote *r, int who)
     if (m->ctx.mobs && m->ctx.cb) {
         /* A creature or player in reach takes the blow instead of the block
          * behind it. */
-        combat_targets t = {m->tpl, m->thl, m->tn};
+        combat_targets t = {m->tpl, m->thl, m->tn, m->tsense};
         double block_d = hit.hit ? dv3_len(dv3(hit.block.x + 0.5 - eye.x, hit.block.y + 0.5 - eye.y,
                                                hit.block.z + 0.5 - eye.z))
                                  : 5.0;
@@ -680,7 +682,11 @@ static int terrain_ready(const world *w, const player *p)
     return 1;
 }
 
-combat_targets mp_targets(mp *m) { return (combat_targets){m->tpl, m->thl, m->tn}; }
+combat_targets mp_targets(mp *m)
+{
+    combat_targets t = {m->tpl, m->thl, m->tn, m->tsense};
+    return t;
+}
 
 void mp_host_step(mp *m, const player_input *local_in)
 {
@@ -721,9 +727,14 @@ void mp_host_step(mp *m, const player_input *local_in)
         health *h = k ? m->r[who[k]].hl : m->ctx.hl;
         m->tpl[k] = h->dead ? NULL : ps[k];
         m->thl[k] = h->dead ? NULL : h;
+        inventory *inv = k ? &m->r[who[k]].inv : m->ctx.inv;
+        const item_stack *held = inv ? inv_held(inv) : NULL;
+        mob_sense *se = &m->tsense[k];
+        se->level = lightfx_seen(m->ctx.w, ps[k]->pos.x, ps[k]->pos.y + PLAYER_EYE, ps[k]->pos.z,
+                                 thermo_daylight(m->ctx.th), held && held->count ? held->id : 0, &se->fire);
     }
     if (m->ctx.mobs && m->ctx.cb) {
-        combat_targets t = {m->tpl, m->thl, m->tn};
+        combat_targets t = {m->tpl, m->thl, m->tn, m->tsense};
         combat_creatures(m->ctx.cb, m->ctx.mobs, m->ctx.ph, &t, thermo_daylight(m->ctx.th));
     }
     for (int k = 1; k < n; k++) {
@@ -732,6 +743,7 @@ void mp_host_step(mp *m, const player_input *local_in)
         survival_env(m->ctx.w, &r->pl, &sb[k], r->actions, &env);
         survival_thermal(m->ctx.th, m->ctx.w, &r->pl, &env);
         if (m->ctx.mobs) env.fear = mobs_fear(m->ctx.mobs, &r->pl, thermo_daylight(m->ctx.th));
+        env.dark = lightfx_dark(m->tsense[k].level);
         r->actions = 0;
         survival_impacts(r->hl, m->ctx.w, &m->ctx.ph->contact[k], &r->pl, &sb[k]);
         health_step(r->hl, &env, PHYS_DT);

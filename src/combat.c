@@ -233,7 +233,7 @@ combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *
 int combat_creatures(combat *c, mobs *ms, physics *ph, const combat_targets *t, float daylight)
 {
     mob_events ev = {0};
-    mobs_step(ms, ph, t->pl, t->n, daylight, &ev);
+    mobs_step(ms, ph, t->pl, t->sense, t->n, daylight, &ev);
     for (int k = 0; k < ev.bite_count; k++) {
         const mob_bite *b = &ev.bites[k];
         if (b->who < 0 || b->who >= t->n || !t->hl[b->who]) continue;

@@ -301,7 +301,7 @@ static void test_muzzle_origin(void)
     mobs_init(&ms, 7);
     combat c = {0};
     combat_init(&c, 7);
-    combat_targets tg = {NULL, NULL, 0};
+    combat_targets tg = {NULL, NULL, 0, NULL};
     inventory inv = {0};
     inv_init(&inv);
     inv_add(&inv, I_RIFLE, 1);

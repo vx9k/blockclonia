@@ -179,7 +179,7 @@ static void step(test_world *t, mobs *ms, combat *c, player *pl, health *h)
     ms->spawn_t = 1e9f;
     player *tp[1] = {pl};
     health *th[1] = {h};
-    combat_targets tg = {tp, th, 1};
+    combat_targets tg = {tp, th, 1, NULL};
     combat_creatures(c, ms, &t->ph, &tg, 1.0f);
 }
 

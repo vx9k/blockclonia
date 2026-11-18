@@ -213,6 +213,7 @@ typedef struct {
     double wind;          /* m/s of air moving past besides the body's own speed */
     int crouched;         /* crouching (sneak): the head nearer the heart */
     float fear;           /* 0..1: a predator hunting the body nearby (mobs_fear) */
+    float dark;           /* 0..1: how dark it is around the eyes (lightfx_dark) */
 } health_env;
 
 typedef struct health {
@@ -305,6 +306,7 @@ typedef struct health {
     /* Fear of a hunting predator: fight-or-flight without a wound. */
     float fear; /* 0..1 felt now */
     float fear_ref; /* slow reference a sudden fright is measured against */
+    float dark; /* 0..1 how dark it is to the eyes, which take a while to adjust */
     float sepsis;                     /* 0..1 */
     int conscious;                    /* consciousness */
 
