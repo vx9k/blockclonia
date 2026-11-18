@@ -689,6 +689,58 @@ static void test_upgrade(void)
     mem_free(enc);
 }
 
+/* A world exactly as a format 2 build wrote it: STRICT tables, the name
+ * and the players still blobs. */
+static void make_format2(char *dir, size_t cap, const char *name)
+{
+    sub_dir(dir, cap, name);
+    CHECK(raw_sql(dir, "PRAGMA application_id = 1296258892; PRAGMA user_version = 2;"
+                       "CREATE TABLE meta(key TEXT PRIMARY KEY NOT NULL CHECK(length(key) BETWEEN 1 AND 64), "
+                       "value INTEGER NOT NULL) STRICT, WITHOUT ROWID;"
+                       "CREATE TABLE columns(cx INTEGER NOT NULL CHECK(cx BETWEEN -125000000 AND 124999999), "
+                       "cz INTEGER NOT NULL CHECK(cz BETWEEN -125000000 AND 124999999), "
+                       "data BLOB NOT NULL CHECK(length(data) BETWEEN 1 AND 393280), "
+                       "PRIMARY KEY(cx, cz)) STRICT, WITHOUT ROWID;"
+                       "CREATE TABLE blobs(name TEXT PRIMARY KEY NOT NULL CHECK(length(name) BETWEEN 1 AND 80), "
+                       "data BLOB NOT NULL CHECK(length(data) <= 393280)) STRICT, WITHOUT ROWID;"
+                       "INSERT INTO meta VALUES ('seed', 5), ('mode', 1);"
+                       "INSERT INTO columns VALUES (1, 1, x'0102');"
+                       "INSERT INTO blobs VALUES ('name', x'54776F'), ('player', x'4C'), "
+                       "('player:local', x'58'), ('player:ff', x'46')"));
+}
+
+/* Format 2 to 3 on its own: the list reads the name from its blob before
+ * the upgrade, and afterwards every row is where format 3 keeps it. */
+static void test_upgrade_from_2(void)
+{
+    char dir[400] = {0};
+    make_format2(dir, sizeof dir, "up2");
+    save_peek pk = {0};
+    save_db_peek(dir, &pk);
+    CHECK(pk.status == SAVE_PEEK_OK && pk.seed == 5 && pk.mode == 1 && strcmp(pk.name, "Two") == 0);
+    save_db *db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (!db) return;
+    char buf[8] = {0};
+    int64_t v = 0;
+    uint8_t *b = NULL;
+    CHECK(save_db_get_meta(db, "mode", &v) == 0 && v == 1);
+    CHECK(save_db_get_text(db, "name", buf, sizeof buf) == 3 && strcmp(buf, "Two") == 0);
+    /* The single player keeps "local"; a remote row named like it loses. */
+    CHECK(save_db_get_player(db, SAVE_DB_LOCAL_PLAYER, buf, sizeof buf) == 1 && buf[0] == 'L');
+    CHECK(save_db_get_player(db, "ff", buf, sizeof buf) == 1 && buf[0] == 'F');
+    long n = save_db_get_column(db, 1, 1, &b);
+    CHECK(n == 2 && b && b[0] == 1 && b[1] == 2);
+    mem_free(b);
+    save_db_close(db);
+    CHECK(raw_pragma(dir, "world.db", "PRAGMA user_version") == SAVE_DB_FORMAT);
+    CHECK(raw_pragma(dir, "world.db", "SELECT count(*) FROM blobs") == 0);
+    CHECK(raw_pragma(dir, "world.db.format2", "PRAGMA user_version") == 2);
+    CHECK(raw_pragma(dir, "world.db.format2", "SELECT count(*) FROM blobs") == 4);
+    save_db_peek(dir, &pk);
+    CHECK(pk.status == SAVE_PEEK_OK && strcmp(pk.name, "Two") == 0); /* now from meta */
+}
+
 /* Closing hands freed pages back, and a damaged page refuses the file. */
 static void test_tidy_and_damage(void)
 {
@@ -733,9 +785,10 @@ static void clean_up(void)
     const char *subs[] = {"rt",      "garbage", "foreign", "trigger",    "index",    "view",    "altered",
                           "newer",   "app",     "link0",   "link1",      "link2",    "rows",    "old",
                           "none",    "world",   "full",    "unreadable", "together", "upgrade", "upbad",
-                          "upextra", "uplink",  "tidy",    "updrop",     "typed"};
-    const char *files[] = {"world.db",   "world.db-wal", "world.db-shm", "world.db-journal", "level.dat",
-                           "player.dat", "c.0.-1.bin",   "c.01.0.bin",   "c.3.3.bin",        "world.db.format1"};
+                          "upextra", "uplink",  "tidy",    "updrop",     "typed",    "up2"};
+    const char *files[] = {"world.db",  "world.db-wal",     "world.db-shm",    "world.db-journal",
+                           "level.dat", "player.dat",       "c.0.-1.bin",      "c.01.0.bin",
+                           "c.3.3.bin", "world.db.format1", "world.db.format2"};
     char d[400] = {0}, p[512] = {0};
     for (size_t i = 0; i < sizeof subs / sizeof subs[0]; i++) {
         path_in(d, sizeof d, g_root, subs[i]);
@@ -760,6 +813,7 @@ void test_save_db_all(void)
     test_bad_rows();
     test_players_and_text();
     test_upgrade();
+    test_upgrade_from_2();
     test_tidy_and_damage();
     test_read_fails();
     test_import();
