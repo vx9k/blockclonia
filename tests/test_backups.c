@@ -246,6 +246,30 @@ static void test_folder_is_file(void)
     tmp_remove(p);
 }
 
+/* A world reached through a linked folder above it, as every temporary
+ * folder on macOS is (/var is a link to /private/var): copies are taken,
+ * listed and restored through the folder the link leads to. */
+static void test_linked_parent(void)
+{
+    char real[400] = {0}, alias[400] = {0}, dir[500] = {0};
+    path_in(real, sizeof real, g_root, "real");
+    path_in(alias, sizeof alias, g_root, "alias");
+    (void)os_mkdir(real, 0700);
+    if (tmp_symlink(real, alias) != 1) return;
+    path_in(dir, sizeof dir, alias, "w");
+    (void)os_mkdir(dir, 0700);
+    save_db *db = save_db_open(dir);
+    CHECK(db && save_db_set_seed(db, 71) == 0 && backups_take(db, dir, T0) == 1);
+    CHECK(db && save_db_set_seed(db, 72) == 0);
+    save_db_close(db);
+    backup_entry list[2] = {0};
+    CHECK(backups_list(dir, list, 2) == 1 && backups_restore(dir, list[0].name, T0 + 1) == 0);
+    CHECK(seed_of(dir) == 71);
+    worlds_delete(dir);
+    tmp_remove(alias);
+    tmp_remove(real);
+}
+
 /* Deleting a world takes its backups with it, but not a file of someone
  * else's that was put in the folder. */
 static void test_delete(void)
@@ -288,6 +312,7 @@ void test_backups_all(void)
     test_symlinks();
     test_foreign_copy();
     test_folder_is_file();
+    test_linked_parent();
     test_delete();
     const char *worlds[] = {"take", "restore", "linked", "other", "foreign", "blocked", "kept"};
     for (size_t i = 0; i < sizeof worlds / sizeof worlds[0]; i++) remove_world(worlds[i]);

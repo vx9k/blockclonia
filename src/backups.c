@@ -45,10 +45,14 @@ int backups_name_time(const char *name, int64_t *t)
     return 1;
 }
 
-/* dir/backups, or "" if it does not fit. */
+/* dir/backups with dir resolved, or "" if it cannot be. SQLite's
+ * NOFOLLOW refuses a link anywhere in a path, and the folders above a
+ * world may be links (macOS's /var), so the copies' paths start from the
+ * resolved folder, as save_db_open's do. */
 static void folder_of(const char *world_dir, char *out, size_t cap)
 {
-    int n = snprintf(out, cap, "%s/backups", world_dir);
+    char real[512] = {0};
+    int n = os_full_path(world_dir, real, sizeof real) == 0 ? snprintf(out, cap, "%s/backups", real) : -1;
     if (n < 0 || (size_t)n >= cap) out[0] = '\0';
 }
 
@@ -109,10 +113,11 @@ static void prune(const char *world_dir, int64_t now)
     int n = backups_list(world_dir, list, BACKUPS_LIST_MAX);
     for (int i = 0; i < n; i++) times[i] = list[i].time;
     backups_keep(times, n, now, keep);
-    char path[700] = {0};
-    for (int i = 0; i < n; i++) {
+    char folder[600] = {0}, path[700] = {0};
+    folder_of(world_dir, folder, sizeof folder);
+    for (int i = 0; i < n && folder[0]; i++) {
         if (keep[i]) continue;
-        snprintf(path, sizeof path, "%s/backups/%s", world_dir, list[i].name);
+        snprintf(path, sizeof path, "%s/%s", folder, list[i].name);
         if (remove(path) != 0) log_warn("could not delete the old backup %s", path);
     }
 }
@@ -146,9 +151,10 @@ int backups_take(save_db *db, const char *world_dir, int64_t now)
 int backups_restore(const char *world_dir, const char *name, int64_t now)
 {
     int64_t t = 0;
-    char path[700] = {0};
-    if (!backups_name_time(name, &t)) return -1;
-    snprintf(path, sizeof path, "%s/backups/%s", world_dir, name);
+    char folder[600] = {0}, path[700] = {0};
+    folder_of(world_dir, folder, sizeof folder);
+    if (!backups_name_time(name, &t) || !folder[0]) return -1;
+    snprintf(path, sizeof path, "%s/%s", folder, name);
     save_db *db = save_db_open(world_dir);
     if (!db) return -1;
     /* The world as it is goes into a copy first; pruning waits until the
