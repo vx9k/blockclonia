@@ -35,6 +35,18 @@ station, the right items in, a cartridge out.
 
 ## Principles
 
+- *Everything leaves the barrel.* A shot starts at the muzzle of the
+  rifle as it is held and flies along the bore, never from the eye or
+  the crosshair: the flash, the smoke and the tracer start there too.
+  Down the sights the bore runs a few centimetres under the line of
+  sight, so a close shot strikes that much low until zeroing (step 8)
+  tilts the bore up to meet the sight line at a set range. From the hip
+  the bore points where the rifle does, which is not where the
+  crosshair is. The muzzle comes from the rifle's resting pose at the
+  current aim (`viewmodel_muzzle`), the same on the server and the
+  client; the view model's sway, lag and recoil are only drawn. A
+  barrel pressed through a wall fires from the eye into the wall rather
+  than past it.
 - *A round is data.* Each ammunition type is a row in a table:
   calibre, bullet mass, muzzle velocity for a reference barrel length,
   ballistic coefficient and the drag model it is given against (G1 or
@@ -141,7 +153,8 @@ Each step is one pull request:
    exponential slowing where drag is flat, the lag rule for wind
    drift) and a published remaining velocity.
 2. **Muzzle effects:** a flash that lights the surroundings for a
-   moment, black-powder smoke that drifts with the wind, and tracers.
+   moment, black-powder smoke that drifts with the wind, and tracers,
+   all leaving the muzzle with the bullet.
 3. **Penetration and ricochet** through blocks by material, including
    bullets that pass through walls.
 4. **Wound ballistics** into the health model: the path through body

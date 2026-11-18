@@ -11,6 +11,7 @@ void fx_init(fx_state *f, uint32_t seed)
     f->count = 0;
     f->rng = seed ? seed : 1u;
     f->wind = dv3(0.0, 0.0, 0.0);
+    f->flash = 0.0f;
 }
 
 static float frand(fx_state *f)
@@ -297,7 +298,8 @@ void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *cra
              * steps fainter by the end. */
             float age = 1.0f - life, ss = pt->size * (1.0f + 2.0f * age);
             uint8_t tex = (uint8_t)(T_SMOKE0 + (age < 0.3f ? 0 : (age < 0.65f ? 1 : 2)));
-            put_trans(&l, cube_at(p, eye, same_tex(tex), q, ss, ss, ss, 0.9f * lit(ph, p, daylight)));
+            float light = fmaxf(0.9f * lit(ph, p, daylight), f->flash);
+            put_trans(&l, cube_at(p, eye, same_tex(tex), q, ss, ss, ss, light));
             continue;
         }
         if (pt->kind == FXP_GLOW) {

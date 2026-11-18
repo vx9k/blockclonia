@@ -211,8 +211,12 @@ static void test_rifle_aim(void)
             c.count = 0;
             combat_out o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, east, 5.0, 1, k ? 0.0f : 1.0f, 1.0f / 60.0f);
             CHECK(o.fired && c.count == 1);
-            double v = dv3_len(c.b[0].vel);
-            float off = (float)(hypot(c.b[0].vel.y, c.b[0].vel.z) / v);
+            /* Scatter is about the bore, which at the hip isn't the crosshair. */
+            dvec3 at = {0};
+            vec3 bore = {0};
+            combat_muzzle(NULL, eye, east, k ? 0.0f : 1.0f, &at, &bore);
+            dvec3 u = dv3_scale(c.b[0].vel, 1.0 / dv3_len(c.b[0].vel));
+            float off = (float)dv3_len(dv3(u.x - (double)bore.x, u.y - (double)bore.y, u.z - (double)bore.z));
             worst[k] = fmaxf(worst[k], off);
             mean[k] += off / 30.0f;
         }

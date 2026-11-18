@@ -1969,14 +1969,9 @@ static void frame_interact(game *g, double dt)
                                          ii.attack_click, g->aim, (float)dt);
             if (co.fired) {
                 sound_play(g->snd, SND_SHOT, NULL, 0, 1.0f);
-                /* The muzzle is about 0.8 m out along the barrel: under the
-                 * eye down the sights, low and to the right from the hip. */
-                double hip = 1.0 - (double)g->aim, rx = -(double)g->look.z, rz = (double)g->look.x;
-                double rl = fmax(sqrt(rx * rx + rz * rz), 1e-6);
-                dvec3 dir = dv3((double)g->look.x, (double)g->look.y, (double)g->look.z);
-                dvec3 muzzle = dv3(g->eye.x + dir.x * 0.8 + rx / rl * 0.12 * hip, g->eye.y + dir.y * 0.8 - 0.05 - 0.08 * hip,
-                                   g->eye.z + dir.z * 0.8 + rz / rl * 0.12 * hip);
-                fx_muzzle(g->fx, muzzle, dir, ammo_get(CARTRIDGE_AMMO)->black);
+                /* Flash and smoke leave the barrel's end, where the bullet did. */
+                fx_muzzle(g->fx, co.at, dv3((double)co.dir.x, (double)co.dir.y, (double)co.dir.z),
+                          ammo_get(CARTRIDGE_AMMO)->black);
                 g->flash = 1.0f;
             }
             if (co.struck) sound_play(g->snd, SND_HIT, &co.at, 0, 0.8f);
@@ -2164,6 +2159,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     /* A real flash is over in milliseconds; this one halves every 14 ms, so
      * it shows for a frame or two at any frame rate. */
     lightfx_flash(&v.lfx, g->flash);
+    g->fx->flash = g->flash;
     g->flash *= expf(-(float)dt / 0.02f);
     v.stars = sky_visibility(thermo_daylight(g->th));
     v.star_rot = sky_rotation(thermo_day_time(g->th));

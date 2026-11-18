@@ -1,6 +1,7 @@
 #include "combat.h"
 #include "mathlib.h"
 #include "noise.h"
+#include "viewmodel.h"
 
 #include <math.h>
 #include <string.h>
@@ -142,6 +143,26 @@ static void shot_free_oldest(combat *c)
     c->b[old] = c->b[--c->count];
 }
 
+void combat_muzzle(const world *w, dvec3 eye, vec3 look, float aim, dvec3 *at, vec3 *bore)
+{
+    float p[3] = {0}, d[3] = {0};
+    viewmodel_muzzle(aim, p, d);
+    /* The view's axes: x right, y up, -z along the look. */
+    vec3 r = v3(-look.z, 0.0f, look.x);
+    float rl = sqrtf(r.x * r.x + r.z * r.z);
+    r = rl > 1e-6f ? v3(r.x / rl, 0.0f, r.z / rl) : v3(1.0f, 0.0f, 0.0f);
+    vec3 u = v3(r.y * look.z - r.z * look.y, r.z * look.x - r.x * look.z, r.x * look.y - r.y * look.x);
+    vec3 off = v3(r.x * p[0] + u.x * p[1] - look.x * p[2], r.y * p[0] + u.y * p[1] - look.y * p[2],
+                  r.z * p[0] + u.z * p[1] - look.z * p[2]);
+    *bore = v3(r.x * d[0] + u.x * d[1] - look.x * d[2], r.y * d[0] + u.y * d[1] - look.y * d[2],
+               r.z * d[0] + u.z * d[1] - look.z * d[2]);
+    *at = dv3(eye.x + (double)off.x, eye.y + (double)off.y, eye.z + (double)off.z);
+    /* Pressed against a wall the barrel would poke through it; the shot
+     * then starts at the eye and meets the wall, rather than skipping it. */
+    float ol = sqrtf(off.x * off.x + off.y * off.y + off.z * off.z);
+    if (w && ol > 0.0f && physics_raycast(w, eye, v3(off.x / ol, off.y / ol, off.z / ol), (double)ol).hit) *at = eye;
+}
+
 combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *t, int who, inventory *inv, dvec3 eye,
                         vec3 dir, double block_dist, int attack_click, float aim, float dt)
 {
@@ -157,21 +178,29 @@ combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *
             o.msg = "No cartridges";
             return o;
         }
+        /* The bullet leaves the barrel's end along the bore, which down the
+         * sights runs under the line of sight and at the hip points where
+         * the rifle does, not at the crosshair. */
+        float a = isfinite(aim) ? fminf(fmaxf(aim, 0.0f), 1.0f) : 0.0f;
+        dvec3 from = eye;
+        vec3 bore = dir;
+        combat_muzzle(ph ? ph->w : NULL, eye, dir, a, &from, &bore);
         if (c->count == COMBAT_SHOTS) shot_free_oldest(c);
         if (c->count < COMBAT_SHOTS) {
             /* Spread: aimed, a rifle held standing (4 mrad, not clamped in a
-             * vice); from the hip the eye isn't behind the sights and shots
-             * wander by a few degrees. */
-            float a = isfinite(aim) ? fminf(fmaxf(aim, 0.0f), 1.0f) : 0.0f;
+             * vice); from the hip it isn't braced and shots wander by a few
+             * degrees. */
             float sp = 0.004f + HIP_SPREAD * (1.0f - a);
-            vec3 d = v3(dir.x + (frand(c) - 0.5f) * sp, dir.y + (frand(c) - 0.5f) * sp, dir.z + (frand(c) - 0.5f) * sp);
+            vec3 d = v3(bore.x + (frand(c) - 0.5f) * sp, bore.y + (frand(c) - 0.5f) * sp,
+                        bore.z + (frand(c) - 0.5f) * sp);
             double v = (double)ammo_get(CARTRIDGE_AMMO)->muzzle;
-            c->b[c->count++] = (bullet){eye, dv3((double)d.x * v, (double)d.y * v, (double)d.z * v), BULLET_LIFE, who,
+            c->b[c->count++] = (bullet){from, dv3((double)d.x * v, (double)d.y * v, (double)d.z * v), BULLET_LIFE, who,
                                         CARTRIDGE_AMMO};
         }
         c->cooldown[who] = 1.2f; /* working the action */
         o.fired = 1;
-        o.at = eye;
+        o.at = from;
+        o.dir = bore;
         item_id was = held->id;
         if (inv_wear_held(inv, 1)) o.tool_broke = was;
         return o;

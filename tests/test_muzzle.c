@@ -7,6 +7,7 @@
 #include "fx.h"
 #include "lightfx.h"
 #include "texgen.h"
+#include "viewmodel.h"
 
 #include <math.h>
 
@@ -110,6 +111,14 @@ static void test_muzzle_draw(void)
         young = fmaxf(young, out[i].scale[0]);
     }
     CHECK(glow && smoke);
+    /* On a dark night the flash lights its own smoke. */
+    f.flash = 1.0f;
+    fx_build_entities(&f, NULL, NULL, eye, 1.0, 0.0f, 0.0f, out, 64, &no, &nt);
+    int lit = nt == 14;
+    for (int i = no; i < no + nt; i++) lit &= out[i].light == 1.0f;
+    f.flash = 0.0f;
+    fx_build_entities(&f, NULL, NULL, eye, 1.0, 0.0f, 0.0f, out, 64, &no, &nt);
+    CHECK(lit && out[no].light == 0.0f);
     /* Most of the way through its life: the third, thinnest step, larger. */
     for (int i = 0; i < f.count; i++) f.p[i].life = 0.2f * f.p[i].max_life;
     fx_build_entities(&f, NULL, NULL, eye, 1.0, 0.0f, 1.0f, out, 64, &no, &nt);
@@ -132,7 +141,7 @@ static float mean_alpha(int layer, int centre)
             if (c != centre) continue;
             uint8_t px[4] = {0};
             texgen_texel(layer, x, y, px);
-            sum += px[3];
+            sum += (float)px[3];
             n++;
         }
     return sum / (float)n;
@@ -198,10 +207,7 @@ static void test_rounds(void)
     CHECK(pos.x > 800.0 && pos.x < 1100.0);
 }
 
-static bullet tracer_at(dvec3 pos, dvec3 vel, float age)
-{
-    return (bullet){pos, vel, 60.0f - age, 0, AMMO_TRACER};
-}
+static bullet tracer_at(dvec3 pos, dvec3 vel, float age) { return (bullet){pos, vel, 60.0f - age, 0, AMMO_TRACER}; }
 
 static void test_tracers(void)
 {
@@ -255,8 +261,63 @@ static void test_tracers(void)
     CHECK(fabsf(out[0].scale[2] - (float)(800.0 * PHYS_DT)) < 1e-3f && isfinite(out[0].rot[3]));
 }
 
+static int near3(const float a[3], float x, float y, float z, float tol)
+{ return fabsf(a[0] - x) < tol && fabsf(a[1] - y) < tol && fabsf(a[2] - z) < tol; }
+
+/* The shot leaves the barrel's end along the bore: down the sights the bore
+ * runs 5.8 cm under the line of sight, parallel to it; at the hip it is low,
+ * right, and points a little off the crosshair, as the rifle does. */
+static void test_muzzle_origin(void)
+{
+    float p[3] = {0}, d[3] = {0};
+    viewmodel_muzzle(1.0f, p, d);
+    CHECK(near3(p, 0.0f, -0.058f, -0.88f, 0.002f) && near3(d, 0.0f, 0.0f, -1.0f, 1e-4f));
+    viewmodel_muzzle(0.0f, p, d);
+    float off = acosf(fminf(1.0f, -d[2]));
+    CHECK(p[0] > 0.05f && p[1] < -0.1f && p[2] < -0.5f && off > 0.02f && off < 0.25f);
+    CHECK(fabsf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2] - 1.0f) < 1e-4f);
+    float q[3] = {0}, e[3] = {0};
+    viewmodel_muzzle(NAN, q, e);
+    CHECK(near3(q, p[0], p[1], p[2], 1e-6f) && near3(e, d[0], d[1], d[2], 1e-6f));
+
+    /* In the world, looking along +x down the sights. */
+    dvec3 at = {0};
+    vec3 bore = {0};
+    combat_muzzle(NULL, dv3(0.0, 70.0, 0.0), v3(1.0f, 0.0f, 0.0f), 1.0f, &at, &bore);
+    CHECK(fabs(at.x - 0.88) < 0.002 && fabs(at.y - 69.942) < 0.002 && fabs(at.z) < 0.002);
+    CHECK(fabsf(bore.x - 1.0f) < 1e-4f && fabsf(bore.y) < 1e-4f && fabsf(bore.z) < 1e-4f);
+    /* Looking up and to the side, the bore stays under the sight line. */
+    vec3 look = v3(0.0f, 0.6f, -0.8f);
+    combat_muzzle(NULL, dv3(0.0, 70.0, 0.0), look, 1.0f, &at, &bore);
+    CHECK(fabsf(bore.x - look.x) < 1e-3f && fabsf(bore.y - look.y) < 1e-3f && fabsf(bore.z - look.z) < 1e-3f);
+    CHECK(fabs(at.y - (70.0 + 0.88 * 0.6 - 0.058 * 0.8)) < 0.003);
+
+    /* A fired bullet starts there; against a wall it starts at the eye. */
+    test_world t = {0};
+    tw_init(&t);
+    mobs ms = {0};
+    mobs_init(&ms, 7);
+    combat c = {0};
+    combat_init(&c, 7);
+    combat_targets tg = {NULL, NULL, 0};
+    inventory inv = {0};
+    inv_init(&inv);
+    inv_add(&inv, I_RIFLE, 1);
+    inv_add(&inv, I_CARTRIDGE, 2);
+    dvec3 eye = dv3(0.5, GROUND + 1.6, 0.5);
+    combat_out o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, v3(1.0f, 0.0f, 0.0f), 5.0, 1, 1.0f, 1.0f / 60.0f);
+    CHECK(o.fired && c.count == 1 && fabs(o.at.x - 1.38) < 0.002 && c.b[0].pos.x == o.at.x && c.b[0].pos.y == o.at.y &&
+          c.b[0].vel.x > 0.0);
+    world_set(&t.w, 1, GROUND + 1, 0, B_STONE, 0);
+    c.cooldown[0] = 0.0f;
+    o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, eye, v3(1.0f, 0.0f, 0.0f), 5.0, 1, 1.0f, 1.0f / 60.0f);
+    CHECK(o.fired && c.count == 2 && c.b[1].pos.x == eye.x && c.b[1].pos.y == eye.y);
+    tw_free(&t);
+}
+
 void test_muzzle_all(void)
 {
+    test_muzzle_origin();
     test_muzzle_spawn();
     test_smoke_drift();
     test_recycle();

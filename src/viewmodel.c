@@ -122,6 +122,8 @@ static const float GUN_HIP[3] = {0.12f, -0.15f, -0.22f};
 #define MOUNT_HZ 2.4f
 #define MOUNT_DAMP 0.6f
 static const float GUN_HAND[2][3] = {{0.035f, 0.33f, 0.0f}, {0.04f, 0.82f, 0.0f}}; /* wrist of the stock, fore-end */
+/* The barrel's end, on the bore's axis (itemmodel.c's rifle). */
+static const float GUN_MUZZLE[3] = {-0.034f, 1.11f, 0.0f};
 
 /* ---- helpers */
 
@@ -354,6 +356,46 @@ static void advance(viewmodel *vm, const viewmodel_input *in, float dt)
 
 /* ---- pose */
 
+/* Where the rifle sits at aim (0 hip .. 1 sights): its turn and where the
+ * model's GUN_EYE point goes, in view space. kick is the recoil (0..1),
+ * drift the slow wander down the sights (radians), sway the stride's. */
+static void gun_place(float aim, float sprint, float kick, float drift_x, float drift_y, const float sway[3], quat *rot,
+                      float at[3])
+{
+    quat ads = quat_mul(quat_axis(0.0f, 1.0f, 0.0f, 0.5f * PI_F), quat_axis(0.0f, 0.0f, 1.0f, -0.5f * PI_F));
+    /* At the hip it points ahead and in a little, canted to show its
+     * side; running, it's carried muzzle down. */
+    quat hip = quat_mul(quat_axis(0.0f, 1.0f, 0.0f, 0.07f), quat_mul(quat_axis(0.0f, 0.0f, 1.0f, 0.18f), ads));
+    hip = quat_mul(quat_axis(1.0f, 0.0f, 0.0f, -0.35f * sprint), hip);
+    /* On the way up the rifle swings through an arc below the line,
+     * canted, butt first, the muzzle coming onto the mark last. */
+    float mount = sinf(PI_F * anim_clamp01(aim));
+    quat swing = quat_mul(quat_axis(0.0f, 1.0f, 0.0f, drift_x),
+                          quat_mul(quat_axis(1.0f, 0.0f, 0.0f, drift_y - 0.09f * mount),
+                                   quat_axis(0.0f, 0.0f, 1.0f, 0.14f * mount)));
+    /* Recoil: the muzzle climbs and the butt drives back into the shoulder. */
+    *rot = quat_mul(quat_axis(1.0f, 0.0f, 0.0f, 0.10f * kick), quat_mul(swing, quat_blend(hip, ads, aim)));
+    float settle = 1.0f - 0.8f * aim;
+    for (int i = 0; i < 3; i++) at[i] = GUN_HIP[i] * (1.0f - aim) + sway[i] * settle;
+    at[0] += 0.015f * mount;
+    at[1] -= 0.035f * mount;
+    at[1] += 0.008f * kick - 0.03f * sprint * (1.0f - aim);
+    at[2] += 0.035f * kick;
+}
+
+void viewmodel_muzzle(float aim, float pos[3], float dir[3])
+{
+    const float zero[3] = {0}, up[3] = {0.0f, 1.0f, 0.0f};
+    float a = clamp_range(finite_or0(aim), 0.0f, 1.0f), at[3] = {0};
+    quat rot = {0};
+    gun_place(a, 0.0f, 0.0f, 0.0f, 0.0f, zero, &rot, at);
+    const float d[3] = {GUN_MUZZLE[0] - GUN_EYE[0], GUN_MUZZLE[1] - GUN_EYE[1], GUN_MUZZLE[2] - GUN_EYE[2]};
+    float r[3] = {0};
+    quat_apply(rot, d, r);
+    vadd(pos, at, r);
+    quat_apply(rot, up, dir);
+}
+
 /* Both hands on a haft or the rifle, in view space before the mouse lag
  * and the equip dip. sway is the stride's and the breath's drift. Returns
  * the parts written: both arms, then the item. */
@@ -366,29 +408,12 @@ static int two_hands(const viewmodel *vm, int hold, float aim, float sprint, con
     quat rot = {0};
     if (hold == HOLD_GUN) {
         float kick = swing_amount(vm->swing_t); /* a shot sets the swing going */
-        quat ads = quat_mul(quat_axis(0.0f, 1.0f, 0.0f, 0.5f * PI_F), quat_axis(0.0f, 0.0f, 1.0f, -0.5f * PI_F));
-        /* At the hip it points ahead and in a little, canted to show its
-         * side; running, it's carried muzzle down. */
-        quat hip = quat_mul(quat_axis(0.0f, 1.0f, 0.0f, 0.07f), quat_mul(quat_axis(0.0f, 0.0f, 1.0f, 0.18f), ads));
-        hip = quat_mul(quat_axis(1.0f, 0.0f, 0.0f, -0.35f * sprint), hip);
-        /* On the way up the rifle swings through an arc below the line,
-         * canted, butt first, the muzzle coming onto the mark last; down
-         * the sights it drifts in a slow figure of eight and with each
+        /* Down the sights it drifts in a slow figure of eight and with each
          * breath, a milliradian or two, as a standing shooter's does. */
-        float mount = sinf(PI_F * anim_clamp01(aim)), held = anim_clamp01(aim), t = vm->time;
+        float held = anim_clamp01(aim), t = vm->time;
         float drift_x = 0.0016f * sinf(2.0f * PI_F * 0.21f * t + 1.0f) * held;
         float drift_y = (0.0012f * sinf(2.0f * PI_F * 0.42f * t) + 0.0008f * sinf(2.0f * PI_F * BREATH_HZ * t)) * held;
-        quat swing = quat_mul(quat_axis(0.0f, 1.0f, 0.0f, drift_x),
-                              quat_mul(quat_axis(1.0f, 0.0f, 0.0f, drift_y - 0.09f * mount),
-                                       quat_axis(0.0f, 0.0f, 1.0f, 0.14f * mount)));
-        /* Recoil: the muzzle climbs and the butt drives back into the shoulder. */
-        rot = quat_mul(quat_axis(1.0f, 0.0f, 0.0f, 0.10f * kick), quat_mul(swing, quat_blend(hip, ads, aim)));
-        float settle = 1.0f - 0.8f * aim;
-        for (int i = 0; i < 3; i++) at[i] = GUN_HIP[i] * (1.0f - aim) + sway[i] * settle;
-        at[0] += 0.015f * mount;
-        at[1] -= 0.035f * mount;
-        at[1] += 0.008f * kick - 0.03f * sprint * (1.0f - aim);
-        at[2] += 0.035f * kick;
+        gun_place(aim, sprint, kick, drift_x, drift_y, sway, &rot, at);
         memcpy(origin, GUN_EYE, sizeof origin);
         for (int s = 0; s < 2; s++) {
             const float d[3] = {GUN_HAND[s][0] - GUN_EYE[0], GUN_HAND[s][1] - GUN_EYE[1], GUN_HAND[s][2] - GUN_EYE[2]};

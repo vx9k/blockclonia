@@ -31,7 +31,8 @@ typedef struct {
     particle p[FX_MAX_PARTICLES];
     int count;
     uint32_t rng;
-    dvec3 wind; /* m/s, what smoke drifts with; the caller keeps it current */
+    dvec3 wind;  /* m/s, what smoke drifts with; the caller keeps it current */
+    float flash; /* a muzzle flash's light this frame, 0..1, which lights the smoke too */
 } fx_state;
 
 void fx_init(fx_state *f, uint32_t seed);

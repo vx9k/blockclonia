@@ -46,5 +46,10 @@ int viewmodel_hands(item_id id);
 
 /* Advances the animation and writes up to max instances; returns how many. */
 int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *out, int max);
+/* The rifle's muzzle at aim (0 hip .. 1 sights), held still (no sway, lag
+ * or recoil): pos is the barrel's end and dir the bore's unit axis, in
+ * view space. Shots, flash and smoke leave from here, on the authority as
+ * well as the client, so it depends on nothing but aim. */
+void viewmodel_muzzle(float aim, float pos[3], float dir[3]);
 
 #endif
