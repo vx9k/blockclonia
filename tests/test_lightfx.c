@@ -55,7 +55,7 @@ static void build_at(lightfx_frame *f, double day, uint32_t held, int brightness
     thermo *th = thermo_create(4);
     float d[3] = {0.0f, 0.0f, 0.0f};
     sun_at(th, day, d);
-    lightfx_build(f, d, thermo_daylight(th), held, brightness, 12.0);
+    lightfx_build(f, d, thermo_daylight(th), held, brightness, 12.0, 1);
     thermo_destroy(th);
 }
 
@@ -83,7 +83,7 @@ static void test_sky_colour(void)
     thermo *th = thermo_create(5);
     float d[3] = {0.0f, 0.0f, 0.0f};
     sun_at(th, 0.25, d);
-    lightfx_build(&f, d, thermo_daylight(th), 0, 0, 0.0);
+    lightfx_build(&f, d, thermo_daylight(th), 0, 0, 0.0, 1);
     CHECK(len3(f.sun) < 0.01f);
     thermo_destroy(th);
 }
@@ -131,6 +131,20 @@ static void test_floor_and_flicker(void)
     CHECK(lo >= 0.9f && hi <= 1.0f);
     CHECK(hi - lo > 0.04f); /* it does move */
     CHECK(lightfx_flicker(3.7) == lightfx_flicker(3.7));
+    CHECK(fabsf(0.5f * (lo + hi) - LIGHTFX_STEADY) < 0.02f); /* steady sits mid-way */
+
+    /* Flicker off: a held torch is the same at every moment. */
+    float d[3] = {0.0f, 1.0f, 0.0f}, first = -1.0f;
+    for (int i = 0; i < 50; i++) {
+        lightfx_build(&f, d, 1.0f, B_TORCH, 0, i * 0.037, 0);
+        if (i == 0) first = f.held[0];
+        CHECK(f.held[0] == first);
+    }
+    CHECK(first > 0.0f);
+    lightfx_build(&f, d, 1.0f, B_TORCH, 0, 0.0, 1);
+    float a = f.held[0];
+    lightfx_build(&f, d, 1.0f, B_TORCH, 0, 0.11, 1);
+    CHECK(a != f.held[0]); /* on, it moves */
 }
 
 static void test_faces(void)
@@ -200,6 +214,64 @@ static void test_at(void)
     float near = lightfx_at(&f, 0, 0.3f), far = lightfx_at(&f, 0, 8.0f);
     CHECK(near > 0.4f);
     CHECK(far < near && far > dark);
+}
+
+/* The light on an entity per channel: torchlight is orange, the open sky
+ * by day near white and by night the moon's blue, and the brightness
+ * matches lightfx_at. */
+static void test_colour(void)
+{
+    lightfx_frame f = {0};
+    float rgb[3] = {0.0f, 0.0f, 0.0f};
+    build_at(&f, 0.5, 0, 0);
+    float b = lightfx_colour(&f, light_emission(B_TORCH), 0.0f, rgb);
+    CHECK(close_to(b, lightfx_at(&f, light_emission(B_TORCH), 0.0f), 1e-5f));
+    CHECK(rgb[0] == 1.0f && rgb[1] < 0.9f && rgb[2] < rgb[1]);
+    b = lightfx_colour(&f, LIGHT_OPEN_SKY, 0.0f, rgb);
+    CHECK(close_to(b, lightfx_at(&f, LIGHT_OPEN_SKY, 0.0f), 1e-5f));
+    CHECK(rgb[0] > 0.85f && rgb[1] > 0.85f && rgb[2] > 0.85f);
+    /* A blue evening sky (by full night the black level, as on the
+     * terrain, outshines the moon and the colour goes grey). */
+    lightfx_frame eve = {0};
+    eve.sky[0] = 0.2f;
+    eve.sky[1] = 0.3f;
+    eve.sky[2] = 0.5f;
+    lightfx_colour(&eve, LIGHT_OPEN_SKY, 0.0f, rgb);
+    CHECK(rgb[2] == 1.0f && rgb[0] < 0.6f && rgb[1] < rgb[2]);
+    /* A carried torch lights a dark cell orange nearby, not far off. */
+    build_at(&f, 0.5, B_TORCH, 0);
+    float near = lightfx_colour(&f, 0, 1.0f, rgb);
+    CHECK(near > 0.3f && rgb[0] == 1.0f && rgb[2] < 0.8f);
+    float far = lightfx_colour(&f, 0, 12.0f, rgb);
+    CHECK(far < near);
+    /* Black with no floor: a neutral colour, never a division by 0. */
+    lightfx_frame none = {0};
+    none.floor = -100.0f;
+    none.held[0] = none.held[1] = none.held[2] = -100.0f;
+    float z = lightfx_colour(&none, 0, 0.0f, rgb);
+    CHECK(z >= 0.0f && rgb[0] <= 1.0f && rgb[1] <= 1.0f && rgb[2] <= 1.0f);
+}
+
+/* Coloured light multiplies into an instance's tint, except where the
+ * part glows. */
+static void test_shine(void)
+{
+    entity_instance e[3] = {0};
+    e[1].tint = entity_tint(0x80FF40u);
+    e[2].tint = entity_tint(0x80FF40u) | ENTITY_GLOWS;
+    const float warm[3] = {1.0f, 0.5f, 0.25f};
+    entity_shine(e, 3, warm);
+    CHECK(e[0].tint == entity_tint(0xFF8040u));
+    CHECK(e[1].tint == entity_tint(0x808010u));
+    CHECK(e[2].tint == (entity_tint(0x80FF40u) | ENTITY_GLOWS));
+    /* White leaves the colour as it was; out-of-range values are held to 0..1. */
+    const float white[3] = {1.0f, 1.0f, 1.0f}, wild[3] = {2.0f, -1.0f, 1.0f};
+    entity_instance w = {0};
+    w.tint = entity_tint(0x123456u);
+    entity_shine(&w, 1, white);
+    CHECK(w.tint == entity_tint(0x123456u));
+    entity_shine(&w, 1, wild);
+    CHECK(w.tint == entity_tint(0x120056u));
 }
 
 static void test_pack(void)
@@ -279,6 +351,9 @@ static void test_torch_model(void)
     CHECK(m[0].light == 0.4f);
     CHECK(m[1].light < 0.4f && m[1].light > 0.0f);
     for (int i = 2; i < TORCH_PARTS; i++) CHECK(m[i].light == 1.0f);
+    /* Only what glows is marked so; the light around passes it by. */
+    CHECK(!(m[0].tint & ENTITY_GLOWS) && !(m[1].tint & ENTITY_GLOWS));
+    for (int i = 2; i < TORCH_PARTS; i++) CHECK(m[i].tint & ENTITY_GLOWS);
     CHECK((m[0].tex & 255u) == T_LOG_SIDE && (m[0].tex & ENTITY_TEX_METRIC));
     CHECK((m[3].tex & 255u) == T_LAVA && (m[4].tex & 255u) == T_FIRE0);
     /* The handle is the bottom part and the flame's layers climb. */
@@ -382,6 +457,8 @@ void test_lightfx_all(void)
     test_faces();
     test_tone();
     test_at();
+    test_colour();
+    test_shine();
     test_pack();
     test_fog();
     test_torch_model();

@@ -1,5 +1,5 @@
 // The block and entity fragment shader; block.frag and entity.frag compile
-// it, the second with TINTED defined.
+// it, the second with TINTED defined, and block_shadow.frag with SHADOWS.
 #include "push_frag.glsl"
 
 precision highp float;
@@ -15,6 +15,22 @@ layout(location = 2) in mediump vec2 f_shade;  // x: shade, y: fog
 layout(location = 3) in vec3 f_luv;            // highp: hundreds of texels across
 #ifdef TINTED
 layout(location = 4) in mediump vec3 f_tint;  // entity.vert: the instance's colour
+#endif
+#ifdef SHADOWS
+// The sun's shadow map: a compare sampler, 1 where the sun reaches.
+layout(set = 1, binding = 1) uniform mediump sampler2DShadow u_shadow;
+layout(location = 4) in vec4 f_sh;  // highp: depth to a hundredth of a metre in 800; w: shafts
+// The map's matrix (block_vert.glsl): its last column is the eye's place.
+layout(set = 1, binding = 0) uniform ShadowMap { mat4 clip; } u_sh;
+// The sunlight the haze scatters, warm white, times the sky's brightness
+// and colour: faint and cool under the moon, orange at dusk.
+const mediump vec3 SHAFT_LIGHT = vec3(1.0, 0.92, 0.78);
+const int SHAFT_TAPS = 8;
+// f_layer's bits 8-15 hold the shadow's extra shift in pairs of steps
+// (block_vert.glsl).
+#define LAYER(f) ((f) & 0xFFu)
+#else
+#define LAYER(f) ((f) & 0xFFFFu)
 #endif
 
 // Each light level is 80% as bright as the one above, so level L of 15 is
@@ -72,12 +88,12 @@ void main()
         vec2 tx = t - 0.5 * box;
         uv = (floor(tx) + 0.5 + clamp((fract(tx) - (1.0 - box)) / box, 0.0, 1.0)) / TEXELS;
     }
-    mediump vec4 c = texture(u_tex, vec3(uv, float(f_layer & 0xFFFFu)));
+    mediump vec4 c = texture(u_tex, vec3(uv, float(LAYER(f_layer))));
 #ifdef TINTED
     c.rgb *= f_tint;
 #endif
     if (ALPHA_MODE == 2u) {
-        o_color = vec4(0.0, 0.0, 0.0, glow(f_layer & 0xFFFFu, c.rgb) * c.a);
+        o_color = vec4(0.0, 0.0, 0.0, glow(LAYER(f_layer), c.rgb) * c.a);
         return;
     }
     // Coloured block light and sky light, the brighter per channel. The
@@ -87,13 +103,41 @@ void main()
     // channels pay for an exp2.
     mediump vec4 l = texture(u_light, f_luv);
     mediump vec4 held = unpackUnorm4x8(pc.held);
-    mediump vec3 sky = pc.sky + (l.a - float(f_layer >> 16) * SUN_STEP);
+    mediump float sun_shift = float(f_layer >> 16);
+#ifdef SHADOWS
+    {
+        // Four taps half a texel apart, each the hardware's 2x2 compare:
+        // a soft edge three texels (18 cm) wide. It fades out over the
+        // map's outer eighth, past which the sky light alone shades.
+        const float T = 0.5 / 2048.0;  // SHADOW_SIZE
+        mediump float lit = texture(u_shadow, f_sh.xyz + vec3(-T, -T, 0.0)) + texture(u_shadow, f_sh.xyz + vec3(T, -T, 0.0)) +
+                            texture(u_shadow, f_sh.xyz + vec3(-T, T, 0.0)) + texture(u_shadow, f_sh.xyz + vec3(T, T, 0.0));
+        vec2 e = abs(f_sh.xy - 0.5) * 2.0;
+        mediump float fade = clamp((1.0 - max(e.x, e.y)) * 8.0, 0.0, 1.0);
+        sun_shift += (1.0 - 0.25 * lit) * fade * float((f_layer >> 8) & 0xFFu) * 2.0;
+    }
+#endif
+    mediump vec3 sky = pc.sky + (l.a - sun_shift * SUN_STEP);
     mediump vec3 blk = max(l.rgb, held.rgb - HELD_FALL / gl_FragCoord.z) + BLOCK_GAIN;
     mediump vec3 light = exp2(max(max(blk, sky), held.a) * LIGHT_K - LIGHT_K) * f_shade.x;
     // The tone curve: unchanged up to the knee, then rolling off toward
     // white, so a lamp-lit wall or lava saturates instead of clipping.
     mediump vec3 x = c.rgb * light;
+#ifdef SHADOWS
+    if (f_sh.w > 1.0 / 512.0) {
+        // Light shafts: how much of the way from the eye is in the sun, in
+        // taps along the line between their places in the map (the map is
+        // linear in the position), offset per pixel so the steps blur into
+        // noise rather than bands. Past the map's edge the air counts lit.
+        vec3 eye = vec3(u_sh.clip[3].xy * 0.5 + 0.5, u_sh.clip[3].z);
+        float j = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+        mediump float sunlit = 0.0;
+        for (int i = 0; i < SHAFT_TAPS; i++)
+            sunlit += texture(u_shadow, mix(eye, f_sh.xyz, (float(i) + j) / float(SHAFT_TAPS)));
+        x += SHAFT_LIGHT * exp2(pc.sky * LIGHT_K) * (f_sh.w * sunlit / float(SHAFT_TAPS));
+    }
+#endif
     mediump vec3 u = max(x - TONE_KNEE, 0.0);
     x = min(x, TONE_KNEE) + u / (1.0 + u * (1.0 / (1.0 - TONE_KNEE)));
-    o_color = vec4(mix(x, pc.color.rgb, f_shade.y), ALPHA_MODE == 1u ? c.a : glow(f_layer & 0xFFFFu, c.rgb));
+    o_color = vec4(mix(x, pc.color.rgb, f_shade.y), ALPHA_MODE == 1u ? c.a : glow(LAYER(f_layer), c.rgb));
 }

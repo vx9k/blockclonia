@@ -429,7 +429,9 @@ starts with the defaults and doesn't save changes over it.
 | Video | Texture filtering (distance) | on (default): trilinear between mipmaps, with up to 8× anisotropic filtering where the GPU supports it; off: the nearest texel of the nearest mipmap, sharper but shimmering in the distance. Up close textures stay pixel-sharp either way |
 | Video | View bobbing, FOV effects | on/off |
 | Video | Smooth lighting | on (default): light blends across each face from the cells around it; off: each face takes the light of the cell in front of it, in flat steps |
+| Video | Sun shadows | Auto (default): on where the GPU's timestamps show the shadow map costing under 0.5 ms a frame, off on integrated GPUs and without timestamps or a filterable depth format; On; Off. Trees, walls and overhangs cast the sun's (by night the moon's) shadow within 64 m, and light shafts show through the air where it is broken |
 | Video | Bloom | Auto (default): on where the GPU's timestamps show it costing under 0.3 ms a frame, off without timestamps; On; Off. A soft glow around fire, lava, torches, foxfire and the moon |
+| Video | Light flicker | on (default)/off: flames, torches and other fire waver; off, they burn at a steady level |
 | Video | Brightness (nights) | 0–100% (default 0): a floor under all light, for dark nights and caves; daylight is unchanged |
 | Display | Fullscreen | on/off (also F11): borderless at the monitor's own resolution |
 | Display | VSync | on/off |
@@ -486,6 +488,7 @@ entirely.
 | GPU timestamps around each frame (`timestamps`; reset from the CPU) | F3 shows the GPU time of a frame next to the CPU time spent recording it |
 | Light in a 3D texture of 18³ boxes, one per section, sampled once per pixel; B4G4R4A4 where the GPU filters it (`light4`), RGBA8 otherwise | Smooth coloured light for one texture fetch, with no per-vertex light in the 4-byte vertex; half the memory with `light4` |
 | Bloom from the scene image's alpha, which marks glowing texels, blurred at a quarter of the resolution (9 bilinear fetches a pass) and added in the post pass; Auto keeps it where GPU timestamps measure it under 0.3 ms | Light sources glow without HDR targets or a second colour attachment, and weak GPUs don't pay for it |
+| Sun shadows (`shadow`, where a 16- or 32-bit depth format filters linearly): one 2048² depth map 64 m around the eye, drawn from the sun with only the faces turned from it, its texels fixed in the world; 4 hardware-PCF taps in the shadowed terrain shader; Auto keeps it where GPU timestamps measure the map under 0.5 ms and leaves it off on integrated GPUs | Crisp shadows a sixteenth of a block across without acne on sunlit floors, shade at 30% of sunlight, and light shafts from 8 more taps per pixel; the unshadowed shaders are untouched, so weak GPUs pay nothing |
 | Pipeline cache kept on disk between runs (`pcache`) | Pipelines build from it where the driver has no shader cache of its own (Intel with Mesa's cache off: 40 ms to 3 ms) |
 
 By default the renderer negotiates the highest API version the loader,
@@ -498,7 +501,7 @@ the startup GPU log line and in the F3 overlay.
 Optional features the device offers at that version are enabled when the
 device is created, and listed next to the version. `MC_VK_DISABLE` turns
 them off for testing, as a comma list of `mdi`, `dynrend`, `sync2`,
-`aniso`, `hostcopy`, `budget`, `timestamps`, `pcache`, `relaxed` and `light4`, or
+`aniso`, `hostcopy`, `budget`, `timestamps`, `pcache`, `relaxed`, `light4` and `shadow`, or
 `all`; unknown names are logged and ignored. `MC_VK_API=1.2
 MC_VK_DISABLE=all` is the plainest path, the one a bare 1.2 driver takes.
 

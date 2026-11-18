@@ -29,9 +29,8 @@ unless it says otherwise.
 
 In this order (agreed 2026-11-16):
 
-1. **[Lighting](#lighting)**: sky light that reaches into caves, light
-   from fire, lamps and hot blocks. The underground and the furnace
-   both need it.
+1. ~~**[Lighting](#lighting)**~~: done 2026-11-18, shadows, shafts and
+   the sky included.
 2. **[Items and crafting](#items-and-crafting)**: 3D models for every
    item, animated objects, hands-on crafting at stations.
 3. **[Machines and power](#machines-and-power)**: water, wind and steam
@@ -89,9 +88,10 @@ the underground series is in progress.
 
 **Goal:** dark caves and nights, light from fire, lamps and hot blocks,
 and a sun that moves.
-**Status:** the light engine is in: coloured block light and sky light
-by flood fill, a 3D light texture per section, torches, lamps, foxfire
-and hot-block glow. Next: the visual polish.
+**Status:** done (2026-11-18): coloured block and sky light by flood
+fill, emitters and hot-block glow, the polish (tone curve, bloom, fog,
+sun and moon, held and carried lights), darkness gameplay, sun shadows
+with light shafts, and a sky with a gradient and the sun's glow.
 **Design:** [docs/design/lighting.md](docs/design/lighting.md)
 
 - [x] Choose how light reaches the shader: a light texture per section
@@ -99,12 +99,18 @@ and hot-block glow. Next: the visual polish.
       relighting on edits
 - [x] Emitters: campfire, lava, torches, lamps, foxfire; glow from
       `thermo` temperature
-- [ ] HDR with tone mapping and a brightness setting, bloom, fog tinted
+- [x] HDR with tone mapping and a brightness setting, bloom, fog tinted
       by the light, a smooth-lighting toggle
-- [ ] A held torch or lantern
-- [ ] Sun and moon direction and colour by time of day; a brightness
+- [x] A held torch or lantern; torches others carry and burning things
+      light the world too
+- [x] Sun and moon direction and colour by time of day; a brightness
       setting
-- [ ] Optional: sun shadows (`GPUCAP_*` bit with a fallback on bare 1.2)
+- [x] Coloured light on creatures, players and items; darkness that
+      creatures and the player feel; a flicker setting
+- [x] Sun and moon shadows (Off/On/Auto, `GPUCAP_SHADOW`), light shafts
+      through the shadow map, deeper shade out of the sun
+- [x] A sky with a gradient from the horizon to the zenith and the sun's
+      glow
 
 ### Items and crafting
 

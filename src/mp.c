@@ -1,5 +1,6 @@
 #include "mp.h"
 #include "gamemode.h"
+#include "lightfx.h"
 #include "log.h"
 #include "mem.h"
 #include "netkeys.h"
@@ -92,6 +93,7 @@ typedef struct {
     float yaw[2], pitch[2];
     double t[2];
     uint8_t flags;
+    uint32_t held; /* the item in hand, 0 for none */
 } ghost;
 
 typedef struct {
@@ -133,6 +135,7 @@ struct mp {
      * is the host's player, then the remotes in the order stepped. */
     player *tpl[PHYS_MAX_PLAYERS];
     health *thl[PHYS_MAX_PLAYERS];
+    mob_sense tsense[PHYS_MAX_PLAYERS]; /* what creatures make out of each in the light */
     int tn;
     uint8_t *buf;
     size_t buf_cap;
@@ -510,6 +513,14 @@ void mp_on_block_changed(mp *m, int x, int y, int z)
 }
 
 /* The other players, falling blocks and items near r, and r's own state. */
+/* The item a player has in hand, 0 for none: others see its light. */
+static uint32_t held_of(const inventory *inv)
+{
+    if (!inv) return 0;
+    const item_stack *s = &inv->slot[inv->selected];
+    return s->count > 0 ? s->id : 0;
+}
+
 static void host_snapshot(mp *m, int id)
 {
     remote *r = &m->r[id];
@@ -544,6 +555,7 @@ static void host_snapshot(mp *m, int id)
         wire_f32(&w, p->pitch);
         wire_u8(&w, (uint8_t)((p->flying ? F_FLYING : 0) | (p->sneaking ? F_SNEAKING : 0) | (dead ? F_DEAD : 0) |
                               (mode_noclip(p->mode) ? F_WATCHING : 0)));
+        wire_u32(&w, held_of(i ? &m->r[i].inv : m->ctx.inv));
     }
 
     dvec3 me = r->pl.pos;
@@ -591,7 +603,7 @@ static void host_snapshot(mp *m, int id)
         wire_f32(&w, mb->look);
         wire_f32(&w, mb->nod);
         wire_u8(&w, mb->kind);
-        wire_u8(&w, (uint8_t)(mb->hurt_t > 0.0f));
+        wire_u8(&w, (uint8_t)((mb->hurt_t > 0.0f ? 1 : 0) | (mb->burn_t > 0.0f ? 2 : 0)));
         n++;
     }
     if (!w.bad) {
@@ -627,7 +639,7 @@ static void host_hands(mp *m, remote *r, int who)
     if (m->ctx.mobs && m->ctx.cb) {
         /* A creature or player in reach takes the blow instead of the block
          * behind it. */
-        combat_targets t = {m->tpl, m->thl, m->tn};
+        combat_targets t = {m->tpl, m->thl, m->tn, m->tsense};
         double block_d = hit.hit ? dv3_len(dv3(hit.block.x + 0.5 - eye.x, hit.block.y + 0.5 - eye.y,
                                                hit.block.z + 0.5 - eye.z))
                                  : 5.0;
@@ -680,7 +692,11 @@ static int terrain_ready(const world *w, const player *p)
     return 1;
 }
 
-combat_targets mp_targets(mp *m) { return (combat_targets){m->tpl, m->thl, m->tn}; }
+combat_targets mp_targets(const mp *m)
+{
+    combat_targets t = {m->tpl, m->thl, m->tn, m->tsense};
+    return t;
+}
 
 void mp_host_step(mp *m, const player_input *local_in)
 {
@@ -721,9 +737,14 @@ void mp_host_step(mp *m, const player_input *local_in)
         health *h = k ? m->r[who[k]].hl : m->ctx.hl;
         m->tpl[k] = h->dead ? NULL : ps[k];
         m->thl[k] = h->dead ? NULL : h;
+        inventory *inv = k ? &m->r[who[k]].inv : m->ctx.inv;
+        const item_stack *held = inv ? inv_held(inv) : NULL;
+        mob_sense *se = &m->tsense[k];
+        se->level = lightfx_seen(m->ctx.w, ps[k]->pos.x, ps[k]->pos.y + PLAYER_EYE, ps[k]->pos.z,
+                                 thermo_daylight(m->ctx.th), held && held->count ? held->id : 0, &se->fire);
     }
     if (m->ctx.mobs && m->ctx.cb) {
-        combat_targets t = {m->tpl, m->thl, m->tn};
+        combat_targets t = {m->tpl, m->thl, m->tn, m->tsense};
         combat_creatures(m->ctx.cb, m->ctx.mobs, m->ctx.ph, &t, thermo_daylight(m->ctx.th));
     }
     for (int k = 1; k < n; k++) {
@@ -732,6 +753,7 @@ void mp_host_step(mp *m, const player_input *local_in)
         survival_env(m->ctx.w, &r->pl, &sb[k], r->actions, &env);
         survival_thermal(m->ctx.th, m->ctx.w, &r->pl, &env);
         if (m->ctx.mobs) env.fear = mobs_fear(m->ctx.mobs, &r->pl, thermo_daylight(m->ctx.th));
+        env.dark = lightfx_dark(m->tsense[k].level);
         r->actions = 0;
         survival_impacts(r->hl, m->ctx.w, &m->ctx.ph->contact[k], &r->pl, &sb[k]);
         health_step(r->hl, &env, PHYS_DT);
@@ -934,6 +956,7 @@ static void client_snapshot(mp *m, wire_r *rd)
         int id;
         float yaw, pitch;
         uint8_t flags;
+        uint32_t held;
     } o[NET_MAX_PLAYERS] = {0};
     int others = wire_get_u8(rd);
     if (others >= NET_MAX_PLAYERS) rd->bad = 1;
@@ -945,8 +968,9 @@ static void client_snapshot(mp *m, wire_r *rd)
         o[i].yaw = wire_get_f32(rd);
         o[i].pitch = wire_get_f32(rd);
         o[i].flags = wire_get_u8(rd);
-        if (o[i].id >= NET_MAX_PLAYERS || fabs(o[i].pos.x) > WORLD_LIMIT || fabs(o[i].pos.z) > WORLD_LIMIT ||
-            fabs(o[i].pos.y) > 1e5)
+        o[i].held = wire_get_u32(rd);
+        if ((o[i].held && !item_valid(o[i].held)) || o[i].id >= NET_MAX_PLAYERS || fabs(o[i].pos.x) > WORLD_LIMIT ||
+            fabs(o[i].pos.z) > WORLD_LIMIT || fabs(o[i].pos.y) > 1e5)
             rd->bad = 1;
     }
     /* Falling blocks and items: read into scratch first. */
@@ -987,7 +1011,9 @@ static void client_snapshot(mp *m, wire_r *rd)
         mb->look = wire_get_f32(rd);
         mb->nod = wire_get_f32(rd);
         mb->kind = wire_get_u8(rd);
-        mb->hurt_t = wire_get_u8(rd) ? 0.1f : 0.0f;
+        uint8_t mf = wire_get_u8(rd);
+        mb->hurt_t = mf & 1 ? 0.1f : 0.0f;
+        mb->burn_t = mf & 2 ? 0.1f : 0.0f;
         mb->body.prev_pos = mb->body.pos;
         if (mb->kind >= MOB_KINDS || fabs(mb->body.pos.x) > WORLD_LIMIT || fabs(mb->body.pos.z) > WORLD_LIMIT ||
             fabs(mb->body.pos.y) > 1e5 || !(fabsf(mb->body.yaw) < 1e4f) || !(fabsf(mb->stride) < 1e7f) ||
@@ -1042,6 +1068,7 @@ static void client_snapshot(mp *m, wire_r *rd)
         g->pitch[1] = o[i].pitch;
         g->t[1] = m->now;
         g->flags = o[i].flags;
+        g->held = o[i].held;
         g->present = 1;
     }
     for (int i = 0; i < NET_MAX_PLAYERS; i++)
@@ -1274,6 +1301,7 @@ int mp_avatars(const mp *m, double now, double alpha, mp_avatar *out, int max)
             a->flying = p->flying;
             a->sneaking = p->sneaking;
             a->dead = r->hl->dead;
+            a->held = held_of(&r->inv);
         } else {
             const ghost *g = &m->c.g[id];
             if (!g->present || (g->flags & F_WATCHING)) continue;
@@ -1286,6 +1314,7 @@ int mp_avatars(const mp *m, double now, double alpha, mp_avatar *out, int max)
             a->flying = (g->flags & F_FLYING) != 0;
             a->sneaking = (g->flags & F_SNEAKING) != 0;
             a->dead = (g->flags & F_DEAD) != 0;
+            a->held = g->held;
         }
         a->id = id;
         a->name = net_player_name(m->n, id);

@@ -101,7 +101,7 @@ static void test_muzzle_draw(void)
     dvec3 eye = dv3(0.0, 80.0, -3.0);
     fx_muzzle(&f, dv3(0.0, 80.0, 0.0), dv3(0.0, 0.0, 1.0), 1);
     int no = 0, nt = 0;
-    fx_build_entities(&f, NULL, NULL, eye, 1.0, 0.0f, 1.0f, out, 64, &no, &nt);
+    fx_build_entities(&f, NULL, NULL, eye, 1.0, 0.0f, 1.0f, NULL, out, 64, &no, &nt);
     CHECK(no == 6 && nt == 14);
     int glow = 1, smoke = 1;
     float young = 0.0f;
@@ -113,15 +113,15 @@ static void test_muzzle_draw(void)
     CHECK(glow && smoke);
     /* On a dark night the flash lights its own smoke. */
     f.flash = 1.0f;
-    fx_build_entities(&f, NULL, NULL, eye, 1.0, 0.0f, 0.0f, out, 64, &no, &nt);
+    fx_build_entities(&f, NULL, NULL, eye, 1.0, 0.0f, 0.0f, NULL, out, 64, &no, &nt);
     int lit = nt == 14;
     for (int i = no; i < no + nt; i++) lit &= out[i].light == 1.0f;
     f.flash = 0.0f;
-    fx_build_entities(&f, NULL, NULL, eye, 1.0, 0.0f, 0.0f, out, 64, &no, &nt);
+    fx_build_entities(&f, NULL, NULL, eye, 1.0, 0.0f, 0.0f, NULL, out, 64, &no, &nt);
     CHECK(lit && out[no].light == 0.0f);
     /* Most of the way through its life: the third, thinnest step, larger. */
     for (int i = 0; i < f.count; i++) f.p[i].life = 0.2f * f.p[i].max_life;
-    fx_build_entities(&f, NULL, NULL, eye, 1.0, 0.0f, 1.0f, out, 64, &no, &nt);
+    fx_build_entities(&f, NULL, NULL, eye, 1.0, 0.0f, 1.0f, NULL, out, 64, &no, &nt);
     float old = 0.0f;
     int thin = 1;
     for (int i = no; i < no + nt; i++) {
@@ -169,7 +169,7 @@ static void test_flash_light(void)
 {
     const float sun[3] = {0.0f, 1.0f, 0.0f};
     lightfx_frame f = {0};
-    lightfx_build(&f, sun, 0.0f, 0, 50, 0.0);
+    lightfx_build(&f, sun, 0.0f, 0, 50, 0.0, 1);
     lightfx_frame g = f;
     lightfx_flash(&g, 0.0f);
     CHECK(g.held[0] == f.held[0] && g.held[1] == f.held[1] && g.held[2] == f.held[2]);
@@ -301,7 +301,7 @@ static void test_muzzle_origin(void)
     mobs_init(&ms, 7);
     combat c = {0};
     combat_init(&c, 7);
-    combat_targets tg = {NULL, NULL, 0};
+    combat_targets tg = {NULL, NULL, 0, NULL};
     inventory inv = {0};
     inv_init(&inv);
     inv_add(&inv, I_RIFLE, 1);

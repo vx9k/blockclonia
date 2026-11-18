@@ -28,6 +28,7 @@ typedef struct {
     float stride;        /* leg swing phase, radians (drawing) */
     float look;          /* head turned from the body, radians, in the sense of yaw (drawing) */
     float nod;           /* head lowered, radians: grazing, stalking (drawing) */
+    float burn_t;        /* s left of burning */
     uint32_t rng;
     uint8_t kind;
 } mob;
@@ -39,6 +40,14 @@ typedef struct {
     float spawn_t;       /* s until the next spawn attempt */
     float age;           /* s since mobs_init */
 } mobs;
+
+/* What a creature can tell about player i from the light around them
+ * (lightfx_seen at the eyes): how lit they are, 0..1, and how much of it
+ * is firelight, 0..1. */
+typedef struct {
+    float level;
+    float fire;
+} mob_sense;
 
 /* A wolf bit player `who` this step. */
 typedef struct {
@@ -56,11 +65,24 @@ typedef struct {
 
 void mobs_init(mobs *s, uint32_t seed);
 
+/* s a creature burns on after leaving a fire or lava: fur and fat keep
+ * burning a while. Water puts it out at once. */
+#define MOB_BURN_S 5.0f
+
 /* One fixed physics step (PHYS_DT): spawning around the players, despawning
  * far from all of them, thinking and moving. players[i] may be NULL (a dead
- * or absent player). daylight is thermo_daylight. Bites are reported in ev
- * for the caller to apply to the right body. */
-void mobs_step(mobs *s, physics *ph, player *const *players, int n, float daylight, mob_events *ev);
+ * or absent player). daylight is thermo_daylight. sense[i] is what the
+ * light shows of player i (NULL: everyone in plain view, no fire): a
+ * player in the dark is noticed from closer, one carrying a torch from as
+ * far as by day, and a wolf that has not been hurt keeps out of
+ * firelight. Bites are reported in ev for the caller to apply to the
+ * right body. */
+void mobs_step(mobs *s, physics *ph, player *const *players, const mob_sense *sense, int n, float daylight,
+               mob_events *ev);
+
+/* How far a creature of kind notices a player lit to level (mob_sense):
+ * range in full light, less in the dark by how well its eyes cope. */
+double mobs_sight(int kind, double range, float level);
 
 /* The first mob along a ray within max_dist, -1 for none; *dist is set to
  * how far along the ray it was hit. */
@@ -91,8 +113,10 @@ int mobs_add(mobs *s, int kind, dvec3 pos);
 /* A mob as boxes covered in its pixel art (mobskin.c): body, shoulders,
  * head, snout, ears, tail and two-part legs, feet relative to the camera.
  * t is a clock in seconds for idle motion (a wagging tail). Writes up to
- * max instances and returns how many (MOB_FIGURE for a full figure). */
-#define MOB_FIGURE 15
+ * max instances and returns how many: MOB_BODY, and two flames more
+ * while it burns (MOB_FIGURE at most). */
+#define MOB_BODY 15
+#define MOB_FIGURE (MOB_BODY + 2)
 int mob_figure(const mob *m, const float feet[3], float light, float t, entity_instance *out, int max);
 
 #endif

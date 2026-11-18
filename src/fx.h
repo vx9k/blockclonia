@@ -7,6 +7,7 @@
 #define MC_FX_H
 
 #include "entity.h"
+#include "lightfx.h"
 #include "physics.h"
 
 #define FX_MAX_PARTICLES 1024
@@ -66,6 +67,7 @@ typedef struct {
  * (light_at with daylight). Positions are relative to eye; alpha
  * interpolates physics state between steps. */
 void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *crack, dvec3 eye, double alpha, float time,
-                       float daylight, entity_instance *out, int max, int *n_opaque, int *n_trans);
+                       float daylight, const lightfx_frame *lf, entity_instance *out, int max, int *n_opaque,
+                       int *n_trans);
 
 #endif

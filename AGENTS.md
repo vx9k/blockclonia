@@ -113,7 +113,7 @@ clang 21 (Ubuntu 26.04), clang 22 (Alpine 3.24) and macOS's Apple clang.
   `vkGetDeviceProcAddr`/`vkGetInstanceProcAddr`, never by linking.
 - **Test the fallbacks** on a capable machine with `MC_VK_API=1.2` (up to
   `1.4`) to cap the API version and `MC_VK_DISABLE=all` (or a comma list:
-  `mdi,dynrend,sync2,aniso,hostcopy,budget,timestamps,pcache,relaxed,light4`).
+  `mdi,dynrend,sync2,aniso,hostcopy,budget,timestamps,pcache,relaxed,light4,shadow`).
   Any renderer change must run with `--validate` and zero validation
   messages, on a real GPU and on lavapipe.
 - The hot path is built for weak GPUs: 4-byte vertices, one pool buffer,

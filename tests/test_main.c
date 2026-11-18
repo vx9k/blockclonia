@@ -16,6 +16,7 @@
 #include "physics.h"
 #include "save.h"
 #include "settings.h"
+#include "shadow.h"
 #include "survival.h"
 #include "sysinfo.h"
 #include "test_util.h"
@@ -1529,7 +1530,7 @@ static void test_interact(void)
     entity_instance *ents = mem_alloc(sizeof(entity_instance) * 2048);
     int no = 0, nt = 0;
     fx_crack cr = {1, 0, GROUND - 1, 0, 0.6f};
-    fx_build_entities(fx, &t.ph, &cr, eye, 0.5, 1.0f, 0.5f, ents, 2048, &no, &nt);
+    fx_build_entities(fx, &t.ph, &cr, eye, 0.5, 1.0f, 0.5f, NULL, ents, 2048, &no, &nt);
     CHECK(no > 0 && nt >= 2); /* the bucket card and the crack overlay */
     CHECK(ents[no + nt - 1].tex == (uint32_t)(T_CRACK0 + 2) * 0x010101u);
     /* Under the open sky (the test world is not lit) things take daylight;
@@ -1598,7 +1599,7 @@ static void test_review_fixes(void)
     entity_instance *ents = mem_alloc(sizeof(entity_instance) * 300);
     fx_crack cr = {1, 1, GROUND - 1, 1, 0.9f};
     int no = 0, nt = 0;
-    fx_build_entities(fx, &t.ph, &cr, dv3(0, 20, 0), 0.0, 0.0f, 1.0f, ents, 300, &no, &nt);
+    fx_build_entities(fx, &t.ph, &cr, dv3(0, 20, 0), 0.0, 0.0f, 1.0f, NULL, ents, 300, &no, &nt);
     CHECK(no + nt == 300);
     int crack_found = 0;
     for (int i = no; i < no + nt; i++) crack_found |= ents[i].tex == (uint32_t)(T_CRACK0 + 3) * 0x010101u;
@@ -1704,6 +1705,7 @@ static void test_settings(void)
     s.mute_unfocused = 0;
     s.smooth_light = 0;
     s.bloom = BLOOM_ON;
+    s.shadows = SHADOW_OFF;
     int n = settings_format(&s, buf, (int)sizeof buf);
     CHECK(n > 0 && n < (int)sizeof buf);
     CHECK(strstr(buf, "smooth_light 0\n") != NULL); /* saved under its key */
@@ -1727,6 +1729,11 @@ static void test_settings(void)
     CHECK(settings_parse(&t, "bloom 0\n") == 1 && t.bloom == BLOOM_OFF);
     CHECK(settings_parse(&t, "bloom 1\n") == 1 && t.bloom == BLOOM_ON);
     CHECK(settings_parse(&t, "bloom 3\nbloom -1\n") == 0 && t.bloom == BLOOM_ON);
+    /* So do shadows, and a file from before them leaves them on Auto. */
+    CHECK(t.shadows == SHADOW_AUTO);
+    CHECK(settings_parse(&t, "shadows 0\n") == 1 && t.shadows == SHADOW_OFF);
+    CHECK(settings_parse(&t, "shadows 1\n") == 1 && t.shadows == SHADOW_ON);
+    CHECK(settings_parse(&t, "shadows 3\n") == 0 && t.shadows == SHADOW_ON);
     /* A tiny buffer truncates instead of overflowing. */
     char tiny[8] = {0};
     CHECK(settings_format(&s, tiny, (int)sizeof tiny) == 7 && tiny[7] == '\0');
@@ -2210,6 +2217,9 @@ int main(void)
     test_liquids_all();
     test_faint_all();
     test_fear_all();
+    test_dark_all();
+    test_lamps_all();
+    test_shadow_all();
     test_mobmodel_all();
     test_avatar_all();
     test_cardio_all();

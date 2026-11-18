@@ -17,6 +17,7 @@
 #include "inventory.h"
 #include "invui.h"
 #include "jobs.h"
+#include "lamps.h"
 #include "light.h"
 #include "lightfx.h"
 #include "log.h"
@@ -962,6 +963,7 @@ typedef struct {
     world w;
     physics ph;
     mobs mobs;                /* creatures (simulated here unless this is a client) */
+    lamps lamps;              /* lights that move, for the light jobs */
     combat cb;                /* blows and bullets in flight */
     thermo *th;
     world_hooks hooks;
@@ -1349,8 +1351,9 @@ static void open_world(game *g, const char *dir, int backdrop)
     g->hooks = (world_hooks){&g->ph, g->th, &g->w, NULL, 0, g->snd, g->fx};
     g->w.edit_user = &g->hooks;
     g->w.on_block_changed = on_block_changed;
-    g->w.glow = thermo_glow;
-    g->w.glow_user = g->th;
+    lamps_init(&g->lamps, thermo_glow, g->th);
+    g->w.glow = lamps_glow;
+    g->w.glow_user = &g->lamps;
     g->w.on_column_unload = on_column_unload;
     g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, g->db, &g->mp};
     log_set_fatal_hook(save_on_fatal, &g->sc);
@@ -1515,8 +1518,9 @@ static void open_remote_world(game *g, uint32_t seed)
     g->hooks = (world_hooks){&g->ph, g->th, &g->w, g->mp, 1, g->snd, g->fx};
     g->w.edit_user = &g->hooks;
     g->w.on_block_changed = on_block_changed;
-    g->w.glow = thermo_glow;
-    g->w.glow_user = g->th;
+    lamps_init(&g->lamps, thermo_glow, g->th);
+    g->w.glow = lamps_glow;
+    g->w.glow_user = &g->lamps;
     g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, NULL, &g->mp};
     renderer_bind_world(g->rd, &g->w);
     memset(&g->pl, 0, sizeof g->pl);
@@ -1653,6 +1657,7 @@ static void game_init_world(game *g)
                       .filtering = g->st.filtering,
                       .smooth_light = g->st.smooth_light,
                       .bloom = g->st.bloom,
+                      .shadows = g->st.shadows,
                       .pipeline_cache = g_paths.pipelines};
     g->rd = renderer_create(g->win, &ro);
 }
@@ -1878,6 +1883,11 @@ static void frame_simulate(game *g, const player_input *raw, double dt)
     const player_input *in = &lim;
     while (g->acc >= PHYS_DT && steps < MAX_STEPS_PER_FRAME) {
         survival_before sb = survival_capture(&g->pl);
+        /* What the light shows of the player: to creatures, and to their own eyes. */
+        const item_stack *held = &g->inv.slot[g->inv.selected];
+        mob_sense me = {0};
+        me.level = lightfx_seen(&g->w, g->pl.pos.x, g->pl.pos.y + PLAYER_EYE, g->pl.pos.z, thermo_daylight(g->th),
+                                held->count ? held->id : 0, &me.fire);
         if (g->mp) {
             mp_host_step(g->mp, in);
         } else {
@@ -1885,7 +1895,7 @@ static void frame_simulate(game *g, const player_input *raw, double dt)
             if (!g->backdrop) {
                 player *tp[1] = {g->hl.dead ? NULL : &g->pl};
                 health *th[1] = {g->hl.dead ? NULL : &g->hl};
-                combat_targets t = {tp, th, 1};
+                combat_targets t = {tp, th, 1, &me};
                 combat_creatures(&g->cb, &g->mobs, &g->ph, &t, thermo_daylight(g->th));
             }
         }
@@ -1894,6 +1904,7 @@ static void frame_simulate(game *g, const player_input *raw, double dt)
         survival_env(&g->w, &g->pl, &sb, g->actions, &env);
         survival_thermal(g->th, &g->w, &g->pl, &env);
         env.fear = mobs_fear(&g->mobs, &g->pl, thermo_daylight(g->th));
+        env.dark = lightfx_dark(me.level);
         g->actions = 0;
         survival_impacts(&g->hl, &g->w, &g->ph.contact[0], &g->pl, &sb);
         /* Per-step physics events, cleared by the next step. */
@@ -1996,7 +2007,7 @@ static void frame_interact(game *g, double dt)
          * behind it; the rifle fires on right-click. */
         player *tp[1] = {&g->pl};
         health *th[1] = {&g->hl};
-        combat_targets t = g->mp ? mp_targets(g->mp) : (combat_targets){tp, th, 1};
+        combat_targets t = g->mp ? mp_targets(g->mp) : (combat_targets){tp, th, 1, NULL};
         double block_d = g->hit.hit ? dv3_len(dv3(g->hit.block.x + 0.5 - g->eye.x, g->hit.block.y + 0.5 - g->eye.y,
                                                   g->hit.block.z + 0.5 - g->eye.z))
                                     : 5.0;
@@ -2087,9 +2098,18 @@ static void frame_interact(game *g, double dt)
     g->hs.msg_age += (float)dt;
 }
 
+/* The light on a figure standing at p: its brightness, and the colour
+ * that falls on the instances it built (entity_shine). */
+static float figure_light(game *g, const lightfx_frame *lf, dvec3 eye, dvec3 p, float rgb[3])
+{
+    uint16_t l = world_light(&g->w, (int)floor(p.x), (int)floor(p.y), (int)floor(p.z));
+    return lightfx_colour(lf, l, (float)dv3_len(dv3(p.x - eye.x, p.y - eye.y, p.z - eye.z)), rgb);
+}
+
 /* The other players as figures, among the opaque entities (which come
  * before the translucent ones). */
-static void add_players(game *g, dvec3 eye, double alpha, double now, float light, float dt, int *n_op, int n_tr)
+static void add_players(game *g, dvec3 eye, double alpha, double now, const lightfx_frame *lf, float dt, int *n_op,
+                        int n_tr)
 {
     mp_avatar av[NET_MAX_PLAYERS];
     int count = mp_avatars(g->mp, now, alpha, av, NET_MAX_PLAYERS);
@@ -2101,13 +2121,16 @@ static void add_players(game *g, dvec3 eye, double alpha, double now, float ligh
         memmove(g->ents + *n_op + AVATAR_BOXES, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
         const float feet[3] = {(float)(av[i].pos.x - eye.x), (float)(av[i].pos.y - eye.y),
                                (float)(av[i].pos.z - eye.z)};
-        float lit = light_at(&g->w, av[i].pos.x, av[i].pos.y + 1.0, av[i].pos.z, light);
-        *n_op += avatar_build(a, feet, av[i].yaw, av[i].pitch, av[i].dead, lit, g->ents + *n_op, AVATAR_BOXES);
+        float rgb[3] = {1.0f, 1.0f, 1.0f};
+        float lit = figure_light(g, lf, eye, dv3(av[i].pos.x, av[i].pos.y + 1.0, av[i].pos.z), rgb);
+        int k = avatar_build(a, feet, av[i].yaw, av[i].pitch, av[i].dead, lit, g->ents + *n_op, AVATAR_BOXES);
+        entity_shine(g->ents + *n_op, k, rgb);
+        *n_op += k;
     }
 }
 
 /* The --figures, on the ground where they stand, walking on the spot. */
-static void add_figures(game *g, dvec3 eye, float light, float dt, int *n_op, int n_tr)
+static void add_figures(game *g, dvec3 eye, const lightfx_frame *lf, float dt, int *n_op, int n_tr)
 {
     for (int i = 0; i < g->nfigs; i++) {
         if (RENDER_MAX_ENTS - *n_op - n_tr < AVATAR_BOXES) return;
@@ -2117,14 +2140,17 @@ static void add_figures(game *g, dvec3 eye, float light, float dt, int *n_op, in
         double y = (double)world_surface_y(&g->w, (int)floor(f->x), (int)floor(f->z));
         memmove(g->ents + *n_op + AVATAR_BOXES, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
         const float feet[3] = {(float)(f->x - eye.x), (float)(y - eye.y), (float)(f->z - eye.z)};
-        float lit = light_at(&g->w, f->x, y + 1.0, f->z, light);
-        *n_op += avatar_build(&f->anim, feet, f->yaw, 0.0f, f->dead, lit, g->ents + *n_op, AVATAR_BOXES);
+        float rgb[3] = {1.0f, 1.0f, 1.0f};
+        float lit = figure_light(g, lf, eye, dv3(f->x, y + 1.0, f->z), rgb);
+        int k = avatar_build(&f->anim, feet, f->yaw, 0.0f, f->dead, lit, g->ents + *n_op, AVATAR_BOXES);
+        entity_shine(g->ents + *n_op, k, rgb);
+        *n_op += k;
     }
 }
 
 /* Creatures as figures among the opaque entities: the ones simulated here,
  * or on a client the ones the host last sent. */
-static void add_mobs(game *g, dvec3 eye, double alpha, float light, double now, int *n_op, int n_tr)
+static void add_mobs(game *g, dvec3 eye, double alpha, const lightfx_frame *lf, double now, int *n_op, int n_tr)
 {
     const mobs *ms = g->client ? mp_client_mobs(g->mp) : &g->mobs;
     for (int i = 0; ms && i < ms->count; i++) {
@@ -2135,8 +2161,10 @@ static void add_mobs(game *g, dvec3 eye, double alpha, float light, double now, 
         if (dv3_len(dv3(p.x - eye.x, p.y - eye.y, p.z - eye.z)) > 160.0) continue;
         memmove(g->ents + *n_op + MOB_FIGURE, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
         const float feet[3] = {(float)(p.x - eye.x), (float)(p.y - eye.y), (float)(p.z - eye.z)};
-        float lit = light_at(&g->w, p.x, p.y + 0.5, p.z, light);
+        float rgb[3] = {1.0f, 1.0f, 1.0f};
+        float lit = figure_light(g, lf, eye, dv3(p.x, p.y + 0.5, p.z), rgb);
         int k = mob_figure(m, feet, lit, (float)fmod(now, 3600.0), g->ents + *n_op, MOB_FIGURE);
+        entity_shine(g->ents + *n_op, k, rgb);
         /* Close the gap if the figure came out short. */
         if (k < MOB_FIGURE)
             memmove(g->ents + *n_op + k, g->ents + *n_op + MOB_FIGURE, sizeof g->ents[0] * (size_t)n_tr);
@@ -2206,9 +2234,10 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     thermo_sky(g->th, v.sky);
     float sun[3] = {0.0f, 1.0f, 0.0f};
     thermo_sun(g->th, sun);
+    memcpy(v.sun_dir, sun, sizeof v.sun_dir);
     const item_stack *carried = &g->inv.slot[g->inv.selected];
     uint32_t held_id = on_title || g->hl.dead || !carried->count ? 0 : carried->id;
-    lightfx_build(&v.lfx, sun, thermo_daylight(g->th), held_id, g->st.brightness, now);
+    lightfx_build(&v.lfx, sun, thermo_daylight(g->th), held_id, g->st.brightness, now, g->st.flicker);
     /* A real flash is over in milliseconds; this one halves every 14 ms, so
      * it shows for a frame or two at any frame rate. */
     lightfx_flash(&v.lfx, g->flash);
@@ -2228,6 +2257,8 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     g->eat_anim = fmaxf(0.0f, g->eat_anim - (float)dt / 1.6f);
     if (!on_title && !g->hl.dead && !g->in_menu) {
         const item_stack *held = &g->inv.slot[g->inv.selected];
+        float hand_rgb[3] = {1.0f, 1.0f, 1.0f};
+        float hand_light = lightfx_colour(&v.lfx, eye_light, 0.3f, hand_rgb);
         viewmodel_input vi = {held->count ? held->id : 0,
                               g->ia.swing,
                               g->ia.swinging,
@@ -2239,10 +2270,11 @@ static render_view build_view(game *g, double now, double dt, double alpha)
                               g->eat_anim > 0.0f ? 1.0f - g->eat_anim : 0.0f,
                               g->aim,
                               g->bolt_t < 1.0f ? g->bolt_t : 0.0f,
-                              lightfx_at(&v.lfx, eye_light, 0.3f),
+                              hand_light,
                               (float)dt};
         v.view_model = g->vm_ents;
         v.view_model_count = mode_hands(g->pl.mode) ? viewmodel_build(&g->vm, &vi, g->vm_ents, VIEWMODEL_MAX) : 0;
+        entity_shine(g->vm_ents, v.view_model_count, hand_rgb);
         /* Shaking hands (adrenaline, the crash after it, low sugar, cold). */
         float tremor = health_get_senses(&g->hl).tremor;
         for (int i = 0; i < v.view_model_count && tremor > 0.01f; i++) {
@@ -2251,12 +2283,12 @@ static render_view build_view(game *g, double now, double dt, double alpha)
         }
     }
     int n_op = 0, n_tr = 0;
-    fx_build_entities(g->fx, &g->ph, &g->crack, v.eye, alpha, v.time, v.daylight, g->ents, RENDER_MAX_ENTS, &n_op,
-                      &n_tr);
-    if (g->mp) add_players(g, v.eye, alpha, now, v.daylight, (float)dt, &n_op, n_tr);
+    fx_build_entities(g->fx, &g->ph, &g->crack, v.eye, alpha, v.time, v.daylight, &v.lfx, g->ents, RENDER_MAX_ENTS,
+                      &n_op, &n_tr);
+    if (g->mp) add_players(g, v.eye, alpha, now, &v.lfx, (float)dt, &n_op, n_tr);
     if (!on_title) {
-        add_figures(g, v.eye, v.daylight, (float)dt, &n_op, n_tr);
-        add_mobs(g, v.eye, alpha, v.daylight, now, &n_op, n_tr);
+        add_figures(g, v.eye, &v.lfx, (float)dt, &n_op, n_tr);
+        add_mobs(g, v.eye, alpha, &v.lfx, now, &n_op, n_tr);
         add_tracers(g, v.eye, alpha, &n_op, n_tr);
     }
     v.ents = g->ents;
@@ -2605,6 +2637,7 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
         renderer_set_filtering(g->rd, g->st.filtering);
         renderer_set_smooth_light(g->rd, g->st.smooth_light);
         renderer_set_bloom(g->rd, g->st.bloom);
+        renderer_set_shadows(g->rd, g->st.shadows);
         set_fullscreen(g, g->st.fullscreen);
         apply_volumes(g);
         apply_discord(g);
@@ -2734,8 +2767,35 @@ static int draw_overlay(game *g, double dt, double alpha)
     return u.quads;
 }
 
+/* The lights that move (lamps.h): what other players carry, light-giving
+ * items lying about, burning creatures and fresh muzzle flashes other
+ * than this player's own, which block.frag lights from the eye. */
+static void update_lamps(game *g, double now)
+{
+    if (g->mp) {
+        mp_avatar av[NET_MAX_PLAYERS];
+        int n = mp_avatars(g->mp, now, 1.0, av, NET_MAX_PLAYERS);
+        for (int i = 0; i < n; i++)
+            if (!av[i].dead)
+                lamps_add(&g->lamps, dv3(av[i].pos.x, av[i].pos.y + 1.2, av[i].pos.z), lightfx_carried(av[i].held));
+    }
+    for (int i = 0; i < g->ph.item_count; i++)
+        lamps_add(&g->lamps, g->ph.items[i].pos, lightfx_carried(g->ph.items[i].id));
+    const mobs *ms = g->client ? mp_client_mobs(g->mp) : &g->mobs;
+    for (int i = 0; ms && i < ms->count; i++)
+        if (ms->m[i].burn_t > 0.0f) {
+            dvec3 p = ms->m[i].body.pos;
+            lamps_add(&g->lamps, dv3(p.x, p.y + 0.5, p.z), LAMPS_FIRE);
+        }
+    dvec3 fl[COMBAT_FLASHES];
+    int k = combat_flashes(&g->cb, 0, (double)LAMPS_FLASH_S, fl, COMBAT_FLASHES);
+    for (int i = 0; i < k; i++) lamps_add(&g->lamps, fl[i], LAMPS_FLASH);
+    lamps_end(&g->lamps, &g->w);
+}
+
 static void frame_render(game *g, double now, double dt)
 {
+    update_lamps(g, now);
     if (g_in.want_shot) {
         renderer_request_screenshot(g->rd, "screenshot.png");
         g_in.want_shot = 0;

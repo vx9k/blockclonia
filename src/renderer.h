@@ -34,6 +34,7 @@ typedef struct {
     int filtering;       /* trilinear + up to 8x anisotropic minification (see renderer_set_filtering) */
     int smooth_light;    /* see renderer_set_smooth_light */
     int bloom;           /* BLOOM_OFF, BLOOM_ON or BLOOM_AUTO (bloom.h) */
+    int shadows;         /* SHADOW_OFF, SHADOW_ON or SHADOW_AUTO (shadow.h) */
     /* Pipeline cache file, kept between runs so pipelines build faster.
      * NULL: "blockclonia.pipelines" in the working directory; "": none. */
     const char *pipeline_cache;
@@ -59,6 +60,7 @@ typedef struct {
     float sky[3];        /* sky and fog colour; all zero: the default day sky */
     float fog[3];        /* the fog's own colour when it differs from the sky's (lightfx_fog); all zero: the sky's */
     lightfx_frame lfx;   /* sky colour, sun, held light and floor for the block shaders; all zero: daylight alone */
+    float sun_dir[3]; /* toward the sun, a unit vector (thermo_sun): the sky's glow; zero: none */
     float stars;         /* how much of the night sky shows, 0..1 (sky_visibility); 0 draws no stars or moon */
     quat star_rot;       /* the star field's orientation (sky_rotation) */
     sky_star moon;       /* sky_moon */
@@ -131,6 +133,10 @@ void renderer_set_smooth_light(renderer *r, int enabled);
 /* BLOOM_OFF, BLOOM_ON or BLOOM_AUTO, which keeps bloom on where the GPU's
  * timestamps show it costing under BLOOM_BUDGET_MS (off without them). */
 void renderer_set_bloom(renderer *r, int mode);
+/* SHADOW_OFF, SHADOW_ON or SHADOW_AUTO, which keeps the sun's shadow map
+ * where the GPU draws it under SHADOW_BUDGET_MS; none without
+ * GPUCAP_SHADOW. */
+void renderer_set_shadows(renderer *r, int mode);
 const char *renderer_device_name(const renderer *r);
 /* "Vulkan 1.3: multi-draw indirect, dynamic rendering, ...": the API
  * version in use and the optional features the renderer turned on. */

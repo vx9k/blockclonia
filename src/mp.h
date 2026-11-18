@@ -85,6 +85,7 @@ typedef struct {
     int id;
     float yaw, pitch;
     int flying, sneaking, dead;
+    uint32_t held; /* the item in hand, 0 for none */
 } mp_avatar;
 
 typedef struct {
@@ -127,7 +128,7 @@ int mp_ended(const mp *m, const char **why);
 void mp_host_step(mp *m, const player_input *local_in);
 /* The bodies the host's last step could hit, for the host player's own
  * blows (index 0 is the host's player). */
-combat_targets mp_targets(mp *m);
+combat_targets mp_targets(const mp *m);
 /* On a client, the creatures near this player as the host last sent them
  * (positions, headings and kinds only, for drawing). */
 const mobs *mp_client_mobs(const mp *m);

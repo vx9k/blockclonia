@@ -145,6 +145,8 @@ set(MC_CORE_SOURCES
   src/jobs.c
   src/light.c
   src/lightfx.c
+  src/lamps.c
+  src/shadow.c
   src/log.c
   src/mem.c
   src/menu.c
@@ -241,7 +243,7 @@ if(MC_BUILD_GAME)
   mc_compile_shaders(blockclonia
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders
     SOURCES block.vert block.frag entity.vert entity.frag line.vert line.frag ui.vert ui.frag post.vert post.frag star.vert
-            star.frag bloom.frag)
+            star.frag sky.vert sky.frag bloom.frag block_shadow.vert block_shadow.frag shadow.vert)
 
   # PGO compiles the game from a profile; BOLT then lays out the result.
   include(Pgo)
@@ -256,7 +258,7 @@ if(MC_BUILD_TESTS)
   add_executable(mc_tests tests/test_main.c tests/test_util.c tests/test_thermo.c tests/test_health2.c
                           tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_gpucaps.c tests/test_light.c tests/test_itemmodel.c
                           tests/test_lightfx.c tests/test_bloom.c
-                          tests/test_health_debug.c tests/test_thoughts.c tests/test_drugs.c tests/test_faint.c tests/test_fear.c tests/test_mobmodel.c tests/test_avatar.c tests/test_defib.c tests/test_paths.c
+                          tests/test_health_debug.c tests/test_thoughts.c tests/test_drugs.c tests/test_faint.c tests/test_fear.c tests/test_dark.c tests/test_lamps.c tests/test_shadow.c tests/test_mobmodel.c tests/test_avatar.c tests/test_defib.c tests/test_paths.c
                           tests/test_save_db.c tests/test_worlds.c tests/test_backups.c tests/test_hud.c tests/test_cardio.c
                           tests/test_discord.c tests/test_netcrypto.c tests/test_wire.c tests/test_net.c tests/test_mp.c
                           tests/test_worldgen.c tests/test_edge.c tests/test_tools.c tests/test_materials.c

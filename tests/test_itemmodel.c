@@ -686,7 +686,7 @@ static void test_dropped(void)
     itemmodel_build(item_tool_id(TOOL_PICKAXE, TIER_IRON), &pick);
     CHECK(physics_drop_item(&t.ph, dv3(0.5, GROUND + 0.5, 0.5), dv3(0, 0, 0), item_tool_id(TOOL_PICKAXE, TIER_IRON), 1,
                             0.0f) >= 0);
-    fx_build_entities(NULL, &t.ph, NULL, eye, 1.0, 0.0f, 1.0f, ents, 512, &no, &nt);
+    fx_build_entities(NULL, &t.ph, NULL, eye, 1.0, 0.0f, 1.0f, NULL, ents, 512, &no, &nt);
     CHECK(no == pick.n && nt == 0);
     float ylo = 9.0f, yhi = -9.0f;
     for (int i = 0; i < no; i++) {
@@ -703,13 +703,13 @@ static void test_dropped(void)
     int glass = 0;
     for (int i = 0; i < bottle.n; i++) glass += itemmodel_layer_clear(bottle.box[i].layer);
     physics_drop_item(&t.ph, dv3(0.5, GROUND + 0.5, 0.5), dv3(0, 0, 0), I_ANTISEPTIC, 1, 0.0f);
-    fx_build_entities(NULL, &t.ph, NULL, eye, 1.0, 0.0f, 1.0f, ents, 512, &no, &nt);
+    fx_build_entities(NULL, &t.ph, NULL, eye, 1.0, 0.0f, 1.0f, NULL, ents, 512, &no, &nt);
     CHECK(nt == glass && no == bottle.n - glass);
     for (int i = no; i < no + nt; i++) CHECK(itemmodel_layer_clear((uint8_t)(ents[i].tex & 255u)));
     /* A cartridge is enlarged so it can be found; a pile shows three. */
     t.ph.item_count = 0;
     physics_drop_item(&t.ph, dv3(0.5, GROUND + 0.5, 0.5), dv3(0, 0, 0), I_CARTRIDGE, 40, 0.0f);
-    fx_build_entities(NULL, &t.ph, NULL, eye, 1.0, 0.0f, 1.0f, ents, 512, &no, &nt);
+    fx_build_entities(NULL, &t.ph, NULL, eye, 1.0, 0.0f, 1.0f, NULL, ents, 512, &no, &nt);
     item_model cart = {0};
     itemmodel_build(I_CARTRIDGE, &cart);
     CHECK(no == 3 * cart.n);
@@ -719,8 +719,32 @@ static void test_dropped(void)
     /* A block item is still a cube. */
     t.ph.item_count = 0;
     physics_drop_item(&t.ph, dv3(0.5, GROUND + 0.5, 0.5), dv3(0, 0, 0), B_STONE, 1, 0.0f);
-    fx_build_entities(NULL, &t.ph, NULL, eye, 1.0, 0.0f, 1.0f, ents, 512, &no, &nt);
+    fx_build_entities(NULL, &t.ph, NULL, eye, 1.0, 0.0f, 1.0f, NULL, ents, 512, &no, &nt);
     CHECK(no == 1 && fabsf(ents[0].scale[0] - 0.25f) < 1e-6f && ents[0].tint == 0u);
+    /* Under a sunset's orange sky the pick takes its colour; a torch's
+     * flame keeps its own, its handle does not glow. */
+    lightfx_frame dusk = {0};
+    dusk.sky[0] = 1.0f;
+    dusk.sky[1] = 0.5f;
+    dusk.sky[2] = 0.25f;
+    t.ph.item_count = 0;
+    physics_drop_item(&t.ph, dv3(0.5, GROUND + 0.5, 0.5), dv3(0, 0, 0), item_tool_id(TOOL_PICKAXE, TIER_IRON), 1, 0.0f);
+    fx_build_entities(NULL, &t.ph, NULL, eye, 1.0, 0.0f, 1.0f, &dusk, ents, 512, &no, &nt);
+    CHECK(no == pick.n);
+    int bluer = 0;
+    for (int i = 0; i < no; i++) {
+        uint32_t was = entity_tint(pick.box[i].rgb);
+        CHECK((ents[i].tint & 255u) == (was & 255u)); /* red: full light */
+        bluer += (ents[i].tint >> 16 & 255u) > (was >> 16 & 255u);
+    }
+    CHECK(bluer > 0);
+    t.ph.item_count = 0;
+    physics_drop_item(&t.ph, dv3(0.5, GROUND + 0.5, 0.5), dv3(0, 0, 0), B_TORCH, 1, 0.0f);
+    fx_build_entities(NULL, &t.ph, NULL, eye, 1.0, 0.0f, 1.0f, &dusk, ents, 512, &no, &nt);
+    int glowing = 0;
+    for (int i = 0; i < no + nt; i++) glowing += (ents[i].tint & ENTITY_GLOWS) != 0;
+    CHECK(glowing > 0 && glowing < no + nt);
+    CHECK(!(ents[0].tint & ENTITY_GLOWS)); /* the handle */
     mem_free(ents);
     tw_free(&t);
 }

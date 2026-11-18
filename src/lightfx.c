@@ -3,6 +3,7 @@
 #include "item.h"
 #include "light.h"
 #include "thermo.h"
+#include "world.h"
 #include <math.h>
 
 static float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
@@ -34,8 +35,56 @@ float lightfx_flicker(double t)
     return (float)(0.95 + 0.05 * n);
 }
 
+/* The block a held item lights like: a block item is its block, a tool
+ * may carry one (a torch). */
+static uint8_t held_block(uint32_t held_item)
+{
+    if (!held_item) return B_AIR;
+    if (item_is_block(held_item)) return (uint8_t)held_item;
+    return item_get(held_item)->block;
+}
+
+uint16_t lightfx_carried(uint32_t item)
+{
+    uint16_t em = light_emission(held_block(item));
+    const unsigned lv[3] = {LIGHT_R(em), LIGHT_G(em), LIGHT_B(em)};
+    unsigned d[3] = {0, 0, 0};
+    for (int i = 0; i < 3; i++) d[i] = lv[i] > 1 ? lv[i] - 1 : 0;
+    return (uint16_t)LIGHT_PACK(0, d[0], d[1], d[2]);
+}
+
+static unsigned max3(unsigned a, unsigned b, unsigned c)
+{
+    unsigned m = a > b ? a : b;
+    return m > c ? m : c;
+}
+
+float lightfx_seen(const struct world *w, double x, double y, double z, float daylight, uint32_t held_item, float *fire)
+{
+    uint16_t l = world_light(w, (int)floor(x), (int)floor(y), (int)floor(z));
+    uint16_t em = lightfx_carried(held_item);
+    unsigned held = max3(LIGHT_R(em), LIGHT_G(em), LIGHT_B(em));
+    float sky = LIGHT_SKY(l) ? (float)LIGHT_SKY(l) / (float)LIGHT_MAX + log2f(fmaxf(daylight, 1e-3f)) / LIGHT_CURVE_K
+                             : 0.0f;
+    float blk = (float)max3(LIGHT_R(l), LIGHT_G(l), LIGHT_B(l)) / (float)LIGHT_MAX;
+    float lv = fmaxf(fmaxf(sky, blk), (float)held / (float)LIGHT_MAX);
+    int warm_cell = (int)LIGHT_R(l) - (int)LIGHT_B(l);
+    int warm_held = (int)LIGHT_R(em) - (int)LIGHT_B(em);
+    int warm = warm_cell > warm_held ? warm_cell : warm_held;
+    *fire = clamp01((float)warm / (float)LIGHT_MAX);
+    return clamp01(lv);
+}
+
+/* Below about level 6 of 15 the eye starts losing detail; a moonlit
+ * field (level 0.6) is dark, and only no light at all is pitch black. */
+float lightfx_dark(float level)
+{
+    const float enough = 0.4f;
+    return clamp01(1.0f - level / enough);
+}
+
 void lightfx_build(lightfx_frame *f, const float sun_dir[3], float daylight, uint32_t held_item, int brightness,
-                   double time)
+                   double time, int flicker)
 {
     /* Light through a long path of air at sunrise and sunset has lost its
      * blue; moonlight looks blue to dark-adapted eyes (the Purkinje
@@ -57,10 +106,9 @@ void lightfx_build(lightfx_frame *f, const float sun_dir[3], float daylight, uin
     for (int i = 0; i < 3; i++) f->sun[i] = sun_dir[i] * c;
     /* A carried light is a level below its block: the hand holds it half a
      * metre from the eye. */
-    uint8_t block = held_item ? item_get(held_item)->block : B_AIR;
-    if (held_item && item_is_block(held_item)) block = (uint8_t)held_item;
+    uint8_t block = held_block(held_item);
     uint16_t em = light_emission(block);
-    float flick = block == B_FOXFIRE ? 1.0f : lightfx_flicker(time);
+    float flick = block == B_FOXFIRE ? 1.0f : (flicker ? lightfx_flicker(time) : LIGHTFX_STEADY);
     const unsigned lv[3] = {LIGHT_R(em), LIGHT_G(em), LIGHT_B(em)};
     for (int i = 0; i < 3; i++) f->held[i] = lv[i] > 1 ? (float)(lv[i] - 1) / (float)LIGHT_MAX * flick : 0.0f;
     f->floor = clamp01((float)brightness / 100.0f) * LIGHTFX_FLOOR_MAX;
@@ -98,6 +146,21 @@ float lightfx_at(const lightfx_frame *f, uint16_t l, float dist)
     float sky = fmaxf(f->sky[0], fmaxf(f->sky[1], f->sky[2]));
     float sky_lv = (float)LIGHT_SKY(l) / (float)LIGHT_MAX + log2f(fmaxf(sky, 1e-3f)) / LIGHT_CURVE_K;
     return bright(fmaxf(fmaxf(blk, sky_lv), f->floor));
+}
+
+float lightfx_colour(const lightfx_frame *f, uint16_t l, float dist, float rgb[3])
+{
+    const unsigned lv[3] = {LIGHT_R(l), LIGHT_G(l), LIGHT_B(l)};
+    float top = 0.0f;
+    for (int c = 0; c < 3; c++) {
+        float held = f->held[c] - dist / (float)LIGHT_MAX;
+        float blk = fmaxf((float)lv[c] / (float)LIGHT_MAX, held) + gain_shift();
+        float sky = (float)LIGHT_SKY(l) / (float)LIGHT_MAX + log2f(fmaxf(f->sky[c], 1e-3f)) / LIGHT_CURVE_K;
+        rgb[c] = bright(fmaxf(fmaxf(blk, sky), f->floor));
+        top = fmaxf(top, rgb[c]);
+    }
+    for (int c = 0; c < 3; c++) rgb[c] = top > 0.0f ? rgb[c] / top : 1.0f;
+    return top;
 }
 
 uint32_t lightfx_pack(const lightfx_frame *f, float daylight, float sky[3])

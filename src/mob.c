@@ -30,6 +30,15 @@ static const mob_rule RULES[MOB_KINDS] = {
 #define CHARGE 8.0       /* m from its prey a stalking wolf breaks into a run */
 #define CALM 45.0f       /* s after a world opens before the first wolf */
 #define LOOK_RANGE 8.0   /* m a creature glances at a player from */
+#define LIT_FULL 0.5f /* light level a body is in plain view at */
+#define FIRE_FEAR 0.45f /* firelight (mob_sense.fire) a wolf will not hunt into */
+#define FIRE_KEEP 6.0 /* m a wolf keeps from prey standing in firelight */
+#define BURN_HP_S 2.5f /* hit points a second burning takes: a boar lasts 8 s */
+
+/* The share of its daylight sight a creature keeps in the dark: wolves
+ * hunt by night and have a reflecting layer behind the retina, boars
+ * rely on smell and see poorly. */
+static const float DARK_EYES[MOB_KINDS] = {[MOB_BOAR] = 0.4f, [MOB_WOLF] = 0.6f};
 
 static dvec3 sub(dvec3 a, dvec3 b) { return dv3(a.x - b.x, a.y - b.y, a.z - b.z); }
 
@@ -129,14 +138,24 @@ static void try_spawn(mobs *s, const physics *ph, player *const *players, int n,
 }
 
 /* The nearest present player within range of p, -1 for none. */
-static int nearest(player *const *players, int n, dvec3 p, double range, double *d)
+double mobs_sight(int kind, double range, float level)
+{
+    float eyes = kind >= 0 && kind < MOB_KINDS ? DARK_EYES[kind] : 1.0f;
+    float lit = level < LIT_FULL ? (level > 0.0f ? level / LIT_FULL : 0.0f) : 1.0f;
+    return range * (double)(eyes + (1.0f - eyes) * lit);
+}
+
+/* The nearest player a creature of kind notices within range, each seen
+ * from as far as the light around them allows. */
+static int nearest(player *const *players, const mob_sense *sense, int n, int kind, dvec3 p, double range, double *d)
 {
     int best = -1;
     *d = range;
     for (int i = 0; i < n; i++) {
         if (!players[i]) continue;
         double di = dv3_len(sub(players[i]->pos, p));
-        if (di < *d) {
+        double ri = sense ? mobs_sight(kind, range, sense[i].level) : range;
+        if (di < ri && di < *d) {
             *d = di;
             best = i;
         }
@@ -145,16 +164,23 @@ static int nearest(player *const *players, int n, dvec3 p, double range, double 
 }
 
 /* Decides this step's movement for one mob, and reports a bite. */
-static player_input think(mob *m, player *const *players, int n, float daylight, mob_events *ev)
+static player_input think(mob *m, player *const *players, const mob_sense *sense, int n, float daylight, mob_events *ev)
 {
     player_input in = {0};
     player *b = &m->body;
     double d = 0.0;
     int target = -1;
     if (m->kind == MOB_WOLF && (daylight < NIGHT || m->angry_t > 0.0f))
-        target = nearest(players, n, b->pos, HUNT_RANGE, &d);
+        target = nearest(players, sense, n, m->kind, b->pos, HUNT_RANGE, &d);
+    /* Fire keeps a hunting wolf off, unless it has been hurt. */
+    int wary = target >= 0 && sense && sense[target].fire >= FIRE_FEAR && m->angry_t <= 0.0f;
 
-    if (target >= 0) {
+    if (wary) {
+        /* It circles out of the light: backs off when close, watches from
+         * the edge otherwise. */
+        b->yaw = yaw_to(b->pos, players[target]->pos);
+        in.forward = d < FIRE_KEEP ? -0.6f : 0.0f;
+    } else if (target >= 0) {
         /* Hunt: stalk at a walk, charge the last few metres, and bite when
          * close; the player gets a moment to see it coming. */
         b->yaw = yaw_to(b->pos, players[target]->pos);
@@ -186,7 +212,7 @@ static player_input think(mob *m, player *const *players, int n, float daylight,
     /* Where the head points, for drawing: at a player close by, down to the
      * grass while a boar stands grazing, low while a wolf stalks. */
     double near_d = 0.0;
-    int seen = nearest(players, n, b->pos, LOOK_RANGE, &near_d);
+    int seen = nearest(players, sense, n, m->kind, b->pos, LOOK_RANGE, &near_d);
     float look = 0.0f, nod = 0.0f;
     if (target >= 0) {
         nod = d >= CHARGE ? 0.3f : 0.0f;
@@ -207,7 +233,10 @@ static player_input think(mob *m, player *const *players, int n, float daylight,
     return in;
 }
 
-void mobs_step(mobs *s, physics *ph, player *const *players, int n, float daylight, mob_events *ev)
+static int burn(mobs *s, physics *ph, int i);
+
+void mobs_step(mobs *s, physics *ph, player *const *players, const mob_sense *sense, int n, float daylight,
+               mob_events *ev)
 {
     memset(ev, 0, sizeof *ev);
     s->age += (float)PHYS_DT;
@@ -219,12 +248,16 @@ void mobs_step(mobs *s, physics *ph, player *const *players, int n, float daylig
     for (int i = 0; i < s->count; i++) {
         mob *m = &s->m[i];
         double d = 0.0;
-        if (nearest(players, n, m->body.pos, DESPAWN, &d) < 0 || m->body.pos.y < -32.0) {
+        if (nearest(players, NULL, n, m->kind, m->body.pos, DESPAWN, &d) < 0 || m->body.pos.y < -32.0) {
             remove_at(s, i--);
             continue;
         }
-        player_input in = think(m, players, n, daylight, ev);
+        player_input in = think(m, players, sense, n, daylight, ev);
         physics_move_player(ph, &m->body, &in);
+        if (burn(s, ph, i)) {
+            i--;
+            continue;
+        }
         m->stride += (float)(PHYS_DT * sqrt(m->body.vel.x * m->body.vel.x + m->body.vel.z * m->body.vel.z)) * 4.0f;
     }
 }
@@ -281,6 +314,39 @@ int mobs_raycast(const mobs *s, dvec3 o, vec3 dir, double max_dist, double *dist
     return best;
 }
 
+/* Removes creature i, leaving what it leaves: a boar its meat, cooked
+ * if it burned to death. */
+static void die(mobs *s, physics *ph, int i, int burnt)
+{
+    mob *m = &s->m[i];
+    dvec3 at = dv3(m->body.pos.x, m->body.pos.y + 0.5, m->body.pos.z);
+    if (m->kind == MOB_BOAR)
+        physics_drop_item(ph, at, dv3(0.0, 2.0, 0.0), burnt ? I_COOKED_MEAT : I_RAW_MEAT, 2 + (int)(next(&m->rng) % 2u),
+                          0.4f);
+    remove_at(s, i);
+}
+
+/* Fire and lava at its feet or body set a creature alight, water puts it
+ * out, and burning wears it down. Returns 1 if it burned to death (it is
+ * removed). */
+static int burn(mobs *s, physics *ph, int i)
+{
+    mob *m = &s->m[i];
+    const player *b = &m->body;
+    for (int k = 0; k < 2 && ph->w; k++) {
+        uint8_t id = world_get(ph->w, (int)floor(b->pos.x), (int)floor(b->pos.y + 0.05 + 0.5 * k),
+                               (int)floor(b->pos.z));
+        if (id == B_CAMPFIRE || id == B_LAVA) m->burn_t = MOB_BURN_S;
+        else if (id == B_WATER || id == B_BRINE) m->burn_t = 0.0f;
+    }
+    if (m->burn_t <= 0.0f) return 0;
+    m->burn_t -= (float)PHYS_DT;
+    m->hp -= BURN_HP_S * (float)PHYS_DT;
+    if (m->hp > 0.0f) return 0;
+    die(s, ph, i, 1);
+    return 1;
+}
+
 int mobs_hurt(mobs *s, physics *ph, int i, float damage, dvec3 from)
 {
     if (i < 0 || i >= s->count || !(damage > 0.0f)) return 0;
@@ -303,10 +369,7 @@ int mobs_hurt(mobs *s, physics *ph, int i, float damage, dvec3 from)
         m->angry_t = 30.0f;
     }
     if (m->hp > 0.0f) return 0;
-    dvec3 at = dv3(m->body.pos.x, m->body.pos.y + 0.5, m->body.pos.z);
-    if (m->kind == MOB_BOAR)
-        physics_drop_item(ph, at, dv3(0.0, 2.0, 0.0), I_RAW_MEAT, 2 + (int)(next(&m->rng) % 2u), 0.4f);
-    remove_at(s, i);
+    die(s, ph, i, 0);
     return 1;
 }
 
@@ -447,6 +510,25 @@ int mob_figure(const mob *m, const float feet[3], float light, float t, entity_i
         for (int i = 0; i < 3; i++) knee[i] += hip[i];
         put_from(&f, &s->upper, hip, half_up, upper);
         put_from(&f, &s->lower, knee, half_low, lower);
+    }
+
+    /* Burning: flames over the back, which light themselves. */
+    for (int k = 0; k < 2 && m->burn_t > 0.0f && f.n < f.max; k++) {
+        entity_instance e = {0};
+        float half = 0.25f * s->body.size[2] * (k ? -1.0f : 1.0f);
+        const float local[3] = {s->body.at[0] * TX, (s->body.at[1] + 0.5f * s->body.size[1]) * TX + 0.2f,
+                                (s->body.at[2] + f.shift + half) * TX};
+        float r[3] = {0};
+        quat_apply(f.facing, local, r);
+        for (int a = 0; a < 3; a++) e.pos[a] = f.feet[a] + r[a];
+        e.scale[0] = s->body.size[0] * TX;
+        e.scale[1] = 0.5f;
+        e.scale[2] = 0.5f * s->body.size[2] * TX;
+        e.tex = (uint32_t)(T_FIRE0 + k) * 0x010101u;
+        entity_set_rot(&e, f.facing);
+        e.light = 1.0f;
+        e.tint = ENTITY_GLOWS;
+        f.out[f.n++] = e;
     }
     return f.n;
 }

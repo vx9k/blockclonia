@@ -48,6 +48,8 @@ void bloom_auto_reset(bloom_auto *a);
 /* One frame's bloom cost in ms. Ignored during the warm-up and once
  * decided; the last sample decides. Returns 1 on the frame it decides. */
 int bloom_auto_add(bloom_auto *a, float ms);
+/* The same against another budget (the shadow map's, shadow.h). */
+int bloom_auto_add_within(bloom_auto *a, float ms, float budget_ms);
 /* Whether to draw bloom this frame. Auto measures with bloom on, and
  * without GPU timestamps (can_measure 0) it cannot, so it stays off. */
 int bloom_active(int mode, const bloom_auto *a, int can_measure);
