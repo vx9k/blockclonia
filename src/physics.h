@@ -56,6 +56,8 @@ typedef struct {
 #define WALK_SPEED 4.0      /* m/s, a brisk walk (game pace) */
 #define SPRINT_SPEED 6.5    /* m/s */
 #define SNEAK_SPEED 1.3     /* m/s */
+#define FOOT_GRIP 2.0     /* static over sliding friction, for a planted sole */
+#define LEG_ACCEL_G 1.2   /* the most the legs push or brake with, in g */
 #define SWIM_SPEED 1.2
 #define SWIM_SPRINT_SPEED 1.8
 

@@ -103,8 +103,13 @@ void survival_limit_input(const health *h, const player *p, player_input *in)
         memset(in, 0, sizeof *in);
         return;
     }
-    in->forward *= l.move_scale;
-    in->right *= l.move_scale;
+    /* Cap the direction at full speed before the body slows it. Physics
+     * caps it too, but after this scaling that would stretch a hurt
+     * player's diagonal (0.8, 0.8) back to full speed. */
+    float len = sqrtf(in->forward * in->forward + in->right * in->right);
+    float scale = len > 1.0f ? l.move_scale / len : l.move_scale;
+    in->forward *= scale;
+    in->right *= scale;
     if (!l.can_sprint) in->sprint = 0;
     /* In water, "jump" is a swim stroke: it needs arms, not legs. */
     if (p->submerged > 0.3) {
