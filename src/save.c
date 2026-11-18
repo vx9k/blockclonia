@@ -123,8 +123,13 @@ int save_decode_column(column *c, const uint8_t *data, size_t len)
 
     /* Decoded aside and applied only once all of it checks out, so a
      * rejected column leaves c as it was. */
-    uint8_t *blocks = mem_calloc(COL_VOL, 1), *meta = (flags & 1) ? mem_calloc(COL_VOL, 1) : NULL;
+    /* blocks is on the stack (96 KB, once per column loaded): rle_decode
+     * writes the stored layers, the rest are zeroed here. meta goes on
+     * the heap because c keeps it. */
+    uint8_t blocks[COL_VOL];
+    uint8_t *meta = (flags & 1) ? mem_calloc(COL_VOL, 1) : NULL;
     _Static_assert(B_AIR == 0, "layers above the stored height are zeroed to air");
+    memset(blocks + vol, 0, COL_VOL - vol);
     size_t used = rle_decode(p, payload, blocks, vol, B_COUNT - 1);
     int ok = used != 0;
     if (ok && meta) {
@@ -142,7 +147,6 @@ int save_decode_column(column *c, const uint8_t *data, size_t len)
     } else {
         ok = 0;
     }
-    mem_free(blocks);
     mem_free(meta);
     return ok ? 0 : -1;
 }

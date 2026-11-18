@@ -21,6 +21,7 @@
 #include "test_util.h"
 #include "ui.h"
 #include "world.h"
+#include "worldgen.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -2076,6 +2077,52 @@ static void test_thread_stack(void)
     CHECK(ok == 1);
 }
 
+/* Leaves garbage where the next call's frame will be, so a stack buffer
+ * read before it is written shows up as a difference. */
+static void dirty_stack(void)
+{
+    volatile unsigned char junk[200 * 1024];
+    for (size_t i = 0; i < sizeof junk; i++) junk[i] = (unsigned char)(i * 131u + 7u);
+}
+
+/* The scratch buffers kept on the stack: caves and strata (worldgen),
+ * the decoded blocks (save) and the column a host generates for a
+ * client (world) give the same result over a dirty stack. */
+static void test_stack_scratch(void)
+{
+    column *a = column_alloc(3, -2), *b = column_alloc(3, -2);
+    worldgen_column(1337, a);
+    dirty_stack();
+    worldgen_column(1337, b);
+    CHECK(memcmp(a->blocks, b->blocks, COL_VOL) == 0);
+
+    /* A column stored to 128 layers decodes with air above them. */
+    column *low = column_alloc(3, -2);
+    memset(low->blocks, B_AIR, COL_VOL);
+    memset(low->blocks, B_STONE, 128 * COL_AREA);
+    uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
+    size_t n = save_encode_column(low, buf, SAVE_MAX_FILE);
+    memset(b->blocks, B_STONE, COL_VOL);
+    dirty_stack();
+    CHECK(n > 0 && save_decode_column(b, buf, n) == 0);
+    CHECK(memcmp(low->blocks, b->blocks, COL_VOL) == 0);
+
+    /* A column never loaded is generated for the encode. */
+    jobs *js = jobs_create(0);
+    world w = {0};
+    world_init(&w, 1337, 2, js, NULL);
+    dirty_stack();
+    n = world_column_encode(&w, 3, -2, buf, SAVE_MAX_FILE);
+    CHECK(n > 0 && save_decode_column(b, buf, n) == 0);
+    CHECK(memcmp(a->blocks, b->blocks, COL_VOL) == 0);
+    world_destroy(&w);
+    jobs_destroy(js);
+    mem_free(buf);
+    column_free(a);
+    column_free(b);
+    column_free(low);
+}
+
 int main(void)
 {
     mem_init(64);
@@ -2084,6 +2131,7 @@ int main(void)
     test_gpupool();
     test_save_roundtrip();
     test_save_heights();
+    test_stack_scratch();
     test_save_reject_untouched();
     test_save_files();
     test_mesher();
