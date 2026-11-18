@@ -11,6 +11,8 @@
 #include "texgen.h"
 #include "thermo.h"
 #include "world.h"
+
+#include <string.h>
 #include "worldgen.h"
 
 #include <math.h>
@@ -1112,8 +1114,44 @@ static void test_tree_seams(void)
     mem_free(g);
 }
 
+/* The generator remembers the slow fields it worked out last (and, for
+ * trees, which grow where). A remembered answer must be the one it would
+ * work out again: the same points, sampled cold, after another seed and
+ * after enough other points to push them out, come back bit for bit, and
+ * a column grown after its neighbours is the column grown alone. */
+static void test_worldgen_memo(void)
+{
+    enum { N = 40 };
+    worldgen_point first[N] = {{0}};
+    for (int i = 0; i < N; i++) first[i] = worldgen_sample(4242, i * 97 - 1900, i * 61 + 300);
+    for (int i = 0; i < 3000; i++) (void)worldgen_sample(i & 1 ? 4242 : 4243, i * 13 - 20000, i * 7);
+    int same = 1;
+    for (int i = 0; i < N; i++) {
+        (void)worldgen_sample(4243, i * 97 - 1900, i * 61 + 300); /* the same point in another world */
+        worldgen_point again = worldgen_sample(4242, i * 97 - 1900, i * 61 + 300);
+        same &= memcmp(&again, &first[i], sizeof again) == 0;
+    }
+    CHECK(same);
+
+    column *alone = column_alloc(3, -2);
+    worldgen_column(4242, alone);
+    for (int dz = -1; dz <= 1; dz++)
+        for (int dx = -1; dx <= 1; dx++) {
+            column *n = column_alloc(3 + dx, -2 + dz);
+            worldgen_column(dx ? 4243 : 4242, n);
+            column_free(n);
+        }
+    column *after = column_alloc(3, -2);
+    worldgen_column(4242, after);
+    CHECK(memcmp(alone->blocks, after->blocks, COL_VOL) == 0);
+    CHECK(!alone->meta == !after->meta && (!alone->meta || memcmp(alone->meta, after->meta, COL_VOL) == 0));
+    column_free(alone);
+    column_free(after);
+}
+
 void test_worldgen_all(void)
 {
+    test_worldgen_memo();
     test_noise_grad();
     test_noise_wrap();
     test_noise_ranges();

@@ -14,6 +14,7 @@
 #include "mathlib.h"
 #include "mem.h"
 #include "noise.h"
+#include "os.h"
 #include "physics.h"
 #include "trees.h"
 #include "world.h"
@@ -135,6 +136,28 @@ static slow slow_at(uint32_t seed, int x, int z)
     return s;
 }
 
+/* slow_at is the dearest call in the generator (the rain shadow alone
+ * shapes the land five times), and every point query a column makes for
+ * its own blocks, its rivers and the trees rooted around it asks again for
+ * the same few grid points. Each thread keeps the latest ones; a hit
+ * returns exactly what slow_at would, so nothing depends on which thread
+ * or column asked first. */
+#define SLOW_MEMO 256
+typedef struct {
+    uint32_t seed;
+    int x, z, used;
+    slow s;
+} slow_memo;
+static OS_THREAD_LOCAL slow_memo g_slow_memo[SLOW_MEMO];
+
+static slow slow_node(uint32_t seed, int x, int z)
+{
+    slow_memo *m = &g_slow_memo[hash2i(seed, x, z) & (SLOW_MEMO - 1)];
+    if (!m->used || m->seed != seed || m->x != x || m->z != z)
+        *m = (slow_memo){seed, x, z, 1, slow_at(seed, x, z)};
+    return m->s;
+}
+
 /* Bilinear between the four grid points around a block: a at (x0, z0), b
  * at (x0 + SLOW, z0), c at (x0, z0 + SLOW), d at (x0 + SLOW, z0 + SLOW). */
 static float mix4(float a, float b, float c, float d, float u, float w)
@@ -154,8 +177,8 @@ static slow slow_mix(const slow *a, const slow *b, const slow *c, const slow *d,
 static slow slow_point(uint32_t seed, int x, int z)
 {
     int x0 = (int)(floor(x / (double)SLOW) * SLOW), z0 = (int)(floor(z / (double)SLOW) * SLOW);
-    slow a = slow_at(seed, x0, z0), b = slow_at(seed, x0 + SLOW, z0);
-    slow c = slow_at(seed, x0, z0 + SLOW), d = slow_at(seed, x0 + SLOW, z0 + SLOW);
+    slow a = slow_node(seed, x0, z0), b = slow_node(seed, x0 + SLOW, z0);
+    slow c = slow_node(seed, x0, z0 + SLOW), d = slow_node(seed, x0 + SLOW, z0 + SLOW);
     return slow_mix(&a, &b, &c, &d, (float)(x - x0) / SLOW, (float)(z - z0) / SLOW);
 }
 
@@ -297,7 +320,7 @@ static int wet_far(const wet_field *f) { return f->dist >= RIVER_REACH && f->lak
  * it, so a river runs below its banks. */
 static float level_corner(uint32_t seed, int x, int z)
 {
-    slow s = slow_at(seed, x, z);
+    slow s = slow_node(seed, x, z);
     float fine = 0.0f;
     return land_at(seed, x, z, &s, &fine) - 2.0f;
 }
@@ -1130,7 +1153,7 @@ void worldgen_column(uint32_t seed, column *c)
     geo gnode[4][4];
     for (int k = 0; k < 4; k++)
         for (int i = 0; i < 4; i++) {
-            node[k][i] = slow_at(seed, bx + (i - 1) * SLOW, bz + (k - 1) * SLOW);
+            node[k][i] = slow_node(seed, bx + (i - 1) * SLOW, bz + (k - 1) * SLOW);
             gnode[k][i] = geo_at(seed, bx + (i - 1) * SLOW, bz + (k - 1) * SLOW);
         }
 
