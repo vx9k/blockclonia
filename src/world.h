@@ -76,6 +76,7 @@ typedef struct {
     uint32_t opaque_quads;
     uint32_t trans_quads;
     uint16_t face_end[6];  /* opaque quads grouped by face, see mesh_counts */
+    uint16_t leaf_end;     /* the cut-out quads' leaves end here, plants follow */
     uint8_t block;         /* which vertex pool block holds it */
     uint8_t glow;          /* a translucent quad glows: bloom's glow pass draws it (bloom.h) */
     uint32_t light_slot;   /* the renderer's light texels for it */
@@ -297,8 +298,9 @@ void worldgen_column(uint32_t seed, column *c);
 /* Bump when worldgen_column makes different terrain for the same seed:
  * worlds record the version they were made with, and a build refuses a
  * world from any other generator instead of joining new terrain onto it. */
-#define WORLDGEN_VERSION 4
-/* Terrain surface height before trees/water; needs nothing loaded. */
+#define WORLDGEN_VERSION 5
+/* The ground's height (the first block above it: air, or the water of the
+ * sea, a river or a lake) before trees; needs nothing loaded. */
 int worldgen_height(uint32_t seed, int x, int z);
 
 /* Column lifetime. alloc returns a COL_LOADING column whose blocks are

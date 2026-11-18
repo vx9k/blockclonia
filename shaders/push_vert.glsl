@@ -11,6 +11,9 @@ layout(push_constant) uniform PushVert {
 const uint FIRE_FIRST = 22u;
 const uint WATER_LAYER = 14u;
 const uint LEAVES_LAYER = 8u;
+const uint LEAVES_FIRST = 117u;  // the other trees' leaves, four of them
+const uint PLANT_FIRST = 121u;   // the ground plants, eleven of them
+const uint PLANT_COUNT = 11u;
 
 // The light atlas's size in texels, inverted (renderer.c, light_plan): set
 // when the pipeline is built, so turning a texel position into a texture

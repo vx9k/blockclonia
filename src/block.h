@@ -70,6 +70,29 @@ typedef enum {
     B_TORCH,     /* a light on a stick; drawn as a small model, not a block */
     B_LAMP,      /* an oil lamp behind glass */
     B_FOXFIRE,   /* glowing fungus on a damp cave floor */
+    /* Trees besides the oak (B_LOG, B_LEAVES): the logs, then the leaves,
+     * each in the same order. */
+    B_BIRCH_LOG,
+    B_SPRUCE_LOG,
+    B_PINE_LOG,
+    B_THORN_LOG, /* the flat-crowned tree of dry country */
+    B_BIRCH_LEAVES,
+    B_SPRUCE_LEAVES,
+    B_PINE_LEAVES,
+    B_THORN_LEAVES,
+    /* Ground plants: crossed quads, no collision, broken by hand. Grasses
+     * and low shrubs, then the flowers. */
+    B_GRASS_TUFT,
+    B_TALL_GRASS,
+    B_FERN,
+    B_REEDS,
+    B_HEATHER,
+    B_DRY_SHRUB,
+    B_BUSH,
+    B_POPPY,
+    B_DANDELION,
+    B_CORNFLOWER,
+    B_OXEYE,
     B_COUNT
 } block_id;
 
@@ -215,6 +238,30 @@ typedef enum {
     T_SMOKE1,
     T_SMOKE2,
     T_FLASH,
+    /* The trees' bark and the birch's pale end grain; then their leaves,
+     * together, so the shaders sway them as one range. */
+    T_BIRCH_SIDE,
+    T_BIRCH_TOP,
+    T_SPRUCE_SIDE,
+    T_PINE_SIDE,
+    T_THORN_SIDE,
+    T_BIRCH_LEAVES,
+    T_SPRUCE_LEAVES,
+    T_PINE_LEAVES,
+    T_THORN_LEAVES,
+    /* The ground plants, in their blocks' order: together, so the shaders
+     * sway them as one range. */
+    T_GRASS_TUFT,
+    T_TALL_GRASS,
+    T_FERN,
+    T_REEDS,
+    T_HEATHER,
+    T_DRY_SHRUB,
+    T_BUSH,
+    T_POPPY,
+    T_DANDELION,
+    T_CORNFLOWER,
+    T_OXEYE,
     T_COUNT
 } tex_id;
 
@@ -223,6 +270,10 @@ _Static_assert(T_COUNT <= 256, "a texture layer is one byte in block_def and the
 #define T_MOB_LAST T_MOB_SOLE
 
 #define T_FIRE_FRAMES 4
+#define T_LEAVES_FIRST T_BIRCH_LEAVES
+#define T_LEAVES_LAST T_THORN_LEAVES
+#define T_PLANT_FIRST T_GRASS_TUFT
+#define T_PLANT_LAST T_OXEYE
 
 /* What a block is made of, as far as tools and sound care: the tool that
  * digs it and the noise it makes. */
@@ -283,6 +334,15 @@ static inline int block_opaque(uint8_t id)
 
 /* Liquids flow and keep their level in the cell's meta (world.h). */
 static inline int block_fluid(uint8_t id) { return id < B_COUNT && (g_blocks[id].flags & BF_FLUID); }
+
+/* A tree's trunk or branch, of any kind. */
+static inline int block_log(uint8_t id) { return id == B_LOG || (id >= B_BIRCH_LOG && id <= B_THORN_LOG); }
+
+/* A ground plant: crossed quads, no collision, uprooted with its soil. */
+static inline int block_plant(uint8_t id) { return id >= B_GRASS_TUFT && id <= B_OXEYE; }
+
+/* Leaves of any tree: drawn cut out, so the sky shows between them. */
+static inline int block_leaves(uint8_t id) { return id < B_COUNT && g_blocks[id].mat == BM_LEAVES && !block_plant(id); }
 
 /* Blocks that keep a 0..7 value in the column's meta array: liquids (their
  * level, 0 = full) and campfires (fuel left, 0 = full). */

@@ -59,7 +59,7 @@ layout(constant_id = 4) const uint GLOW4 = 0u;
 layout(constant_id = 5) const uint GLOW5 = 0u;
 layout(constant_id = 6) const uint GLOW6 = 0u;
 layout(constant_id = 7) const uint GLOW7 = 0u;
-layout(constant_id = 8) const uint ALPHA_MODE = 0u;
+layout(constant_id = 8) const uint ALPHA_MODE = 0u;  // 0 opaque, 1 blended, 2 the glow pass, 3 cut out
 
 layout(location = 0) out vec4 o_color;
 
@@ -96,6 +96,9 @@ void main()
         o_color = vec4(0.0, 0.0, 0.0, glow(LAYER(f_layer), c.rgb) * c.a);
         return;
     }
+    // Leaves: only their own pipeline discards, so the opaque pass keeps
+    // its early depth test.
+    if (ALPHA_MODE == 3u && c.a < 0.5) discard;
     // Coloured block light and sky light, the brighter per channel. The
     // sky's colour and the sun's shading scale its brightness, which on
     // this curve shifts its level, and the held light and the floor are

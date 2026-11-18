@@ -22,7 +22,15 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
   seldom open onto the surface. Under the soil lie granite, basalt and
   folded beds of limestone, sandstone, shale and rock salt, banded in every
   cliff, and every ore sits in the rock it forms in: tin in granite,
-  lead and zinc in limestone, gold in quartz veins. It
+  lead and zinc in limestone, gold in quartz veins. Rivers run from the
+  highlands to the sea in valleys of their own, still the moment they are
+  generated, and lakes fill closed basins. Five kinds of tree grow where
+  their climate suits them (oak, birch, spruce, Scots pine and a
+  flat-crowned thorn tree of dry country), young and old, in stands, with
+  leaves the sky shows through. Under them grows the ground cover of each
+  biome: short and tall grass, ferns in the shade, heather, dry shrubs,
+  berry bushes, reeds by the water and patches of poppies, dandelions,
+  cornflowers and oxeye daisies, all of it moving in the wind. It
   goes on for 2 billion blocks in every direction, as detailed at the edge
   as at spawn.
 
@@ -432,6 +440,7 @@ starts with the defaults and doesn't save changes over it.
 | Video | Sun shadows | Auto (default): on where the GPU's timestamps show the shadow map costing under 0.5 ms a frame, off on integrated GPUs and without timestamps or a filterable depth format; On; Off. Trees, walls and overhangs cast the sun's (by night the moon's) shadow within 64 m, and light shafts show through the air where it is broken |
 | Video | Bloom | Auto (default): on where the GPU's timestamps show it costing under 0.3 ms a frame, off without timestamps; On; Off. A soft glow around fire, lava, torches, foxfire and the moon |
 | Video | Light flicker | on (default)/off: flames, torches and other fire waver; off, they burn at a steady level |
+| Video | Leaves and grass sway | on (default)/off: leaves, grass and flowers move in the wind; off, they stand still |
 | Video | Brightness (nights) | 0–100% (default 0): a floor under all light, for dark nights and caves; daylight is unchanged |
 | Display | Fullscreen | on/off (also F11): borderless at the monitor's own resolution |
 | Display | VSync | on/off |
@@ -471,7 +480,8 @@ entirely.
 | Every entity is one instanced cube draw | Items, particles and falling blocks cost one draw per pass |
 | Push constants instead of uniform buffers | No descriptor updates per frame |
 | Reversed-Z projection with a float depth buffer | Stable depth at any distance |
-| No `discard` in any shader, depth attachment never stored | Keeps early-Z and on-chip depth on tile-based mobile GPUs |
+| `discard` only in the cut-out pass (leaves and plants), drawn after the opaque pass; depth attachment never stored | The opaque terrain keeps early-Z, and so does on-chip depth on tile-based mobile GPUs |
+| Plants are two crossed quads in the cut-out range, after the leaves, left out of the shadow map | A meadow costs four quads a plant and no shadow-map triangles |
 | Camera-relative rendering, doubles for physics positions | No jitter far from spawn |
 | CPU frustum culling per 16³ section, front-to-back opaque, back-to-front translucent | Less overdraw |
 | Meshing and generation on worker threads from private snapshots | Main thread never waits, edits never race |

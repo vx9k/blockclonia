@@ -4,9 +4,11 @@
 #include "inventory.h"
 #include "item.h"
 #include "jobs.h"
+#include "mem.h"
 #include "noise.h"
 #include "physics.h"
 #include "test_util.h"
+#include "texgen.h"
 #include "thermo.h"
 #include "world.h"
 #include "worldgen.h"
@@ -49,7 +51,10 @@ static int ore_band_ok(uint8_t b, int y)
 static int bare_rock(uint8_t b) { return block_get(b)->mat == BM_STONE && !item_valid(b); }
 
 /* What may stand on the ground: nothing that belongs to the ground. */
-static int above_ground(uint8_t b) { return b == B_AIR || b == B_WATER || b == B_ICE || b == B_LOG || b == B_LEAVES; }
+static int above_ground(uint8_t b)
+{
+    return b == B_AIR || b == B_WATER || b == B_ICE || block_log(b) || block_leaves(b) || block_plant(b);
+}
 
 /* The derivative noise2d_grad reports is the slope of noise2d. */
 static void test_noise_grad(void)
@@ -122,7 +127,7 @@ static void test_climate(void)
 static void test_generators(void)
 {
     /* Worlds keep growing exactly as they began. */
-    CHECK(hash_columns(1337) == 0xab58b795f49ee954ull);
+    CHECK(hash_columns(1337) == 0x16293fedd9811a9cull);
 
     long ore[3] = {0}, cave = 0, under = 0, bad_band = 0, hanging = 0, no_bedrock = 0, bad_ground = 0;
     long mouths = 0, mouth_cols = 0, cols = 0, fox = 0, bad_fox = 0;
@@ -235,7 +240,7 @@ static int slope_at(uint32_t seed, int x, int z, int h, int *rise)
 
 typedef struct {
     long seen[BIOME_COUNT], wrong, warm_snow, cold_grass, bad_ice;
-    long cliffs, scree, sand_beach, desert_sand, snow, ice;
+    long cliffs, scree, sand_beach, desert_sand, snow, ice, beds;
 } soil_tally;
 
 /* What the top block of the ground should be (B_ROCK for any bare rock),
@@ -269,6 +274,12 @@ static void soil_column(int cx, int cz, int step, soil_tally *t)
             uint8_t top = c->blocks[col_index(x, h - 1, z)];
             t->seen[p.b]++;
             if (top == B_AIR) continue; /* a cave mouth */
+            if (p.level > SEA_LEVEL) {
+                /* An inland river or lake: a bed of gravel, sand or clay. */
+                t->beds++;
+                t->wrong += top != B_GRAVEL && top != B_SAND && top != B_CLAY;
+                continue;
+            }
             uint8_t want = soil_want(p, slope, rise, t);
             t->wrong += want != B_AIR && (want == B_ROCK ? !bare_rock(top) : top != want);
             t->sand_beach += p.b == BIOME_BEACH && top == B_SAND;
@@ -304,9 +315,19 @@ static void test_soil(void)
 
 /* Trees grow by the rain: thick in forest and taiga, sparse on the
  * steppe, none in the desert or the sea. */
+/* Which wood a trunk is, by the climate it grows in: temperate (forest,
+ * meadow, wetland), cold (taiga, alpine) and dry (scrub, steppe). */
+static int tree_climate(biome b)
+{
+    if (b == BIOME_TAIGA || b == BIOME_ALPINE) return 1;
+    if (b == BIOME_SCRUB || b == BIOME_STEPPE) return 2;
+    return 0;
+}
+
 static void test_trees(void)
 {
-    long trunks[BIOME_COUNT] = {0}, ground[BIOME_COUNT] = {0};
+    long trunks[BIOME_COUNT] = {0}, ground[BIOME_COUNT] = {0}, kind[3][B_COUNT] = {{0}};
+    long snags = 0, young = 0, tall = 0;
     for (int i = 0; i < 160; i++) {
         int cx = (i * 1187) % 1500 - 750, cz = (i * 1733) % 1500 - 750;
         column *c = column_alloc(cx, cz);
@@ -315,10 +336,37 @@ static void test_trees(void)
             for (int x = 2; x < CHUNK_W - 2; x += 2) {
                 worldgen_point p = worldgen_sample(1337, cx * CHUNK_W + x, cz * CHUNK_W + z);
                 ground[p.b]++;
-                trunks[p.b] += p.height < WORLD_H && c->blocks[col_index(x, p.height, z)] == B_LOG;
+                trunks[p.b] += p.height < WORLD_H && block_log(c->blocks[col_index(x, p.height, z)]);
             }
+        /* Every trunk, by its foot on the ground: its kind by climate, its
+         * height, and whether it has leaves at all. */
+        for (int z = 0; z < CHUNK_W; z++)
+            for (int x = 0; x < CHUNK_W; x++)
+                for (int y = 2; y < WORLD_H - 2; y++) {
+                    uint8_t b = c->blocks[col_index(x, y, z)], under = c->blocks[col_index(x, y - 1, z)];
+                    if (!block_log(b) || block_log(under) || block_leaves(under) || under == B_AIR) continue;
+                    int top = y;
+                    while (top < WORLD_H - 1 && block_log(c->blocks[col_index(x, top + 1, z)])) top++;
+                    worldgen_point p = worldgen_sample(1337, cx * CHUNK_W + x, cz * CHUNK_W + z);
+                    kind[tree_climate(p.b)][b]++;
+                    snags += top + 1 < WORLD_H && c->blocks[col_index(x, top + 1, z)] == B_AIR;
+                    young += top - y < 4;
+                    tall += top - y >= 7;
+                    break;
+                }
         column_free(c);
     }
+    /* Oak and birch in the temperate woods, conifers in the cold, the
+     * thorn tree only where it is dry. */
+    CHECK(kind[0][B_LOG] > 0 && kind[0][B_BIRCH_LOG] > 0);
+    CHECK(kind[1][B_SPRUCE_LOG] > kind[1][B_LOG] && kind[1][B_PINE_LOG] > 0);
+    CHECK(kind[0][B_THORN_LOG] == 0 && kind[1][B_THORN_LOG] == 0 && kind[1][B_LOG] == 0);
+    CHECK(kind[2][B_THORN_LOG] > 0);
+    /* Mostly grown trees, some young and short, a few tall, a few dead. */
+    long all = 0;
+    for (int q = 0; q < 3; q++)
+        for (int b = 0; b < B_COUNT; b++) all += kind[q][b];
+    CHECK(young > 0 && tall > 0 && snags > 0 && snags < all / 10 && young < all / 2);
     double forest = (double)(trunks[BIOME_FOREST] + trunks[BIOME_TAIGA]) /
                     (double)(ground[BIOME_FOREST] + ground[BIOME_TAIGA] + 1);
     double steppe = (double)trunks[BIOME_STEPPE] / (double)(ground[BIOME_STEPPE] + 1);
@@ -423,6 +471,151 @@ static void test_sample(void)
     CHECK(differ > 250);
 }
 
+/* The first block of an inland river or lake found walking out from the
+ * origin in 64 m steps, or 0 when there is none within 8 km. */
+static int find_river(uint32_t seed, int *rx, int *rz)
+{
+    for (int r = 0; r < 8000; r += 64)
+        for (int a = -r; a <= r; a += 64) {
+            int pts[4][2] = {{a, -r}, {a, r}, {-r, a}, {r, a}};
+            for (int k = 0; k < 4; k++)
+                if (worldgen_sample(seed, pts[k][0], pts[k][1]).level > SEA_LEVEL) {
+                    *rx = pts[k][0];
+                    *rz = pts[k][1];
+                    return 1;
+                }
+        }
+    return 0;
+}
+
+/* Rivers and lakes run above the sea, and their water lies still as
+ * generated: over the 5 x 5 columns around one, no water block has air
+ * beside it or below it, across column borders too, and every column has
+ * the ground and water the single-point query says. */
+static void test_rivers(void)
+{
+    int rx = 0, rz = 0;
+    CHECK(find_river(1337, &rx, &rz));
+    int cx0 = (int)floor(rx / (double)CHUNK_W) - 2, cz0 = (int)floor(rz / (double)CHUNK_W) - 2;
+    enum { N = 5, W = N * CHUNK_W };
+    uint8_t *b = mem_alloc((size_t)W * W * WORLD_H);
+    for (int cz = 0; cz < N; cz++)
+        for (int cx = 0; cx < N; cx++) {
+            column *c = column_alloc(cx0 + cx, cz0 + cz);
+            worldgen_column(1337, c);
+            for (int y = 0; y < WORLD_H; y++)
+                for (int z = 0; z < CHUNK_W; z++)
+                    for (int x = 0; x < CHUNK_W; x++)
+                        b[((size_t)y * W + (size_t)(cz * CHUNK_W + z)) * W + (size_t)(cx * CHUNK_W + x)] =
+                            c->blocks[col_index(x, y, z)];
+            column_free(c);
+        }
+#define AT(x, y, z) b[((size_t)(y) * W + (size_t)(z)) * W + (size_t)(x)]
+    long water = 0, inland = 0, leaks = 0, wrong = 0;
+    for (int z = 0; z < W; z++)
+        for (int x = 0; x < W; x++) {
+            worldgen_point p = worldgen_sample(1337, cx0 * CHUNK_W + x, cz0 * CHUNK_W + z);
+            /* The water (or its ice) fills from the ground to the level, under
+             * nothing but air or a canopy from the bank. */
+            if (p.level) {
+                uint8_t at = AT(x, p.height, z), surf = AT(x, p.level - 1, z), over = AT(x, p.level, z);
+                wrong += (at != B_WATER && at != B_ICE) || (surf != B_WATER && surf != B_ICE) ||
+                         (over != B_AIR && over != B_LEAVES && over != B_LOG);
+                inland += p.level > SEA_LEVEL;
+            } else {
+                wrong += AT(x, p.height - 1, z) == B_WATER;
+            }
+            for (int y = 1; y < WORLD_H; y++) {
+                if (AT(x, y, z) != B_WATER) continue;
+                water++;
+                leaks += AT(x, y - 1, z) == B_AIR;
+                if (x > 0) leaks += AT(x - 1, y, z) == B_AIR;
+                if (x < W - 1) leaks += AT(x + 1, y, z) == B_AIR;
+                if (z > 0) leaks += AT(x, y, z - 1) == B_AIR;
+                if (z < W - 1) leaks += AT(x, y, z + 1) == B_AIR;
+            }
+        }
+#undef AT
+    mem_free(b);
+    CHECK(inland > 20 && water > 100);
+    CHECK(leaks == 0 && wrong == 0);
+}
+
+/* Over a 6 km square sampled about every 30 m: inland water stays below the hills
+ * (no level above 70 m over the sea) and comes in terraces 3 m apart, every water column's ground lies under its level, the dry ground
+ * beside water is never below it, and another seed puts its rivers
+ * elsewhere. */
+static void test_river_levels(void)
+{
+    long inland = 0, high = 0, off_step = 0, under = 0, low_bank = 0, other = 0, same = 0;
+    for (int z = -3000; z < 3000; z += 31)
+        for (int x = -3000; x < 3000; x += 29) {
+            worldgen_point p = worldgen_sample(1337, x, z);
+            if (p.level) under += p.height >= p.level;
+            if (p.level <= SEA_LEVEL) continue;
+            inland++;
+            high += p.level > SEA_LEVEL + 70;
+            off_step += (p.level - SEA_LEVEL) % 3 != 0;
+            static const int D[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+            for (int k = 0; k < 4; k++) {
+                worldgen_point q = worldgen_sample(1337, x + D[k][0], z + D[k][1]);
+                /* A drier neighbour holds this water in: as high as it. */
+                low_bank += !q.level && q.height < p.level;
+            }
+            worldgen_point o = worldgen_sample(4242, x, z);
+            other += o.level > SEA_LEVEL;
+            same += o.level == p.level;
+        }
+    CHECK(inland > 30 && high == 0 && off_step == 0);
+    CHECK(under == 0 && low_bank == 0);
+    CHECK(other > 0 && same < inland / 2);
+}
+
+/* Rivers sit in lowland and run dry in the desert: most inland water lies
+ * within 30 m of the sea, and none lies in the driest country. */
+static void test_river_climate(void)
+{
+    long low = 0, all = 0, dry = 0;
+    for (int z = -6000; z < 6000; z += 67)
+        for (int x = -6000; x < 6000; x += 61) {
+            worldgen_point p = worldgen_sample(1337, x, z);
+            if (p.level <= SEA_LEVEL) continue;
+            all++;
+            low += p.level <= SEA_LEVEL + 30;
+            dry += p.rain < 0.12f;
+        }
+    CHECK(all > 30 && low * 2 > all && dry == 0);
+}
+
+/* A river's bed and banks hold: over the columns around one, no cave opens
+ * within a block of inland water (water would drain into it), and the beds
+ * are gravel, sand or clay rather than the soil of the land around. */
+static void test_river_beds(void)
+{
+    int rx = 0, rz = 0;
+    CHECK(find_river(1337, &rx, &rz));
+    int cx0 = (int)floor(rx / (double)CHUNK_W) - 1, cz0 = (int)floor(rz / (double)CHUNK_W) - 1;
+    long beds = 0, odd = 0, holes = 0;
+    for (int cz = cz0; cz < cz0 + 3; cz++)
+        for (int cx = cx0; cx < cx0 + 3; cx++) {
+            column *c = column_alloc(cx, cz);
+            worldgen_column(1337, c);
+            for (int z = 0; z < CHUNK_W; z++)
+                for (int x = 0; x < CHUNK_W; x++) {
+                    worldgen_point p = worldgen_sample(1337, cx * CHUNK_W + x, cz * CHUNK_W + z);
+                    if (p.level <= SEA_LEVEL) continue;
+                    uint8_t bed = c->blocks[col_index(x, p.height - 1, z)];
+                    beds++;
+                    odd += bed != B_GRAVEL && bed != B_SAND && bed != B_CLAY;
+                    /* The ground under the bed down to the stone is solid. */
+                    for (int y = p.height - 6; y < p.height; y++)
+                        holes += y > 0 && c->blocks[col_index(x, y, z)] == B_AIR;
+                }
+            column_free(c);
+        }
+    CHECK(beds > 20 && odd == 0 && holes == 0);
+}
+
 /* At the world's edge, 2000 km out, the terrain is as sane as near the
  * origin: heights in range, known biomes, no cliff between neighbouring
  * columns that the land's slope could not make, and the small-scale
@@ -516,6 +709,188 @@ static void test_caves_stand(void)
     jobs_destroy(js);
 }
 
+/* Every tree in a stretch of mixed forest stands as generated: no leaf
+ * hangs beyond what its span carries. */
+static void test_trees_stand(void)
+{
+    jobs *js = jobs_create(0);
+    world w = {0};
+    world_init(&w, 1337, 4, js, NULL);
+    world_load_blocking(&w, 72.0, -72.0, 3);
+    physics ph = {0};
+    physics_init(&ph, &w);
+    int leaves = 0, logs = 0, fell = 0;
+    for (int z = -104; z < -40; z++)
+        for (int x = 40; x < 104; x++)
+            for (int y = 40; y < WORLD_H - 1; y++) {
+                uint8_t b = world_get(&w, x, y, z);
+                if (!block_log(b) && !block_leaves(b)) continue;
+                leaves += block_leaves(b);
+                logs += block_log(b);
+                fell += physics_check_structure(&ph, x, y, z);
+            }
+    CHECK(leaves > 300 && logs > 50 && leaves > 3 * logs);
+    CHECK(fell == 0);
+    physics_destroy(&ph);
+    world_destroy(&w);
+    jobs_destroy(js);
+}
+
+/* Leaves are cut out: a share of each leaf texture is see-through, but under
+ * half, so every coarser mip, averaged over the gaps, is solid and a
+ * distant canopy closes up. */
+static void test_leaf_textures(void)
+{
+    static const int LEAF[] = {T_LEAVES, T_BIRCH_LEAVES, T_SPRUCE_LEAVES, T_PINE_LEAVES, T_THORN_LEAVES};
+    uint8_t *tex = mem_alloc(texgen_total_bytes());
+    texgen_build(tex);
+    for (int i = 0; i < 5; i++) {
+        int gaps = 0;
+        for (int y = 0; y < TEX_SIZE; y++)
+            for (int x = 0; x < TEX_SIZE; x++) {
+                uint8_t t[4] = {0};
+                texgen_texel(LEAF[i], x, y, t);
+                gaps += t[3] < 128;
+                /* A gap keeps a leaf colour, for whatever draws it whole. */
+                CHECK(t[1] > t[2] && t[1] > 20);
+            }
+        CHECK(gaps > TEX_SIZE * TEX_SIZE / 10 && gaps < TEX_SIZE * TEX_SIZE * 2 / 5);
+        int thin = 0;
+        for (int m = 2; m < TEX_MIPS; m++) {
+            const uint8_t *mip = tex + texgen_offset(LEAF[i], m);
+            int n = TEX_SIZE >> m;
+            for (int t = 0; t < n * n; t++) thin += mip[4 * t + 3] < 128;
+        }
+        CHECK(thin == 0);
+    }
+    /* Bark and stone stay solid. */
+    uint8_t t[4] = {0};
+    texgen_texel(T_BIRCH_SIDE, 3, 3, t);
+    CHECK(t[3] == 255 && t[0] > 150);
+    mem_free(tex);
+}
+
+/* Every kind of log splits into planks and chars, and only an oak's
+ * leaves give apples. */
+static void test_tree_items(void)
+{
+    static const uint8_t LOGS[] = {B_LOG, B_BIRCH_LOG, B_SPRUCE_LOG, B_PINE_LOG, B_THORN_LOG};
+    for (int i = 0; i < 5; i++) {
+        CHECK(block_log(LOGS[i]) && !block_leaves(LOGS[i]) &&
+              block_leaves((uint8_t)(LOGS[i] == B_LOG ? B_LEAVES : LOGS[i] + 4)));
+        int planks = 0, charcoal = 0;
+        for (int r = 0; r < g_recipe_count; r++) {
+            if (g_recipes[r].in[0].id != LOGS[i]) continue;
+            planks += g_recipes[r].out.id == B_PLANKS && g_recipes[r].out.count == 4;
+            charcoal += g_recipes[r].out.id == I_CHARCOAL;
+        }
+        CHECK(planks == 1 && charcoal == 1);
+    }
+    CHECK(!block_log(B_PLANKS) && !block_leaves(B_GRASS) && !block_leaves(B_COUNT));
+    uint32_t rng = 11;
+    int apples[2] = {0}, fibre = 0;
+    for (int k = 0; k < 600; k++) {
+        item_stack out[3] = {{0}};
+        int n = item_drops(k & 1 ? B_PINE_LEAVES : B_LEAVES, &rng, out);
+        for (int j = 0; j < n; j++) {
+            apples[k & 1] += out[j].id == I_APPLE;
+            fibre += out[j].id == I_FIBRE;
+        }
+    }
+    CHECK(apples[0] > 20 && apples[1] == 0 && fibre > 200);
+}
+
+/* Plants are cut out like leaves, but thin: a share of each texture is
+ * clear and a share solid, and a clear texel keeps a plant's colour (no
+ * dark rim in the mips). Each flower shows its own colour. */
+static void test_plant_textures(void)
+{
+    for (int l = T_PLANT_FIRST; l <= T_PLANT_LAST; l++) {
+        int clear = 0, dark = 0;
+        for (int y = 0; y < TEX_SIZE; y++)
+            for (int x = 0; x < TEX_SIZE; x++) {
+                uint8_t t[4] = {0};
+                texgen_texel(l, x, y, t);
+                clear += t[3] == 0;
+                dark += t[3] == 0 && t[0] + t[1] + t[2] < 120;
+                CHECK(t[3] == 0 || t[3] == 255);
+            }
+        CHECK(clear > TEX_SIZE * TEX_SIZE / 5 && clear < TEX_SIZE * TEX_SIZE - 12 && dark == 0);
+    }
+    /* Red, yellow, blue and white heads; the stem green. */
+    static const int RGB[4][3] = {{1, 0, 0}, {1, 1, 0}, {0, 0, 1}, {1, 1, 1}};
+    for (int k = 0; k < 4; k++) {
+        int head = 0;
+        for (int y = 0; y < 8; y++)
+            for (int x = 0; x < TEX_SIZE; x++) {
+                uint8_t t[4] = {0};
+                texgen_texel(T_POPPY + k, x, y, t);
+                const int on[3] = {t[0] > 180, t[1] > 180, t[2] > 180};
+                head += t[3] && on[0] == RGB[k][0] && on[1] == RGB[k][1] && on[2] == RGB[k][2];
+            }
+        CHECK(head >= 6);
+    }
+}
+
+/* Every plant stands on soil in open air, never under water; reeds stand
+ * by water; and each country has its own cover: flowers and grass on the
+ * meadows, ferns in the woods' shade, tall grass on the steppe, heather in
+ * the cold, dry shrubs in the dry. */
+static void test_plants(void)
+{
+    long kinds[BIOME_COUNT][B_COUNT] = {{0}}, open[BIOME_COUNT] = {0};
+    int bad = 0, dry_reeds = 0, reeds = 0, shaded_ferns = 0;
+    /* A spread of columns, and a shore at 24,-31 for the reeds. */
+    for (int i = 0; i < 64; i++) {
+        int cx = i < 48 ? (i * 1187) % 1500 - 750 : 24 + (i - 48) % 4;
+        int cz = i < 48 ? (i * 1733) % 1500 - 750 : -31 + (i - 48) / 4;
+        column *c = column_alloc(cx, cz);
+        worldgen_column(1337, c);
+        for (int z = 0; z < CHUNK_W; z++)
+            for (int x = 0; x < CHUNK_W; x++)
+                for (int y = 1; y < WORLD_H - 1; y++) {
+                    uint8_t b = c->blocks[col_index(x, y, z)];
+                    if (!block_plant(b)) continue;
+                    uint8_t below = c->blocks[col_index(x, y - 1, z)], above = c->blocks[col_index(x, y + 1, z)];
+                    int m = block_get(below)->mat;
+                    bad += !block_solid(below) || (m != BM_GRASS && m != BM_DIRT && m != BM_SAND);
+                    bad += block_fluid(above);
+                    worldgen_point p = worldgen_sample(1337, cx * CHUNK_W + x, cz * CHUNK_W + z);
+                    kinds[p.b][b]++;
+                    open[p.b]++;
+                    if (b == B_REEDS && x > 0 && x < CHUNK_W - 1 && z > 0 && z < CHUNK_W - 1) {
+                        int wet = 0;
+                        for (int k = 0; k < 4; k++) {
+                            int nx = x + (k == 0) - (k == 1), nz = z + (k == 2) - (k == 3);
+                            wet |= c->blocks[col_index(nx, y - 1, nz)] == B_WATER ||
+                                   c->blocks[col_index(nx, y, nz)] == B_WATER;
+                        }
+                        dry_reeds += !wet;
+                        reeds++;
+                    }
+                    if (b == B_FERN)
+                        for (int ly = y + 1; ly < y + 12 && ly < WORLD_H; ly++)
+                            if (block_leaves(c->blocks[col_index(x, ly, z)])) {
+                                shaded_ferns++;
+                                break;
+                            }
+                }
+        column_free(c);
+    }
+    CHECK(bad == 0);
+    CHECK(reeds > 0 && dry_reeds == 0);
+    long meadow_flowers = 0;
+    for (int f = B_POPPY; f <= B_OXEYE; f++) meadow_flowers += kinds[BIOME_MEADOW][f];
+    CHECK(kinds[BIOME_MEADOW][B_GRASS_TUFT] > kinds[BIOME_MEADOW][B_TALL_GRASS] && meadow_flowers > 0);
+    CHECK(kinds[BIOME_FOREST][B_FERN] > 0 && shaded_ferns > 0);
+    CHECK(kinds[BIOME_STEPPE][B_TALL_GRASS] > kinds[BIOME_STEPPE][B_GRASS_TUFT]);
+    CHECK(kinds[BIOME_TAIGA][B_HEATHER] + kinds[BIOME_TUNDRA][B_HEATHER] + kinds[BIOME_ALPINE][B_HEATHER] > 0);
+    CHECK(kinds[BIOME_SCRUB][B_DRY_SHRUB] > 0 && kinds[BIOME_DESERT][B_GRASS_TUFT] == 0);
+    CHECK(kinds[BIOME_MEADOW][B_HEATHER] == 0 && kinds[BIOME_TUNDRA][B_TALL_GRASS] == 0);
+    /* Ground cover, not a carpet: under half the open ground of a meadow. */
+    CHECK(open[BIOME_MEADOW] > 100);
+}
+
 static void test_smelting(void)
 {
     int furnace = -1, iron = -1;
@@ -556,9 +931,18 @@ void test_worldgen_all(void)
     test_cave_shapes();
     test_landforms();
     test_sample();
+    test_rivers();
+    test_river_levels();
+    test_river_climate();
+    test_river_beds();
     test_far_edge();
     test_climate_zones();
     test_dry_landforms();
     test_caves_stand();
+    test_trees_stand();
+    test_leaf_textures();
+    test_tree_items();
+    test_plant_textures();
+    test_plants();
     test_smelting();
 }

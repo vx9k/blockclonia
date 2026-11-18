@@ -37,7 +37,8 @@ typedef enum {
 } biome;
 
 typedef struct {
-    int height;    /* the first air block above the ground (water fills to SEA_LEVEL) */
+    int height;    /* the first block above the ground: air, or water up to level */
+    int level;     /* the first air block above the sea, a river or a lake here; 0: dry */
     float temp;    /* mean air temperature at the ground, C */
     float rain;    /* yearly rainfall, 0 (desert) to 1 (wettest) */
     biome b;

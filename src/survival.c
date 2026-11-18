@@ -89,7 +89,7 @@ void survival_impacts(health *h, const world *w, const player_contact *c, const 
     /* Falling blocks that struck the player. */
     for (int i = 0; i < c->hit_count; i++) {
         const player_hit *k = &c->hits[i];
-        double soft = k->block == B_LEAVES
+        double soft = block_leaves(k->block)
                           ? 0.95
                           : (k->block == B_SNOW ? 0.7 : (k->block == B_SAND || k->block == B_GRAVEL ? 0.3 : 0.0));
         health_struck(h, (double)k->mass, (double)k->speed, (double)k->height, soft);

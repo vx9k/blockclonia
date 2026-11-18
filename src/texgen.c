@@ -6,6 +6,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 typedef struct { uint8_t r, g, b, a; } rgba;
 
@@ -157,6 +158,151 @@ static rgba face(int x, int y, int n)
     return shade(214, 170, 136, 255, n / 3);
 }
 
+static int leaf_gap(int layer, int x, int y, int holes)
+{
+    return (int)((hash2i(0x1EAFu + (uint32_t)layer, x / 2, y) + hash2i(0x1EAFu, x, y / 2) % 7u) % 100u) < holes;
+}
+
+/* Leaves cut out against the sky: a share of `holes` percent of the
+ * texels is see-through, in clumps of two so the gaps read at a distance.
+ * No 4x4 block has more than 6 gaps in 16, so from the third mip on (the
+ * box filter averages a block into a texel) the leaves are solid and a
+ * distant canopy closes up. A gap keeps a darker leaf colour for what
+ * draws the texture without cutting it out (a falling block, an icon). */
+static rgba leaf(int layer, int x, int y, rgba c, int holes, int grain)
+{
+    rgba t = shade(c.r, c.g, c.b, 255, px_noise(layer, x, y, grain));
+    if (!leaf_gap(layer, x, y, holes)) return t;
+    int before = 0;
+    for (int i = 0; i < (y & 3) * 4 + (x & 3); i++)
+        before += leaf_gap(layer, (x & ~3) + (i & 3), (y & ~3) + i / 4, holes);
+    if (before >= 6) return t;
+    return (rgba){(uint8_t)(t.r * 3 / 5), (uint8_t)(t.g * 3 / 5), (uint8_t)(t.b * 3 / 5), 0};
+}
+
+/* One stem of a plant drawn bottom up: stem i of `seed` stands at a
+ * hashed column, lo..hi texels tall, leaning up to `lean` texels at its
+ * tip. Returns how far row `up` (0 at the foot) is below the tip, 0 above
+ * it, and the stem's column there in *cx. */
+static int stem(uint32_t seed, int i, int up, int lo, int hi, int lean, int *cx)
+{
+    uint32_t h = hash2i(seed, i, 7);
+    int height = lo + (int)((h >> 8) % (uint32_t)(hi - lo + 1));
+    int l = (int)((h >> 16) % (uint32_t)(2 * lean + 1)) - lean;
+    *cx = 2 + (int)(h % 12u) + l * up * up / (15 * 15);
+    return up < height ? height - up : 0;
+}
+
+/* A flower's head: a diamond of petals round (cx, cy), its middle in the
+ * centre colour. */
+static int petal(int x, int y, int cx, int cy) { return abs(x - cx) + abs(y - cy) <= (x == cx || y == cy ? 2 : 1); }
+
+/* Ground plants, drawn on crossed quads, rows top down. A clear texel
+ * keeps the plant's colour, so the box-filtered mips fade a plant out
+ * instead of darkening its edges; past a few metres the thin ones are
+ * gone, which the eye takes for distance. */
+static rgba plant(int layer, int x, int y)
+{
+    int up = 15 - y, n = px_noise(layer, x, y, 10), cx = 0;
+    const rgba clear = {70, 104, 46, 0};
+    uint32_t seed = 0x9A5u + (uint32_t)layer * 131u, h = hash2i(seed, x, y);
+    switch (layer) {
+    case T_GRASS_TUFT:
+    case T_TALL_GRASS: {
+        int tall = layer == T_TALL_GRASS;
+        for (int i = 0; i < (tall ? 10 : 8); i++) {
+            int tip = stem(seed, i, up, tall ? 9 : 4, tall ? 15 : 9, tall ? 3 : 2, &cx);
+            if (!tip || x != cx) continue;
+            /* Tall grass in seed: a pale head on the tallest stems. */
+            if (tall && tip <= 2 && up >= 10 && (i & 1)) return shade(150, 150, 92, 255, n);
+            return shade(64 + up * 3, 112 + up * 4, 42, 255, n);
+        }
+        return clear;
+    }
+    case T_FERN:
+        /* Fronds arching out from the middle, leaflets on alternate rows. */
+        for (int i = 0; i < 5; i++) {
+            int tip = stem(seed, i, up, 8, 13, 6, &cx);
+            if (!tip) continue;
+            if (x == cx || (tip > 2 && abs(x - cx) == 1 && ((up + i) & 1)))
+                return shade(48 + up * 2, 104 + up * 3, 40, 255, n);
+        }
+        return clear;
+    case T_REEDS:
+        for (int i = 0; i < 6; i++) {
+            int tip = stem(seed, i, up, 11, 16, 1, &cx);
+            if (!tip) continue;
+            /* A brown seed head near the top of some stems. */
+            if (i < 3 && tip >= 2 && tip <= 5 && (x == cx || x == cx + 1)) return shade(110, 70, 40, 255, n);
+            if (x == cx) return shade(96 + up, 122 + up * 2, 58, 255, n);
+        }
+        return clear;
+    case T_HEATHER: {
+        /* A low mound, its tips flowering pink. */
+        float dx = ((float)x - 7.5f) / 7.5f, dy = (float)up / 6.5f;
+        if (dx * dx + dy * dy >= 1.0f || h % 5u == 0) return clear;
+        if (up >= 2 && h % 100u < 18u + (uint32_t)up * 5u) return shade(178, 92, 152, 255, n);
+        return shade(58, 82, 50, 255, n);
+    }
+    case T_DRY_SHRUB:
+        for (int i = 0; i < 7; i++) {
+            int tip = stem(seed, i, up, 6, 11, 4, &cx);
+            if (tip && (x == cx || (up % 3 == 1 && x == cx + 1 && tip > 1))) return shade(128, 104, 78, 255, n);
+        }
+        return clear;
+    case T_BUSH: {
+        /* A round, dense bush with a few gaps and red berries. */
+        float dx = (float)x - 7.5f, dy = (float)y - 8.5f;
+        if (dx * dx + dy * dy > 49.0f || h % 9u == 0) return clear;
+        if (h % 31u == 1) return shade(176, 34, 40, 255, n / 2);
+        return shade(48, 94, 40, 255, n);
+    }
+    default: {
+        /* Flowers: two to a texture, a tall one and a short one, on
+         * stems with a leaf. */
+        static const rgba HEAD[4] = {{204, 40, 32, 255},
+                                     {240, 200, 44, 255},
+                                     {74, 104, 214, 255},
+                                     {236, 236, 226, 255}};
+        static const rgba MID[4] = {{40, 20, 20, 255}, {226, 168, 30, 255}, {44, 60, 150, 255}, {232, 188, 40, 255}};
+        int k = layer - T_POPPY;
+        for (int f = 0; f < 2; f++) {
+            int sx = f ? 11 : 5, top = f ? 9 : 12;
+            if (petal(x, y, sx, 15 - top))
+                return x == sx && y == 15 - top ? MID[k] : shade(HEAD[k].r, HEAD[k].g, HEAD[k].b, 255, n / 2);
+            if (x == sx && up < top - 1) return shade(64, 116, 44, 255, n);
+            if (up == top / 2 && x == sx + (f ? -1 : 1)) return shade(70, 126, 48, 255, n);
+        }
+        return clear;
+    }
+    }
+}
+
+/* The trees' bark, and the birch's end grain. */
+static rgba bark(int layer, int x, int y, int n)
+{
+    switch (layer) {
+    case T_BIRCH_SIDE: {
+        /* White bark with dark lenticels in short horizontal dashes. */
+        int dash = hash2i(0xB1Cu, x / 3, y) % 9u == 0;
+        return dash ? shade(46, 42, 38, 255, n / 3) : shade(214, 210, 198, 255, n / 3);
+    }
+    case T_BIRCH_TOP: {
+        int dx = x * 2 - 15, dy = y * 2 - 15;
+        if (x == 0 || y == 0 || x == 15 || y == 15) return shade(214, 210, 198, 255, n / 3);
+        return shade(222, 200, 150, 255, ((dx * dx + dy * dy) / 40) % 2 ? -12 : 0);
+    }
+    case T_SPRUCE_SIDE: return shade(80, 60, 44, 255, (hash2i(0x5B7u, x, y / 5) % 4u == 0 ? -20 : 0) + n / 2);
+    case T_PINE_SIDE: {
+        /* Orange-brown plates between darker furrows. */
+        int plate = (int)(hash2i(0x914Eu, x / 3, (y + (x / 3) * 2) / 4) % 3u) * 10;
+        return (x + y / 4) % 3 == 0 ? shade(96, 58, 38, 255, n / 3) : shade(150, 92, 54, 255, plate + n / 3);
+    }
+    default: break;
+    }
+    return shade(80, 60, 44, 255, n / 2);
+}
+
 static rgba texel(int layer, int x, int y)
 {
     int n = px_noise(layer, x, y, 12);
@@ -166,6 +312,7 @@ static rgba texel(int layer, int x, int y)
     if (mobskin_texel(layer, x, y, px)) return (rgba){px[0], px[1], px[2], px[3]};
     if (layer >= T_CRACK0 && layer <= T_CRACK3) return crack(layer - T_CRACK0, x, y);
     if (layer >= T_FIRE0 && layer <= T_FIRE3) return flame(layer - T_FIRE0, x, y);
+    if (layer >= T_PLANT_FIRST && layer <= T_PLANT_LAST) return plant(layer, x, y);
     for (int i = 0; i < (int)(sizeof ORE_ART / sizeof ORE_ART[0]); i++) {
         if (ORE_ART[i].layer != layer) continue;
         /* Rock with clusters of mineral: a texel is ore where a coarse
@@ -266,7 +413,16 @@ static rgba texel(int layer, int x, int y)
         int ring = (d2 / 40) % 2 ? -14 : 0;
         return shade(176, 144, 90, 255, ring + n / 3);
     }
-    case T_LEAVES: return shade(58, 110, 38, 255, px_noise(layer, x, y, 22));
+    case T_LEAVES: return leaf(layer, x, y, (rgba){58, 110, 38, 255}, 26, 22);
+    case T_BIRCH_LEAVES: return leaf(layer, x, y, (rgba){108, 158, 58, 255}, 32, 22);
+    case T_SPRUCE_LEAVES: return leaf(layer, x, y, (rgba){36, 70, 48, 255}, 18, 14);
+    case T_PINE_LEAVES: return leaf(layer, x, y, (rgba){52, 92, 50, 255}, 24, 16);
+    case T_THORN_LEAVES: return leaf(layer, x, y, (rgba){104, 122, 56, 255}, 38, 18);
+    case T_BIRCH_SIDE:
+    case T_BIRCH_TOP:
+    case T_SPRUCE_SIDE:
+    case T_PINE_SIDE: return bark(layer, x, y, n);
+    case T_THORN_SIDE: return shade(112, 98, 80, 255, (y % 5 == 0 ? -12 : 0) + n / 2);
     case T_PLANKS: {
         int seam = (y % 4 == 3) ? -30 : 0;
         int joint = ((x + (y / 4) * 5) % 16 == 0) ? -20 : 0;

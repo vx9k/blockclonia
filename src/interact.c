@@ -43,7 +43,24 @@ static int can_place(const world *w, const physics *ph, const player *pl, ipos t
         if (interact_box_hits_cell(bb, t.x, t.y, t.z)) return 0;
     }
     uint8_t cur = world_get(w, t.x, t.y, t.z);
-    return cur == B_AIR || block_fluid(cur);
+    return cur == B_AIR || block_fluid(cur) || block_plant(cur);
+}
+
+/* Plants growing on a block that is gone come up with it, roots and all. */
+static void uproot(interact *s, world *w, physics *ph, const player *pl, ipos b)
+{
+    for (ipos p = {b.x, b.y + 1, b.z}; block_plant(world_get(w, p.x, p.y, p.z)); p.y++) {
+        uint8_t id = world_get(w, p.x, p.y, p.z);
+        world_set_player(w, p.x, p.y, p.z, B_AIR, 0);
+        if (!mode_creative(pl->mode)) spill_drops(s, ph, id, 0, p);
+    }
+}
+
+/* Plants take root in soil only. */
+static int soil(uint8_t id)
+{
+    int m = block_get(id)->mat;
+    return block_solid(id) && (m == BM_GRASS || m == BM_DIRT || m == BM_SAND);
 }
 
 static void emit(interact_out *o, int kind, uint8_t block, dvec3 at)
@@ -58,6 +75,7 @@ static void do_break(interact *s, world *w, physics *ph, const player *pl, inven
 {
     emit(o, IE_BREAK, id, centre(b));
     world_set_player(w, b.x, b.y, b.z, B_AIR, 0);
+    uproot(s, w, ph, pl, b);
     const block_def *d = block_get(id);
     fx_break(fx, id, b.x, b.y, b.z, (d->flags & BF_BRITTLE) ? 20 : 12);
     o->actions++;
@@ -85,8 +103,7 @@ static int fuel_units(item_id id)
     switch (id) {
     case I_STICK: return 1;
     case B_PLANKS: return 2;
-    case B_LOG: return 4;
-    default: return 0;
+    default: return block_log((uint8_t)id) && id < B_COUNT ? 4 : 0;
     }
 }
 
@@ -143,8 +160,13 @@ static void use_item(interact *s, world *w, const physics *ph, thermo *th, const
     }
     const item_def *d = item_get(held->id);
     if (d->block == B_AIR) return;
-    ipos t = hit.before;
+    /* Aimed at a plant, a block takes its place. */
+    ipos t = block_plant(hit.id) ? hit.block : hit.before;
     if (!can_place(w, ph, pl, t)) return;
+    if (block_plant(d->block) && !soil(world_get(w, t.x, t.y - 1, t.z))) {
+        o->msg = "Plants need soil";
+        return;
+    }
     /* A bucket holds exactly one cell: pouring onto a liquid would
      * overwrite what is there and lose it. */
     if (block_fluid(d->block) && world_get(w, t.x, t.y, t.z) != B_AIR) {

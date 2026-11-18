@@ -132,6 +132,27 @@ should look different for a reason you could explain.
    ferns in forest, flowers by biome and season, reeds in wetlands,
    bushes, heather on moors, dry shrubs in scrub. Density from
    rainfall and light under the canopy.
+
+   *Done (the vegetation series, 2026-11-18).* Rivers and lakes as
+   above. The trees are oak, birch, spruce, Scots pine and a
+   flat-crowned thorn tree for dry country, picked from the biome and
+   its warmth, with a slow patch field so neighbours are alike and a
+   forest comes in stands; a fifth are young, some are old giants, and
+   deep woods keep dead snags. Fallen trunks are not in yet. Leaves are
+   cut out: their textures have gaps, at most 6 in any 4x4 block so
+   the coarse mips stay closed, drawn by a pipeline whose fragment
+   shader discards, after the opaque pass so that pass keeps early-Z.
+   The ground plants are eleven blocks: short grass, tall grass, fern,
+   reeds, heather, dry shrub, berry bush, poppy, dandelion, cornflower
+   and oxeye daisy. A per-biome table gives each its share of open
+   soil; flowers come in patches of one kind from a noise field; under
+   a canopy (leaves within 12 blocks above) ferns, short grass and
+   bushes take over; reeds grow where soil meets unfrozen water. They
+   need soil (grass, dirt or sand) in the world and in the hand. The
+   mesher draws each as two crossed quads in the cut-out range, after
+   the leaves, so the shadow map can leave them out; the vertex shader
+   bends their tops in the leaves' wind, and the "Leaves and grass
+   sway" setting holds both still. Flowers by season wait for seasons.
 8. **Settlements**, as designed below, on top of the new terrain.
 
 **Settlements: villages, houses and towns.** Settlements in the generated

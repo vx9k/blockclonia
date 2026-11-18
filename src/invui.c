@@ -94,11 +94,18 @@ void invui_icon(ui *u, item_id id, float x, float y, float size, float alpha)
         }
         return;
     }
+    if (id >= B_COUNT) return; /* a block id no block has yet */
+    uint8_t b = (uint8_t)id;
+    /* A plant stands flat, as it looks from the side. */
+    if (block_plant(b)) {
+        face(u, &g_face[b][1][0][0], x, y, size, 0.0f, 0.0f, size, alpha);
+        return;
+    }
     /* Isometric cube: top diamond, left and right faces. */
     float s = size, h = s * 0.5f, q = s * 0.25f;
-    face(u, &g_face[id][0][0][0], x + h, y, h, q, -h, q, alpha); /* top: back corner, right edge, left edge */
-    face(u, &g_face[id][1][0][0], x, y + q, h, q, 0.0f, h, alpha); /* left */
-    face(u, &g_face[id][2][0][0], x + h, y + h, h, -q, 0.0f, h, alpha); /* right */
+    face(u, &g_face[b][0][0][0], x + h, y, h, q, -h, q, alpha); /* top: back corner, right edge, left edge */
+    face(u, &g_face[b][1][0][0], x, y + q, h, q, 0.0f, h, alpha); /* left */
+    face(u, &g_face[b][2][0][0], x + h, y + h, h, -q, 0.0f, h, alpha); /* right */
 }
 
 /* The count in a slot's corner, with a shadow. */

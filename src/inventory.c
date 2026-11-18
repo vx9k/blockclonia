@@ -168,6 +168,10 @@ item_stack inv_return_cursor(inventory *inv)
 
 const recipe g_recipes[] = {
     {{B_PLANKS, 4}, {{B_LOG, 1}}, 0},
+    {{B_PLANKS, 4}, {{B_BIRCH_LOG, 1}}, 0},
+    {{B_PLANKS, 4}, {{B_SPRUCE_LOG, 1}}, 0},
+    {{B_PLANKS, 4}, {{B_PINE_LOG, 1}}, 0},
+    {{B_PLANKS, 4}, {{B_THORN_LOG, 1}}, 0},
     {{I_STICK, 4}, {{B_PLANKS, 2}}, 0},
     {{I_SPLINT, 1}, {{I_STICK, 2}, {I_FIBRE, 1}}, 0},
     {{I_BUCKET, 1}, {{B_PLANKS, 3}, {I_FIBRE, 1}}, 0},
@@ -208,6 +212,10 @@ const recipe g_recipes[] = {
     /* A log smothered in its own embers chars instead of burning away;
      * limestone gives off its CO2 above about 900 C. */
     {{I_CHARCOAL, 2}, {{B_LOG, 1}}, STATION_FIRE},
+    {{I_CHARCOAL, 2}, {{B_BIRCH_LOG, 1}}, STATION_FIRE},
+    {{I_CHARCOAL, 2}, {{B_SPRUCE_LOG, 1}}, STATION_FIRE},
+    {{I_CHARCOAL, 2}, {{B_PINE_LOG, 1}}, STATION_FIRE},
+    {{I_CHARCOAL, 2}, {{B_THORN_LOG, 1}}, STATION_FIRE},
     {{I_QUICKLIME, 1}, {{B_LIMESTONE, 1}, {I_COAL, 1}}, STATION_FURNACE},
     /* Black powder by mass: 75% saltpeter, 15% charcoal, 10% sulfur. */
     {{I_GUNPOWDER, 4}, {{I_SALTPETER, 3}, {I_CHARCOAL, 1}, {I_SULFUR, 1}}, 0},

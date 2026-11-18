@@ -20,6 +20,8 @@ unless it says otherwise.
          dripstone, lava lakes
    - [ ] Delete the old per-file world importer
 2. **Rivers and lakes**, then a new terrain screenshot for the README.
+   Rivers, lakes, trees and ground plants are done (the vegetation
+   series); the screenshot is still to do.
 3. **Platforms:** Ubuntu 26.04 (x86_64 and arm64), Alpine Linux and macOS
    only; the Raspberry Pi, armhf and older distributions are dropped.
    - [ ] CI and packages for the supported platforms
@@ -57,8 +59,7 @@ Not yet in order:
   simulated flight, penetration, wounds, and weapons built from parts
   that wear and jam
 - [Building and furniture](#building-and-furniture)
-- [World generation](#world-generation): trees, ground plants,
-  settlements
+- [World generation](#world-generation): settlements
 - [User interface](#user-interface): the "field kit" redesign
 - [Health](#health): the panel by mouse, the anatomical view
 - [Android](#android)
@@ -71,17 +72,20 @@ Not yet in order:
 
 **Goal:** land that looks natural, from a climate down to single
 plants, and is worth exploring.
-**Status:** generator 3 (a climate, biomes, landforms, caves and ore);
-the underground series is in progress.
+**Status:** generator 5 (a climate, biomes, landforms, caves and ore,
+rivers and lakes, five kinds of tree and the ground plants); the
+underground series is in progress.
 **Design:** [docs/design/worldgen.md](docs/design/worldgen.md)
 
 - [x] A 384-block world (#63)
 - [x] Climate and landforms (#67)
 - [ ] Underground: materials, strata, liquids, aquifers, cave variety
       (see Now)
-- [ ] Rivers and lakes
-- [ ] Trees redone: species by climate, age classes, real growth habits
-- [ ] Ground plants: grass, ferns, flowers, reeds, shrubs
+- [x] Rivers and lakes
+- [x] Trees redone: species by climate, age classes, real growth habits,
+      leaves cut out (fallen trunks still to come)
+- [x] Ground plants: grass, ferns, flowers, reeds, shrubs, swaying
+      (flowers by season wait for seasons)
 - [ ] Settlements: villages, houses and towns
 
 ### Lighting

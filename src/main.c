@@ -43,6 +43,7 @@
 #include "ui.h"
 #include "viewmodel.h"
 #include "world.h"
+#include "worldgen.h"
 #include "worlds.h"
 
 #define GLFW_INCLUDE_NONE
@@ -819,7 +820,8 @@ static void find_spawn(uint32_t seed, double *sx, double *sz)
         for (int a = 0; a < 16; a++) {
             double ang = a * (2 * MC_PI / 16);
             int x = (int)(cos(ang) * r), z = (int)(sin(ang) * r);
-            if (worldgen_height(seed, x, z) > SEA_LEVEL + 2) {
+            worldgen_point p = worldgen_sample(seed, x, z);
+            if (p.height > SEA_LEVEL + 2 && !p.level) {
                 *sx = x + 0.5;
                 *sz = z + 0.5;
                 return;
@@ -2229,6 +2231,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     v.underwater = block_fluid(eye_block);
     if (v.underwater) fluid_view(eye_block, v.under_fog, &v.under_range);
     v.time = (float)fmod(now, 3600.0);
+    v.sway = g->st.sway;
     /* Brightness lifts the darkest light toward dusk; days are unchanged. */
     v.daylight = fmaxf(thermo_daylight(g->th), 0.006f * (float)g->st.brightness);
     thermo_sky(g->th, v.sky);

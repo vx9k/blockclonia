@@ -15,8 +15,10 @@
 /* On the side face of a step down to a lower surface of the same liquid:
  * that surface's drop. */
 #define K_BASE(k) (((k) >> 20) & 0xFu)
+/* Leaves: drawn cut out, in their own range after the opaque quads. */
+#define K_CUT (1u << 28)
 
-enum { C_OPAQUE = 1, C_TRANS = 2, C_FLUID = 4, C_AIR = 8 };
+enum { C_OPAQUE = 1, C_TRANS = 2, C_FLUID = 4, C_AIR = 8, C_CUT = 16 };
 
 static uint8_t g_class[256];
 
@@ -24,8 +26,10 @@ void mesher_init(void)
 {
     for (int i = 0; i < 256; i++) {
         uint8_t c = 0;
-        if (i == B_AIR || i == B_TORCH) c = C_AIR; /* a torch is a model (renderer.c), not faces */
+        /* A torch is a model (renderer.c), a plant crossed quads: neither has faces. */
+        if (i == B_AIR || i == B_TORCH || block_plant((uint8_t)i)) c = C_AIR;
         else if (i < B_COUNT && (g_blocks[i].flags & BF_FLUID)) c = C_FLUID;
+        else if (block_leaves((uint8_t)i)) c = C_CUT; /* the sky shows through */
         else if (i >= B_COUNT || (g_blocks[i].flags & BF_OPAQUE)) c = C_OPAQUE; /* unknown/unloaded: hide faces */
         else c = C_TRANS;
         g_class[i] = c;
@@ -68,10 +72,11 @@ static inline uint32_t face_key(const mesh_input *in, const uint8_t *cls, int pi
     uint8_t b = in->blocks[pi];
     if (cn == C_OPAQUE && cb != C_FLUID) { /* hidden: the common case, decided first */
         /* Leaves sway in block.vert and nothing else does, so where leaves
-         * touch another loaded block both faces stay: the one that moves
-         * away would otherwise open a gap into the block's empty inside. */
-        uint8_t nb = in->blocks[ni];
-        if ((b == B_LEAVES) == (nb == B_LEAVES) || nb >= B_COUNT) return 0;
+         * touch another loaded block their face stays: it moves away and
+         * would otherwise open a gap into the leaves' inside. (Leaves are
+         * not opaque, so a block beside them keeps its face anyway, which
+         * shows through their gaps.) */
+        if (cb != C_CUT || in->blocks[ni] >= B_COUNT) return 0;
     }
     uint32_t key = K_PRESENT | block_get(b)->tex[f]; /* ids >= B_COUNT read as stone */
 
@@ -106,13 +111,38 @@ static inline uint32_t face_key(const mesh_input *in, const uint8_t *cls, int pi
     /* The sway is a sine of the position, applied at the corners: a merged
      * quad's edge stays a straight chord, and a neighbour's corner partway
      * along it moves off that chord and opens a crack. */
-    if (b == B_LEAVES) key |= K_NOMERGE;
+    /* Leaf against leaf both faces stay, or the canopy's inside would show
+     * as holes through to the sky. */
+    if (cb == C_CUT) key |= K_NOMERGE | K_CUT;
     return key;
+}
+
+/* Plants: two quads crossed on the cell's diagonals, each wound both ways
+ * so either side shows, appended to the cut-out quads at cut[n]. Faces 6
+ * and 7 tell block.vert they are plants; the top edge has AO 3 (it sways),
+ * the foot 2, a little darker. Returns the new count. */
+static uint32_t mesh_plants(const mesh_input *in, uint32_t *cut, uint32_t n)
+{
+    static const int END[2][2][2] = {{{0, 0}, {1, 1}}, {{1, 0}, {0, 1}}};
+    for (int y = 0; y < 16; y++)
+        for (int z = 0; z < 16; z++)
+            for (int x = 0; x < 16; x++) {
+                uint8_t b = in->blocks[mesh_pidx(x, y, z)];
+                if (!block_plant(b)) continue;
+                for (int d = 0; d < 2; d++)
+                    for (int side = 0; side < 2; side++, n++)
+                        for (int v = 0; v < 4; v++) {
+                            int e = (v == 1 || v == 2) ^ side, top = v >= 2;
+                            int p[3] = {x + END[d][e][0], y + top, z + END[d][e][1]};
+                            cut[4u * n + (uint32_t)v] = pack_vertex(p, 6 + d, top ? 3 : 2, g_blocks[b].tex[0], 0);
+                        }
+            }
+    return n;
 }
 
 uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *mc)
 {
-    uint32_t nopq = 0, ntr = 0;
+    uint32_t nopq = 0, ntr = 0, ncut = 0;
     /* Left uninitialised on purpose: cls is filled just below and mask row
      * by row before any read, and zeroing both cost 12% of meshing time. */
     uint32_t mask[16][16];
@@ -166,6 +196,9 @@ uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *m
                     if (k & K_TRANS) {
                         ntr++;
                         dst = out + 4u * (MESH_MAX_QUADS - ntr);
+                    } else if (k & K_CUT) {
+                        dst = out + 4u * (MESH_MAX_QUADS + ncut);
+                        ncut++;
                     } else {
                         dst = out + 4u * nopq;
                         nopq++;
@@ -198,10 +231,17 @@ uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *m
         mc->face_end[f] = (uint16_t)nopq;
     }
 
-    /* Translucent quads were written backwards from the end; move them to
-     * directly follow the opaque ones. */
-    if (ntr)
-        memmove(out + 4u * nopq, out + 4u * (MESH_MAX_QUADS - ntr), sizeof(uint32_t) * 4u * ntr);
+    mc->leaf_end = (uint16_t)(nopq + ncut);
+    ncut = mesh_plants(in, out + 4u * MESH_MAX_QUADS, ncut);
+
+    /* The cut-out quads, gathered past the end, follow the opaque ones; the
+     * translucent quads, written backwards from the end, follow those. A
+     * block has one quad per face at most and a plant four, so the three
+     * fit in the first half and the cut-out ones land short of the
+     * translucent ones. */
+    if (ncut) memcpy(out + 4u * nopq, out + 4u * MESH_MAX_QUADS, sizeof(uint32_t) * 4u * ncut);
+    if (ntr) memmove(out + 4u * (nopq + ncut), out + 4u * (MESH_MAX_QUADS - ntr), sizeof(uint32_t) * 4u * ntr);
+    nopq += ncut;
     mc->opaque = nopq;
     mc->trans = ntr;
     return nopq + ntr;
