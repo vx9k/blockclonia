@@ -88,25 +88,25 @@ static void test_bark_windows(void)
  * hard line there. */
 static void test_bark_seamless(void)
 {
-    static int L[STRIP][16];
+    static int lums[STRIP][16];
     for (int k = 0; k < TREE_KINDS; k++) {
         for (int y = 0; y < STRIP; y++)
             for (int x = 0; x < 16; x++) {
                 uint8_t p[4];
                 treetex_bark(k, x, y, STRIP, p);
-                L[y][x] = lum(p);
+                lums[y][x] = lum(p);
             }
         int seam_v = 0, seam_h = 0, max_v = 0, max_h = 0;
-        for (int x = 0; x < 16; x++) seam_v += abs(L[STRIP - 1][x] - L[0][x]);
-        for (int y = 0; y < STRIP; y++) seam_h += abs(L[y][15] - L[y][0]);
+        for (int x = 0; x < 16; x++) seam_v += abs(lums[STRIP - 1][x] - lums[0][x]);
+        for (int y = 0; y < STRIP; y++) seam_h += abs(lums[y][15] - lums[y][0]);
         for (int y = 0; y + 1 < STRIP; y++) {
             int d = 0;
-            for (int x = 0; x < 16; x++) d += abs(L[y][x] - L[y + 1][x]);
+            for (int x = 0; x < 16; x++) d += abs(lums[y][x] - lums[y + 1][x]);
             max_v = d > max_v ? d : max_v;
         }
         for (int x = 0; x < 15; x++) {
             int d = 0;
-            for (int y = 0; y < STRIP; y++) d += abs(L[y][x] - L[y][x + 1]);
+            for (int y = 0; y < STRIP; y++) d += abs(lums[y][x] - lums[y][x + 1]);
             max_h = d > max_h ? d : max_h;
         }
         /* Sums over 16 texels across and STRIP down; the slack is a few

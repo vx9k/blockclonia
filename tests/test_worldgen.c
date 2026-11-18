@@ -963,7 +963,6 @@ static int tree_belongs(int k, worldgen_point p)
     case TREE_SPRUCE: return b == BIOME_TAIGA || b == BIOME_ALPINE || (b == BIOME_FOREST && p.temp < 6.0f);
     case TREE_MAPLE:
     case TREE_CHERRY: return wood;
-    case TREE_WILLOW: return b != BIOME_BEACH && b != BIOME_DESERT;
     default: return b != BIOME_BEACH && b != BIOME_DESERT;
     }
 }
@@ -1013,7 +1012,7 @@ static void test_tree_climate(void)
 #define SEAM_W (SEAM_N * CHUNK_W)
 static void test_tree_seams(void)
 {
-    const int cx0 = (72 >> 4) - SEAM_N / 2, cz0 = (-72 >> 4) - SEAM_N / 2;
+    const int cx0 = 4 - SEAM_N / 2, cz0 = -5 - SEAM_N / 2; /* around (72, -72) */
     uint8_t *g = mem_alloc((size_t)SEAM_W * SEAM_W * WORLD_H);
     for (int n = 0; n < SEAM_N * SEAM_N; n++) {
         column *c = column_alloc(cx0 + n % SEAM_N, cz0 + n / SEAM_N);
@@ -1077,8 +1076,37 @@ static void test_tree_seams(void)
                 pieces++;
                 floating += !held;
             }
+    /* What the trees left on the ground: metas only on logs, and valid;
+     * vines hang from a tree or from vines above; no trunk stands on
+     * grass or podzol, which turns to dirt under it; and the old woods
+     * have mossy logs. */
+    long bad_meta = 0, loose_vines = 0, grassy = 0, mossy = 0, trunks = 0;
+    for (int n = 0; n < SEAM_N * SEAM_N; n++) {
+        column *c = column_alloc(cx0 + n % SEAM_N, cz0 + n / SEAM_N);
+        worldgen_column(1337, c);
+        for (int y = 2; y < WORLD_H - 1; y++)
+            for (int z = 0; z < CHUNK_W; z++)
+                for (int x = 0; x < CHUNK_W; x++) {
+                    int ci = col_index(x, y, z);
+                    uint8_t b = c->blocks[ci], m = c->meta ? c->meta[ci] : 0, up = c->blocks[ci + COL_AREA];
+                    if (block_log(b)) {
+                        bad_meta += m > (LOG_BRANCH | LOG_MOSS);
+                        mossy += (m & LOG_MOSS) != 0;
+                        uint8_t under = c->blocks[ci - COL_AREA];
+                        if ((m & 3) == LOG_UP && !block_log(under) && block_solid(under)) {
+                            trunks++;
+                            grassy += under == B_GRASS || under == B_PODZOL;
+                        }
+                    } else if (!block_fluid(b)) {
+                        bad_meta += m != 0;
+                    }
+                    if (b == B_VINES) loose_vines += !block_leaves(up) && !block_log(up) && up != B_VINES;
+                }
+        column_free(c);
+    }
 #undef G
     CHECK(pieces > 20 && floating == 0 && across > 100);
+    CHECK(bad_meta == 0 && loose_vines == 0 && grassy == 0 && trunks > 20 && mossy > 0);
     mem_free(queue);
     mem_free(done);
     mem_free(g);

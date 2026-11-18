@@ -383,7 +383,7 @@ static void test_tree_connected(void)
                     uint8_t id = t->id[i], m = t->meta[i];
                     all += id != B_AIR;
                     wood += block_log(id);
-                    bad_meta += m >= FLUID_FULL || (m && !block_log(id)) || (block_log(id) && (m & 3) > LOG_BRANCH);
+                    bad_meta += m > (LOG_BRANCH | LOG_MOSS) || (m && !block_log(id));
                     if (cell_y(i) < 0 && id != B_AIR) bad_roots += !block_log(id) || (m & 3) != LOG_BRANCH;
                 }
                 miscount += all != t->blocks;
@@ -529,7 +529,7 @@ static void test_tree_place_into(void)
             for (int x = -TREE_REACH; x <= TREE_REACH; x++) {
                 uint8_t id = t->id[tree_cell(x, y, z)];
                 int wx = 8 + x, wz = 8 + z;
-                if (id == B_AIR || wx < 0 || wx >= CHUNK_W || wz < 0 || wz >= CHUNK_W) continue;
+                if (id == B_AIR || wx >= CHUNK_W || wz >= CHUNK_W) continue;
                 uint8_t b = c->blocks[col_index(wx, ground + y, wz)];
                 if (wx < 4) glass += b == B_GLASS;
                 else if (wx < 6) water += b == B_WATER;
