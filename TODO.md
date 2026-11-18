@@ -53,7 +53,9 @@ the final pass is sync work, not a rewrite.
 Not yet in order:
 
 - [Rendering performance](#rendering-performance): occlusion culling,
-  cheaper plants, distant terrain detail
+  cheaper plants, distant terrain detail; the wider optimisation
+  series (noise, lighting, fluid, mesher, threads, GPU culling) is in
+  [docs/design/performance.md](docs/design/performance.md)
 - [Animals](#animals): more species, cats among them, and behaviour
   from needs and senses
 - [Farming and food](#farming-and-food)
