@@ -52,6 +52,8 @@ the final pass is sync work, not a rewrite.
 
 Not yet in order:
 
+- [Rendering performance](#rendering-performance): occlusion culling,
+  cheaper plants, distant terrain detail
 - [Animals](#animals): more species, cats among them, and behaviour
   from needs and senses
 - [Farming and food](#farming-and-food)
@@ -115,6 +117,22 @@ with light shafts, and a sky with a gradient and the sun's glow.
       through the shadow map, deeper shade out of the sun
 - [x] A sky with a gradient from the horizon to the zenith and the sun's
       glow
+
+### Rendering performance
+
+**Goal:** draw only what can be seen, at the detail it can be seen at,
+so weak GPUs keep a steady frame rate at long view distances.
+**Status:** planned (2026-11-18), not started. Today the renderer culls
+only by the view frustum and back-facing face groups.
+**Design:** [docs/design/rendering.md](docs/design/rendering.md)
+
+- [ ] Occlusion culling: which faces of each section see each other,
+      recorded by the mesher; a walk from the camera draws only the
+      sections reachable through open space
+- [ ] Cheaper plants: two quads a plant with culling off, and a plant
+      draw distance (Auto/Near/Far/Off) hidden by the fog
+- [ ] Distant terrain detail: 2 x 2 x 2 and 4 x 4 x 4 meshes for far
+      columns, with skirts at the seams
 
 ### Items and crafting
 
