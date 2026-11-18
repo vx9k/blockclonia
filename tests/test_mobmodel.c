@@ -79,8 +79,8 @@ static void test_mobmodel_faces(void)
     for (int kind = 0; kind < MOB_KINDS; kind++) {
         mob m = make(kind);
         entity_instance e[MOB_FIGURE + 4] = {0};
-        CHECK(mob_figure(&m, FEET, 1.0f, 0.0f, e, MOB_FIGURE + 4) == MOB_FIGURE);
-        for (int i = 0; i < MOB_FIGURE; i++) {
+        CHECK(mob_figure(&m, FEET, 1.0f, 0.0f, e, MOB_FIGURE + 4) == MOB_BODY);
+        for (int i = 0; i < MOB_BODY; i++) {
             CHECK((e[i].tex & ENTITY_TEX_METRIC) != 0);
             float tx[3] = {0};
             for (int k = 0; k < 3; k++) {

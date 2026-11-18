@@ -85,6 +85,7 @@ typedef struct {
     int id;
     float yaw, pitch;
     int flying, sneaking, dead;
+    uint32_t held; /* the item in hand, 0 for none */
 } mp_avatar;
 
 typedef struct {

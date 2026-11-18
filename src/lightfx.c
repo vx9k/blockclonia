@@ -44,6 +44,15 @@ static uint8_t held_block(uint32_t held_item)
     return item_get(held_item)->block;
 }
 
+uint16_t lightfx_carried(uint32_t item)
+{
+    uint16_t em = light_emission(held_block(item));
+    const unsigned lv[3] = {LIGHT_R(em), LIGHT_G(em), LIGHT_B(em)};
+    unsigned d[3] = {0, 0, 0};
+    for (int i = 0; i < 3; i++) d[i] = lv[i] > 1 ? lv[i] - 1 : 0;
+    return (uint16_t)LIGHT_PACK(0, d[0], d[1], d[2]);
+}
+
 static unsigned max3(unsigned a, unsigned b, unsigned c)
 {
     unsigned m = a > b ? a : b;
@@ -53,16 +62,14 @@ static unsigned max3(unsigned a, unsigned b, unsigned c)
 float lightfx_seen(const struct world *w, double x, double y, double z, float daylight, uint32_t held_item, float *fire)
 {
     uint16_t l = world_light(w, (int)floor(x), (int)floor(y), (int)floor(z));
-    uint16_t em = light_emission(held_block(held_item));
-    /* Carried a level below its block, as lightfx_build has it. */
+    uint16_t em = lightfx_carried(held_item);
     unsigned held = max3(LIGHT_R(em), LIGHT_G(em), LIGHT_B(em));
-    held = held > 0 ? held - 1 : 0;
     float sky = LIGHT_SKY(l) ? (float)LIGHT_SKY(l) / (float)LIGHT_MAX + log2f(fmaxf(daylight, 1e-3f)) / LIGHT_CURVE_K
                              : 0.0f;
     float blk = (float)max3(LIGHT_R(l), LIGHT_G(l), LIGHT_B(l)) / (float)LIGHT_MAX;
     float lv = fmaxf(fmaxf(sky, blk), (float)held / (float)LIGHT_MAX);
     int warm_cell = (int)LIGHT_R(l) - (int)LIGHT_B(l);
-    int warm_held = held ? (int)LIGHT_R(em) - (int)LIGHT_B(em) - 1 : 0;
+    int warm_held = (int)LIGHT_R(em) - (int)LIGHT_B(em);
     int warm = warm_cell > warm_held ? warm_cell : warm_held;
     *fire = clamp01((float)warm / (float)LIGHT_MAX);
     return clamp01(lv);

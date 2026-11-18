@@ -93,6 +93,7 @@ typedef struct {
     float yaw[2], pitch[2];
     double t[2];
     uint8_t flags;
+    uint32_t held; /* the item in hand, 0 for none */
 } ghost;
 
 typedef struct {
@@ -512,6 +513,14 @@ void mp_on_block_changed(mp *m, int x, int y, int z)
 }
 
 /* The other players, falling blocks and items near r, and r's own state. */
+/* The item a player has in hand, 0 for none: others see its light. */
+static uint32_t held_of(const inventory *inv)
+{
+    if (!inv) return 0;
+    const item_stack *s = &inv->slot[inv->selected];
+    return s->count > 0 ? s->id : 0;
+}
+
 static void host_snapshot(mp *m, int id)
 {
     remote *r = &m->r[id];
@@ -546,6 +555,7 @@ static void host_snapshot(mp *m, int id)
         wire_f32(&w, p->pitch);
         wire_u8(&w, (uint8_t)((p->flying ? F_FLYING : 0) | (p->sneaking ? F_SNEAKING : 0) | (dead ? F_DEAD : 0) |
                               (mode_noclip(p->mode) ? F_WATCHING : 0)));
+        wire_u32(&w, held_of(i ? &m->r[i].inv : m->ctx.inv));
     }
 
     dvec3 me = r->pl.pos;
@@ -593,7 +603,7 @@ static void host_snapshot(mp *m, int id)
         wire_f32(&w, mb->look);
         wire_f32(&w, mb->nod);
         wire_u8(&w, mb->kind);
-        wire_u8(&w, (uint8_t)(mb->hurt_t > 0.0f));
+        wire_u8(&w, (uint8_t)((mb->hurt_t > 0.0f ? 1 : 0) | (mb->burn_t > 0.0f ? 2 : 0)));
         n++;
     }
     if (!w.bad) {
@@ -946,6 +956,7 @@ static void client_snapshot(mp *m, wire_r *rd)
         int id;
         float yaw, pitch;
         uint8_t flags;
+        uint32_t held;
     } o[NET_MAX_PLAYERS] = {0};
     int others = wire_get_u8(rd);
     if (others >= NET_MAX_PLAYERS) rd->bad = 1;
@@ -957,8 +968,9 @@ static void client_snapshot(mp *m, wire_r *rd)
         o[i].yaw = wire_get_f32(rd);
         o[i].pitch = wire_get_f32(rd);
         o[i].flags = wire_get_u8(rd);
-        if (o[i].id >= NET_MAX_PLAYERS || fabs(o[i].pos.x) > WORLD_LIMIT || fabs(o[i].pos.z) > WORLD_LIMIT ||
-            fabs(o[i].pos.y) > 1e5)
+        o[i].held = wire_get_u32(rd);
+        if ((o[i].held && !item_valid(o[i].held)) || o[i].id >= NET_MAX_PLAYERS || fabs(o[i].pos.x) > WORLD_LIMIT ||
+            fabs(o[i].pos.z) > WORLD_LIMIT || fabs(o[i].pos.y) > 1e5)
             rd->bad = 1;
     }
     /* Falling blocks and items: read into scratch first. */
@@ -999,7 +1011,9 @@ static void client_snapshot(mp *m, wire_r *rd)
         mb->look = wire_get_f32(rd);
         mb->nod = wire_get_f32(rd);
         mb->kind = wire_get_u8(rd);
-        mb->hurt_t = wire_get_u8(rd) ? 0.1f : 0.0f;
+        uint8_t mf = wire_get_u8(rd);
+        mb->hurt_t = mf & 1 ? 0.1f : 0.0f;
+        mb->burn_t = mf & 2 ? 0.1f : 0.0f;
         mb->body.prev_pos = mb->body.pos;
         if (mb->kind >= MOB_KINDS || fabs(mb->body.pos.x) > WORLD_LIMIT || fabs(mb->body.pos.z) > WORLD_LIMIT ||
             fabs(mb->body.pos.y) > 1e5 || !(fabsf(mb->body.yaw) < 1e4f) || !(fabsf(mb->stride) < 1e7f) ||
@@ -1054,6 +1068,7 @@ static void client_snapshot(mp *m, wire_r *rd)
         g->pitch[1] = o[i].pitch;
         g->t[1] = m->now;
         g->flags = o[i].flags;
+        g->held = o[i].held;
         g->present = 1;
     }
     for (int i = 0; i < NET_MAX_PLAYERS; i++)
@@ -1286,6 +1301,7 @@ int mp_avatars(const mp *m, double now, double alpha, mp_avatar *out, int max)
             a->flying = p->flying;
             a->sneaking = p->sneaking;
             a->dead = r->hl->dead;
+            a->held = held_of(&r->inv);
         } else {
             const ghost *g = &m->c.g[id];
             if (!g->present || (g->flags & F_WATCHING)) continue;
@@ -1298,6 +1314,7 @@ int mp_avatars(const mp *m, double now, double alpha, mp_avatar *out, int max)
             a->flying = (g->flags & F_FLYING) != 0;
             a->sneaking = (g->flags & F_SNEAKING) != 0;
             a->dead = (g->flags & F_DEAD) != 0;
+            a->held = g->held;
         }
         a->id = id;
         a->name = net_player_name(m->n, id);

@@ -197,6 +197,11 @@ combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *
             c->b[c->count++] = (bullet){from, dv3((double)d.x * v, (double)d.y * v, (double)d.z * v), BULLET_LIFE, who,
                                         CARTRIDGE_AMMO};
         }
+        c->flash[c->flash_next].at = from;
+        c->flash[c->flash_next].time = c->time;
+        c->flash[c->flash_next].owner = who;
+        c->flash[c->flash_next].used = 1;
+        c->flash_next = (c->flash_next + 1) % COMBAT_FLASHES;
         c->cooldown[who] = COMBAT_CYCLE_S;
         o.fired = 1;
         o.at = from;
@@ -318,6 +323,17 @@ int combat_step(combat *c, mobs *ms, physics *ph, const combat_targets *t)
         if (done) c->b[i--] = c->b[--c->count];
     }
     return hits;
+}
+
+int combat_flashes(const combat *c, int skip, double within, dvec3 *out, int max)
+{
+    int n = 0;
+    for (int i = 0; i < COMBAT_FLASHES && n < max; i++) {
+        if (!c->flash[i].used || c->flash[i].owner == skip) continue;
+        double age = c->time - c->flash[i].time;
+        if (age >= 0.0 && age < within) out[n++] = c->flash[i].at;
+    }
+    return n;
 }
 
 int combat_tracers(const combat *c, dvec3 eye, double alpha, entity_instance *out, int max)
