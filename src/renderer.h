@@ -34,6 +34,7 @@ typedef struct {
     int filtering;       /* trilinear + up to 8x anisotropic minification (see renderer_set_filtering) */
     int smooth_light;    /* see renderer_set_smooth_light */
     int bloom;           /* BLOOM_OFF, BLOOM_ON or BLOOM_AUTO (bloom.h) */
+    int shadows;         /* SHADOW_OFF, SHADOW_ON or SHADOW_AUTO (shadow.h) */
     /* Pipeline cache file, kept between runs so pipelines build faster.
      * NULL: "blockclonia.pipelines" in the working directory; "": none. */
     const char *pipeline_cache;
@@ -131,6 +132,10 @@ void renderer_set_smooth_light(renderer *r, int enabled);
 /* BLOOM_OFF, BLOOM_ON or BLOOM_AUTO, which keeps bloom on where the GPU's
  * timestamps show it costing under BLOOM_BUDGET_MS (off without them). */
 void renderer_set_bloom(renderer *r, int mode);
+/* SHADOW_OFF, SHADOW_ON or SHADOW_AUTO, which keeps the sun's shadow map
+ * where the GPU draws it under SHADOW_BUDGET_MS; none without
+ * GPUCAP_SHADOW. */
+void renderer_set_shadows(renderer *r, int mode);
 const char *renderer_device_name(const renderer *r);
 /* "Vulkan 1.3: multi-draw indirect, dynamic rendering, ...": the API
  * version in use and the optional features the renderer turned on. */

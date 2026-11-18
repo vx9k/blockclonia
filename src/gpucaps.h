@@ -54,7 +54,8 @@
 #define GPUCAP_PCACHE      (1u << 7) /* pipeline cache kept on disk between runs */
 #define GPUCAP_RELAXED     (1u << 8) /* FIFO_RELAXED present mode with vsync on */
 #define GPUCAP_LIGHT4      (1u << 9) /* light texels in 4-bit B4G4R4A4, not RGBA8 (format support) */
-#define GPUCAP_COUNT 10
+#define GPUCAP_SHADOW      (1u << 10) /* sun shadows: a depth format sampled with linear compare (format support) */
+#define GPUCAP_COUNT 11
 /* clang-format on */
 #define GPUCAP_ALL ((1u << GPUCAP_COUNT) - 1u)
 
@@ -86,6 +87,11 @@ typedef struct {
      * for 2D sampling only, and Metal has no such format on Intel and AMD
      * Macs, so MoltenVK may leave it out. */
     int light_4bit;
+    /* D16_UNORM or D32_SFLOAT can be drawn to and sampled with linear
+     * filtering, which a depth compare turns into a 2x2 percentage-closer
+     * filter for free. Vulkan requires depth sampling but not filtering;
+     * without it there are no sun shadows, only the sky light's. */
+    int shadow_depth;
 } gpu_offer;
 
 typedef struct {
