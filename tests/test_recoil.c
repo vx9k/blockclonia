@@ -3,6 +3,7 @@
 #include "test_util.h"
 
 #include "combat.h"
+#include "itemmodel.h"
 #include "recoil.h"
 #include "viewmodel.h"
 
@@ -116,8 +117,73 @@ static void test_bolt_cycle(void)
     CHECK(n == m && n > 4 && b[n - 1].pos[1] < a[n - 1].pos[1] - 0.05f && rel > 0.05f);
 }
 
+/* Every round carries a real charge and pushes back; the slow, heavy
+ * black-powder bullet pushes hardest. */
+static void test_recoil_rounds(void)
+{
+    float most = 0.0f;
+    int hardest = -1;
+    for (int k = 0; k < AMMO_COUNT; k++) {
+        const ammo_def *a = ammo_get(k);
+        CHECK(a->charge > 0.002f && a->charge < 0.005f);
+        float p = recoil_impulse(a);
+        CHECK(p > 8.0f && p < 15.0f);
+        if (p > most) {
+            most = p;
+            hardest = k;
+        }
+    }
+    CHECK(hardest == AMMO_BLACK_LEAD);
+}
+
+/* The same seed follows the same path; a hitch or a quick second shot
+ * stays bounded. */
+static void test_recoil_edges(void)
+{
+    recoil a = {0}, b = {0}, c = {0};
+    recoil_init(&a, 3);
+    recoil_init(&b, 3);
+    recoil_init(&c, 4);
+    recoil_fire(&a, ammo_get(AMMO_SMOKELESS), 1.0f);
+    recoil_fire(&b, ammo_get(AMMO_SMOKELESS), 1.0f);
+    recoil_fire(&c, ammo_get(AMMO_SMOKELESS), 1.0f);
+    CHECK(a.rest_p == b.rest_p && a.rest_y == b.rest_y && a.rest_p != c.rest_p);
+    float dp = 0.0f, dy = 0.0f;
+    recoil_step(&a, 1.0f, &dp, &dy);
+    CHECK(isfinite(dp) && fabsf(dp) < 0.1f && fabsf(dy) < 0.1f);
+    recoil_fire(&b, ammo_get(AMMO_SMOKELESS), 1.0f);
+    float top = 0.0f, sum = 0.0f;
+    for (int i = 0; i < 120; i++) {
+        recoil_step(&b, 1.0f / 60.0f, &dp, &dy);
+        sum += dp;
+        top = fmaxf(top, sum);
+    }
+    CHECK(top > 0.02f && top < 0.2f);
+}
+
+/* Only the rifle has a bolt, and it marks the handle; the phases blend
+ * smoothly, with no jump between frames. */
+static void test_bolt_model(void)
+{
+    item_model m = {0};
+    CHECK(itemmodel_build(I_RIFLE, &m) && m.bolt > 0 && m.bolt + 1 < m.n);
+    CHECK(fabsf(m.box[m.bolt].pos[1] - 0.40f) < 1e-4f && m.box[m.bolt + 1].pos[2] > m.box[m.bolt].pos[2]);
+    item_model pick = {0};
+    CHECK(itemmodel_build(I_BANDAGE, &pick) && pick.bolt == 0);
+    float prev[3] = {0}, cur[3] = {0}, jump = 0.0f;
+    for (int i = 0; i <= 200; i++) {
+        viewmodel_bolt((float)i / 200.0f, &cur[0], &cur[1], &cur[2]);
+        for (int k = 0; k < 3; k++) jump = fmaxf(jump, fabsf(cur[k] - prev[k]));
+        for (int k = 0; k < 3; k++) prev[k] = cur[k];
+    }
+    CHECK(jump < 0.1f);
+}
+
 void test_recoil_all(void)
 {
+    test_recoil_rounds();
+    test_recoil_edges();
+    test_bolt_model();
     test_recoil_energy();
     test_recoil_kick();
     test_bolt_cycle();
