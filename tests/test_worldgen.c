@@ -945,6 +945,145 @@ static void test_smelting(void)
     CHECK(!item_valid(B_ROCK) && !item_valid(B_IRON_ORE)); /* only ever in place */
 }
 
+/* Does a kind of tree belong where the ground's climate is p? Its own
+ * rules (worldgen.c tree_kind_at), loosened by a degree or a little rain
+ * for the blend between the sample and the site. Willows grow by water
+ * anywhere but sand. */
+static int tree_belongs(int k, worldgen_point p)
+{
+    biome b = p.b;
+    int dry = b == BIOME_SCRUB || b == BIOME_STEPPE, wood = b == BIOME_FOREST || b == BIOME_MEADOW;
+    switch (k) {
+    case TREE_PALM: return b == BIOME_BEACH && p.temp > 17.0f;
+    case TREE_REDWOOD: return b == BIOME_FOREST && p.rain > 0.6f && p.temp < 17.0f;
+    case TREE_MOUNTAIN_PINE: return b == BIOME_ALPINE;
+    case TREE_BAOBAB: return dry && p.temp > 15.0f;
+    case TREE_THORN: return dry;
+    case TREE_UMBRELLA: return dry || (b == BIOME_FOREST && p.temp > 13.0f);
+    case TREE_SPRUCE: return b == BIOME_TAIGA || b == BIOME_ALPINE || (b == BIOME_FOREST && p.temp < 6.0f);
+    case TREE_MAPLE:
+    case TREE_CHERRY: return wood;
+    case TREE_WILLOW: return b != BIOME_BEACH && b != BIOME_DESERT;
+    default: return b != BIOME_BEACH && b != BIOME_DESERT;
+    }
+}
+
+/* Over generated ground far apart: every trunk is of a kind its climate
+ * grows, most kinds turn up, and the trunks lying on the ground lie only
+ * in the deep woods, where nothing clears the dead. */
+static void test_tree_climate(void)
+{
+    long feet = 0, wrong = 0, lying = 0, lying_wrong = 0;
+    int seen[TREE_KINDS] = {0};
+    for (int i = 0; i < 120; i++) {
+        int cx = (i * 2741) % 2400 - 1200, cz = (i * 3571) % 2400 - 1200;
+        column *c = column_alloc(cx, cz);
+        worldgen_column(1337, c);
+        for (int z = 0; z < CHUNK_W; z++)
+            for (int x = 0; x < CHUNK_W; x++)
+                for (int y = 2; y < WORLD_H - 1; y++) {
+                    int ci = col_index(x, y, z);
+                    uint8_t b = c->blocks[ci], under = c->blocks[ci - COL_AREA], m = c->meta ? c->meta[ci] : 0;
+                    if (!block_log(b) || block_log(under) || block_leaves(under) || under == B_AIR) continue;
+                    worldgen_point p = worldgen_sample(1337, cx * CHUNK_W + x, cz * CHUNK_W + z);
+                    if ((m & 3) == LOG_X || (m & 3) == LOG_Z) {
+                        lying++;
+                        lying_wrong += p.b != BIOME_FOREST && p.b != BIOME_TAIGA && p.b != BIOME_WETLAND;
+                        continue;
+                    }
+                    if ((m & 3) != LOG_UP || !block_log(c->blocks[ci + COL_AREA])) continue;
+                    int k = block_tree(b);
+                    feet++;
+                    seen[k]++;
+                    wrong += !tree_belongs(k, p);
+                }
+        column_free(c);
+    }
+    int kinds = 0;
+    for (int k = 0; k < TREE_KINDS; k++) kinds += seen[k] > 0;
+    /* A wide trunk's far corner can stand a block over a biome's edge. */
+    CHECK(feet > 40 && wrong * 50 <= feet && kinds >= 8);
+    CHECK(lying >= 3 && lying_wrong * 20 <= lying);
+}
+
+/* Columns of a forest, generated one by one as the game does: no piece of
+ * a tree floats where a neighbour should have grown the rest of it, and
+ * crowns do reach across the columns' edges. */
+#define SEAM_N 5
+#define SEAM_W (SEAM_N * CHUNK_W)
+static void test_tree_seams(void)
+{
+    const int cx0 = (72 >> 4) - SEAM_N / 2, cz0 = (-72 >> 4) - SEAM_N / 2;
+    uint8_t *g = mem_alloc((size_t)SEAM_W * SEAM_W * WORLD_H);
+    for (int n = 0; n < SEAM_N * SEAM_N; n++) {
+        column *c = column_alloc(cx0 + n % SEAM_N, cz0 + n / SEAM_N);
+        worldgen_column(1337, c);
+        for (int y = 0; y < WORLD_H; y++)
+            for (int z = 0; z < CHUNK_W; z++)
+                for (int x = 0; x < CHUNK_W; x++) {
+                    int gx = n % SEAM_N * CHUNK_W + x, gz = n / SEAM_N * CHUNK_W + z;
+                    g[((size_t)y * SEAM_W + (size_t)gz) * SEAM_W + (size_t)gx] = c->blocks[col_index(x, y, z)];
+                }
+        column_free(c);
+    }
+#define G(x, y, z) g[((size_t)(y) * SEAM_W + (size_t)(z)) * SEAM_W + (size_t)(x)]
+    /* Pairs of one tree's blocks either side of a column edge. */
+    long across = 0;
+    for (int y = 1; y < WORLD_H; y++)
+        for (int z = 0; z < SEAM_W; z++)
+            for (int x = CHUNK_W; x < SEAM_W; x += CHUNK_W) {
+                int k = block_tree(G(x, y, z));
+                across += k >= 0 && block_tree(G(x - 1, y, z)) == k;
+                k = block_tree(G(z, y, x));
+                across += k >= 0 && block_tree(G(z, y, x - 1)) == k;
+            }
+    /* Flood every piece of tree; one that touches no other solid block and
+     * stays inside the grid is floating. */
+    uint8_t *done = mem_calloc((size_t)SEAM_W * SEAM_W * WORLD_H, 1);
+    int *queue = mem_alloc(sizeof(int) * 3 * 200000);
+    static const int D[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+    long pieces = 0, floating = 0;
+    for (int y = 1; y < WORLD_H - 1; y++)
+        for (int z = 0; z < SEAM_W; z++)
+            for (int x = 0; x < SEAM_W; x++) {
+                uint8_t b = G(x, y, z);
+                if (done[((size_t)y * SEAM_W + (size_t)z) * SEAM_W + (size_t)x] || (block_tree(b) < 0 && b != B_VINES))
+                    continue;
+                int n = 0, held = 0;
+                queue[n++] = x;
+                queue[n++] = y;
+                queue[n++] = z;
+                done[((size_t)y * SEAM_W + (size_t)z) * SEAM_W + (size_t)x] = 1;
+                for (int h = 0; h < n && n < 3 * 200000 - 3; h += 3)
+                    for (int d = 0; d < 6; d++) {
+                        int a = queue[h] + D[d][0], e = queue[h + 1] + D[d][1], f = queue[h + 2] + D[d][2];
+                        if (a < 0 || f < 0 || a >= SEAM_W || f >= SEAM_W) {
+                            held = 1; /* runs on outside the grid */
+                            continue;
+                        }
+                        if (e < 1 || e >= WORLD_H) continue;
+                        uint8_t nb = G(a, e, f);
+                        size_t di = ((size_t)e * SEAM_W + (size_t)f) * SEAM_W + (size_t)a;
+                        if (block_tree(nb) < 0 && nb != B_VINES) {
+                            held |= block_solid(nb);
+                            continue;
+                        }
+                        if (done[di]) continue;
+                        done[di] = 1;
+                        queue[n++] = a;
+                        queue[n++] = e;
+                        queue[n++] = f;
+                    }
+                pieces++;
+                floating += !held;
+            }
+#undef G
+    CHECK(pieces > 20 && floating == 0 && across > 100);
+    mem_free(queue);
+    mem_free(done);
+    mem_free(g);
+}
+
 void test_worldgen_all(void)
 {
     test_noise_grad();
@@ -954,6 +1093,8 @@ void test_worldgen_all(void)
     test_generators();
     test_soil();
     test_trees();
+    test_tree_climate();
+    test_tree_seams();
     test_cave_shapes();
     test_landforms();
     test_sample();
