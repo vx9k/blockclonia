@@ -70,6 +70,10 @@ static void test_names_and_ages(void)
     CHECK(strcmp(s, "1 minute ago") == 0);
     backups_age_text(3 * 3600 + 5, s, sizeof s);
     CHECK(strcmp(s, "3 hours ago") == 0);
+    backups_age_text(3600, s, sizeof s);
+    CHECK(strcmp(s, "1 hour ago") == 0);
+    backups_age_text(86400 + 3599, s, sizeof s);
+    CHECK(strcmp(s, "1 day ago") == 0);
     backups_age_text(2 * 86400, s, sizeof s);
     CHECK(strcmp(s, "2 days ago") == 0);
     backups_age_text(-5, s, sizeof s);
