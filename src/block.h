@@ -209,6 +209,12 @@ typedef enum {
     T_MAT_PLAIN,
     T_MAT_FLESH,
     T_MAT_GRAIN,
+    /* Powder smoke in three steps of thinning (fx.c), and the muzzle flash
+     * and tracers' burning white. */
+    T_SMOKE0,
+    T_SMOKE1,
+    T_SMOKE2,
+    T_FLASH,
     T_COUNT
 } tex_id;
 

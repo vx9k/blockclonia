@@ -1,5 +1,6 @@
 /* blockclonia: entry point, input, and the fixed-timestep game loop. */
 #include "anim.h"
+#include "atmos.h"
 #include "audio_device.h"
 #include "avatar.h"
 #include "bench.h"
@@ -969,6 +970,7 @@ typedef struct {
     int nfigs;
     float eat_anim;           /* 1 at the start of eating, easing to 0 */
     float aim;                /* 0 rifle at the hip .. 1 down its sights */
+    float flash;              /* the last muzzle flash's light, 1 when fired, fading */
     float fog[3];             /* the fog's colour, easing toward the light at the eye */
     int fog_set;
     uint32_t death_rng;
@@ -1882,6 +1884,7 @@ static void frame_simulate(game *g, const player_input *raw, double dt)
     if (steps && physics_pickup(&g->ph, 0, inv_accept, &g->inv)) sound_play(g->snd, SND_PICKUP, NULL, 0, 0.7f);
     if (!g->in_menu || g->mp) {
         thermo_step(g->th, &g->w, dt, g->pl.pos);
+        g->fx->wind = atmos_wind_at(&g->w, g->cb.wind_seed, g->cb.time, g->pl.pos);
         fx_step(g->fx, &g->w, dt);
     }
     g->phys_ms = anim_approach(g->phys_ms, (float)((glfwGetTime() - t0) * 1000.0), 5.0f, (float)dt);
@@ -1964,7 +1967,18 @@ static void frame_interact(game *g, double dt)
         if (hands) {
             combat_out co = combat_frame(&g->cb, &g->mobs, &g->ph, &t, 0, &g->inv, g->eye, g->look, block_d,
                                          ii.attack_click, g->aim, (float)dt);
-            if (co.fired) sound_play(g->snd, SND_SHOT, NULL, 0, 1.0f);
+            if (co.fired) {
+                sound_play(g->snd, SND_SHOT, NULL, 0, 1.0f);
+                /* The muzzle is about 0.8 m out along the barrel: under the
+                 * eye down the sights, low and to the right from the hip. */
+                double hip = 1.0 - (double)g->aim, rx = -(double)g->look.z, rz = (double)g->look.x;
+                double rl = fmax(sqrt(rx * rx + rz * rz), 1e-6);
+                dvec3 dir = dv3((double)g->look.x, (double)g->look.y, (double)g->look.z);
+                dvec3 muzzle = dv3(g->eye.x + dir.x * 0.8 + rx / rl * 0.12 * hip, g->eye.y + dir.y * 0.8 - 0.05 - 0.08 * hip,
+                                   g->eye.z + dir.z * 0.8 + rz / rl * 0.12 * hip);
+                fx_muzzle(g->fx, muzzle, dir, ammo_get(CARTRIDGE_AMMO)->black);
+                g->flash = 1.0f;
+            }
             if (co.struck) sound_play(g->snd, SND_HIT, &co.at, 0, 0.8f);
             if (co.struck || co.fired) {
                 ii.attack_click = 0;
@@ -2082,6 +2096,19 @@ static void add_mobs(game *g, dvec3 eye, double alpha, float light, double now, 
     }
 }
 
+/* Tracers in flight, among the opaque entities. */
+static void add_tracers(game *g, dvec3 eye, double alpha, int *n_op, int n_tr)
+{
+    enum { MAX_TRACERS = 16 };
+    entity_instance t[MAX_TRACERS] = {0};
+    int room = RENDER_MAX_ENTS - *n_op - n_tr;
+    int k = combat_tracers(&g->cb, eye, alpha, t, room < MAX_TRACERS ? room : MAX_TRACERS);
+    if (k <= 0) return;
+    memmove(g->ents + *n_op + k, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
+    memcpy(g->ents + *n_op, t, sizeof t[0] * (size_t)k);
+    *n_op += k;
+}
+
 /* Camera, sky, entities and the first-person arm for the renderer. */
 static render_view build_view(game *g, double now, double dt, double alpha)
 {
@@ -2134,6 +2161,10 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     const item_stack *carried = &g->inv.slot[g->inv.selected];
     uint32_t held_id = on_title || g->hl.dead || !carried->count ? 0 : carried->id;
     lightfx_build(&v.lfx, sun, thermo_daylight(g->th), held_id, g->st.brightness, now);
+    /* A real flash is over in milliseconds; this one halves every 14 ms, so
+     * it shows for a frame or two at any frame rate. */
+    lightfx_flash(&v.lfx, g->flash);
+    g->flash *= expf(-(float)dt / 0.02f);
     v.stars = sky_visibility(thermo_daylight(g->th));
     v.star_rot = sky_rotation(thermo_day_time(g->th));
     v.moon = sky_moon(sun);
@@ -2176,6 +2207,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     if (!on_title) {
         add_figures(g, v.eye, v.daylight, (float)dt, &n_op, n_tr);
         add_mobs(g, v.eye, alpha, v.daylight, now, &n_op, n_tr);
+        add_tracers(g, v.eye, alpha, &n_op, n_tr);
     }
     v.ents = g->ents;
     v.ent_opaque = n_op;

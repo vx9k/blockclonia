@@ -23,6 +23,7 @@ typedef enum {
     AMMO_BLACK_LEAD, /* the black-powder cartridge's long lead bullet */
     AMMO_SMOKELESS,  /* a jacketed 7.62 mm service round */
     AMMO_MATCH,      /* a heavier 7.62 mm boat-tail for long range */
+    AMMO_TRACER,     /* a 7.62 mm round whose base burns bright */
     AMMO_COUNT
 } ammo_kind;
 
@@ -34,6 +35,8 @@ typedef struct {
     float bc;      /* ballistic coefficient, lb/in^2 as published */
     uint8_t drag;  /* drag_model the bc is given against */
     uint8_t build; /* bullet_build */
+    uint8_t black; /* fired with black powder, which leaves a thick white cloud */
+    float tracer;  /* s its base burns, from leaving the muzzle; 0 for none */
 } ammo_def;
 
 const ammo_def *ammo_get(int kind); /* NULL past the table */

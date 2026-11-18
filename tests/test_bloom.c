@@ -15,6 +15,8 @@ static void test_mask(void)
     CHECK(bloom_layer_glows(m, T_CAMPFIRE_BASE));
     CHECK(bloom_layer_glows(m, T_FOXFIRE));
     CHECK(bloom_layer_glows(m, T_LAMP));
+    CHECK(bloom_layer_glows(m, T_FLASH)); /* a muzzle flash or tracer */
+    CHECK(!bloom_layer_glows(m, T_SMOKE0) && !bloom_layer_glows(m, T_SMOKE2));
     /* See-through but not alight: water, glass, oil, ice. */
     CHECK(!bloom_layer_glows(m, T_WATER));
     CHECK(!bloom_layer_glows(m, T_GLASS));
@@ -24,7 +26,7 @@ static void test_mask(void)
     CHECK(!bloom_layer_glows(m, 300u));
     int n = 0;
     for (uint32_t l = 0; l < T_COUNT; l++) n += bloom_layer_glows(m, l);
-    CHECK(n == 8);
+    CHECK(n == 9);
 }
 
 static uint32_t quad_vertex(uint32_t layer) { return layer << 20 | 3u << 15; }

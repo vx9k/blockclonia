@@ -10,6 +10,7 @@
 #define MC_COMBAT_H
 
 #include "ballistics.h"
+#include "entity.h"
 #include "health.h"
 #include "inventory.h"
 #include "mob.h"
@@ -78,5 +79,11 @@ int combat_creatures(combat *c, mobs *ms, physics *ph, const combat_targets *t, 
 
 /* The damage a blow does with this item in hand (hit points; a fist is 1). */
 float combat_blow(item_id held);
+
+/* Glowing streaks for the tracers in flight: each the stretch it covers in
+ * one physics step, ending where it is `alpha` of the way into the next,
+ * and never thinner than about a pixel however far away. A bullet's age is
+ * BULLET_LIFE less its life. Writes up to max; returns how many. */
+int combat_tracers(const combat *c, dvec3 eye, double alpha, entity_instance *out, int max);
 
 #endif

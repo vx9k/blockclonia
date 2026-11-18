@@ -11,6 +11,10 @@
  * world, so its range comes from the flight. The longest any round flies
  * is about 35 s, a 7.62 mm shot at 37 degrees. */
 #define BULLET_LIFE 60.0f
+/* A tracer's compound lights about 40 m out, clear of the shooter's eyes. */
+#define TRACER_DELAY 0.05f
+/* Past full light, as a flash's sparks: the tone curve whitens the core. */
+#define TRACER_LIGHT 3.0f
 /* Steps of flight per physics step: a rifle bullet covers 7 to 14 m in
  * one, too far for one straight segment to follow its drop. */
 #define BULLET_SUBSTEPS 4
@@ -285,4 +289,38 @@ int combat_step(combat *c, mobs *ms, physics *ph, const combat_targets *t)
         if (done) c->b[i--] = c->b[--c->count];
     }
     return hits;
+}
+
+int combat_tracers(const combat *c, dvec3 eye, double alpha, entity_instance *out, int max)
+{
+    int n = 0;
+    for (int i = 0; i < c->count && n < max; i++) {
+        const bullet *b = &c->b[i];
+        const ammo_def *a = ammo_get(b->ammo);
+        float age = BULLET_LIFE - b->life;
+        double speed = dv3_len(b->vel);
+        if (!a || a->tracer <= 0.0f || age < TRACER_DELAY || age > a->tracer || speed < 1.0) continue;
+        dvec3 d = dv3_scale(b->vel, 1.0 / speed);
+        double back = (1.0 - alpha) * PHYS_DT, len = speed * PHYS_DT;
+        dvec3 mid = dv3(b->pos.x - b->vel.x * back - d.x * len * 0.5, b->pos.y - b->vel.y * back - d.y * len * 0.5,
+                        b->pos.z - b->vel.z * back - d.z * len * 0.5);
+        dvec3 rel = dv3(mid.x - eye.x, mid.y - eye.y, mid.z - eye.z);
+        /* 1.5 mrad: a pixel or two on a 1080p screen at any range. */
+        float w = (float)fmax(0.03, dv3_len(rel) * 0.0015);
+        entity_instance e = {0};
+        e.pos[0] = (float)rel.x;
+        e.pos[1] = (float)rel.y;
+        e.pos[2] = (float)rel.z;
+        e.tex = (uint32_t)T_FLASH * 0x010101u;
+        /* The box's z axis turned onto the flight; a box is the same
+         * either way along it, so straight back needs no turn. */
+        entity_set_rot(&e, quat_axis((float)-d.y, (float)d.x, 0.0f, (float)acos(fmin(fmax(d.z, -1.0), 1.0))));
+        e.scale[0] = w;
+        e.scale[1] = w;
+        e.scale[2] = (float)len;
+        e.light = TRACER_LIGHT;
+        e.tint = entity_tint(0xFF6A3Au); /* strontium's red */
+        out[n++] = e;
+    }
+    return n;
 }

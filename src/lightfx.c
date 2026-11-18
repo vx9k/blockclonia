@@ -19,6 +19,14 @@ static float bright(float level) { return exp2f(LIGHT_CURVE_K * level - LIGHT_CU
 /* Block light's gain as a shift of its level. */
 static float gain_shift(void) { return log2f(LIGHTFX_BLOCK_GAIN) / LIGHT_CURVE_K; }
 
+void lightfx_flash(lightfx_frame *f, float flash)
+{
+    /* Burning powder gas, white with a little yellow. */
+    static const float RGB[3] = {1.0f, 0.82f, 0.55f};
+    float k = isfinite(flash) ? fminf(fmaxf(flash, 0.0f), 1.0f) : 0.0f;
+    for (int i = 0; i < 3; i++) f->held[i] = fmaxf(f->held[i], k * RGB[i]);
+}
+
 float lightfx_flicker(double t)
 {
     /* Three incommensurate sines, so the pattern doesn't visibly repeat. */

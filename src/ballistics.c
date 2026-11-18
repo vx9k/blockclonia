@@ -49,13 +49,16 @@ static const drag_point G7[] = {
 
 static const ammo_def AMMO[AMMO_COUNT] = {
     /* A .54 patched ball: round, so it sheds speed fast. */
-    [AMMO_ROUND_BALL] = {"Round ball", 0.01372f, 0.01426f, 550.0f, 0.068f, DRAG_G1, BUILD_LEAD},
+    [AMMO_ROUND_BALL] = {"Round ball", 0.01372f, 0.01426f, 550.0f, 0.068f, DRAG_G1, BUILD_LEAD, 1, 0.0f},
     /* A .45 405-grain lead bullet over black powder: slow and heavy. */
-    [AMMO_BLACK_LEAD] = {"Black-powder lead", 0.01163f, 0.02624f, 400.0f, 0.214f, DRAG_G1, BUILD_LEAD},
+    [AMMO_BLACK_LEAD] = {"Black-powder lead", 0.01163f, 0.02624f, 400.0f, 0.214f, DRAG_G1, BUILD_LEAD, 1, 0.0f},
     /* 7.62 mm, 9.5 g full metal jacket at 840 m/s. */
-    [AMMO_SMOKELESS] = {"7.62 mm ball", 0.00782f, 0.00953f, 840.0f, 0.200f, DRAG_G7, BUILD_FMJ},
+    [AMMO_SMOKELESS] = {"7.62 mm ball", 0.00782f, 0.00953f, 840.0f, 0.200f, DRAG_G7, BUILD_FMJ, 0, 0.0f},
     /* 7.62 mm, 11.3 g hollow-point boat-tail at 790 m/s. */
-    [AMMO_MATCH] = {"7.62 mm match", 0.00782f, 0.01134f, 790.0f, 0.243f, DRAG_G7, BUILD_HOLLOW_POINT},
+    [AMMO_MATCH] = {"7.62 mm match", 0.00782f, 0.01134f, 790.0f, 0.243f, DRAG_G7, BUILD_HOLLOW_POINT, 0, 0.0f},
+    /* 7.62 mm, 9.3 g, a pellet of strontium and magnesium in its base that
+     * burns red out to about 900 m. */
+    [AMMO_TRACER] = {"7.62 mm tracer", 0.00782f, 0.00933f, 838.0f, 0.190f, DRAG_G7, BUILD_FMJ, 0, 1.9f},
 };
 
 const ammo_def *ammo_get(int kind)
