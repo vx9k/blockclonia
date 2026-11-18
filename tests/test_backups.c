@@ -20,7 +20,10 @@
 static char g_root[256];
 
 static void path_in(char *out, size_t cap, const char *dir, const char *name)
-{ snprintf(out, cap, "%s/%s", dir, name); }
+{
+    int n = snprintf(out, cap, "%s/%s", dir, name);
+    CHECK(n > 0 && (size_t)n < cap); /* a cut-short path would test the wrong file */
+}
 
 /* A new world folder holding a database with this seed. */
 static void make_world(char *dir, size_t cap, const char *name, uint32_t seed)
