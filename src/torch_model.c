@@ -34,6 +34,7 @@ static entity_instance place(const torch_part *p, const float at[3], quat rot, f
     entity_set_rot(&e, quat_norm(quat_mul(rot, quat_axis(0.0f, 1.0f, 0.0f, p->turn))));
     e.tex = p->tex;
     e.light = p->glows == 1 ? 1.0f : (p->glows == 2 ? light * 0.35f : light);
+    if (p->glows == 1) e.tint |= ENTITY_GLOWS;
     return e;
 }
 

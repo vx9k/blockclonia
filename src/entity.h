@@ -17,11 +17,32 @@ typedef struct {
                             (any zeroed instance) is no tint: entity_tint */
 } entity_instance;
 
+/* In the tint field's spare top byte (the shader reads only rgb): the
+ * part gives off its own light, so the colour of the light around does
+ * not fall on it (entity_shine). */
+#define ENTITY_GLOWS 0x01000000u
+
 /* The tint field for colour 0xRRGGBB. */
 static inline uint32_t entity_tint(uint32_t rgb)
 {
     uint32_t c = ~rgb;
     return (c & 0xFF0000u) >> 16 | (c & 0xFF00u) | (c & 0xFFu) << 16;
+}
+
+/* Lets light of colour rgb (0..1 each, the brightest 1) fall on n
+ * instances: their tint is multiplied by it, except on parts that glow. */
+static inline void entity_shine(entity_instance *e, int n, const float rgb[3])
+{
+    for (int i = 0; i < n; i++) {
+        if (e[i].tint & ENTITY_GLOWS) continue;
+        uint32_t t = 0;
+        for (int c = 0; c < 3; c++) {
+            float have = (float)(255u - ((e[i].tint >> (8 * c)) & 255u)); /* byte 0 is red */
+            float k = rgb[c] < 0.0f ? 0.0f : (rgb[c] > 1.0f ? 1.0f : rgb[c]);
+            t |= (255u - (uint32_t)(have * k + 0.5f)) << (8 * c);
+        }
+        e[i].tint = t;
+    }
 }
 
 /* Pixel art drawn to a box's size, as the creatures are. Without it every

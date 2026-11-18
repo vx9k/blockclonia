@@ -598,8 +598,9 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
             quat_apply(own, tm[i].pos, off);
             const float at[3] = {off[0], off[1] - 0.12f, off[2] + HAND_Z - 0.02f};
             quat pr = {tm[i].rot[0], tm[i].rot[1], tm[i].rot[2], tm[i].rot[3]};
-            parts[n++] = part(lag, base, arm, at, quat_mul(own, pr), tm[i].scale[0], tm[i].scale[1], tm[i].scale[2],
-                              tm[i].tex, tm[i].light);
+            parts[n] = part(lag, base, arm, at, quat_mul(own, pr), tm[i].scale[0], tm[i].scale[1], tm[i].scale[2],
+                            tm[i].tex, tm[i].light);
+            parts[n++].tint = tm[i].tint; /* the flame's glow mark */
         }
     } else if (id > 0 && item_is_block(id)) {
         /* A block rests on the fingers, turned so the top and two sides

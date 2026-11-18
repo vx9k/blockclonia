@@ -89,6 +89,12 @@ float lightfx_tone(float x);
  * held light and the floor, by their brightest channel. */
 float lightfx_at(const lightfx_frame *f, uint16_t l, float dist);
 
+/* lightfx_at per channel, for an entity, which carries one light for all
+ * its faces: returns the brightest channel's brightness and writes the
+ * light's colour to rgb, scaled so its brightest channel is 1. Torchlight
+ * comes out orange, a cave lit by foxfire green, moonlight blue. */
+float lightfx_colour(const lightfx_frame *f, uint16_t l, float dist, float rgb[3]);
+
 /* block.frag's light push constants (shaders/push_frag.glsl): writes the
  * sky's level shift per channel, log2(brightness) / LIGHT_CURVE_K, to sky
  * and returns the held light and the floor as packUnorm4x8 does. A frame
