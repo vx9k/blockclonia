@@ -10,6 +10,14 @@ peer-to-peer first, ENet over UDP, every packet sealed with
 ChaCha20-Poly1305 (libsodium), chat end-to-end, simulation fully
 authoritative on one peer.
 
+**Finished last** (decided 2026-11-18). The remaining multiplayer work
+waits until every other area in TODO.md is built. Every new system
+(items, machines, vehicles, animals) changes what the authority
+simulates and sends; syncing each one while it still changes means
+syncing it twice. Doing it once, over a finished game, gives players a
+stable, seamless and synchronized game instead of one that drifts out
+of step as features land.
+
 **Shape of the peer-to-peer mode.**
 
 - Every peer holds one ENet host and a direct connection to every other
@@ -89,3 +97,36 @@ fixed on the branch):
   (open/tick/close, a stdin console with /players, /kick, /save, /stop),
   a `blockclonia-server` executable on the core library, `--server` in
   `main.c`, and a test driving a server and a client in one thread.
+
+## Until then
+
+New systems are written so the final multiplayer pass is sync work,
+not a rewrite:
+
+- **The authority decides.** Game state changes only in the
+  deterministic step (fixed `PHYS_DT`, seeded randomness), driven by
+  inputs, never by the frame, the clock or the renderer. A client can
+  then predict it and the host can replay it.
+- **State is plain data with a checked codec.** Anything another player
+  must see has a fixed-size, versionable encoding with a validating
+  decoder (as `save.c` does), so a wire message is a small step from
+  the save format and the fuzz targets cover it.
+- **Effects are derived, not sent.** Light, particles, sound and
+  animation follow from synced state (as burning creatures and held
+  torches do through `mp.c`'s flags and held item), so they cost no
+  extra messages.
+- **Players are indices, not "the" player.** Code takes a player index
+  or a list of bodies (`combat_targets`, `mob_sense`), never a single
+  global player.
+
+What the final pass then adds, in this order:
+
+1. A protocol version and feature flags in the handshake, so a
+   mismatched game is refused with a clear message; every later message
+   change bumps it.
+2. The headless server (above).
+3. Sync for every system built by then.
+4. Interest management and a bandwidth budget per player.
+5. Lag compensation for shots, reconnects, timeouts and bans.
+6. A test running a host and several clients in one process, beside
+   `fuzz_net.c`.

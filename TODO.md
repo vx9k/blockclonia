@@ -39,6 +39,14 @@ In this order (agreed 2026-11-16):
 4. **[Vehicles](#vehicles)**: built from parts and fully simulated,
    from a hand cart to engines on refined fuel.
 
+**[Multiplayer](#multiplayer) is finished last** (decided 2026-11-18),
+once the single-player game above and in Later is built. Each new
+system changes what the authority has to send, so syncing them one by
+one while they still change would mean redoing it. Until then new
+systems only keep to the rules in
+[docs/design/multiplayer.md](docs/design/multiplayer.md#until-then), so
+the final pass is sync work, not a rewrite.
+
 ## Later
 
 Not yet in order:
@@ -53,7 +61,6 @@ Not yet in order:
 - [World generation](#world-generation): trees, ground plants,
   settlements
 - [User interface](#user-interface): the "field kit" redesign
-- [Multiplayer](#multiplayer): the headless server and what is left
 - [Health](#health): the panel by mouse, the anatomical view
 - [Android](#android)
 - [Native Metal renderer](#native-metal-renderer-macos): deferred until
@@ -229,8 +236,20 @@ mortar that makes walls strong.
 
 **Goal:** play together without a third party, end-to-end encrypted.
 **Status:** peer-to-peer and client-server modes, menus and NAT
-traversal are merged.
+traversal are merged. The rest waits until every other area is built
+(see [Next](#next)), so that players get one stable, seamless,
+synchronized game rather than one that is patched as each system lands.
 **Design:** [docs/design/multiplayer.md](docs/design/multiplayer.md)
+
+- [ ] A protocol version and feature flags in the handshake: a
+      mismatched game is refused with a clear message
+- [ ] Sync every system built by then: inventory, crafting and
+      stations, containers, machines, vehicles, fire and liquids
+- [ ] Interest management: send each player only what is near them,
+      with a bandwidth budget per player
+- [ ] Lag compensation for shots, against each shooter's latency
+- [ ] Reconnect after a dropped connection, timeouts, bans
+- [ ] A test running a host and several clients in one process
 
 - [ ] Headless server (`--server`), started on `feat/headless-server`
 - [ ] Hand the authority over when the host leaves
