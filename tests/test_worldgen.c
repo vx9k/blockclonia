@@ -1234,6 +1234,89 @@ static void test_forest_woods(void)
     CHECK(d.main_feet * 100 >= d.all_feet * 90);
 }
 
+/* Whether a trunk stands on the ground at (x, z) of a column: an upright
+ * log with an upright log above it and soil under it. */
+static int trunk_foot(const column *c, int x, int z)
+{
+    for (int y = 2; y < WORLD_H - 1; y++) {
+        int ci = col_index(x, y, z);
+        uint8_t b = c->blocks[ci], under = c->blocks[ci - COL_AREA], m = c->meta ? c->meta[ci] : 0;
+        if (!block_log(b) || block_log(under) || block_leaves(under) || under == B_AIR) continue;
+        if ((m & 3) == LOG_UP && block_log(c->blocks[ci + COL_AREA])) return 1;
+    }
+    return 0;
+}
+
+/* Trees root at most one to a 4 x 4 cell. Trunk feet that touch (a
+ * redwood's broad foot and buttresses, or two trees side by side across a
+ * cell edge) count as one tree, at their middle. Over the inner cells of
+ * 2 x 2 columns at a dozen forest spots, returns the most trees in one
+ * cell and counts the trees. */
+static int trees_per_cell(int *trees)
+{
+    static uint8_t foot[32][32], done[32][32];
+    static int stack[1024][2];
+    int most = 0, spots = 0;
+    *trees = 0;
+    for (int i = 0; i < 6000 && spots < 12; i++) {
+        int x = (i * 7919) % 60000 - 30000, z = (i * 104729) % 60000 - 30000;
+        biome b = worldgen_sample(1337, x + 16, z + 16).b;
+        if (b != BIOME_FOREST && b != BIOME_TAIGA) continue;
+        spots++;
+        memset(done, 0, sizeof done);
+        int cx = (int)floor(x / (double)CHUNK_W), cz = (int)floor(z / (double)CHUNK_W);
+        for (int q = 0; q < 4; q++) {
+            column *c = column_alloc(cx + (q & 1), cz + (q >> 1));
+            worldgen_column(1337, c);
+            for (int bz = 0; bz < CHUNK_W; bz++)
+                for (int bx = 0; bx < CHUNK_W; bx++)
+                    foot[(q >> 1) * CHUNK_W + bz][(q & 1) * CHUNK_W + bx] = (uint8_t)trunk_foot(c, bx, bz);
+            column_free(c);
+        }
+        int count[8][8] = {{0}};
+        for (int z0 = 0; z0 < 32; z0++)
+            for (int x0 = 0; x0 < 32; x0++) {
+                if (!foot[z0][x0] || done[z0][x0]) continue;
+                int n = 1, sx = 0, sz = 0, k = 0, edge = 0;
+                stack[0][0] = x0;
+                stack[0][1] = z0;
+                done[z0][x0] = 1;
+                while (n > 0) {
+                    n--;
+                    int px = stack[n][0], pz = stack[n][1];
+                    sx += px;
+                    sz += pz;
+                    k++;
+                    edge |= px == 0 || pz == 0 || px == 31 || pz == 31;
+                    for (int d = 0; d < 9; d++) {
+                        int nx = px + d % 3 - 1, nz = pz + d / 3 - 1;
+                        if (nx < 0 || nz < 0 || nx > 31 || nz > 31 || !foot[nz][nx] || done[nz][nx]) continue;
+                        done[nz][nx] = 1;
+                        stack[n][0] = nx;
+                        stack[n][1] = nz;
+                        n++;
+                    }
+                }
+                if (edge) continue;
+                int *cell = &count[sz / k / 4][sx / k / 4];
+                (*cell)++;
+                (*trees)++;
+                if (*cell > most) most = *cell;
+            }
+    }
+    return most;
+}
+
+/* Trees used to be tried block by block, so two could root a block or two
+ * apart (main had 2 in one cell of 71 trees here); now each 4 x 4 cell
+ * roots one tree at a jittered spot or none. */
+static void test_tree_cells(void)
+{
+    int trees = 0, most = trees_per_cell(&trees);
+    CHECK(trees >= 40);
+    CHECK(most == 1);
+}
+
 /* Columns grown on several workers at once, sharing the remembered tree
  * sites as they fill them in, are the columns one thread grows alone. */
 typedef struct {
@@ -1278,6 +1361,7 @@ void test_worldgen_all(void)
 {
     test_worldgen_threads();
     test_forest_woods();
+    test_tree_cells();
     test_worldgen_memo();
     test_noise_grad();
     test_noise_wrap();
