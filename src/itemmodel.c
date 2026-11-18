@@ -492,7 +492,7 @@ static void torch(item_model *m)
         im_box *b = box(m, t[i].pos[0], t[i].pos[1], t[i].pos[2], t[i].scale[0], t[i].scale[1], t[i].scale[2],
                         (uint8_t)(t[i].tex & 255u), 0xFFFFFFu);
         b->rot = (quat){t[i].rot[0], t[i].rot[1], t[i].rot[2], t[i].rot[3]};
-        b->glow = t[i].light >= 1.0f;
+        b->glow = (t[i].tint & ENTITY_GLOWS) != 0; /* not the handle, lit 1 here too */
     }
     m->hold = IM_HOLD_TOOL;
     m->grip[1] = 0.06f;
@@ -610,6 +610,7 @@ int itemmodel_place(const item_model *m, const float origin[3], const float at[3
         e.tex = (uint32_t)b->layer * 0x010101u;
         e.tint = entity_tint(b->rgb);
         e.light = b->glow ? 1.0f : light;
+        if (b->glow) e.tint |= ENTITY_GLOWS;
         out[n++] = e;
     }
     return n;

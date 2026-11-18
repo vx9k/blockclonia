@@ -141,6 +141,21 @@ float lightfx_at(const lightfx_frame *f, uint16_t l, float dist)
     return bright(fmaxf(fmaxf(blk, sky_lv), f->floor));
 }
 
+float lightfx_colour(const lightfx_frame *f, uint16_t l, float dist, float rgb[3])
+{
+    const unsigned lv[3] = {LIGHT_R(l), LIGHT_G(l), LIGHT_B(l)};
+    float top = 0.0f;
+    for (int c = 0; c < 3; c++) {
+        float held = f->held[c] - dist / (float)LIGHT_MAX;
+        float blk = fmaxf((float)lv[c] / (float)LIGHT_MAX, held) + gain_shift();
+        float sky = (float)LIGHT_SKY(l) / (float)LIGHT_MAX + log2f(fmaxf(f->sky[c], 1e-3f)) / LIGHT_CURVE_K;
+        rgb[c] = bright(fmaxf(fmaxf(blk, sky), f->floor));
+        top = fmaxf(top, rgb[c]);
+    }
+    for (int c = 0; c < 3; c++) rgb[c] = top > 0.0f ? rgb[c] / top : 1.0f;
+    return top;
+}
+
 uint32_t lightfx_pack(const lightfx_frame *f, float daylight, float sky[3])
 {
     int has_sky = f->sky[0] > 0.0f || f->sky[1] > 0.0f || f->sky[2] > 0.0f;

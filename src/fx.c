@@ -226,15 +226,21 @@ static void put_trans(ent_list *l, entity_instance e)
     if (l->tb > l->no) l->out[--l->tb] = e;
 }
 
-/* The brightness at p: its cell's light, or daylight without a world. */
-static float lit(const physics *ph, dvec3 p, float daylight)
+/* The brightness at p and the light's colour in rgb: its cell's light as
+ * the frame's light shows it (lightfx_colour), by daylight alone without
+ * a frame, or daylight without a world. */
+static float lit(const physics *ph, const lightfx_frame *lf, dvec3 eye, dvec3 p, float daylight, float rgb[3])
 {
+    rgb[0] = rgb[1] = rgb[2] = 1.0f;
     if (!ph || !ph->w) return daylight;
-    return light_at(ph->w, p.x, p.y, p.z, daylight);
+    if (!lf) return light_at(ph->w, p.x, p.y, p.z, daylight);
+    uint16_t l = world_light(ph->w, (int)floor(p.x), (int)floor(p.y), (int)floor(p.z));
+    return lightfx_colour(lf, l, (float)dv3_len(dv3(p.x - eye.x, p.y - eye.y, p.z - eye.z)), rgb);
 }
 
 void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *crack, dvec3 eye, double alpha, float time,
-                       float daylight, entity_instance *out, int max, int *n_opaque, int *n_trans)
+                       float daylight, const lightfx_frame *lf, entity_instance *out, int max, int *n_opaque,
+                       int *n_trans)
 {
     ent_list l = {out, 0, max > 0 ? max : 0, max > 0 ? max : 0};
     /* The crack goes first: the block being broken always shows it. */
@@ -243,13 +249,20 @@ void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *cra
         stage = stage < 0 ? 0 : (stage > 3 ? 3 : stage);
         dvec3 c = dv3(crack->x + 0.5, crack->y + 0.5, crack->z + 0.5);
         /* Lit by the cell in front of the face looked at, not the solid one. */
-        float light = 0.0f;
+        float light = 0.0f, rgb[3] = {1.0f, 1.0f, 1.0f};
         for (int d = 0; d < 6; d++) {
             dvec3 n = dv3(c.x + (d == 0) - (d == 1), c.y + (d == 2) - (d == 3), c.z + (d == 4) - (d == 5));
-            light = fmaxf(light, lit(ph, n, daylight));
+            float col[3] = {1.0f, 1.0f, 1.0f};
+            float b = lit(ph, lf, eye, n, daylight, col);
+            if (b > light) {
+                light = b;
+                memcpy(rgb, col, sizeof rgb);
+            }
         }
-        put_trans(&l, cube_at(c, eye, same_tex((uint8_t)(T_CRACK0 + stage)), quat_identity(), 1.004f, 1.004f, 1.004f,
-                              light));
+        entity_instance e = cube_at(c, eye, same_tex((uint8_t)(T_CRACK0 + stage)), quat_identity(), 1.004f, 1.004f,
+                                    1.004f, light);
+        entity_shine(&e, 1, rgb);
+        put_trans(&l, e);
     }
     for (int i = 0; ph && i < ph->item_count; i++) {
         const item_ent *it = &ph->items[i];
@@ -258,7 +271,8 @@ void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *cra
         float bob = it->on_ground ? 0.05f + 0.04f * sinf(time * 2.2f + (float)i) : 0.0f;
         p.y += (double)bob;
         quat q = quat_axis(0, 1, 0, it->spin);
-        float light = lit(ph, p, daylight);
+        float rgb[3] = {1.0f, 1.0f, 1.0f};
+        float light = lit(ph, lf, eye, p, daylight, rgb);
         int stacks = it->count > 32 ? 3 : (it->count > 1 ? 2 : 1); /* a pile looks like a pile */
         item_model mdl = {0};
         int has_model = itemmodel_build(it->id, &mdl);
@@ -274,6 +288,7 @@ void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *cra
                 quat lie = mdl.hold == IM_HOLD_PALM ? q : quat_mul(q, quat_axis(1.0f, 0.0f, 0.0f, 1.5708f));
                 entity_instance im[IM_MAX_BOXES] = {0};
                 int nb = itemmodel_place(&mdl, c, at, lie, size, light, im, IM_MAX_BOXES);
+                entity_shine(im, nb, rgb);
                 for (int b = 0; b < nb; b++) {
                     if (itemmodel_layer_clear((uint8_t)(im[b].tex & 255u))) put_trans(&l, im[b]);
                     else put_opaque(&l, im[b]);
@@ -282,6 +297,7 @@ void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *cra
             }
             uint8_t b = (uint8_t)it->id; /* a block item's id is its block */
             entity_instance e = cube_at(pk, eye, block_tex(b), q, 0.25f, 0.25f, 0.25f, light);
+            if (!light_emission(b)) entity_shine(&e, 1, rgb);
             if (block_get(b)->flags & BF_TRANSLUCENT) put_trans(&l, e);
             else put_opaque(&l, e);
         }
@@ -298,15 +314,22 @@ void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *cra
              * steps fainter by the end. */
             float age = 1.0f - life, ss = pt->size * (1.0f + 2.0f * age);
             uint8_t tex = (uint8_t)(T_SMOKE0 + (age < 0.3f ? 0 : (age < 0.65f ? 1 : 2)));
-            float light = fmaxf(0.9f * lit(ph, p, daylight), f->flash);
-            put_trans(&l, cube_at(p, eye, same_tex(tex), q, ss, ss, ss, light));
+            float rgb[3] = {1.0f, 1.0f, 1.0f};
+            float light = 0.9f * lit(ph, lf, eye, p, daylight, rgb);
+            entity_instance e = cube_at(p, eye, same_tex(tex), q, ss, ss, ss, fmaxf(light, f->flash));
+            if (light >= f->flash) entity_shine(&e, 1, rgb);
+            put_trans(&l, e);
             continue;
         }
         if (pt->kind == FXP_GLOW) {
-            put_opaque(&l, cube_at(p, eye, same_tex(pt->tex), q, pt->size, pt->size, pt->size, FX_GLOW_LIGHT));
+            entity_instance e = cube_at(p, eye, same_tex(pt->tex), q, pt->size, pt->size, pt->size, FX_GLOW_LIGHT);
+            e.tint |= ENTITY_GLOWS;
+            put_opaque(&l, e);
             continue;
         }
-        entity_instance e = cube_at(p, eye, same_tex(pt->tex), q, s, s, s, 0.9f * lit(ph, p, daylight));
+        float rgb[3] = {1.0f, 1.0f, 1.0f};
+        entity_instance e = cube_at(p, eye, same_tex(pt->tex), q, s, s, s, 0.9f * lit(ph, lf, eye, p, daylight, rgb));
+        entity_shine(&e, 1, rgb);
         if (pt->tex == T_WATER || pt->tex == T_GLASS || pt->tex == T_ICE) put_trans(&l, e);
         else put_opaque(&l, e);
     }

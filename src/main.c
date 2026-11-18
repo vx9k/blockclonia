@@ -2093,9 +2093,18 @@ static void frame_interact(game *g, double dt)
     g->hs.msg_age += (float)dt;
 }
 
+/* The light on a figure standing at p: its brightness, and the colour
+ * that falls on the instances it built (entity_shine). */
+static float figure_light(game *g, const lightfx_frame *lf, dvec3 eye, dvec3 p, float rgb[3])
+{
+    uint16_t l = world_light(&g->w, (int)floor(p.x), (int)floor(p.y), (int)floor(p.z));
+    return lightfx_colour(lf, l, (float)dv3_len(dv3(p.x - eye.x, p.y - eye.y, p.z - eye.z)), rgb);
+}
+
 /* The other players as figures, among the opaque entities (which come
  * before the translucent ones). */
-static void add_players(game *g, dvec3 eye, double alpha, double now, float light, float dt, int *n_op, int n_tr)
+static void add_players(game *g, dvec3 eye, double alpha, double now, const lightfx_frame *lf, float dt, int *n_op,
+                        int n_tr)
 {
     mp_avatar av[NET_MAX_PLAYERS];
     int count = mp_avatars(g->mp, now, alpha, av, NET_MAX_PLAYERS);
@@ -2107,13 +2116,16 @@ static void add_players(game *g, dvec3 eye, double alpha, double now, float ligh
         memmove(g->ents + *n_op + AVATAR_BOXES, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
         const float feet[3] = {(float)(av[i].pos.x - eye.x), (float)(av[i].pos.y - eye.y),
                                (float)(av[i].pos.z - eye.z)};
-        float lit = light_at(&g->w, av[i].pos.x, av[i].pos.y + 1.0, av[i].pos.z, light);
-        *n_op += avatar_build(a, feet, av[i].yaw, av[i].pitch, av[i].dead, lit, g->ents + *n_op, AVATAR_BOXES);
+        float rgb[3] = {1.0f, 1.0f, 1.0f};
+        float lit = figure_light(g, lf, eye, dv3(av[i].pos.x, av[i].pos.y + 1.0, av[i].pos.z), rgb);
+        int k = avatar_build(a, feet, av[i].yaw, av[i].pitch, av[i].dead, lit, g->ents + *n_op, AVATAR_BOXES);
+        entity_shine(g->ents + *n_op, k, rgb);
+        *n_op += k;
     }
 }
 
 /* The --figures, on the ground where they stand, walking on the spot. */
-static void add_figures(game *g, dvec3 eye, float light, float dt, int *n_op, int n_tr)
+static void add_figures(game *g, dvec3 eye, const lightfx_frame *lf, float dt, int *n_op, int n_tr)
 {
     for (int i = 0; i < g->nfigs; i++) {
         if (RENDER_MAX_ENTS - *n_op - n_tr < AVATAR_BOXES) return;
@@ -2123,14 +2135,17 @@ static void add_figures(game *g, dvec3 eye, float light, float dt, int *n_op, in
         double y = (double)world_surface_y(&g->w, (int)floor(f->x), (int)floor(f->z));
         memmove(g->ents + *n_op + AVATAR_BOXES, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
         const float feet[3] = {(float)(f->x - eye.x), (float)(y - eye.y), (float)(f->z - eye.z)};
-        float lit = light_at(&g->w, f->x, y + 1.0, f->z, light);
-        *n_op += avatar_build(&f->anim, feet, f->yaw, 0.0f, f->dead, lit, g->ents + *n_op, AVATAR_BOXES);
+        float rgb[3] = {1.0f, 1.0f, 1.0f};
+        float lit = figure_light(g, lf, eye, dv3(f->x, y + 1.0, f->z), rgb);
+        int k = avatar_build(&f->anim, feet, f->yaw, 0.0f, f->dead, lit, g->ents + *n_op, AVATAR_BOXES);
+        entity_shine(g->ents + *n_op, k, rgb);
+        *n_op += k;
     }
 }
 
 /* Creatures as figures among the opaque entities: the ones simulated here,
  * or on a client the ones the host last sent. */
-static void add_mobs(game *g, dvec3 eye, double alpha, float light, double now, int *n_op, int n_tr)
+static void add_mobs(game *g, dvec3 eye, double alpha, const lightfx_frame *lf, double now, int *n_op, int n_tr)
 {
     const mobs *ms = g->client ? mp_client_mobs(g->mp) : &g->mobs;
     for (int i = 0; ms && i < ms->count; i++) {
@@ -2141,8 +2156,10 @@ static void add_mobs(game *g, dvec3 eye, double alpha, float light, double now, 
         if (dv3_len(dv3(p.x - eye.x, p.y - eye.y, p.z - eye.z)) > 160.0) continue;
         memmove(g->ents + *n_op + MOB_FIGURE, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
         const float feet[3] = {(float)(p.x - eye.x), (float)(p.y - eye.y), (float)(p.z - eye.z)};
-        float lit = light_at(&g->w, p.x, p.y + 0.5, p.z, light);
+        float rgb[3] = {1.0f, 1.0f, 1.0f};
+        float lit = figure_light(g, lf, eye, dv3(p.x, p.y + 0.5, p.z), rgb);
         int k = mob_figure(m, feet, lit, (float)fmod(now, 3600.0), g->ents + *n_op, MOB_FIGURE);
+        entity_shine(g->ents + *n_op, k, rgb);
         /* Close the gap if the figure came out short. */
         if (k < MOB_FIGURE)
             memmove(g->ents + *n_op + k, g->ents + *n_op + MOB_FIGURE, sizeof g->ents[0] * (size_t)n_tr);
@@ -2234,6 +2251,8 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     g->eat_anim = fmaxf(0.0f, g->eat_anim - (float)dt / 1.6f);
     if (!on_title && !g->hl.dead && !g->in_menu) {
         const item_stack *held = &g->inv.slot[g->inv.selected];
+        float hand_rgb[3] = {1.0f, 1.0f, 1.0f};
+        float hand_light = lightfx_colour(&v.lfx, eye_light, 0.3f, hand_rgb);
         viewmodel_input vi = {held->count ? held->id : 0,
                               g->ia.swing,
                               g->ia.swinging,
@@ -2245,10 +2264,11 @@ static render_view build_view(game *g, double now, double dt, double alpha)
                               g->eat_anim > 0.0f ? 1.0f - g->eat_anim : 0.0f,
                               g->aim,
                               g->bolt_t < 1.0f ? g->bolt_t : 0.0f,
-                              lightfx_at(&v.lfx, eye_light, 0.3f),
+                              hand_light,
                               (float)dt};
         v.view_model = g->vm_ents;
         v.view_model_count = mode_hands(g->pl.mode) ? viewmodel_build(&g->vm, &vi, g->vm_ents, VIEWMODEL_MAX) : 0;
+        entity_shine(g->vm_ents, v.view_model_count, hand_rgb);
         /* Shaking hands (adrenaline, the crash after it, low sugar, cold). */
         float tremor = health_get_senses(&g->hl).tremor;
         for (int i = 0; i < v.view_model_count && tremor > 0.01f; i++) {
@@ -2257,12 +2277,12 @@ static render_view build_view(game *g, double now, double dt, double alpha)
         }
     }
     int n_op = 0, n_tr = 0;
-    fx_build_entities(g->fx, &g->ph, &g->crack, v.eye, alpha, v.time, v.daylight, g->ents, RENDER_MAX_ENTS, &n_op,
-                      &n_tr);
-    if (g->mp) add_players(g, v.eye, alpha, now, v.daylight, (float)dt, &n_op, n_tr);
+    fx_build_entities(g->fx, &g->ph, &g->crack, v.eye, alpha, v.time, v.daylight, &v.lfx, g->ents, RENDER_MAX_ENTS,
+                      &n_op, &n_tr);
+    if (g->mp) add_players(g, v.eye, alpha, now, &v.lfx, (float)dt, &n_op, n_tr);
     if (!on_title) {
-        add_figures(g, v.eye, v.daylight, (float)dt, &n_op, n_tr);
-        add_mobs(g, v.eye, alpha, v.daylight, now, &n_op, n_tr);
+        add_figures(g, v.eye, &v.lfx, (float)dt, &n_op, n_tr);
+        add_mobs(g, v.eye, alpha, &v.lfx, now, &n_op, n_tr);
         add_tracers(g, v.eye, alpha, &n_op, n_tr);
     }
     v.ents = g->ents;

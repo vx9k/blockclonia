@@ -682,7 +682,7 @@ static int terrain_ready(const world *w, const player *p)
     return 1;
 }
 
-combat_targets mp_targets(mp *m)
+combat_targets mp_targets(const mp *m)
 {
     combat_targets t = {m->tpl, m->thl, m->tn, m->tsense};
     return t;

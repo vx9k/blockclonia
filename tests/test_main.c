@@ -1528,7 +1528,7 @@ static void test_interact(void)
     entity_instance *ents = mem_alloc(sizeof(entity_instance) * 2048);
     int no = 0, nt = 0;
     fx_crack cr = {1, 0, GROUND - 1, 0, 0.6f};
-    fx_build_entities(fx, &t.ph, &cr, eye, 0.5, 1.0f, 0.5f, ents, 2048, &no, &nt);
+    fx_build_entities(fx, &t.ph, &cr, eye, 0.5, 1.0f, 0.5f, NULL, ents, 2048, &no, &nt);
     CHECK(no > 0 && nt >= 2); /* the bucket card and the crack overlay */
     CHECK(ents[no + nt - 1].tex == (uint32_t)(T_CRACK0 + 2) * 0x010101u);
     /* Under the open sky (the test world is not lit) things take daylight;
@@ -1597,7 +1597,7 @@ static void test_review_fixes(void)
     entity_instance *ents = mem_alloc(sizeof(entity_instance) * 300);
     fx_crack cr = {1, 1, GROUND - 1, 1, 0.9f};
     int no = 0, nt = 0;
-    fx_build_entities(fx, &t.ph, &cr, dv3(0, 20, 0), 0.0, 0.0f, 1.0f, ents, 300, &no, &nt);
+    fx_build_entities(fx, &t.ph, &cr, dv3(0, 20, 0), 0.0, 0.0f, 1.0f, NULL, ents, 300, &no, &nt);
     CHECK(no + nt == 300);
     int crack_found = 0;
     for (int i = no; i < no + nt; i++) crack_found |= ents[i].tex == (uint32_t)(T_CRACK0 + 3) * 0x010101u;
