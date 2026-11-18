@@ -15,6 +15,7 @@
 #include "mem.h"
 #include "noise.h"
 #include "physics.h"
+#include "trees.h"
 #include "world.h"
 
 #include <stdlib.h>
@@ -494,6 +495,44 @@ static int rows_of(int f, int h) { return (f == 3 ? h - 13 : h - 1) / CAVE_STEP 
 /* A row of the height map, with the one-block rim on each side. */
 typedef int hm_row[CHUNK_W + 2];
 
+static const struct {
+    uint32_t seed;
+    double xz, y; /* feature sizes, m */
+} CAVE_FIELD[CAVE_FIELDS] = {{71, 44.0, 22.0}, {73, 44.0, 22.0}, {79, 90.0, 45.0}, {89, 28.0, 14.0}};
+
+static float cave_node(uint32_t seed, int f, int x, int y, int z)
+{
+    return noise3d(seed + CAVE_FIELD[f].seed, x / CAVE_FIELD[f].xz, y / CAVE_FIELD[f].y, z / CAVE_FIELD[f].xz);
+}
+
+/* The blends between grid points, shared by the column and cave_hollow so
+ * both round the same way to the last bit. */
+static float cave_xz(float g00, float g10, float g01, float g11, float u, float w)
+{
+    float a = g00 + u * (g10 - g00);
+    float b = g01 + u * (g11 - g01);
+    return a + w * (b - a);
+}
+
+static float cave_y(float lo, float hi, float v) { return lo + v * (hi - lo); }
+
+/* What the fields carve at height y under ground h, the block above
+ * open or not: a tunnel, or a chamber. */
+static int cave_carves(uint32_t seed, const float *val, int x, int y, int z, int h, int land, int open, int *mouth)
+{
+    float width = 0.010f + 0.012f * fmaxf(0.0f, val[2]);
+    int tunnel = val[0] * val[0] + val[1] * val[1] < width;
+    /* Underground a tunnel keeps at least four layers of rock over
+     * it (one layer under soil gave way over wide spots); nearer
+     * the surface only an opening carved from the sky down, so no
+     * soil or sand is ever left hanging over a hole. */
+    int deep = y < h - 9, surface = land && (open || y == h - 1);
+    if (tunnel && !deep && surface && *mouth < 0) *mouth = noise2d(seed + 87, x / 160.0, z / 160.0) > 0.45f;
+    int carve = tunnel && (deep || (surface && *mouth > 0));
+    /* Chambers stay a dozen blocks down, under a thick roof. */
+    return carve || (val[3] > 0.55f && y > 6 && y < h - 12);
+}
+
 static void carve_caves(uint32_t seed, column *c, const hm_row *hm, const uint8_t *wet_near)
 {
     int bx = c->cx * CHUNK_W, bz = c->cz * CHUNK_W, top = 0;
@@ -508,17 +547,11 @@ static void carve_caves(uint32_t seed, column *c, const hm_row *hm, const uint8_
      * zeroing it would cost as much as filling it. */
     float g[CAVE_FIELDS * CAVE_NY * CAVE_NX * CAVE_NX];
 #define G(f, j, k, i) g[(size_t)(f) * plane + ((size_t)(j) * CAVE_NX + (size_t)(k)) * CAVE_NX + (size_t)(i)]
-    static const struct {
-        uint32_t seed;
-        double xz, y; /* feature sizes, m */
-    } FIELD[CAVE_FIELDS] = {{71, 44.0, 22.0}, {73, 44.0, 22.0}, {79, 90.0, 45.0}, {89, 28.0, 14.0}};
     for (int f = 0; f < CAVE_FIELDS; f++)
         for (int j = 0; j < ny && j <= rows_of(f, top); j++)
             for (int k = 0; k < CAVE_NX; k++)
-                for (int i = 0; i < CAVE_NX; i++) {
-                    int x = bx + i * CAVE_STEP, y = j * CAVE_STEP, z = bz + k * CAVE_STEP;
-                    G(f, j, k, i) = noise3d(seed + FIELD[f].seed, x / FIELD[f].xz, y / FIELD[f].y, z / FIELD[f].xz);
-                }
+                for (int i = 0; i < CAVE_NX; i++)
+                    G(f, j, k, i) = cave_node(seed, f, bx + i * CAVE_STEP, j * CAVE_STEP, bz + k * CAVE_STEP);
 
     for (int z = 0; z < CHUNK_W; z++)
         for (int x = 0; x < CHUNK_W; x++) {
@@ -532,29 +565,16 @@ static void carve_caves(uint32_t seed, column *c, const hm_row *hm, const uint8_
              * only blends between two heights. */
             float cv[CAVE_FIELDS][CAVE_NY] = {{0}};
             for (int f = 0; f < CAVE_FIELDS; f++)
-                for (int j = 0; j <= rows_of(f, h) && j < ny; j++) {
-                    float a = G(f, j, k, i) + u * (G(f, j, k, i + 1) - G(f, j, k, i));
-                    float b = G(f, j, k + 1, i) + u * (G(f, j, k + 1, i + 1) - G(f, j, k + 1, i));
-                    cv[f][j] = a + w * (b - a);
-                }
+                for (int j = 0; j <= rows_of(f, h) && j < ny; j++)
+                    cv[f][j] = cave_xz(G(f, j, k, i), G(f, j, k, i + 1), G(f, j, k + 1, i), G(f, j, k + 1, i + 1), u,
+                                       w);
             uint8_t *col = &c->blocks[col_index(x, 0, z)];
             int open = 0; /* the block above was carved, or is the sky */
             for (int y = h - 1; y >= 3; y--) {
                 int j = y / CAVE_STEP;
                 float v = (float)(y % CAVE_STEP) / CAVE_STEP, val[CAVE_FIELDS] = {0};
-                for (int f = 0; f < CAVE_FIELDS; f++) val[f] = cv[f][j] + v * (cv[f][j + 1] - cv[f][j]);
-                float width = 0.010f + 0.012f * fmaxf(0.0f, val[2]);
-                int tunnel = val[0] * val[0] + val[1] * val[1] < width;
-                /* Underground a tunnel keeps at least four layers of rock over
-                 * it (one layer under soil gave way over wide spots); nearer
-                 * the surface only an opening carved from the sky down, so no
-                 * soil or sand is ever left hanging over a hole. */
-                int deep = y < h - 9, surface = land && (open || y == h - 1);
-                if (tunnel && !deep && surface && mouth < 0)
-                    mouth = noise2d(seed + 87, (bx + x) / 160.0, (bz + z) / 160.0) > 0.45f;
-                int carve = tunnel && (deep || (surface && mouth > 0));
-                /* Chambers stay a dozen blocks down, under a thick roof. */
-                carve |= val[3] > 0.55f && y > 6 && y < h - 12;
+                for (int f = 0; f < CAVE_FIELDS; f++) val[f] = cave_y(cv[f][j], cv[f][j + 1], v);
+                int carve = cave_carves(seed, val, bx + x, y, bz + z, h, land, open, &mouth);
                 uint8_t above = col[(y + 1) * COL_AREA];
                 if (above == B_WATER || (block_get(above)->flags & BF_GRANULAR)) carve = 0;
                 if (carve) col[y * COL_AREA] = B_AIR;
@@ -800,167 +820,55 @@ static void place_ores(uint32_t seed, column *c)
 
 /* ------------------------------------------------------------- trees */
 
-static void put(column *c, int x, int y, int z, uint8_t id)
-{
-    if (x < 0 || x >= CHUNK_W || z < 0 || z >= CHUNK_W || y < 1 || y >= WORLD_H) return;
-    uint8_t *b = &c->blocks[col_index(x, y, z)];
-    if (*b == B_AIR || (block_leaves(*b) && block_log(id))) *b = id;
-}
-
-/* Trees by kind, and their age. A crown stays within three steps of wood
- * or of leaves resting on it, as far as leaves reach (their span), so
- * every generated tree stands. */
-typedef enum { TREE_OAK, TREE_BIRCH, TREE_SPRUCE, TREE_PINE, TREE_THORN, TREE_KINDS } tree_kind;
-typedef enum { AGE_YOUNG, AGE_GROWN, AGE_OLD, AGE_SNAG } tree_age;
-
-static const uint8_t TREE_LOG[TREE_KINDS] = {B_LOG, B_BIRCH_LOG, B_SPRUCE_LOG, B_PINE_LOG, B_THORN_LOG};
-
-/* One layer of a crown round (x, z): the square of radius r, cut to m steps
- * from the middle, and a share `trim` in a hundred of its outermost ring
- * left out so the edge is ragged. */
-static void crown(column *c, uint32_t h, int x, int y, int z, int r, int m, uint32_t trim, uint8_t leaf)
-{
-    for (int dz = -r; dz <= r; dz++)
-        for (int dx = -r; dx <= r; dx++) {
-            int d = abs(dx) + abs(dz);
-            if (d > m) continue;
-            if (d == m && d > 0 && hash_u32(h ^ (uint32_t)((dx + 4) * 16 + dz + 4 + y * 256)) % 100u < trim) continue;
-            put(c, x + dx, y, z + dz, leaf);
-        }
-}
-
-/* The trunk from y up to below top, of the kind's wood. */
-static void trunk(column *c, int x, int y, int z, int top, uint8_t log)
-{
-    for (int ly = y; ly < top; ly++) put(c, x, ly, z, log);
-}
-
-static void grow_oak(column *c, uint32_t h, int x, int y, int z, tree_age age)
-{
-    int top = y + 4 + (int)(h % 3u) + (age == AGE_OLD ? 2 : 0) - (age == AGE_YOUNG ? 2 : 0);
-    if (age == AGE_YOUNG) {
-        crown(c, h, x, top - 1, z, 1, 2, 30, B_LEAVES);
-        crown(c, h, x, top, z, 1, 2, 30, B_LEAVES);
-        crown(c, h, x, top + 1, z, 1, 1, 0, B_LEAVES);
-    } else {
-        if (age == AGE_OLD) crown(c, h, x, top - 3, z, 2, 3, 45, B_LEAVES);
-        crown(c, h, x, top - 2, z, 2, 3, 25, B_LEAVES);
-        crown(c, h, x, top - 1, z, 2, 3, 15, B_LEAVES);
-        crown(c, h, x, top, z, age == AGE_OLD ? 2 : 1, 2, 30, B_LEAVES);
-        crown(c, h, x, top + 1, z, 1, 1, 20, B_LEAVES);
-    }
-    trunk(c, x, y, z, top, B_LOG);
-}
-
-/* Tall and slender, the crown narrow and open. */
-static void grow_birch(column *c, uint32_t h, int x, int y, int z, tree_age age)
-{
-    int top = y + 6 + (int)(h % 3u) - (age == AGE_YOUNG ? 3 : 0);
-    crown(c, h, x, top - 3, z, 1, 1, 30, B_BIRCH_LEAVES);
-    crown(c, h, x, top - 2, z, 2, 2, 50, B_BIRCH_LEAVES);
-    crown(c, h, x, top - 1, z, 1, 2, 25, B_BIRCH_LEAVES);
-    crown(c, h, x, top, z, 1, 1, 0, B_BIRCH_LEAVES);
-    put(c, x, top + 1, z, B_BIRCH_LEAVES);
-    trunk(c, x, y, z, top, B_BIRCH_LOG);
-}
-
-/* A cone in tiers from low on the trunk to a spike. */
-static void grow_spruce(column *c, uint32_t h, int x, int y, int z, tree_age age)
-{
-    int top = y + 7 + (int)(h % 4u) + (age == AGE_OLD ? 2 : 0) - (age == AGE_YOUNG ? 3 : 0);
-    for (int ly = y + (age == AGE_YOUNG ? 1 : 2); ly <= top; ly++) {
-        int d = top - ly, r = d >= 4 ? 2 : (d >= 1 ? 1 : 0);
-        if (d > 0 && d % 3 == 0) r--; /* the gap under each tier */
-        crown(c, h, x, ly, z, r, r == 2 ? 3 : r, r == 2 ? 30 : 0, B_SPRUCE_LEAVES);
-    }
-    put(c, x, top + 1, z, B_SPRUCE_LEAVES);
-    trunk(c, x, y, z, top, B_SPRUCE_LOG);
-}
-
-/* A long bare trunk under a small, flat-topped crown. */
-static void grow_pine(column *c, uint32_t h, int x, int y, int z, tree_age age)
-{
-    int top = y + 8 + (int)(h % 3u) - (age == AGE_YOUNG ? 3 : 0);
-    crown(c, h, x, top - 2, z, 1, 1, 0, B_PINE_LEAVES);
-    crown(c, h, x, top - 1, z, 2, 3, 35, B_PINE_LEAVES);
-    crown(c, h, x, top, z, 2, 2, 25, B_PINE_LEAVES);
-    crown(c, h, x, top + 1, z, 1, 1, 40, B_PINE_LEAVES);
-    trunk(c, x, y, z, top, B_PINE_LOG);
-}
-
-/* Short, forked, with a wide flat crown that shades the ground under it:
- * a crown three steps across rests on the trunk's top. */
-static void grow_thorn(column *c, uint32_t h, int x, int y, int z, tree_age age)
-{
-    int top = y + 3 + (int)(h % 2u) - (age == AGE_YOUNG ? 1 : 0);
-    int ax = (h >> 4) & 1u ? 1 : 0, az = 1 - ax;
-    crown(c, h, x, top, z, age == AGE_YOUNG ? 2 : 3, age == AGE_YOUNG ? 2 : 3, 30, B_THORN_LEAVES);
-    crown(c, h, x, top + 1, z, 2, 2, 45, B_THORN_LEAVES);
-    trunk(c, x, y, z, top, B_THORN_LOG);
-    put(c, x + ax, top - 1, z + az, B_THORN_LOG);
-    put(c, x - ax, top - 1, z - az, B_THORN_LOG);
-}
-
-/* A dead tree: its trunk broken off, one stub of a branch left. */
-static void grow_snag(column *c, uint32_t h, int x, int y, int z, tree_kind k)
-{
-    int top = y + 3 + (int)(h % 4u);
-    trunk(c, x, y, z, top, TREE_LOG[k]);
-    static const int D[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-    int s = (int)((h >> 6) & 3u);
-    put(c, x + D[s][0], top - 2, z + D[s][1], TREE_LOG[k]);
-}
-
-static void grow_tree(column *c, uint32_t h, int x, int y, int z, tree_kind k, tree_age age)
-{
-    if (age == AGE_SNAG) {
-        grow_snag(c, h, x, y, z, k);
-        return;
-    }
-    switch (k) {
-    case TREE_OAK: grow_oak(c, h, x, y, z, age); break;
-    case TREE_BIRCH: grow_birch(c, h, x, y, z, age); break;
-    case TREE_SPRUCE: grow_spruce(c, h, x, y, z, age); break;
-    case TREE_PINE: grow_pine(c, h, x, y, z, age); break;
-    default: grow_thorn(c, h, x, y, z, age); break;
-    }
-}
-
-/* Which tree grows: by biome and warmth, with a slow patch field so
- * neighbours tend to be the same kind and a forest comes in stands of it. */
-static tree_kind tree_kind_at(biome b, float temp, float patch, uint32_t h)
+/* Which tree grows: by biome, warmth and rain, with a slow patch field so
+ * neighbours tend to be the same kind and a forest comes in stands of it.
+ * Willows grow by water, redwoods in the wettest mild forests, palms on
+ * warm beaches, baobabs and umbrella pines in hot dry country. Returns -1
+ * for none. */
+static int tree_kind_at(biome b, const local *l, float patch, uint32_t h, int by_water)
 {
     int u = clampi((int)(h % 100u) + (int)(patch * 30.0f), 0, 99);
+    float t = l->temp;
+    if (by_water && t > 4.0f && b != BIOME_BEACH && b != BIOME_DESERT && (h >> 7) % 100u < 60u) return TREE_WILLOW;
     switch (b) {
-    case BIOME_TAIGA: return u < 55 ? TREE_SPRUCE : (u < 82 ? TREE_PINE : TREE_BIRCH);
-    case BIOME_ALPINE: return u < 70 ? TREE_SPRUCE : TREE_PINE;
+    case BIOME_TAIGA: return u < 50 ? TREE_SPRUCE : (u < 82 ? TREE_PINE : TREE_BIRCH);
+    case BIOME_ALPINE: return u < 60 ? TREE_MOUNTAIN_PINE : (u < 88 ? TREE_SPRUCE : TREE_PINE);
     case BIOME_FOREST:
-        if (temp < 5.0f) return u < 40 ? TREE_SPRUCE : (u < 72 ? TREE_BIRCH : TREE_OAK);
-        return u < 62 ? TREE_OAK : (u < 90 ? TREE_BIRCH : TREE_PINE);
-    case BIOME_WETLAND: return u < 55 ? TREE_BIRCH : TREE_OAK;
-    case BIOME_MEADOW: return u < 75 ? TREE_OAK : TREE_BIRCH;
+        if (t < 5.0f) return u < 35 ? TREE_SPRUCE : (u < 65 ? TREE_BIRCH : (u < 85 ? TREE_OAK : TREE_MAPLE));
+        if (l->rain > 0.65f && t < 16.0f && u >= 60) return TREE_REDWOOD;
+        if (t > 14.0f) return u < 35 ? TREE_OAK : (u < 55 ? TREE_UMBRELLA : (u < 75 ? TREE_CHERRY : TREE_MAPLE));
+        return u < 40 ? TREE_OAK : (u < 55 ? TREE_BIRCH : (u < 77 ? TREE_MAPLE : (u < 87 ? TREE_CHERRY : TREE_PINE)));
+    case BIOME_WETLAND: return u < 45 ? TREE_WILLOW : (u < 75 ? TREE_BIRCH : TREE_OAK);
+    case BIOME_MEADOW: return u < 55 ? TREE_OAK : (u < 70 ? TREE_BIRCH : (u < 85 ? TREE_CHERRY : TREE_MAPLE));
     case BIOME_SCRUB:
     case BIOME_STEPPE:
-        if (temp > 12.0f) return u < 80 ? TREE_THORN : TREE_PINE;
+        if (t > 16.0f) return u < 55 ? TREE_THORN : (u < 80 ? TREE_BAOBAB : TREE_UMBRELLA);
+        if (t > 10.0f) return u < 40 ? TREE_UMBRELLA : (u < 70 ? TREE_THORN : TREE_PINE);
         return u < 65 ? TREE_PINE : TREE_THORN;
+    case BIOME_BEACH: return t > 18.0f ? TREE_PALM : -1;
     default: return TREE_OAK;
     }
 }
 
 /* Mostly grown; a fifth young; some old; and in the deep woods, where
- * nothing clears the dead, now and then a snag. */
+ * nothing clears the dead, now and then a snag or a fallen trunk. */
 static tree_age tree_age_at(biome b, uint32_t h)
 {
     uint32_t a = (h >> 12) % 100u;
-    if ((b == BIOME_FOREST || b == BIOME_TAIGA || b == BIOME_WETLAND) && (h >> 20) % 100u < 5u) return AGE_SNAG;
+    if (b == BIOME_FOREST || b == BIOME_TAIGA || b == BIOME_WETLAND) {
+        uint32_t dead = (h >> 20) % 100u;
+        if (dead < 4u) return AGE_SNAG;
+        if (dead < 8u) return AGE_FALLEN;
+    }
     return a < 22u ? AGE_YOUNG : (a >= 86u ? AGE_OLD : AGE_GROWN);
 }
 
-/* Trees per 10,000 blocks of ground, by biome. */
+/* Trees per 10,000 blocks of ground, by biome; TREES_MAX the most. */
 static const uint16_t TREES[BIOME_COUNT] = {
     [BIOME_FOREST] = 260, [BIOME_TAIGA] = 220, [BIOME_WETLAND] = 120, [BIOME_MEADOW] = 25,
-    [BIOME_SCRUB] = 40,   [BIOME_STEPPE] = 12, [BIOME_ALPINE] = 3,
+    [BIOME_SCRUB] = 40,   [BIOME_STEPPE] = 12, [BIOME_ALPINE] = 8,    [BIOME_BEACH] = 30,
 };
+#define TREES_MAX 260u
 
 /* ------------------------------------------------------------ plants */
 
@@ -1102,6 +1010,117 @@ static soil soil_at(biome b, int h, int slope, int rise, const local *l, float f
     return so;
 }
 
+/* Whether caves open anywhere from just under the ground at (x, z),
+ * height h, to `depth` blocks down: the column's carve at one point. It
+ * leaves out what only stops a carve (water or sand above, a river near),
+ * so it finds a hollow wherever the column has one, and now and then
+ * where it has not. */
+static int cave_hollow(uint32_t seed, int x, int z, int h, int depth)
+{
+    int lo = imax(3, h - depth), gx = x - (x & (CAVE_STEP - 1)), gz = z - (z & (CAVE_STEP - 1));
+    float u = (float)(x & (CAVE_STEP - 1)) / CAVE_STEP, w = (float)(z & (CAVE_STEP - 1)) / CAVE_STEP;
+    int j0 = lo / CAVE_STEP, j1 = (h - 1) / CAVE_STEP + 1;
+    float cv[CAVE_FIELDS][CAVE_NY] = {{0}};
+    for (int f = 0; f < CAVE_FIELDS; f++)
+        for (int j = j0; j <= imin(j1, rows_of(f, h)); j++)
+            cv[f][j] = cave_xz(cave_node(seed, f, gx, j * CAVE_STEP, gz),
+                               cave_node(seed, f, gx + CAVE_STEP, j * CAVE_STEP, gz),
+                               cave_node(seed, f, gx, j * CAVE_STEP, gz + CAVE_STEP),
+                               cave_node(seed, f, gx + CAVE_STEP, j * CAVE_STEP, gz + CAVE_STEP), u, w);
+    int land = h > SEA_LEVEL + 3, open = 0, mouth = -1;
+    for (int y = h - 1; y >= lo; y--) {
+        int j = y / CAVE_STEP;
+        float v = (float)(y % CAVE_STEP) / CAVE_STEP, val[CAVE_FIELDS] = {0};
+        for (int f = 0; f < CAVE_FIELDS; f++) val[f] = cave_y(cv[f][j], cv[f][j + 1], v);
+        open = cave_carves(seed, val, x, y, z, h, land, open, &mouth);
+        if (open) return 1;
+    }
+    return 0;
+}
+
+/* The block on top of the ground at (x, z), height h, with the slow
+ * fields s, as the column lays it. Slopes are taken from the settled ground
+ * all round, where the column takes them from its unsettled rim, so at a
+ * column's edge beside a river the two can differ. */
+static uint8_t top_at(uint32_t seed, int x, int z, int h, const slow *s, const local *l)
+{
+    static const int D[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+    int side[4] = {0};
+    for (int k = 0; k < 4; k++) side[k] = worldgen_height(seed, x + D[k][0], z + D[k][1]);
+    int slope = clampi(abs(side[0] - side[1]) + abs(side[2] - side[3]), 0, 64);
+    int rise = imax(imax(side[0], side[1]), imax(side[2], side[3])) - h;
+    float fine = 0.0f;
+    slow sl = *s;
+    (void)land_at(seed, x, z, &sl, &fine);
+    /* The top does not depend on the rock, only how deep the soil is. */
+    return soil_at(l->b, h, slope, rise, l, fine, B_STONE).top;
+}
+
+/* A tree rooted at (x, z), and everything it needs to grow there: each
+ * column it reaches works this out alone, from the seed. */
+typedef struct {
+    int y, kind, vines;
+    tree_age age;
+    uint32_t h;
+} tree_site;
+
+static int tree_site_at(uint32_t seed, int x, int z, tree_site *out)
+{
+    uint32_t h = hash2i(seed ^ 0xA5A5A5A5U, x, z), roll = h % 10000u;
+    /* The cheap tests first: most ground grows no tree. */
+    if (roll >= TREES_MAX) return 0;
+    float stand = sat(0.55f + 1.4f * fbm2d(seed + 301, x / 120.0, z / 120.0, 2));
+    if ((float)roll >= (float)TREES_MAX * stand) return 0;
+    slow s = {{0}, 0.0f, 0.0f, 0.0f, 0.0f};
+    int h0 = 0;
+    wet self = wet_point(seed, x, z, &h0, &s);
+    if (self.water || self.river) return 0;
+    local l = local_at(seed, x, z, &s, h0);
+    if ((float)roll >= (float)TREES[l.b] * stand) return 0;
+    int level = 0, y = ground_at(seed, x, z, &level, NULL, NULL);
+    if (level || y >= WORLD_H - TREE_UP) return 0;
+    wet_field f = wet_field_at(seed, x, z);
+    int kind = tree_kind_at(l.b, &l, fbm2d(seed + 311, x / 70.0, z / 70.0, 2), h >> 8,
+                            f.dist < 8.0f || f.lake > LAKE_RIM - 0.08f);
+    if (kind < 0) return 0;
+    uint8_t top = top_at(seed, x, z, y, &s, &l);
+    if (kind == TREE_PALM ? top != B_SAND : top != B_GRASS && top != B_PODZOL) return 0;
+    /* Over a cave the soil, not the ground, would carry the tree, and its
+     * canopy would drop at the first dig nearby. A structural check takes
+     * everything STRUCT_RADIUS below where it starts as standing, so only
+     * a cave within that reach counts: looking all the way down left most
+     * of the deep ground's forests bare. */
+    if (cave_hollow(seed, x, z, y, STRUCT_RADIUS + 1)) return 0;
+    tree_age age = tree_age_at(l.b, h);
+    if (age == AGE_FALLEN) {
+        /* The trunk lies on level, dry ground, or the tree still stands. */
+        tree_fall fl = tree_fall_of(h >> 8);
+        for (int i = fl.from; i <= fl.to && age == AGE_FALLEN; i++) {
+            int cx = x + fl.dx * i, cz = z + fl.dz * i, lv = 0;
+            if (ground_at(seed, cx, cz, &lv, NULL, NULL) != y || lv || cave_hollow(seed, cx, cz, y, 2)) age = AGE_GROWN;
+        }
+    }
+    *out = (tree_site){y, kind, l.rain > 0.6f && l.temp > 12.0f && (l.b == BIOME_FOREST || l.b == BIOME_WETLAND), age,
+                       h >> 8};
+    return 1;
+}
+
+/* Every tree rooted within reach of the column, in the same order in
+ * every column, so where two trees' crowns meet, both columns keep the
+ * same one. */
+static void grow_trees(uint32_t seed, column *c)
+{
+    int bx = c->cx * CHUNK_W, bz = c->cz * CHUNK_W;
+    tree_shape t;
+    for (int z = bz - TREE_REACH; z < bz + CHUNK_W + TREE_REACH; z++)
+        for (int x = bx - TREE_REACH; x < bx + CHUNK_W + TREE_REACH; x++) {
+            tree_site s = {0, 0, 0, AGE_GROWN, 0};
+            if (!tree_site_at(seed, x, z, &s)) continue;
+            tree_grow(&t, s.kind, s.age, s.h, s.vines);
+            tree_place(&t, c, x, s.y, z);
+        }
+}
+
 void worldgen_column(uint32_t seed, column *c)
 {
     int bx = c->cx * CHUNK_W, bz = c->cz * CHUNK_W;
@@ -1233,36 +1252,6 @@ void worldgen_column(uint32_t seed, column *c)
     carve_caves(seed, c, (const hm_row *)gm, wet_near);
     place_foxfire(seed, c, (const hm_row *)gm);
 
-    /* Trees only where the whole canopy fits in this column: avoids needing
-     * neighbour data on worker threads, at the cost of no trees on the
-     * outermost 2 blocks of each column. They grow in stands with
-     * clearings between. A cave mouth has taken the grass, so no tree
-     * stands over one. */
-    for (int z = 2; z < CHUNK_W - 2; z++)
-        for (int x = 2; x < CHUNK_W - 2; x++) {
-            uint32_t h = hash2i(seed ^ 0xA5A5A5A5U, bx + x, bz + z);
-            uint32_t roll = h % 10000u, rate = TREES[loc[z][x].b];
-            if (roll >= rate) continue;
-            float stand = fbm2d(seed + 301, (bx + x) / 120.0, (bz + z) / 120.0, 2);
-            if ((float)roll >= (float)rate * sat(0.55f + 1.4f * stand)) continue;
-            tree_kind kind = tree_kind_at(loc[z][x].b, loc[z][x].temp,
-                                          fbm2d(seed + 311, (bx + x) / 70.0, (bz + z) / 70.0, 2), h >> 8);
-            /* The thorn tree's crown reaches a step further. */
-            if (kind == TREE_THORN && (x < 3 || x > CHUNK_W - 4 || z < 3 || z > CHUNK_W - 4)) continue;
-            int y = gm[z + 1][x + 1];
-            uint8_t ground = c->blocks[col_index(x, y - 1, z)];
-            if (ground != B_GRASS && ground != B_PODZOL) continue;
-            /* Over a cave the soil, not the ground, would carry the tree, and
-             * its canopy would drop at the first dig nearby. A structural
-             * check takes everything STRUCT_RADIUS below where it starts as
-             * standing, so only a cave within that reach counts: looking all
-             * the way down left most of the deep ground's forests bare. */
-            int hollow = 0;
-            for (int ly = imax(1, y - 1 - STRUCT_RADIUS); ly < y - 1 && !hollow; ly++)
-                hollow = c->blocks[col_index(x, ly, z)] == B_AIR;
-            if (hollow) continue;
-            c->blocks[col_index(x, y - 1, z)] = B_DIRT;
-            grow_tree(c, h >> 8, x, y, z, kind, tree_age_at(loc[z][x].b, h));
-        }
+    grow_trees(seed, c);
     place_plants(seed, c, (const hm_row *)gm, lvl, (const local(*)[CHUNK_W])loc);
 }

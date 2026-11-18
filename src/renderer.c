@@ -176,9 +176,12 @@ typedef struct {
 } pool_free;
 
 _Static_assert(sizeof(entity_instance) == 52, "entity_instance is the instance vertex layout");
-_Static_assert(T_FIRE0 == 22 && T_WATER == 14 && T_LEAVES == 8, "update the layer constants in push_vert.glsl");
-_Static_assert(T_LEAVES_FIRST == 117 && T_LEAVES_LAST == T_LEAVES_FIRST + 3, "update LEAVES_FIRST in push_vert.glsl");
-_Static_assert(T_PLANT_FIRST == 121 && T_PLANT_LAST == T_PLANT_FIRST + 10, "update PLANT_FIRST in push_vert.glsl");
+_Static_assert(T_FIRE0 == 19 && T_WATER == 11, "update the layer constants in push_vert.glsl");
+_Static_assert(T_TREE_FIRST == 109 && T_TREE_LEAVES_FIRST == 200 && T_TREE_LAST == 212 && TREE_KINDS == 13,
+               "update TREE_FIRST, TREE_LEAVES_FIRST and TREE_COUNT in push_vert.glsl");
+_Static_assert(T_PLANT_FIRST == 213 && T_PLANT_LAST == T_PLANT_FIRST + 11 && T_VINES == 224,
+               "update PLANT_FIRST in push_vert.glsl");
+_Static_assert(T_TREE_LEAVES_FIRST + (int)TREE_MAPLE == 206, "update MAPLE_LEAVES in block_frag.glsl");
 _Static_assert(TEX_SIZE == 16, "update TEXELS in block.frag");
 
 typedef struct {

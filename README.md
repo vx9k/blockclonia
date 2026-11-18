@@ -24,10 +24,18 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
   cliff, and every ore sits in the rock it forms in: tin in granite,
   lead and zinc in limestone, gold in quartz veins. Rivers run from the
   highlands to the sea in valleys of their own, still the moment they are
-  generated, and lakes fill closed basins. Five kinds of tree grow where
-  their climate suits them (oak, birch, spruce, Scots pine and a
-  flat-crowned thorn tree of dry country), young and old, in stands, with
-  leaves the sky shows through. Under them grows the ground cover of each
+  generated, and lakes fill closed basins. Thirteen kinds of tree grow
+  where their climate suits them: oak, birch, maple in autumn reds and
+  cherry in blossom in the temperate woods, spruce and Scots pine in the
+  cold, redwoods in the wettest forests, weeping willows by the water,
+  thorn trees, baobabs and umbrella pines in dry country, palms on warm
+  beaches and twisted pines up the mountains. Each grows its own way, with
+  limbs out from the trunk, tiers or a crown of leaves the sky shows
+  through, and its own bark, cut grain and leaves, every tree tinted a
+  little apart from its neighbours. They come young and old, in stands,
+  some with roots, moss or hanging vines, among dead snags and fallen
+  trunks; they reach across chunk edges and stand as the structure physics
+  would hold them. Under them grows the ground cover of each
   biome: short and tall grass, ferns in the shade, heather, dry shrubs,
   berry bushes, reeds by the water and patches of poppies, dandelions,
   cornflowers and oxeye daisies, all of it moving in the wind. It
@@ -482,6 +490,7 @@ entirely.
 | Reversed-Z projection with a float depth buffer | Stable depth at any distance |
 | `discard` only in the cut-out pass (leaves and plants), drawn after the opaque pass; depth attachment never stored | The opaque terrain keeps early-Z, and so does on-chip depth on tile-based mobile GPUs |
 | Plants are two crossed quads in the cut-out range, after the leaves, left out of the shadow map | A meadow costs four quads a plant and no shadow-map triangles |
+| Upright bark cycles through four windows of a strip four blocks tall, picked by the block's height in the mesher; a per-tree tint from smooth noise over the world, worked out in the vertex shader and passed in four spare bits of the flat layer varying | Trunks with no seam and no repeat a block apart, and trees of one kind that still differ, at no cost in vertex size or texture memory |
 | Camera-relative rendering, doubles for physics positions | No jitter far from spawn |
 | CPU frustum culling per 16³ section, front-to-back opaque, back-to-front translucent | Less overdraw |
 | Meshing and generation on worker threads from private snapshots | Main thread never waits, edits never race |

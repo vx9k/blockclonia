@@ -81,7 +81,7 @@ static void test_light(void)
     settle(&t.w);
     CHECK(LIGHT_SKY(world_light(&t.w, 5, GROUND - 3, 5)) == 15);
     CHECK(world_light(&t.w, 9, GROUND - 3, 9) == 0);
-    for (int b = B_GRASS_TUFT; b <= B_OXEYE; b++) CHECK(light_passes((uint8_t)b) && light_emission((uint8_t)b) == 0);
+    for (int b = B_GRASS_TUFT; b <= B_VINES; b++) CHECK(light_passes((uint8_t)b) && light_emission((uint8_t)b) == 0);
     tw_free(&t);
 }
 
@@ -183,6 +183,92 @@ static void test_roots(void)
     hands_free(&h);
 }
 
+/* Vines hang from wood and from vines as well as from leaves, so a strand
+ * can be grown down, set against the wall beside it (aimed at a vine, a
+ * new one would take its place); in creative play the strands come down with their
+ * leaf and drop nothing; and every kind's logs lie along the face they
+ * are set against. */
+static void test_vines_strands(void)
+{
+    hands h = {0};
+    hands_init(&h, MODE_CREATIVE);
+    world_set(&h.t.w, 6, GROUND + 4, 6, B_MAPLE_LOG, LOG_BRANCH);
+    inv_set_held(&h.inv, B_VINES, 1);
+    for (int y = GROUND; y < GROUND + 4; y++) world_set(&h.t.w, 7, y, 6, B_STONE, 0);
+    for (int y = GROUND + 3; y > GROUND; y--) hands_frame(&h, (ray_hit){1, {7, y, 6}, {6, y, 6}, B_STONE}, 0);
+    for (int y = GROUND + 1; y < GROUND + 4; y++) CHECK(world_get(&h.t.w, 6, y, 6) == B_VINES);
+    CHECK(world_get(&h.t.w, 6, GROUND, 6) == B_AIR);
+
+    world_set(&h.t.w, 9, GROUND + 3, 6, B_CHERRY_BLOSSOM, 0);
+    world_set(&h.t.w, 9, GROUND + 2, 6, B_VINES, 0);
+    world_set(&h.t.w, 9, GROUND + 1, 6, B_VINES, 0);
+    ray_hit leaf = {1, {9, GROUND + 3, 6}, {9, GROUND + 3, 5}, B_CHERRY_BLOSSOM};
+    for (int f = 0; f < 600 && world_get(&h.t.w, 9, GROUND + 3, 6) != B_AIR; f++) hands_frame(&h, leaf, 1);
+    CHECK(world_get(&h.t.w, 9, GROUND + 2, 6) == B_AIR && world_get(&h.t.w, 9, GROUND + 1, 6) == B_AIR);
+    CHECK(h.t.ph.item_count == 0);
+
+    for (int k = 0; k < TREE_KINDS; k++) {
+        uint8_t log = g_tree_log[k];
+        int x = 2 + k;
+        world_set(&h.t.w, x, GROUND, 10, B_STONE, 0);
+        inv_set_held(&h.inv, log, 2);
+        hands_frame(&h, (ray_hit){1, {x, GROUND, 10}, {x, GROUND, 9}, B_STONE}, 0);
+        hands_frame(&h, (ray_hit){1, {x, GROUND, 10}, {x, GROUND + 1, 10}, B_STONE}, 0);
+        CHECK(world_get(&h.t.w, x, GROUND, 9) == log && world_get_meta(&h.t.w, x, GROUND, 9) == LOG_Z);
+        CHECK(world_get(&h.t.w, x, GROUND + 1, 10) == log && world_get_meta(&h.t.w, x, GROUND + 1, 10) == LOG_UP);
+    }
+    hands_free(&h);
+}
+
+/* Vines hang from a tree: placed only under leaves or wood, they come
+ * down with what they hang from and stay when the ground under them
+ * goes. A log takes the axis of the face it is set against. */
+static void test_vines_and_logs(void)
+{
+    hands h = {0};
+    hands_init(&h, MODE_SURVIVAL);
+    for (int y = GROUND; y < GROUND + 3; y++) world_set(&h.t.w, 4, y, 4, B_LOG, LOG_UP);
+    world_set(&h.t.w, 5, GROUND + 2, 4, B_LEAVES, 0);
+    inv_set_held(&h.inv, B_VINES, 2);
+    hands_frame(&h, (ray_hit){1, {5, GROUND + 2, 4}, {5, GROUND + 1, 4}, B_LEAVES}, 0);
+    CHECK(world_get(&h.t.w, 5, GROUND + 1, 4) == B_VINES && inv_held(&h.inv)->count == 1);
+    interact_out o = hands_frame(&h, (ray_hit){1, {10, GROUND - 1, 4}, {10, GROUND, 4}, B_GRASS}, 0);
+    CHECK(world_get(&h.t.w, 10, GROUND, 4) == B_AIR && o.msg != NULL && inv_held(&h.inv)->count == 1);
+
+    /* The leaf goes, and both vines under it. */
+    world_set(&h.t.w, 5, GROUND, 4, B_VINES, 0);
+    ray_hit leaf = {1, {5, GROUND + 2, 4}, {5, GROUND + 2, 3}, B_LEAVES};
+    for (int f = 0; f < 6000 && world_get(&h.t.w, 5, GROUND + 2, 4) == B_LEAVES; f++) hands_frame(&h, leaf, 1);
+    CHECK(world_get(&h.t.w, 5, GROUND + 1, 4) == B_AIR && world_get(&h.t.w, 5, GROUND, 4) == B_AIR);
+    int fibre = 0;
+    for (int i = 0; i < h.t.ph.item_count; i++) fibre += h.t.ph.items[i].id == I_FIBRE;
+    CHECK(fibre >= 2);
+
+    /* A vine reaching the grass hangs on when the grass is dug out. */
+    world_set(&h.t.w, 8, GROUND, 4, B_PLANKS, 0);
+    world_set(&h.t.w, 8, GROUND + 1, 4, B_PLANKS, 0);
+    world_set(&h.t.w, 7, GROUND + 1, 4, B_LEAVES, 0);
+    world_set(&h.t.w, 7, GROUND, 4, B_VINES, 0);
+    ray_hit grass = {1, {7, GROUND - 1, 4}, {7, GROUND - 1, 3}, B_GRASS};
+    for (int f = 0; f < 6000 && world_get(&h.t.w, 7, GROUND - 1, 4) == B_GRASS; f++) hands_frame(&h, grass, 1);
+    CHECK(world_get(&h.t.w, 7, GROUND - 1, 4) == B_AIR && world_get(&h.t.w, 7, GROUND, 4) == B_VINES);
+
+    /* Logs: against the trunk's west side along x, its north side along
+     * z, on the ground upright. */
+    inv_set_held(&h.inv, B_LOG, 3);
+    hands_frame(&h, (ray_hit){1, {4, GROUND, 4}, {3, GROUND, 4}, B_LOG}, 0);
+    hands_frame(&h, (ray_hit){1, {4, GROUND + 1, 4}, {4, GROUND + 1, 3}, B_LOG}, 0);
+    hands_frame(&h, (ray_hit){1, {12, GROUND - 1, 4}, {12, GROUND, 4}, B_GRASS}, 0);
+    CHECK(world_get(&h.t.w, 3, GROUND, 4) == B_LOG && world_get_meta(&h.t.w, 3, GROUND, 4) == LOG_X);
+    CHECK(world_get(&h.t.w, 4, GROUND + 1, 3) == B_LOG && world_get_meta(&h.t.w, 4, GROUND + 1, 3) == LOG_Z);
+    CHECK(world_get(&h.t.w, 12, GROUND, 4) == B_LOG && world_get_meta(&h.t.w, 12, GROUND, 4) == LOG_UP);
+    /* Planks have no axis. */
+    inv_set_held(&h.inv, B_PLANKS, 1);
+    hands_frame(&h, (ray_hit){1, {12, GROUND, 4}, {13, GROUND, 4}, B_LOG}, 0);
+    CHECK(world_get(&h.t.w, 13, GROUND, 4) == B_PLANKS && world_get_meta(&h.t.w, 13, GROUND, 4) == 0);
+    hands_free(&h);
+}
+
 /* Plants at a section's edges: on its top layer the tip reaches 16, the
  * vertex format's limit; a section of nothing but plants fills the cut-out
  * range with four quads each and stays within the mesher's output. */
@@ -268,12 +354,13 @@ static void test_marks(void)
         CHECK(near >= 1 && low == 0);
     }
     /* Every plant stands on the quad's foot: some texel of the bottom row
-     * is solid, so none floats above its soil. */
+     * is solid, so none floats above its soil. Vines hang from the top
+     * row instead. */
     for (int l = T_PLANT_FIRST; l <= T_PLANT_LAST; l++) {
         int foot = 0;
         for (int x = 0; x < TEX_SIZE; x++) {
             uint8_t t[4] = {0};
-            texgen_texel(l, x, TEX_SIZE - 1, t);
+            texgen_texel(l, x, l == T_VINES ? 0 : TEX_SIZE - 1, t);
             foot += t[3] != 0;
         }
         CHECK(foot >= 1);
@@ -288,6 +375,8 @@ void test_plants_all(void)
     test_break_fast();
     test_creative_uproot();
     test_roots();
+    test_vines_and_logs();
+    test_vines_strands();
     test_mesh_limits();
     test_icon();
     test_marks();

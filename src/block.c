@@ -3,6 +3,13 @@
 
 #define ALL(t) {t, t, t, t, t, t}
 #define SIDES_TOP_BOTTOM(s, t, b) {s, s, t, b, s, s}
+/* A kind of tree's log: the first window of its bark round the sides, its
+ * end grain top and bottom (the mesher picks the window and turns a
+ * felled log), and its leaves. */
+#define LOG_TEX(k)                                                                                  \
+    SIDES_TOP_BOTTOM((int)T_BARK_FIRST + (int)(k) * TREE_BARK_WINDOWS, (int)T_END_FIRST + (int)(k), \
+                     (int)T_END_FIRST + (int)(k))
+#define LEAF_TEX(k) ALL((int)T_TREE_LEAVES_FIRST + (int)(k))
 
 /* Densities are real-world figures. Spans are how many blocks a material
  * can cantilever sideways before its own weight snaps it; they are a
@@ -29,10 +36,10 @@ const block_def g_blocks[B_COUNT] = {
                 BM_SAND, 0.85f, 0.6f, 0, 0},
     [B_GRAVEL] = {"gravel", BF_SOLID | BF_OPAQUE | BF_GRANULAR, ALL(T_GRAVEL), 0, 1800.0f, 0.6f, 0.1f, 0.9f, 840.0f,
                   0.7f, BM_GRAVEL, 0.85f, 0.85f, 0, 0},
-    [B_LOG] = {"log", BF_SOLID | BF_OPAQUE, SIDES_TOP_BOTTOM(T_LOG_SIDE, T_LOG_TOP, T_LOG_TOP), 6, 600.0f, 0.6f, 0.3f,
-               3.0f, 1700.0f, 0.15f, BM_WOOD, 1.0f, 0.3f, 0, 0},
-    [B_LEAVES] = {"leaves", BF_SOLID | BF_OPAQUE, ALL(T_LEAVES), 3, 150.0f, 0.4f, 0.1f, 0.25f, 2000.0f, 0.1f, BM_LEAVES,
-                  0.35f, 0.0f, 0, 0},
+    [B_LOG] = {"log", BF_SOLID | BF_OPAQUE, LOG_TEX(TREE_OAK), 6, 600.0f, 0.6f, 0.3f, 3.0f, 1700.0f, 0.15f, BM_WOOD,
+               1.0f, 0.3f, 0, 0},
+    [B_LEAVES] = {"leaves", BF_SOLID | BF_OPAQUE, LEAF_TEX(TREE_OAK), 3, 150.0f, 0.4f, 0.1f, 0.25f, 2000.0f, 0.1f,
+                  BM_LEAVES, 0.35f, 0.0f, 0, 0},
     [B_PLANKS] = {"planks", BF_SOLID | BF_OPAQUE, ALL(T_PLANKS), 6, 500.0f, 0.6f, 0.35f, 2.5f, 1600.0f, 0.12f, BM_WOOD,
                   1.0f, 0.3f, 0, 0},
     [B_GLASS] = {"glass", BF_SOLID | BF_TRANSLUCENT | BF_BRITTLE, ALL(T_GLASS), 2, 2500.0f, 0.4f, 0.5f, 0.4f, 840.0f,
@@ -190,22 +197,59 @@ const block_def g_blocks[B_COUNT] = {
     /* Birch is the densest and hardest of these; the conifers are light
      * and soft, and the thorn tree's wood is dense and tough. Leaves as the
      * oak's: needles are a little denser. */
-    [B_BIRCH_LOG] = {"birch log", BF_SOLID | BF_OPAQUE, SIDES_TOP_BOTTOM(T_BIRCH_SIDE, T_BIRCH_TOP, T_BIRCH_TOP), 6,
-                     650.0f, 0.6f, 0.3f, 3.0f, 1700.0f, 0.15f, BM_WOOD, 1.0f, 0.3f, 0, 0},
-    [B_SPRUCE_LOG] = {"spruce log", BF_SOLID | BF_OPAQUE, SIDES_TOP_BOTTOM(T_SPRUCE_SIDE, T_LOG_TOP, T_LOG_TOP), 6,
-                      450.0f, 0.6f, 0.3f, 2.5f, 1700.0f, 0.12f, BM_WOOD, 1.0f, 0.3f, 0, 0},
-    [B_PINE_LOG] = {"pine log", BF_SOLID | BF_OPAQUE, SIDES_TOP_BOTTOM(T_PINE_SIDE, T_LOG_TOP, T_LOG_TOP), 6, 520.0f,
-                    0.6f, 0.3f, 2.5f, 1700.0f, 0.13f, BM_WOOD, 1.0f, 0.3f, 0, 0},
-    [B_THORN_LOG] = {"thorn log", BF_SOLID | BF_OPAQUE, SIDES_TOP_BOTTOM(T_THORN_SIDE, T_LOG_TOP, T_LOG_TOP), 6, 800.0f,
-                     0.6f, 0.3f, 3.5f, 1700.0f, 0.17f, BM_WOOD, 1.0f, 0.3f, 0, 0},
-    [B_BIRCH_LEAVES] = {"birch leaves", BF_SOLID | BF_OPAQUE, ALL(T_BIRCH_LEAVES), 3, 150.0f, 0.4f, 0.1f, 0.25f,
+    [B_BIRCH_LOG] = {"birch log", BF_SOLID | BF_OPAQUE, LOG_TEX(TREE_BIRCH), 6, 650.0f, 0.6f, 0.3f, 3.0f, 1700.0f,
+                     0.15f, BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_SPRUCE_LOG] = {"spruce log", BF_SOLID | BF_OPAQUE, LOG_TEX(TREE_SPRUCE), 6, 450.0f, 0.6f, 0.3f, 2.5f, 1700.0f,
+                      0.12f, BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_PINE_LOG] = {"pine log", BF_SOLID | BF_OPAQUE, LOG_TEX(TREE_PINE), 6, 520.0f, 0.6f, 0.3f, 2.5f, 1700.0f, 0.13f,
+                    BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_THORN_LOG] = {"thorn log", BF_SOLID | BF_OPAQUE, LOG_TEX(TREE_THORN), 6, 800.0f, 0.6f, 0.3f, 3.5f, 1700.0f,
+                     0.17f, BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_BIRCH_LEAVES] = {"birch leaves", BF_SOLID | BF_OPAQUE, LEAF_TEX(TREE_BIRCH), 3, 150.0f, 0.4f, 0.1f, 0.25f,
                         2000.0f, 0.1f, BM_LEAVES, 0.35f, 0.0f, 0, 0},
-    [B_SPRUCE_LEAVES] = {"spruce needles", BF_SOLID | BF_OPAQUE, ALL(T_SPRUCE_LEAVES), 3, 180.0f, 0.4f, 0.1f, 0.25f,
+    [B_SPRUCE_LEAVES] = {"spruce needles", BF_SOLID | BF_OPAQUE, LEAF_TEX(TREE_SPRUCE), 3, 180.0f, 0.4f, 0.1f, 0.25f,
                          2000.0f, 0.1f, BM_LEAVES, 0.4f, 0.0f, 0, 0},
-    [B_PINE_LEAVES] = {"pine needles", BF_SOLID | BF_OPAQUE, ALL(T_PINE_LEAVES), 3, 170.0f, 0.4f, 0.1f, 0.25f, 2000.0f,
+    [B_PINE_LEAVES] = {"pine needles", BF_SOLID | BF_OPAQUE, LEAF_TEX(TREE_PINE), 3, 170.0f, 0.4f, 0.1f, 0.25f, 2000.0f,
                        0.1f, BM_LEAVES, 0.4f, 0.0f, 0, 0},
-    [B_THORN_LEAVES] = {"thorn leaves", BF_SOLID | BF_OPAQUE, ALL(T_THORN_LEAVES), 3, 140.0f, 0.4f, 0.1f, 0.25f,
+    [B_THORN_LEAVES] = {"thorn leaves", BF_SOLID | BF_OPAQUE, LEAF_TEX(TREE_THORN), 3, 140.0f, 0.4f, 0.1f, 0.25f,
                         2000.0f, 0.1f, BM_LEAVES, 0.4f, 0.0f, 0, 0},
+    /* Willow, cherry and the soft, spongy baobab are light woods; maple
+     * hard and dense; redwood and the pines light and soft. A willow's
+     * long whips hang a block further than other leaves, and a palm's
+     * fronds, stiff with their midribs, two blocks further: far enough to
+     * reach three out from the trunk's top and droop at the tip. */
+    [B_WILLOW_LOG] = {"willow log", BF_SOLID | BF_OPAQUE, LOG_TEX(TREE_WILLOW), 6, 420.0f, 0.6f, 0.3f, 2.5f, 1700.0f,
+                      0.12f, BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_MAPLE_LOG] = {"maple log", BF_SOLID | BF_OPAQUE, LOG_TEX(TREE_MAPLE), 6, 700.0f, 0.6f, 0.3f, 3.5f, 1700.0f,
+                     0.16f, BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_CHERRY_LOG] = {"cherry log", BF_SOLID | BF_OPAQUE, LOG_TEX(TREE_CHERRY), 6, 630.0f, 0.6f, 0.3f, 3.0f, 1700.0f,
+                      0.15f, BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_REDWOOD_LOG] = {"redwood log", BF_SOLID | BF_OPAQUE, LOG_TEX(TREE_REDWOOD), 6, 450.0f, 0.6f, 0.3f, 2.5f, 1700.0f,
+                       0.11f, BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_PALM_LOG] = {"palm log", BF_SOLID | BF_OPAQUE, LOG_TEX(TREE_PALM), 6, 600.0f, 0.6f, 0.3f, 3.0f, 1700.0f, 0.14f,
+                    BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_BAOBAB_LOG] = {"baobab log", BF_SOLID | BF_OPAQUE, LOG_TEX(TREE_BAOBAB), 6, 280.0f, 0.6f, 0.3f, 2.0f, 1700.0f,
+                      0.09f, BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_UMBRELLA_LOG] = {"umbrella pine log", BF_SOLID | BF_OPAQUE, LOG_TEX(TREE_UMBRELLA), 6, 560.0f, 0.6f, 0.3f, 2.5f,
+                        1700.0f, 0.13f, BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_MOUNTAIN_PINE_LOG] = {"mountain pine log", BF_SOLID | BF_OPAQUE, LOG_TEX(TREE_MOUNTAIN_PINE), 6, 500.0f, 0.6f,
+                             0.3f, 2.5f, 1700.0f, 0.13f, BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_WILLOW_LEAVES] = {"willow leaves", BF_SOLID | BF_OPAQUE, LEAF_TEX(TREE_WILLOW), 4, 140.0f, 0.4f, 0.1f, 0.25f,
+                         2000.0f, 0.1f, BM_LEAVES, 0.35f, 0.0f, 0, 0},
+    [B_MAPLE_LEAVES] = {"maple leaves", BF_SOLID | BF_OPAQUE, LEAF_TEX(TREE_MAPLE), 3, 150.0f, 0.4f, 0.1f, 0.25f,
+                        2000.0f, 0.1f, BM_LEAVES, 0.35f, 0.0f, 0, 0},
+    [B_CHERRY_BLOSSOM] = {"cherry blossom", BF_SOLID | BF_OPAQUE, LEAF_TEX(TREE_CHERRY), 3, 130.0f, 0.4f, 0.1f, 0.25f,
+                          2000.0f, 0.1f, BM_LEAVES, 0.35f, 0.0f, 0, 0},
+    [B_REDWOOD_LEAVES] = {"redwood needles", BF_SOLID | BF_OPAQUE, LEAF_TEX(TREE_REDWOOD), 3, 180.0f, 0.4f, 0.1f, 0.25f,
+                          2000.0f, 0.1f, BM_LEAVES, 0.4f, 0.0f, 0, 0},
+    [B_PALM_FRONDS] = {"palm fronds", BF_SOLID | BF_OPAQUE, LEAF_TEX(TREE_PALM), 5, 160.0f, 0.4f, 0.1f, 0.25f, 2000.0f,
+                       0.1f, BM_LEAVES, 0.4f, 0.0f, 0, 0},
+    [B_BAOBAB_LEAVES] = {"baobab leaves", BF_SOLID | BF_OPAQUE, LEAF_TEX(TREE_BAOBAB), 3, 140.0f, 0.4f, 0.1f, 0.25f,
+                         2000.0f, 0.1f, BM_LEAVES, 0.35f, 0.0f, 0, 0},
+    [B_UMBRELLA_LEAVES] = {"umbrella pine needles", BF_SOLID | BF_OPAQUE, LEAF_TEX(TREE_UMBRELLA), 3, 170.0f, 0.4f,
+                           0.1f, 0.25f, 2000.0f, 0.1f, BM_LEAVES, 0.4f, 0.0f, 0, 0},
+    [B_MOUNTAIN_PINE_LEAVES] = {"mountain pine needles", BF_SOLID | BF_OPAQUE, LEAF_TEX(TREE_MOUNTAIN_PINE), 3, 170.0f,
+                                0.4f, 0.1f, 0.25f, 2000.0f, 0.1f, BM_LEAVES, 0.4f, 0.0f, 0, 0},
     /* Ground plants: no flags, so bodies pass through them and light
      * passes; they tear like leaves, the woody ones a little slower. */
     [B_GRASS_TUFT] = {"short grass", 0, ALL(T_GRASS_TUFT), 0, 300.0f, 0.4f, 0.0f, 0.05f, 2000.0f, 0.1f, BM_LEAVES, 1.0f,
@@ -226,6 +270,46 @@ const block_def g_blocks[B_COUNT] = {
                       0.0f, 0, 0},
     [B_OXEYE] = {"oxeye daisy", 0, ALL(T_OXEYE), 0, 300.0f, 0.4f, 0.0f, 0.05f, 2000.0f, 0.1f, BM_LEAVES, 1.0f, 0.0f, 0,
                  0},
+    [B_VINES] = {"vines", 0, ALL(T_VINES), 0, 300.0f, 0.4f, 0.0f, 0.1f, 2000.0f, 0.1f, BM_LEAVES, 1.0f, 0.0f, 0, 0},
     [B_FOXFIRE] = {"foxfire", BF_SOLID | BF_OPAQUE, ALL(T_FOXFIRE), 2, 1100.0f, 0.6f, 0.1f, 0.5f, 2500.0f, 0.4f,
                    BM_DIRT, 0.7f, 0.1f, 0, 0},
+};
+
+const uint8_t g_tree_log[TREE_KINDS] = {
+    B_LOG,        B_BIRCH_LOG,   B_SPRUCE_LOG, B_PINE_LOG,   B_THORN_LOG,    B_WILLOW_LOG,        B_MAPLE_LOG,
+    B_CHERRY_LOG, B_REDWOOD_LOG, B_PALM_LOG,   B_BAOBAB_LOG, B_UMBRELLA_LOG, B_MOUNTAIN_PINE_LOG,
+};
+const uint8_t g_tree_leaves[TREE_KINDS] = {
+    B_LEAVES,        B_BIRCH_LEAVES,    B_SPRUCE_LEAVES,        B_PINE_LEAVES,    B_THORN_LEAVES,
+    B_WILLOW_LEAVES, B_MAPLE_LEAVES,    B_CHERRY_BLOSSOM,       B_REDWOOD_LEAVES, B_PALM_FRONDS,
+    B_BAOBAB_LEAVES, B_UMBRELLA_LEAVES, B_MOUNTAIN_PINE_LEAVES,
+};
+
+const uint8_t g_block_tree[B_COUNT] = {
+    [B_LOG] = 1 + TREE_OAK,
+    [B_LEAVES] = 1 + TREE_OAK,
+    [B_BIRCH_LOG] = 1 + TREE_BIRCH,
+    [B_BIRCH_LEAVES] = 1 + TREE_BIRCH,
+    [B_SPRUCE_LOG] = 1 + TREE_SPRUCE,
+    [B_SPRUCE_LEAVES] = 1 + TREE_SPRUCE,
+    [B_PINE_LOG] = 1 + TREE_PINE,
+    [B_PINE_LEAVES] = 1 + TREE_PINE,
+    [B_THORN_LOG] = 1 + TREE_THORN,
+    [B_THORN_LEAVES] = 1 + TREE_THORN,
+    [B_WILLOW_LOG] = 1 + TREE_WILLOW,
+    [B_WILLOW_LEAVES] = 1 + TREE_WILLOW,
+    [B_MAPLE_LOG] = 1 + TREE_MAPLE,
+    [B_MAPLE_LEAVES] = 1 + TREE_MAPLE,
+    [B_CHERRY_LOG] = 1 + TREE_CHERRY,
+    [B_CHERRY_BLOSSOM] = 1 + TREE_CHERRY,
+    [B_REDWOOD_LOG] = 1 + TREE_REDWOOD,
+    [B_REDWOOD_LEAVES] = 1 + TREE_REDWOOD,
+    [B_PALM_LOG] = 1 + TREE_PALM,
+    [B_PALM_FRONDS] = 1 + TREE_PALM,
+    [B_BAOBAB_LOG] = 1 + TREE_BAOBAB,
+    [B_BAOBAB_LEAVES] = 1 + TREE_BAOBAB,
+    [B_UMBRELLA_LOG] = 1 + TREE_UMBRELLA,
+    [B_UMBRELLA_LEAVES] = 1 + TREE_UMBRELLA,
+    [B_MOUNTAIN_PINE_LOG] = 1 + TREE_MOUNTAIN_PINE,
+    [B_MOUNTAIN_PINE_LEAVES] = 1 + TREE_MOUNTAIN_PINE,
 };

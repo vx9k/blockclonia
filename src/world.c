@@ -358,9 +358,10 @@ static void gen_run(job *j)
         g->saved = NULL;
     }
     if (!loaded) {
-        g->generator(g->seed, g->c);
+        /* The generator writes its own meta (a felled log's axis). */
         mem_free(g->c->meta);
         g->c->meta = NULL;
+        g->generator(g->seed, g->c);
     }
     g->c->modified = (uint8_t)loaded; /* keep saved columns saved */
     g->c->unsaved = 0;
@@ -1085,9 +1086,9 @@ int world_column_arrived(world *w, int cx, int cz, const uint8_t *data, size_t l
      * after the column must find it loaded. */
     if (save_decode_column(c, data, len) != 0) {
         log_warn("column %d,%d from the host does not decode; generating it instead", cx, cz);
-        (w->generator ? w->generator : worldgen_column)(w->seed, c);
         mem_free(c->meta);
         c->meta = NULL;
+        (w->generator ? w->generator : worldgen_column)(w->seed, c);
     }
     c->modified = c->unsaved = 0;
     column_recount(c);
@@ -1142,9 +1143,8 @@ size_t world_column_encode(world *w, int cx, int cz, uint8_t *out, size_t cap)
     uint8_t blocks[COL_VOL];
     column g = {.cx = cx, .cz = cz, .state = COL_LOADING, .blocks = blocks};
     (w->generator ? w->generator : worldgen_column)(w->seed, &g);
-    mem_free(g.meta);
-    g.meta = NULL;
     size_t len = save_encode_column(&g, out, cap);
+    mem_free(g.meta);
     light_free(&g.light);
     return len;
 }

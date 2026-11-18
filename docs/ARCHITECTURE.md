@@ -14,7 +14,8 @@ detail for its module; this page is the map.
   (Vulkan)   mesher     interact              day)       audio_device invui, debug,
   gpupool    save       inventory                                    ui, viewmodel
              jobs       item, fx                                     camera, anim
-                 block, noise, texgen, mathlib, mem, log  (shared basics)
+             trees
+                 block, noise, texgen, treetex, mathlib, mem, log  (shared basics)
 ```
 
 - **`main.c`** is the only file that knows about GLFW input and ties the

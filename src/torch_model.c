@@ -47,7 +47,7 @@ int torch_model(const float at[3], quat rot, float size, double time, uint32_t s
      * each layer lags the one below, so the tip moves most. */
     float lean = 0.012f * sinf(t * 2.3f + ph) + 0.006f * sinf(t * 5.7f + 2.0f * ph);
     float breathe = 1.0f + 0.08f * sinf(t * 9.1f + ph) + 0.05f * sinf(t * 14.3f + 3.0f * ph);
-    uint32_t bark = (uint32_t)T_LOG_SIDE * 0x010101u | ENTITY_TEX_METRIC;
+    uint32_t bark = (uint32_t)tree_tex_bark(TREE_OAK, 0) * 0x010101u | ENTITY_TEX_METRIC;
     uint32_t chark = (uint32_t)T_GRAPHITE_ORE * 0x010101u | ENTITY_TEX_METRIC;
     uint32_t ember = (uint32_t)T_LAVA * 0x010101u;
     torch_part parts[TORCH_PARTS] = {

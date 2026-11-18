@@ -1124,6 +1124,9 @@ int physics_check_structure(physics *ph, int x, int y, int z)
                 ph->bodies[ph->body_count - 1].meta = world_get_meta(w, wx, wy, wz); /* a campfire keeps its fuel */
                 collapse_spin(&ph->bodies[ph->body_count - 1], wx - x, wz - z);
                 world_set(w, wx, wy, wz, B_AIR, 0);
+                /* Vines hanging from it come down with it. */
+                for (int vy = wy - 1; vy > 0 && world_get(w, wx, vy, wz) == B_VINES; vy--)
+                    world_set(w, wx, vy, wz, B_AIR, 0);
                 fell++;
             }
 done:

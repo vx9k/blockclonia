@@ -46,14 +46,17 @@ static int can_place(const world *w, const physics *ph, const player *pl, ipos t
     return cur == B_AIR || block_fluid(cur) || block_plant(cur);
 }
 
-/* Plants growing on a block that is gone come up with it, roots and all. */
+/* Plants growing on a block that is gone come up with it, roots and all,
+ * and vines hanging from it come down. */
 static void uproot(interact *s, world *w, physics *ph, const player *pl, ipos b)
 {
-    for (ipos p = {b.x, b.y + 1, b.z}; block_plant(world_get(w, p.x, p.y, p.z)); p.y++) {
-        uint8_t id = world_get(w, p.x, p.y, p.z);
-        world_set_player(w, p.x, p.y, p.z, B_AIR, 0);
-        if (!mode_creative(pl->mode)) spill_drops(s, ph, id, 0, p);
-    }
+    for (int dir = 1; dir >= -1; dir -= 2)
+        for (ipos p = {b.x, b.y + dir, b.z};; p.y += dir) {
+            uint8_t id = world_get(w, p.x, p.y, p.z);
+            if (!block_plant(id) || (id == B_VINES) != (dir < 0)) break;
+            world_set_player(w, p.x, p.y, p.z, B_AIR, 0);
+            if (!mode_creative(pl->mode)) spill_drops(s, ph, id, 0, p);
+        }
 }
 
 /* Plants take root in soil only. */
@@ -163,7 +166,13 @@ static void use_item(interact *s, world *w, const physics *ph, thermo *th, const
     /* Aimed at a plant, a block takes its place. */
     ipos t = block_plant(hit.id) ? hit.block : hit.before;
     if (!can_place(w, ph, pl, t)) return;
-    if (block_plant(d->block) && !soil(world_get(w, t.x, t.y - 1, t.z))) {
+    if (d->block == B_VINES) {
+        uint8_t above = world_get(w, t.x, t.y + 1, t.z);
+        if (!block_leaves(above) && !block_log(above) && above != B_VINES) {
+            o->msg = "Vines hang from a tree";
+            return;
+        }
+    } else if (block_plant(d->block) && !soil(world_get(w, t.x, t.y - 1, t.z))) {
         o->msg = "Plants need soil";
         return;
     }
@@ -178,7 +187,11 @@ static void use_item(interact *s, world *w, const physics *ph, thermo *th, const
      * surroundings. */
     uint8_t was = world_get(w, t.x, t.y, t.z);
     int displaced = world_fluid_level(w, t.x, t.y, t.z);
-    world_set_player(w, t.x, t.y, t.z, d->block, 0);
+    /* A log lies along the face it was set against. */
+    uint8_t axis = !block_log(d->block) || (t.x == hit.block.x && t.z == hit.block.z) ? LOG_UP
+                   : t.x != hit.block.x                                               ? LOG_X
+                                                                                      : LOG_Z;
+    world_set_player(w, t.x, t.y, t.z, d->block, axis);
     fluid_displace(w, t.x, t.y, t.z, was, displaced, 1);
     o->actions++;
     s->swing = 1.0f;

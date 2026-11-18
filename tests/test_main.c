@@ -339,7 +339,8 @@ static void test_mesher(void)
     in->blocks[mesh_pidx(12, 9, 9)] = B_GLASS;
     CHECK(mesh_section_counts(in, out, &mc) == 29 && mc.opaque == 23 && mc.face_end[5] == 6 && mc.trans == 6);
     uint32_t layer_cut = out[4 * 6] >> 20 & 0xFFu, layer_trans = out[4 * 23] >> 20 & 0xFFu;
-    CHECK(layer_cut == T_LEAVES && layer_trans == T_GLASS && (out[0] >> 20 & 0xFFu) == T_STONE);
+    CHECK(layer_cut == (uint32_t)tree_tex_leaves(TREE_OAK) && layer_trans == T_GLASS &&
+          (out[0] >> 20 & 0xFFu) == T_STONE);
     CHECK(mc.leaf_end == 23);
 
     /* A plant is four quads, two crossed on the cell's diagonals each
@@ -2251,6 +2252,8 @@ int main(void)
     test_net_all();
     test_mp_all();
     test_worldgen_all();
+    test_trees_all();
+    test_treetex_all();
     test_edge_all();
     test_tools_all();
     test_combat_all();

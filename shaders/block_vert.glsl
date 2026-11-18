@@ -10,7 +10,8 @@ layout(location = 1) in vec3 i_origin;
 layout(location = 2) in uint i_light;
 
 layout(location = 0) out vec2 f_uv;
-layout(location = 1) flat out uint f_layer;  // texture layer | sun shading << 16
+// Texture layer | sun shading << 16 (9 bits) | a tree's tint << 25 (4 bits).
+layout(location = 1) flat out uint f_layer;
 layout(location = 2) out mediump vec2 f_shade;  // x: shade, y: fog
 layout(location = 3) out vec3 f_luv;            // light atlas coordinate
 #ifdef SHADOWS
@@ -67,6 +68,28 @@ const vec2 WAVE_N3 = vec2(1.0, -4.0) / 256.0;
 const vec3 WAVE_F = vec3(500.0, 534.0, 571.0) / 3600.0;  // Hz
 const vec3 WAVE_A = vec3(0.015, 0.010, 0.005);             // m
 
+// Trees of a kind are not all one colour: soil, light and age make some
+// paler, some darker and some yellower. A smooth field over the ground,
+// 8 m cells (32 to the 256 m tile), gives each tree its own, and blocks
+// of one tree nearly the same: 1..15, 0 being no tint.
+uint tree_tint(vec2 xz)
+{
+    vec2 g = xz / 8.0, f = fract(g);
+    ivec2 i = ivec2(floor(g));
+    f = f * f * (3.0 - 2.0 * f);
+    float v[4];
+    for (int k = 0; k < 4; k++) {
+        uvec2 c = uvec2((i + ivec2(k & 1, k >> 1)) & 31);
+        uint h = c.x * 0x9E3779B1u ^ c.y * 0x85EBCA77u;
+        h ^= h >> 15;
+        h *= 0x2C1B3C6Du;
+        h ^= h >> 12;
+        v[k] = float(h & 0xFFFFu) / 65535.0;
+    }
+    float t = mix(mix(v[0], v[1], f.x), mix(v[2], v[3], f.x), f.y);
+    return 1u + uint(t * 14.99);
+}
+
 void main()
 {
     vec3 p = vec3(float(v_data & 31u), float((v_data >> 5) & 31u), float((v_data >> 10) & 31u));
@@ -118,7 +141,7 @@ void main()
         // The texture drifts one tile per 40 s along x and per 60 s along
         // the other axis (2.5 and 1.7 cm/s).
         scroll = fract(t * vec2(1.0 / 40.0, 1.0 / 60.0));
-    } else if (layer == LEAVES_LAYER || layer - LEAVES_FIRST < 4u) {
+    } else if (layer - TREE_LEAVES_FIRST < TREE_KINDS) {
         // Leaves sway 3 cm on an ellipse, 0.42 Hz (2.4 s), a wind gust
         // travelling across the canopy: phase from the position, 8 cycles
         // per 256 m in x, 5 in z, and one per 32 m up.
@@ -127,8 +150,9 @@ void main()
     } else if (layer - PLANT_FIRST < PLANT_COUNT) {
         // Plants bend from the foot: only the top edge (AO 3) moves, 8 cm
         // in the same gust as the leaves, a little faster for a light stem.
+        // Vines hang, so theirs is the free bottom edge.
         float ph = TAU * (fract(t / 2.0) + dot(world.xz, vec2(8.0, 5.0) / 256.0));
-        rel.xz += sway * float(ao == 3u) * vec2(0.08 * sin(ph), 0.05 * cos(ph));
+        rel.xz += sway * float((ao == 3u) != (layer == VINES_LAYER)) * vec2(0.08 * sin(ph), 0.05 * cos(ph));
     } else if (layer - FIRE_FIRST < 4u) {
         // Flames: a flip-book at 8 frames/s, full brightness day and night.
         layer = FIRE_FIRST + (uint(t * 8.0) + layer) % 4u;
@@ -147,6 +171,9 @@ void main()
     vec3 ns = plant ? vec3(0.0, 0.5, 0.0) : n;
     float m = 1.0 - FACE_SUN * (length(sun) - max(dot(2.0 * ns, sun), 0.0));
     f_layer = layer | uint(-log2(m) * (SUN_STEPS / LIGHT_K) + 0.5) << 16;
+    // A tree's tint, at the provoking vertex: the field hardly changes in
+    // the metre between a block's corners.
+    if (layer - TREE_FIRST < TREE_COUNT) f_layer |= tree_tint(world.xz) << 25;
 #ifdef SHADOWS
     // Out of the sun a face keeps the sky light of one turned from it:
     // the extra shift, in pairs of steps in bits 8-15 (layers fit in 8; at
