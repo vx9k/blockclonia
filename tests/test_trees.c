@@ -204,6 +204,14 @@ static void test_tree_extras(void)
     mem_free(t);
 }
 
+/* A column of air: column_alloc leaves the blocks to the generator. */
+static column *air_column(int cx, int cz)
+{
+    column *c = column_alloc(cx, cz);
+    memset(c->blocks, B_AIR, COL_VOL);
+    return c;
+}
+
 /* A tree rooted near a column's edge is split between the columns: each
  * keeps its own blocks and together they hold the whole tree. Leaves go
  * only into air, wood also into leaves, roots only into soil, and the
@@ -212,7 +220,7 @@ static void test_tree_place(void)
 {
     tree_shape *t = mem_alloc(sizeof *t);
     tree_grow(t, TREE_OAK, AGE_OLD, 5, 0);
-    column *c[2] = {column_alloc(0, 0), column_alloc(1, 0)};
+    column *c[2] = {air_column(0, 0), air_column(1, 0)};
     const int ground = 20, rx = CHUNK_W - 2, rz = 8;
     for (int n = 0; n < 2; n++) {
         for (int y = 0; y < ground; y++)
@@ -244,7 +252,7 @@ static void test_tree_place(void)
           c[0]->blocks[col_index(rx, ground - 1, 0)] == B_GRASS);
 
     /* Placed over a stone overhang, the leaves stop at the stone. */
-    column *rock = column_alloc(0, 0);
+    column *rock = air_column(0, 0);
     for (int z = 0; z < CHUNK_W; z++)
         for (int x = 0; x < CHUNK_W; x++) rock->blocks[col_index(x, ground + 8, z)] = B_STONE;
     tree_place(t, rock, 8, ground, 8);
@@ -322,6 +330,237 @@ static void test_vines_fall(void)
     tw_free(&tw);
 }
 
+static int cell_x(int i) { return i % TREE_W - TREE_REACH; }
+static int cell_z(int i) { return i / TREE_W % TREE_W - TREE_REACH; }
+static int cell_y(int i) { return i / (TREE_W * TREE_W) - TREE_DOWN; }
+
+/* How many of a tree's blocks (only its wood, with wood_only) are joined
+ * face to face to the ground: to a block on or under it, y <= 0, through
+ * blocks of the same sort. Fills reached[] with the cells it got to. */
+static int grounded(const tree_shape *t, int wood_only, int *queue, uint8_t *reached)
+{
+    static const int D[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+    memset(reached, 0, TREE_BOX);
+    int n = 0;
+    for (int i = 0; i < TREE_BOX; i++) {
+        uint8_t id = t->id[i];
+        if (id == B_AIR || (wood_only && !block_log(id)) || cell_y(i) > 0) continue;
+        reached[i] = 1;
+        queue[n++] = i;
+    }
+    for (int h = 0; h < n; h++) {
+        int i = queue[h];
+        for (int d = 0; d < 6; d++) {
+            int x = cell_x(i) + D[d][0], y = cell_y(i) + D[d][1], z = cell_z(i) + D[d][2];
+            if (abs(x) > TREE_REACH || abs(z) > TREE_REACH || y < -TREE_DOWN || y >= TREE_UP) continue;
+            int j = tree_cell(x, y, z);
+            if (reached[j] || t->id[j] == B_AIR || (wood_only && !block_log(t->id[j]))) continue;
+            reached[j] = 1;
+            queue[n++] = j;
+        }
+    }
+    return n;
+}
+
+/* Nothing in any tree floats: every block reaches the ground through the
+ * tree, and every log through wood alone, so no limb hangs on its leaves.
+ * Only logs carry a meta, and a valid one; roots are limbs; blocks counts
+ * them all; and a tree's foot is its trunk. */
+static void test_tree_connected(void)
+{
+    tree_shape *t = mem_alloc(sizeof *t);
+    int *queue = mem_alloc(sizeof(int) * TREE_BOX);
+    uint8_t *reached = mem_alloc(TREE_BOX);
+    int loose = 0, loose_wood = 0, bad_meta = 0, bad_roots = 0, miscount = 0, footless = 0, trees = 0, upright = 0;
+    for (int k = 0; k < TREE_KINDS; k++)
+        for (int a = AGE_YOUNG; a < AGE_COUNT; a++)
+            for (int s = 0; s < 6; s++) {
+                tree_grow(t, k, (tree_age)a, sample_hash(s + 40) ^ (uint32_t)(k * 31 + a), s & 1);
+                int all = 0, wood = 0;
+                for (int i = 0; i < TREE_BOX; i++) {
+                    uint8_t id = t->id[i], m = t->meta[i];
+                    all += id != B_AIR;
+                    wood += block_log(id);
+                    bad_meta += m >= FLUID_FULL || (m && !block_log(id)) || (block_log(id) && (m & 3) > LOG_BRANCH);
+                    if (cell_y(i) < 0 && id != B_AIR) bad_roots += !block_log(id) || (m & 3) != LOG_BRANCH;
+                }
+                miscount += all != t->blocks;
+                loose += all - grounded(t, 0, queue, reached);
+                loose_wood += wood - grounded(t, 1, queue, reached);
+                int foot = tree_cell(0, 0, 0);
+                footless += !block_log(t->id[foot]);
+                upright += block_log(t->id[foot]) && (t->meta[foot] & 3) == LOG_UP;
+                trees++;
+            }
+    CHECK(loose == 0 && loose_wood == 0 && bad_meta == 0 && bad_roots == 0 && miscount == 0 && footless == 0);
+    /* A limb may grow back through the foot of a twisted pine; nearly
+     * every other foot stands upright. */
+    CHECK(upright * 20 >= trees * 19);
+    mem_free(reached);
+    mem_free(queue);
+    mem_free(t);
+}
+
+/* Roots: big old trees spread them, buttressed giants have them grown,
+ * young trees and the slim birch and spruce never; all of them under the
+ * ground and near the trunk. */
+static int root_cells(tree_shape *t, int kind, tree_age age, int *far)
+{
+    int n = 0;
+    for (int s = 0; s < 6; s++) {
+        tree_grow(t, kind, age, sample_hash(s), 0);
+        for (int i = 0; i < TREE_BOX; i++) {
+            if (cell_y(i) >= 0 || t->id[i] == B_AIR) continue;
+            n++;
+            *far += abs(cell_x(i)) > 4 || abs(cell_z(i)) > 4;
+        }
+    }
+    return n;
+}
+
+static void test_tree_roots(void)
+{
+    tree_shape *t = mem_alloc(sizeof *t);
+    int far = 0;
+    static const int OLD_ROOTS[] = {TREE_OAK, TREE_WILLOW, TREE_MAPLE, TREE_REDWOOD, TREE_BAOBAB};
+    for (size_t i = 0; i < sizeof OLD_ROOTS / sizeof OLD_ROOTS[0]; i++)
+        CHECK(root_cells(t, OLD_ROOTS[i], AGE_OLD, &far) > 0);
+    CHECK(root_cells(t, TREE_REDWOOD, AGE_GROWN, &far) > 0 && root_cells(t, TREE_BAOBAB, AGE_GROWN, &far) > 0);
+    CHECK(root_cells(t, TREE_OAK, AGE_GROWN, &far) == 0);
+    for (int k = 0; k < TREE_KINDS; k++) CHECK(root_cells(t, k, AGE_YOUNG, &far) == 0);
+    for (int a = AGE_YOUNG; a < AGE_COUNT; a++) {
+        CHECK(root_cells(t, TREE_BIRCH, (tree_age)a, &far) == 0);
+        CHECK(root_cells(t, TREE_SPRUCE, (tree_age)a, &far) == 0);
+    }
+    CHECK(far == 0);
+    /* A redwood's buttresses flare from its foot: wood beside the 2x2
+     * trunk, a block or two up. */
+    int flare = 0;
+    for (int s = 0; s < 6; s++) {
+        tree_grow(t, TREE_REDWOOD, AGE_GROWN, sample_hash(s), 0);
+        for (int y = 1; y <= 2; y++)
+            for (int z = -1; z <= 2; z++)
+                for (int x = -1; x <= 2; x++)
+                    if ((x < 0 || x > 1 || z < 0 || z > 1) && block_log(t->id[tree_cell(x, y, z)])) flare++;
+    }
+    CHECK(flare >= 6);
+    mem_free(t);
+}
+
+/* A fallen trunk lies any of the four ways, starting two blocks out, the
+ * same way every time for a hash. */
+static void test_tree_fall(void)
+{
+    int dirs[4] = {0};
+    for (uint32_t h = 0; h < 256; h++) {
+        tree_fall f = tree_fall_of(h), g = tree_fall_of(h);
+        CHECK(f.dx == g.dx && f.dz == g.dz && f.from == g.from && f.to == g.to);
+        CHECK(abs(f.dx) + abs(f.dz) == 1 && f.from == 2 && f.to >= f.from + 3 && f.to <= TREE_REACH);
+        dirs[f.dx > 0 ? 0 : f.dx < 0 ? 1 : f.dz > 0 ? 2 : 3]++;
+    }
+    for (int d = 0; d < 4; d++) CHECK(dirs[d] > 32);
+}
+
+/* Four columns meeting at the world's origin, x and z negative in three
+ * of them: a tree rooted on the corner is shared out four ways, each
+ * column taking exactly what lies over it and the four holding the whole
+ * tree. */
+static void test_tree_corner(void)
+{
+    tree_shape *t = mem_alloc(sizeof *t);
+    tree_grow(t, TREE_OAK, AGE_OLD, 77, 0);
+    column *c[4] = {air_column(-1, -1), air_column(0, -1), air_column(-1, 0), air_column(0, 0)};
+    const int ground = 30;
+    for (int n = 0; n < 4; n++) {
+        memset(c[n]->blocks, B_DIRT, (size_t)COL_AREA * ground);
+        tree_place(t, c[n], 0, ground, 0);
+    }
+    int want = 0, got = 0, owners = 0, spread[4] = {0};
+    for (int y = -TREE_DOWN; y < TREE_UP; y++)
+        for (int z = -TREE_REACH; z <= TREE_REACH; z++)
+            for (int x = -TREE_REACH; x <= TREE_REACH; x++) {
+                uint8_t id = t->id[tree_cell(x, y, z)];
+                int n = (x >= 0) + 2 * (z >= 0);
+                int lx = x - c[n]->cx * CHUNK_W, lz = z - c[n]->cz * CHUNK_W;
+                CHECK(lx >= 0 && lx < CHUNK_W && lz >= 0 && lz < CHUNK_W);
+                uint8_t b = c[n]->blocks[col_index(lx, ground + y, lz)];
+                if (id == B_AIR) {
+                    CHECK(b == (y < 0 ? B_DIRT : B_AIR));
+                    continue;
+                }
+                want++;
+                got += b == id;
+                spread[n]++;
+            }
+    for (int n = 0; n < 4; n++) owners += spread[n] > 0;
+    CHECK(want == t->blocks && got == want && owners == 4);
+    /* A column off to the side, out of the tree's reach, gets nothing. */
+    column *away = air_column(2, 2);
+    tree_place(t, away, 0, ground, 0);
+    int any = 0;
+    for (int i = 0; i < COL_VOL; i++) any += away->blocks[i] != B_AIR;
+    CHECK(any == 0 && away->meta == NULL);
+    column_free(away);
+    for (int n = 0; n < 4; n++) column_free(c[n]);
+    mem_free(t);
+}
+
+/* What a tree may grow into: its wood through another tree's leaves, its
+ * leaves only into air (where crowns meet, the first tree keeps its own),
+ * nothing into glass or water; and clipped at the world's floor and
+ * ceiling. */
+static void test_tree_place_into(void)
+{
+    tree_shape *t = mem_alloc(sizeof *t);
+    tree_grow(t, TREE_SPRUCE, AGE_GROWN, 3, 0);
+    column *c = air_column(0, 0);
+    const int ground = 20;
+    memset(c->blocks, B_DIRT, (size_t)COL_AREA * ground);
+    for (int y = ground; y < ground + 12; y++)
+        for (int z = 0; z < CHUNK_W; z++)
+            for (int x = 0; x < CHUNK_W; x++)
+                c->blocks[col_index(x, y, z)] = x < 4 ? B_GLASS : x < 6 ? B_WATER : B_BIRCH_LEAVES;
+    tree_place(t, c, 8, ground, 8);
+    int logs = 0, kept = 0, glass = 0, water = 0, ours = 0;
+    for (int y = 0; y < 12; y++)
+        for (int z = -TREE_REACH; z <= TREE_REACH; z++)
+            for (int x = -TREE_REACH; x <= TREE_REACH; x++) {
+                uint8_t id = t->id[tree_cell(x, y, z)];
+                int wx = 8 + x, wz = 8 + z;
+                if (id == B_AIR || wx < 0 || wx >= CHUNK_W || wz < 0 || wz >= CHUNK_W) continue;
+                uint8_t b = c->blocks[col_index(wx, ground + y, wz)];
+                if (wx < 4) glass += b == B_GLASS;
+                else if (wx < 6) water += b == B_WATER;
+                else if (block_log(id)) logs += b == id;
+                else {
+                    kept += b == B_BIRCH_LEAVES;
+                    ours += b == id;
+                }
+            }
+    CHECK(logs > 4 && kept > 10 && ours == 0 && glass + water > 0);
+    for (int i = 0; i < COL_VOL; i++)
+        if (c->blocks[i] == B_GLASS || c->blocks[i] == B_WATER) CHECK(i % COL_AREA % CHUNK_W < 6);
+    column_free(c);
+
+    /* Near the top of the world the crown is cut off, not wrapped round;
+     * on the floor the roots find no ground under row 1. */
+    tree_grow(t, TREE_REDWOOD, AGE_OLD, 5, 0);
+    column *top = air_column(0, 0), *floor = air_column(0, 0);
+    tree_place(t, top, 8, WORLD_H - 6, 8);
+    tree_place(t, floor, 8, 1, 8);
+    int low = 0, high = 0, under = 0;
+    for (int y = 0; y < WORLD_H; y++)
+        for (int i = 0; i < COL_AREA; i++) {
+            low += y < WORLD_H - 6 - TREE_DOWN && top->blocks[y * COL_AREA + i] != B_AIR;
+            high += y >= WORLD_H - 6 && top->blocks[y * COL_AREA + i] != B_AIR;
+            under += y < 1 && floor->blocks[y * COL_AREA + i] != B_AIR;
+        }
+    CHECK(low == 0 && high > 0 && under == 0 && floor->blocks[col_index(8, 1, 8)] == B_REDWOOD_LOG);
+    column_free(top);
+    column_free(floor);
+    mem_free(t);
+}
+
 void test_trees_all(void)
 {
     test_tree_shapes();
@@ -330,4 +569,9 @@ void test_trees_all(void)
     test_tree_place();
     test_log_faces();
     test_vines_fall();
+    test_tree_connected();
+    test_tree_roots();
+    test_tree_fall();
+    test_tree_corner();
+    test_tree_place_into();
 }

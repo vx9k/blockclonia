@@ -2253,6 +2253,7 @@ int main(void)
     test_mp_all();
     test_worldgen_all();
     test_trees_all();
+    test_treetex_all();
     test_edge_all();
     test_tools_all();
     test_combat_all();

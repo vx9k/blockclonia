@@ -393,7 +393,9 @@ static void mountain_pine(grower *g)
     int n = g->age == AGE_YOUNG ? 2 : rand_in(g, 3, 4), start = rand_in(g, 0, 7);
     for (int i = 0; i < n; i++) {
         int d = (start + i * 8 / n) & 7;
-        pos e = limb(g, (pos){x, rand_in(g, 1, h), z}, D8[d][0], D8[d][1], reach(d, rand_in(g, 2, 3)),
+        /* From the trunk's last rows: only above its last lean does it
+         * stand where (x, z) now is. */
+        pos e = limb(g, (pos){x, h - 1 - rand_in(g, 0, h > 1), z}, D8[d][0], D8[d][1], reach(d, rand_in(g, 2, 3)),
                      rand_in(g, 0, 1));
         blob(g, (pos){e.x, e.y + 1, e.z}, rand_in(g, 1, 2), 1, rand_in(g, 1, 2), 35);
     }
