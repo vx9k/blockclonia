@@ -18,7 +18,9 @@ layout(location = 3) out vec3 f_luv;            // light atlas coordinate
 // clip space. A uniform, as the push constants are full; per frame, at
 // the frame's dynamic offset.
 layout(set = 1, binding = 0) uniform ShadowMap { mat4 clip; } u_sh;
-layout(location = 4) out vec3 f_sh;  // the map's coordinate and the depth to compare
+// The map's coordinate and the depth to compare; w: the light shafts'
+// strength (block_frag.glsl), in the third varying slot's spare component.
+layout(location = 4) out vec4 f_sh;
 #endif
 
 const float FACE_SHADE[6] = float[](0.80, 0.80, 1.00, 0.50, 0.65, 0.65);
@@ -32,6 +34,12 @@ const float SUN_SHADE = 0.4;  // LIGHTFX_SUN_SHADE
 const float SUN_Z = 0.8391;
 const float LIGHT_K = 4.8289214;  // LIGHT_CURVE_K
 const float SUN_STEPS = 1024.0;  // 1 / LIGHTFX_SUN_STEP
+#ifdef SHADOWS
+// Light shafts: the haze's extinction per metre (half the way at
+// 64 m, the map's edge) and its brightest in-scatter, at full contrast.
+const float HAZE = 0.01;
+const float SHAFT = 0.6;
+#endif
 
 // Animation is a function of the world position, which is rel + pc.origin
 // with x and z wrapped to a 256 m tile, and of pc.fog.z, time wrapped to
@@ -118,7 +126,14 @@ void main()
     float turned = 1.0 - SUN_SHADE * length(sun);
     f_layer |= uint(max(log2(m) - log2(turned), 0.0) * (SUN_STEPS / LIGHT_K) + 0.5) << 8;
     vec4 s = u_sh.clip * vec4(rel, 1.0);
-    f_sh = vec3(s.xy * 0.5 + 0.5, s.z);
+    // Light shafts: sunlit haze between the eye and the face, brighter
+    // looking toward the light (forward scattering) and thicker with
+    // distance; the fragment shader finds how much of the way is lit.
+    float dist = length(rel), c = length(sun);
+    float toward = c > 0.0 && dist > 0.0 ? max(dot(rel, sun) / (dist * c), 0.0) : 0.0;
+    float t2 = toward * toward;
+    float phase = 0.15 + 0.85 * t2 * t2 * t2;
+    f_sh = vec4(s.xy * 0.5 + 0.5, s.z, SHAFT * c * phase * (1.0 - exp(-HAZE * dist)));
 #endif
     // Eight components to interpolate (uv 2, layer 1, shade and fog 2,
     // light 3) fill two vec4 slots; daylight is applied per pixel instead

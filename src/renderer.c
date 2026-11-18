@@ -305,7 +305,6 @@ struct renderer {
     float shadow_dir[3];        /* toward the light the map was last drawn for */
     int shadow_mode;
     bloom_auto shadow_auto;
-    const section_mesh **shadow_casters; /* SHADOW_CASTERS, this frame's */
 
     VkRenderPass pass;
     VkDescriptorSetLayout dsl;
@@ -1636,7 +1635,7 @@ static void create_shadow_layout(renderer *r)
     VkDescriptorSetLayoutBinding b[2] = {{.binding = 0,
                                           .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
                                           .descriptorCount = 1,
-                                          .stageFlags = VK_SHADER_STAGE_VERTEX_BIT},
+                                          .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT},
                                          {.binding = 1,
                                           .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                           .descriptorCount = 1,
@@ -1693,7 +1692,6 @@ static void create_shadow_layout(renderer *r)
 static void create_shadow(renderer *r)
 {
     if (!r->sh_layout) return;
-    r->shadow_casters = mem_alloc(mem_array_size(SHADOW_CASTERS, sizeof *r->shadow_casters));
     VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
                             .imageType = VK_IMAGE_TYPE_2D,
                             .format = r->shadow_fmt,
@@ -1776,7 +1774,6 @@ static void create_shadow(renderer *r)
 
 static void destroy_shadow(renderer *r)
 {
-    mem_free(r->shadow_casters);
     buffer_destroy(r, &r->shadow_ubo);
     vkDestroyDescriptorPool(r->dev, r->shadow_dpool, r->ac);
     vkDestroyFramebuffer(r->dev, r->shadow_fb, r->ac);
@@ -3252,7 +3249,7 @@ static void draw_shadow(renderer *r, terrain_pass *tp, const world *w, const ren
 
     /* The casters' origins, at the end of the dynamic buffer. */
     float (*origins)[4] = (float (*)[4])((uint8_t *)tp->f->dyn.map + SHADOW_ORIGINS_OFF);
-    const section_mesh **casters = r->shadow_casters;
+    const section_mesh *casters[SHADOW_CASTERS] = {0}; /* 69 KB */
     int n = 0;
     int ccx = chunk_of((int)floor(v->eye.x)), ccz = chunk_of((int)floor(v->eye.z));
     for (int dz = -SHADOW_REACH; dz <= SHADOW_REACH; dz++)
