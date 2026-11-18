@@ -1790,6 +1790,61 @@ static menu_action menu_run(menu *m, ui *u, ui_vertex *mem, settings *s, const m
     return last;
 }
 
+/* The backups screen: opened from the world list, Enter restores the
+ * focused copy, the list scrolls, an empty list restores nothing, and
+ * Escape goes back to the worlds. */
+static void test_menu_backups(void)
+{
+    ui_vertex *mem = mem_alloc(sizeof(ui_vertex) * 4 * 8192);
+    ui u = {0};
+    settings s = {0};
+    settings_default(&s);
+    menu m = {0};
+    menu_init(&m);
+    menu_world worlds[1] = {{.name = "Home", .detail = "seed 1", .playable = 1}};
+    menu_world list[9] = {0};
+    for (int i = 0; i < 9; i++) {
+        snprintf(list[i].name, sizeof list[i].name, "2026-11-%02d 12:00:00", 18 - i);
+        snprintf(list[i].detail, sizeof list[i].detail, "%d days ago", i);
+        list[i].playable = 1;
+    }
+    m.worlds = worlds;
+    m.world_count = 1;
+    menu_open(&m, SCREEN_WORLDS);
+    menu_input idle = {.mx = -1, .my = -1, .dt = 1.0f / 60.0f};
+    menu_input down = idle, enter = idle, esc = idle;
+    down.down = 1;
+    enter.enter = 1;
+    esc.back = 1;
+    menu_run(&m, &u, mem, &s, &idle, 20);
+    /* The row, then Play, Create, Rename and Backups. */
+    for (int i = 0; i < 4; i++) menu_run(&m, &u, mem, &s, &down, 1);
+    m.backup_sel = 5;
+    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_WORLD_BACKUPS);
+    CHECK(m.screen == SCREEN_BACKUPS && m.backup_sel == 0 && m.backup_scroll == 0);
+
+    /* No copies yet: Enter on Restore asks for nothing. */
+    m.backups = list;
+    m.backup_count = 0;
+    menu_run(&m, &u, mem, &s, &idle, 20);
+    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_NONE && m.screen == SCREEN_BACKUPS);
+
+    m.backup_count = 9;
+    menu_open(&m, SCREEN_BACKUPS);
+    menu_run(&m, &u, mem, &s, &idle, 20);
+    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_WORLD_RESTORE && m.backup_sel == 0);
+    menu_run(&m, &u, mem, &s, &down, 1);
+    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_WORLD_RESTORE && m.backup_sel == 1);
+    /* Down past the seventh row scrolls the copies. */
+    for (int i = 0; i < 7; i++) menu_run(&m, &u, mem, &s, &down, 1);
+    menu_run(&m, &u, mem, &s, &idle, 1);
+    CHECK(m.backup_sel == 8 && m.backup_scroll == 2);
+    CHECK(menu_run(&m, &u, mem, &s, &enter, 1) == MENU_WORLD_RESTORE && m.backup_sel == 8);
+    menu_run(&m, &u, mem, &s, &esc, 1);
+    CHECK(m.screen == SCREEN_WORLDS);
+    mem_free(mem);
+}
+
 /* The world screens: choosing, scrolling, typing a name and confirming a
  * delete, all from the keyboard. */
 static void test_menu_worlds(void)
@@ -2035,6 +2090,7 @@ int main(void)
     test_ui();
     test_settings();
     test_menu_worlds();
+    test_menu_backups();
     test_mem();
     test_sysinfo();
     test_settings_file();

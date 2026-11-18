@@ -201,7 +201,49 @@ static void test_symlinks(void)
     tmp_remove(elsewhere);
 }
 
-/* Deleting a world takes its backups with it. */
+/* A copy that is an SQLite database but not one of our worlds (another
+ * program's id, or ours with tables we did not make) is refused. */
+static void test_foreign_copy(void)
+{
+    char dir[400] = {0}, p[600] = {0};
+    make_world(dir, sizeof dir, "foreign", 51);
+    CHECK(take_at(dir, T0) == 1);
+    static const char *const SQL[] = {
+        "PRAGMA application_id = 1; CREATE TABLE t(x);",
+        "PRAGMA application_id = 1296258892; PRAGMA user_version = 3; CREATE TABLE t(x);",
+        "PRAGMA application_id = 1296258892; PRAGMA user_version = 99; CREATE TABLE t(x);",
+    };
+    for (size_t i = 0; i < sizeof SQL / sizeof SQL[0]; i++) {
+        char name[32] = {0};
+        snprintf(name, sizeof name, "backup-17000000%02d.db", (int)i);
+        path_in(p, sizeof p, dir, "backups");
+        size_t len = strlen(p);
+        snprintf(p + len, sizeof p - len, "/%s", name);
+        sqlite3 *h = NULL;
+        CHECK(sqlite3_open(p, &h) == SQLITE_OK && sqlite3_exec(h, SQL[i], NULL, NULL, NULL) == SQLITE_OK);
+        sqlite3_close(h);
+        CHECK(backups_restore(dir, name, T0 + 10 + (int64_t)i) == -1);
+        CHECK(seed_of(dir) == 51);
+        tmp_remove(p);
+    }
+}
+
+/* A file where the backups folder should be: no copy, nothing removed. */
+static void test_folder_is_file(void)
+{
+    char dir[400] = {0}, p[600] = {0};
+    make_world(dir, sizeof dir, "blocked", 61);
+    path_in(p, sizeof p, dir, "backups");
+    CHECK(save_write_file(p, "x", 1) == 0);
+    backup_entry list[2] = {0};
+    CHECK(take_at(dir, T0) == -1 && backups_list(dir, list, 2) == 0);
+    CHECK(backups_restore(dir, "backup-1800000000.db", T0) == -1);
+    CHECK(os_path_kind(p) == OS_FILE && seed_of(dir) == 61);
+    tmp_remove(p);
+}
+
+/* Deleting a world takes its backups with it, but not a file of someone
+ * else's that was put in the folder. */
 static void test_delete(void)
 {
     char dir[400] = {0}, p[600] = {0};
@@ -210,6 +252,15 @@ static void test_delete(void)
     CHECK(worlds_delete(dir) == 0);
     path_in(p, sizeof p, dir, "backups");
     CHECK(os_path_kind(p) == OS_MISSING && os_path_kind(dir) == OS_MISSING);
+
+    make_world(dir, sizeof dir, "kept", 42);
+    CHECK(take_at(dir, T0) == 1);
+    path_in(p, sizeof p, dir, "backups/mine.txt");
+    CHECK(save_write_file(p, "mine", 4) == 0);
+    CHECK(worlds_delete(dir) == 1);
+    backup_entry list[2] = {0};
+    CHECK(os_path_kind(p) == OS_FILE && backups_list(dir, list, 2) == 0);
+    tmp_remove(p);
 }
 
 /* Removes a world folder the tests made: its database, side files and
@@ -231,8 +282,10 @@ void test_backups_all(void)
     test_take_and_prune();
     test_restore();
     test_symlinks();
+    test_foreign_copy();
+    test_folder_is_file();
     test_delete();
-    const char *worlds[] = {"take", "restore", "linked", "other"};
+    const char *worlds[] = {"take", "restore", "linked", "other", "foreign", "blocked", "kept"};
     for (size_t i = 0; i < sizeof worlds / sizeof worlds[0]; i++) remove_world(worlds[i]);
     tmp_remove(g_root);
 }
