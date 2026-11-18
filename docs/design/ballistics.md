@@ -97,7 +97,14 @@ station, the right items in, a cartridge out.
 - *Recoil from momentum.* Recoil impulse comes from the bullet's
   momentum and the propellant gas, against the weapon's mass. It
   drives the view-model kick and the muzzle climb the player has to
-  bring back.
+  bring back. `recoil.c` does this now: the impulse acts along the
+  bore 5 cm above the shoulder and turns the rifle muzzle-up (about
+  3 degrees aimed, more from the hip), and the hold, a 2 Hz damped
+  spring, brings the sights back to within a few milliradians of the
+  mark, never exactly onto it. A bolt action is then worked by hand
+  in the view model: the right hand leaves the wrist, turns the handle
+  up, draws the bolt back, runs it home and turns it down, all inside
+  the 1.2 s between shots (`COMBAT_CYCLE_S`).
 - *Condition and failure.* Every shot wears the barrel and dirties the
   action. Firing raises barrel heat into `thermo`; a hot barrel loses
   accuracy and wears faster. Poor condition, dirt, heat or a bad

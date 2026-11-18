@@ -429,6 +429,7 @@ static void rifle(item_model *m)
     box(m, -0.005f, 0.66f, 0.0f, 0.045f, 0.52f, 0.038f, T_MAT_WOOD, darker(WALNUT) + 0x281810u);
     box(m, -0.02f, 0.44f, 0.0f, 0.04f, 0.15f, 0.03f, T_MAT_METAL, GUNMETAL);
     box(m, -0.034f, 0.80f, 0.0f, 0.018f, 0.62f, 0.018f, T_MAT_METAL, GUNMETAL);
+    m->bolt = m->n; /* the bolt's handle and its knob, which viewmodel.c works */
     box(m, -0.02f, 0.40f, 0.03f, 0.012f, 0.012f, 0.05f, T_MAT_METAL, GUNMETAL);
     box(m, -0.02f, 0.40f, 0.058f, 0.018f, 0.018f, 0.018f, T_MAT_METAL, 0x5A5C60u);
     box(m, 0.045f, 0.37f, 0.0f, 0.01f, 0.07f, 0.012f, T_MAT_METAL, GUNMETAL);

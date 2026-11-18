@@ -24,6 +24,7 @@ typedef struct {
     float look_dx, look_dy; /* mouse motion this frame, radians (for lag) */
     float eating;         /* 0..1 while an eat action plays, else 0 */
     float aim;            /* 0 rifle at the hip .. 1 down its sights */
+    float bolt;           /* 0..1 through working the bolt after a shot (COMBAT_CYCLE_S), else 0 */
     float light;          /* brightness (daylight) */
     float dt;
 } viewmodel_input;
@@ -34,6 +35,7 @@ typedef struct {
     float lag_x, lag_y;   /* smoothed mouse lag */
     float swing_t;        /* 0..1 progress of the current swing */
     float aim_x, aim_v;   /* the rifle's mount: a spring following the aim, and its rate */
+    float bolt;           /* viewmodel_input.bolt, this frame */
     float time;
 } viewmodel;
 
@@ -51,5 +53,10 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
  * view space. Shots, flash and smoke leave from here, on the authority as
  * well as the client, so it depends on nothing but aim. */
 void viewmodel_muzzle(float aim, float pos[3], float dir[3]);
+/* Working a bolt action at phase (0..1 of the cycle): how far the right
+ * hand has left the stock for the bolt's knob, how far the handle is
+ * turned up (1 = fully, 60 degrees) and how far it is drawn back (1 = its
+ * whole 9 cm). All 0 outside the cycle. */
+void viewmodel_bolt(float phase, float *to_knob, float *lift, float *slide);
 
 #endif
