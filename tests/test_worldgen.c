@@ -52,7 +52,9 @@ static int bare_rock(uint8_t b) { return block_get(b)->mat == BM_STONE && !item_
 
 /* What may stand on the ground: nothing that belongs to the ground. */
 static int above_ground(uint8_t b)
-{ return b == B_AIR || b == B_WATER || b == B_ICE || block_log(b) || block_leaves(b) || block_plant(b); }
+{
+    return b == B_AIR || b == B_WATER || b == B_ICE || block_log(b) || block_leaves(b) || block_plant(b);
+}
 
 /* The derivative noise2d_grad reports is the slope of noise2d. */
 static void test_noise_grad(void)

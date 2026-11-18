@@ -159,7 +159,9 @@ static rgba face(int x, int y, int n)
 }
 
 static int leaf_gap(int layer, int x, int y, int holes)
-{ return (int)((hash2i(0x1EAFu + (uint32_t)layer, x / 2, y) + hash2i(0x1EAFu, x, y / 2) % 7u) % 100u) < holes; }
+{
+    return (int)((hash2i(0x1EAFu + (uint32_t)layer, x / 2, y) + hash2i(0x1EAFu, x, y / 2) % 7u) % 100u) < holes;
+}
 
 /* Leaves cut out against the sky: a share of `holes` percent of the
  * texels is see-through, in clumps of two so the gaps read at a distance.
