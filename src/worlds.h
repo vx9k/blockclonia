@@ -12,6 +12,7 @@
 #ifndef MC_WORLDS_H
 #define MC_WORLDS_H
 
+#include "gamemode.h"
 #include "save_db.h"
 
 #include <stdint.h>
@@ -44,7 +45,8 @@ void worlds_folder_name(const char *name, char *out, size_t cap);
  * ... if taken), records the name, seed, generator version and creation
  * time, and writes its path to dir_out. 0 on success, -1 (logged) if the
  * name is invalid or the folder or database cannot be made. */
-int worlds_create(const char *root, const char *name, uint32_t seed, char *dir_out, size_t cap);
+int worlds_create(const char *root, const char *name, uint32_t seed, const world_rules *rules, char *dir_out,
+                  size_t cap);
 
 /* Sets the world's shown name; the folder stays. 0 on success. */
 int worlds_rename(const char *dir, const char *name);

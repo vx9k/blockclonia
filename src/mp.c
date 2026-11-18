@@ -1,4 +1,5 @@
 #include "mp.h"
+#include "gamemode.h"
 #include "log.h"
 #include "mem.h"
 #include "netkeys.h"
@@ -36,7 +37,7 @@ _Static_assert(SAVE_MAX_FILE + 9 <= NET_MAX_MESSAGE, "a column message must fit 
 enum { C_INPUT = 1, C_OP, C_COLUMN };
 enum { H_WELCOME = 16, H_COLUMN, H_EDITS, H_SNAP, H_HEALTH, H_INV, H_MSG };
 enum { B_JUMP = 1, B_DESCEND = 2, B_SPRINT = 4, B_SNEAK = 8, B_ATTACK = 16, B_FLY = 32, B_AIM = 64 };
-enum { F_FLYING = 1, F_SNEAKING = 2, F_DEAD = 4 };
+enum { F_FLYING = 1, F_SNEAKING = 2, F_DEAD = 4, F_WATCHING = 8 }; /* F_WATCHING: a spectator, not drawn */
 
 typedef struct {
     float forward, right;
@@ -191,6 +192,8 @@ static player_input movement(const intent *in)
 /* Fly mode follows the intent, as the F key does in single player. */
 static void set_flying(player *p, int on)
 {
+    /* Only where the mode allows it: a spectator always flies. */
+    if (!mode_can_fly(p->mode) || mode_noclip(p->mode)) on = mode_noclip(p->mode);
     if (!p->flying == !on) return;
     p->flying = on;
     p->vel = dv3(0, 0, 0);
@@ -246,6 +249,13 @@ void mp_destroy(mp *m)
 }
 
 int mp_is_host(const mp *m) { return m->host; }
+
+void mp_set_mode(mp *m, int mode)
+{
+    if (!m || !m->host) return;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++)
+        if (m->r[i].active) gamemode_apply(&m->r[i].pl, mode);
+}
 
 int mp_welcome(const mp *m, uint32_t *seed)
 {
@@ -355,6 +365,7 @@ static void host_join(mp *m, int id)
     } else {
         player_spawn(&r->pl, m->ctx.w, floor(h->pos.x) + 0.5 + (double)(id % 3) - 1.0, floor(h->pos.z) + 3.5);
     }
+    gamemode_apply(&r->pl, h->mode);
     r->cur.selected = 0;
 
     uint8_t buf[32] = {0};
@@ -451,7 +462,11 @@ static void host_op(mp *m, remote *r, wire_r *rd)
         if (r->hl->dead) {
             survival_drop_all(m->ctx.ph, &r->inv, &r->pl, &r->rng);
             const player *h = m->ctx.pl;
+            dvec3 died = r->pl.pos;
             player_spawn(&r->pl, m->ctx.w, floor(h->pos.x) + 1.5, floor(h->pos.z) + 0.5);
+            /* Hardcore has one life: the player stays where they fell, watching. */
+            if (r->pl.mode == MODE_HARDCORE) r->pl.pos = r->pl.prev_pos = died;
+            gamemode_apply(&r->pl, gamemode_after_death(r->pl.mode));
             r->rng = r->rng * 1664525u + 1013904223u;
             health_init_varied(r->hl, r->rng);
             inv_starting_kit(&r->inv);
@@ -527,7 +542,8 @@ static void host_snapshot(mp *m, int id)
         wire_f64(&w, p->pos.z);
         wire_f32(&w, p->yaw);
         wire_f32(&w, p->pitch);
-        wire_u8(&w, (uint8_t)((p->flying ? F_FLYING : 0) | (p->sneaking ? F_SNEAKING : 0) | (dead ? F_DEAD : 0)));
+        wire_u8(&w, (uint8_t)((p->flying ? F_FLYING : 0) | (p->sneaking ? F_SNEAKING : 0) | (dead ? F_DEAD : 0) |
+                              (mode_noclip(p->mode) ? F_WATCHING : 0)));
     }
 
     dvec3 me = r->pl.pos;
@@ -595,7 +611,7 @@ static void host_hands(mp *m, remote *r, int who)
         click[i] = (uint8_t)(in->clicks[i] - r->done[i]) != 0;
         r->done[i] = (uint8_t)(r->done[i] + click[i]);
     }
-    player *pl = &r->pl;
+    const player *pl = &r->pl;
     health_limits lim = health_get_limits(r->hl);
     dvec3 eye = dv3(pl->pos.x, pl->pos.y + PLAYER_EYE - (pl->sneaking ? 0.3 : 0.0), pl->pos.z);
     vec3 look = look_dir(pl->yaw, pl->pitch);
@@ -605,8 +621,8 @@ static void host_hands(mp *m, remote *r, int who)
                          .use_click = click[MP_CLICK_PLACE],
                          .pick_click = click[MP_CLICK_PICK],
                          .drop = click[MP_CLICK_DROP_ALL] ? 2 : click[MP_CLICK_DROP],
-                         .can_act = pl->flying || (lim.has_control && lim.can_act),
-                         .speed = pl->flying ? 1.0f : 0.4f + 0.6f * lim.move_scale,
+                         .can_act = mode_hands(pl->mode) && (!mode_body(pl->mode) || (lim.has_control && lim.can_act)),
+                         .speed = !mode_body(pl->mode) ? 1.0f : 0.4f + 0.6f * lim.move_scale,
                          .dt = (float)PHYS_DT};
     if (m->ctx.mobs && m->ctx.cb) {
         /* A creature or player in reach takes the blow instead of the block
@@ -630,7 +646,7 @@ static void host_hands(mp *m, remote *r, int who)
     if (io.eat) host_treat(m, r, BP_ABDOMEN, TREAT_EAT);
     if (io.defib) host_treat(m, r, BP_CHEST, TREAT_DEFIB);
     if (io.msg) snprintf(r->msg, sizeof r->msg, "%s", io.msg);
-    r->cracking = r->ia.has_target && !pl->flying;
+    r->cracking = r->ia.has_target && !mode_creative(pl->mode);
     r->crack = r->ia.target;
     r->crack_p = r->ia.progress;
     if (r->hl->defib.phase != DEFIB_OFF && !inv_count(&r->inv, I_DEFIBRILLATOR) && r->inv.cursor.id != I_DEFIBRILLATOR)
@@ -1250,7 +1266,7 @@ int mp_avatars(const mp *m, double now, double alpha, mp_avatar *out, int max)
         memset(a, 0, sizeof *a);
         if (m->host) {
             const remote *r = &m->r[id];
-            if (!r->active) continue;
+            if (!r->active || mode_noclip(r->pl.mode)) continue;
             const player *p = &r->pl;
             a->pos = lerp3(p->prev_pos, p->pos, alpha);
             a->yaw = p->yaw;
@@ -1260,7 +1276,7 @@ int mp_avatars(const mp *m, double now, double alpha, mp_avatar *out, int max)
             a->dead = r->hl->dead;
         } else {
             const ghost *g = &m->c.g[id];
-            if (!g->present) continue;
+            if (!g->present || (g->flags & F_WATCHING)) continue;
             double span = g->t[1] - g->t[0];
             double f = span > 1e-6 ? (now - INTERP_DELAY - g->t[0]) / span : 1.0;
             f = f < 0.0 ? 0.0 : f > 1.0 ? 1.0 : f;

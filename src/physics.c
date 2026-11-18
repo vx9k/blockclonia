@@ -1,6 +1,7 @@
 #include "physics.h"
 #include "entity.h"
 #include "fluid.h"
+#include "gamemode.h"
 #include "item.h"
 #include "mem.h"
 #include "noise.h"
@@ -232,6 +233,7 @@ static const wire_field PLAYER_FIELDS[] = {
     WIRE_F32(player, pitch),
     WIRE_I32(player, on_ground),
     WIRE_I32(player, flying),
+    WIRE_I32(player, mode),
     PF(submerged),
     WIRE_I32(player, sprinting),
     WIRE_I32(player, sneaking),
@@ -261,7 +263,7 @@ int player_decode(player *p, const uint8_t *in, size_t len)
      * physics can do while keeping a step's travel small. */
     if (r.bad || r.pos != len || !pos_sane(t.pos) || !pos_sane(t.prev_pos) || dv3_len(t.vel) > 1000.0 ||
         fabsf(t.yaw) > 100.0f || fabsf(t.pitch) > 2.0f || t.submerged < 0.0 || t.submerged > 1.0 ||
-        fabs(t.fall_speed) > 1000.0)
+        fabs(t.fall_speed) > 1000.0 || !mode_valid(t.mode))
         return -1;
     *p = t;
     return 0;
@@ -269,7 +271,10 @@ int player_decode(player *p, const uint8_t *in, size_t len)
 
 void player_spawn(player *p, const world *w, double x, double z)
 {
+    /* A respawn keeps the player's mode; the spawn point does not change it. */
+    int mode = mode_valid(p->mode) ? p->mode : MODE_SURVIVAL;
     memset(p, 0, sizeof *p);
+    gamemode_apply(p, mode);
     /* Inside the last block, for a player joining beside a host at the edge. */
     x = clampd(x, -WORLD_LIMIT, WORLD_LIMIT - 1);
     z = clampd(z, -WORLD_LIMIT, WORLD_LIMIT - 1);
@@ -379,6 +384,15 @@ static void player_step(const physics *ph, player *p, const player_input *in)
         p->sprinting = in->sprint && in->forward > 0.5f;
         double speed = p->sprinting ? 24.0 : 10.0;
         p->vel = dv3(fx * speed, (in->jump - in->descend) * speed, fz * speed);
+        if (mode_noclip(p->mode)) {
+            /* A spectator passes through everything, but stays in the world. */
+            p->on_ground = 0;
+            p->pos = dv3_add(p->pos, dv3_scale(p->vel, dt));
+            p->pos.x = clampd(p->pos.x, -WORLD_LIMIT, WORLD_LIMIT);
+            p->pos.z = clampd(p->pos.z, -WORLD_LIMIT, WORLD_LIMIT);
+            p->pos.y = clampd(p->pos.y, -32.0, WORLD_H + 32.0);
+            return;
+        }
         player_move(ph, p, dt);
         return;
     }
@@ -469,7 +483,7 @@ static int solidify(physics *ph, const body *b)
          * stay put, or the structural check would knock it loose again. A
          * body resting on the player just rests until they move. */
         for (int k = 0; k < ph->pl_count; k++)
-            if (boxes_overlap(cell, player_box(ph->pls[k]))) return 0;
+            if (!mode_noclip(ph->pls[k]->mode) && boxes_overlap(cell, player_box(ph->pls[k]))) return 0;
         if (!supported_below(w, x, y, z, b->block)) return 0;
         int displaced = world_fluid_level(w, x, y, z);
         world_set(w, x, y, z, b->block, b->meta);

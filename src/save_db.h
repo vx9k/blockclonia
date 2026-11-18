@@ -65,6 +65,7 @@ typedef struct {
     int has_seed;
     int generator;           /* terrain generator version; 1 when not recorded */
     int64_t last_played;     /* Unix seconds; 0 unknown */
+    int mode, hardcore;      /* the world's rules (gamemode.h); survival when unset */
 } save_peek;
 void save_db_peek(const char *dir, save_peek *p);
 

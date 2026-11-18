@@ -32,7 +32,8 @@ typedef struct {
     char msg[128];          /* result of the last treatment */
     float msg_age;          /* s since msg was set */
     const char *held;       /* name of the block in hand */
-    int flying;
+    const char *mode_hint;  /* a line naming a mode without a body, or NULL */
+    int no_body;            /* creative or spectator: no vitals to show */
     int debug;              /* F3 overlay is up: keep clear of its left column */
     const inventory *inv;   /* supplies for the panel, and the hotbar */
     int hide_hints;         /* the key hints setting is off */

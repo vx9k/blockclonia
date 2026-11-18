@@ -4,6 +4,7 @@
  * the host's, inventory operations are applied by the host and wrong
  * predictions undone, chat arrives, garbage is shrugged off, and a player
  * leaving takes their avatar away. */
+#include "gamemode.h"
 #include "mem.h"
 #include "mp.h"
 #include "netkeys.h"
@@ -135,6 +136,23 @@ static void client_leave(host_side *h, client_side *c)
     }
 }
 
+/* The host's mode switch reaches the client's player; spectators fly and
+ * are hidden from the others, and come back when switched out. */
+static void check_modes(host_side *h, client_side *c)
+{
+    mp_avatar me = {0}, host = {0};
+    gamemode_apply(&h->pl, MODE_SPECTATOR);
+    mp_set_mode(h->m, MODE_SPECTATOR);
+    for (int i = 0; i < 30; i++) frame(h, c, NULL);
+    CHECK(c->pl.mode == MODE_SPECTATOR && c->pl.flying);
+    CHECK(!avatar(c->m, 0, &host) && !avatar(h->m, 1, &me));
+    gamemode_apply(&h->pl, MODE_SURVIVAL);
+    mp_set_mode(h->m, MODE_SURVIVAL);
+    for (int i = 0; i < 30; i++) frame(h, c, NULL);
+    CHECK(c->pl.mode == MODE_SURVIVAL && !c->pl.flying); /* the client's fly intent is refused */
+    CHECK(avatar(c->m, 0, &host) && avatar(h->m, 1, &me));
+}
+
 /* An offline host (as fuzz_net drives it) shrugs off seeded garbage
  * from three players on both channels, stepping after every message,
  * and still answers a well-formed operation. */
@@ -152,6 +170,11 @@ static void check_offline_host(host_side *h, const nc_keypair *kh)
     mp_poll(om, 0.0);
     mp_avatar oa[NET_MAX_PLAYERS];
     CHECK(mp_avatars(om, 0.0, 1.0, oa, NET_MAX_PLAYERS) == 3);
+    mp_set_mode(om, MODE_SPECTATOR);
+    CHECK(mp_avatars(om, 0.0, 1.0, oa, NET_MAX_PLAYERS) == 0);
+    mp_set_mode(om, MODE_SURVIVAL);
+    CHECK(mp_avatars(om, 0.0, 1.0, oa, NET_MAX_PLAYERS) == 3);
+    mp_set_mode(NULL, MODE_CREATIVE); /* no session: nothing to do */
     uint32_t x = 12345u;
     const player_input idle = {0};
     for (int i = 0; i < 3000; i++) {
@@ -340,6 +363,8 @@ void test_mp_all(void)
     CHECK(avatar(c.m, 0, &host) && hypot(host.pos.x - h.pl.pos.x, host.pos.z - h.pl.pos.z) < 0.05);
     CHECK(strcmp(host.name, "Host") == 0);
     CHECK(c.hl->t > 1.0); /* the body arrives from the host */
+
+    check_modes(&h, &c);
 
     /* An inventory click goes through the host; a click it refuses (a
      * slot that does not exist) undoes what the client guessed. */

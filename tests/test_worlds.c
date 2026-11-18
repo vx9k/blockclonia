@@ -53,11 +53,11 @@ static void test_names_and_seeds(void)
 static void test_create_list_rename(void)
 {
     char a[WORLDS_PATH_MAX] = {0}, b[WORLDS_PATH_MAX] = {0}, p[WORLDS_PATH_MAX + 32] = {0};
-    CHECK(worlds_create(g_root, "My World", 42, a, sizeof a) == 0);
-    CHECK(worlds_create(g_root, "My World", 43, b, sizeof b) == 0);
+    CHECK(worlds_create(g_root, "My World", 42, NULL, a, sizeof a) == 0);
+    CHECK(worlds_create(g_root, "My World", 43, NULL, b, sizeof b) == 0);
     path_in(p, sizeof p, g_root, "my-world-2");
     CHECK(strcmp(b, p) == 0); /* a taken folder gets a number */
-    CHECK(worlds_create(g_root, " bad", 1, b, sizeof b) == -1);
+    CHECK(worlds_create(g_root, " bad", 1, NULL, b, sizeof b) == -1);
 
     /* An empty folder is not a world, and listing does not make it one;
      * a folder from an older build shows, to be imported when played. */
@@ -107,7 +107,7 @@ static void test_create_list_rename(void)
 static void test_delete(void)
 {
     char dir[WORLDS_PATH_MAX] = {0}, p[WORLDS_PATH_MAX + 32] = {0}, victim[WORLDS_PATH_MAX + 32] = {0};
-    CHECK(worlds_create(g_root, "Doomed", 1, dir, sizeof dir) == 0);
+    CHECK(worlds_create(g_root, "Doomed", 1, NULL, dir, sizeof dir) == 0);
     /* A planted symlink named like a world file goes, not its target. */
     path_in(victim, sizeof victim, g_root, "victim.txt");
     write_text(victim, "keep me");
@@ -129,7 +129,7 @@ static void test_delete(void)
 
     /* A world folder that is itself a symlink is refused. */
     char real[WORLDS_PATH_MAX] = {0}, link[WORLDS_PATH_MAX] = {0};
-    CHECK(worlds_create(g_root, "Real", 1, real, sizeof real) == 0);
+    CHECK(worlds_create(g_root, "Real", 1, NULL, real, sizeof real) == 0);
     path_in(link, sizeof link, g_root, "link");
     if (tmp_symlink(real, link)) {
         CHECK(worlds_delete(link) == -1);

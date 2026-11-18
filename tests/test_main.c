@@ -2073,6 +2073,7 @@ int main(void)
     test_ballistics_all();
     test_muzzle_all();
     test_recoil_all();
+    test_gamemode_all();
     test_invui_all();
     test_body_risks_all();
     test_thoughts_all();

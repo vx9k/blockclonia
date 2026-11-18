@@ -9,6 +9,7 @@
 #include "debug.h"
 #include "discord.h"
 #include "fx.h"
+#include "gamemode.h"
 #include "health.h"
 #include "hud.h"
 #include "interact.h"
@@ -84,6 +85,7 @@ typedef struct {
     const char *figures; /* players' figures to stand in front: "walk,run" */
     int no_sound;
     int have_time;       /* --time */
+    int mode;            /* --mode: MODE_* + 1, 0 for the world's own */
     double time_of_day;  /* 0..1 */
     int host;            /* --host: open the world to other players */
     int client_server;   /* --client-server: players connect to the host only */
@@ -228,6 +230,8 @@ static void usage(void)
            "  --figures LIST    stand players' figures 4 m in front of you, moving on the\n"
            "                    spot: stand, walk, jog, run, sneak, crouch or dead\n"
            "  --time HH         start at this hour of the day (0-23)\n"
+           "  --mode NAME       play this session in survival, creative, hardcore or\n"
+           "                    spectator (the world keeps its own mode)\n"
            "  --demo            scripted structural-collapse demo\n"
            "  --health-panel    start with the health panel (H) open\n"
            "  --hurt LIST       start injured: comma list of %s,\n"
@@ -335,6 +339,12 @@ static int parse_value_option(options *o, const char *a, const char *v, int *ok)
     } else if (strcmp(a, "--pool-mb") == 0) {
         *ok = parse_int(v, 1, 512, &n);
         o->pool_mb = (uint32_t)n;
+    } else if (strcmp(a, "--mode") == 0) {
+        static const char *const MODE_ARGS[MODE_COUNT] = {"survival", "creative", "hardcore", "spectator"};
+        o->mode = 0;
+        for (int k = 0; k < MODE_COUNT; k++)
+            if (strcmp(v, MODE_ARGS[k]) == 0) o->mode = k + 1;
+        *ok = o->mode != 0;
     } else if (strcmp(a, "--time") == 0) {
         *ok = parse_int(v, 0, 23, &n);
         o->time_of_day = (double)n / 24.0;
@@ -973,6 +983,7 @@ typedef struct {
     float aim;                /* 0 rifle at the hip .. 1 down its sights */
     float flash;              /* the last muzzle flash's light, 1 when fired, fading */
     recoil rc;                /* the muzzle's climb and the hold bringing it back */
+    world_rules rules;        /* the world's mode and whether it may switch */
     float bolt_t;             /* 0..1 through the cycle after a shot, 1 when done */
     float fog[3];             /* the fog's colour, easing toward the light at the eye */
     int fog_set;
@@ -1365,6 +1376,9 @@ static void open_world(game *g, const char *dir, int backdrop)
         world_load_blocking(&g->w, g->pl.pos.x, g->pl.pos.z, 1);
         log_info("player restored from %s/world.db", o->world_dir);
     }
+    g->rules = backdrop ? rules_new(MODE_SURVIVAL, 0) : rules_load(g->db);
+    if (o->mode && !backdrop) g->rules = rules_new(o->mode - 1, 1);
+    gamemode_apply(&g->pl, g->rules.mode);
     /* Only now: a save before this point would write the fresh player
      * over the saved one. */
     g->w.save_user = &g->sc;
@@ -1808,8 +1822,7 @@ static player_input frame_input(game *g)
     if (g_in.slot >= 0 && g_in.slot < INV_HOTBAR) g->inv.selected = g_in.slot;
     g_in.slot = -1;
     if (g_in.toggle_fly) {
-        pl->flying = !pl->flying;
-        pl->vel = dv3(0, 0, 0);
+        gamemode_toggle_fly(pl);
         g_in.toggle_fly = 0;
     }
 
@@ -1952,19 +1965,21 @@ static void frame_interact(game *g, double dt)
     g->eye = dv3(pl->pos.x, pl->pos.y + PLAYER_EYE - (double)g->cam.crouch, pl->pos.z);
     g->look = look_dir(pl->yaw, pl->pitch);
     g->hit = physics_raycast(&g->w, g->eye, g->look, REACH);
+    if (!mode_hands(pl->mode)) g->hit.hit = 0; /* a spectator selects nothing */
     if (g->client) {
         client_hands(g, dt);
         return;
     }
     health_limits lim = health_get_limits(&g->hl);
-    int hands = !g->frozen && (pl->flying || (lim.has_control && lim.can_act));
+    int body = mode_body(pl->mode);
+    int hands = !g->frozen && mode_hands(pl->mode) && (!body || (lim.has_control && lim.can_act));
     interact_input ii = {.attack = g_in.attack && !g->frozen,
                          .attack_click = g_in.click_break,
                          .use_click = g_in.click_place,
                          .pick_click = g_in.click_pick && !g->frozen,
                          .drop = g->frozen ? 0 : g_in.drop,
                          .can_act = hands,
-                         .speed = pl->flying ? 1.0f : 0.4f + 0.6f * lim.move_scale,
+                         .speed = !body ? 1.0f : 0.4f + 0.6f * lim.move_scale,
                          .dt = g->in_menu ? 0.0f : (float)dt};
     if (!g->backdrop && !g->in_menu) {
         /* A creature or player in reach takes the blow instead of the block
@@ -2028,11 +2043,25 @@ static void frame_interact(game *g, double dt)
     /* The pads are cabled to the device: they come off when it is dropped. */
     if (g->hl.defib.phase != DEFIB_OFF && !inv_count(&g->inv, I_DEFIBRILLATOR) && g->inv.cursor.id != I_DEFIBRILLATOR)
         health_pads(&g->hl, 0);
+    /* Hardcore's one life is spent the moment it ends, so quitting before
+     * pressing respawn does not bring it back. */
+    if (g->hl.dead && g->rules.hardcore && g->rules.mode == MODE_HARDCORE) {
+        g->rules.mode = MODE_SPECTATOR;
+        if (g->sc.db) rules_save(g->sc.db, &g->rules);
+    }
     if (g_in.respawn) {
         if (g->hl.dead) {
             survival_drop_all(&g->ph, &g->inv, pl, &g->death_rng);
+            int last = pl->mode == MODE_HARDCORE;
+            dvec3 died = pl->pos;
             world_load_blocking(&g->w, g->sx, g->sz, 1);
             player_spawn(pl, &g->w, g->sx, g->sz);
+            /* Hardcore: no second life; the player watches from where they fell. */
+            if (last) {
+                pl->pos = pl->prev_pos = died;
+                world_load_blocking(&g->w, died.x, died.z, 1);
+            }
+            gamemode_apply(pl, gamemode_after_death(pl->mode));
             health_init_varied(&g->hl, g->seed ^ (uint32_t)g->frame * 2654435761u);
             inv_starting_kit(&g->inv);
             g->hs.alert_count = 0;
@@ -2203,7 +2232,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
                               lightfx_at(&v.lfx, eye_light, 0.3f),
                               (float)dt};
         v.view_model = g->vm_ents;
-        v.view_model_count = viewmodel_build(&g->vm, &vi, g->vm_ents, VIEWMODEL_MAX);
+        v.view_model_count = mode_hands(g->pl.mode) ? viewmodel_build(&g->vm, &vi, g->vm_ents, VIEWMODEL_MAX) : 0;
         /* Shaking hands (adrenaline, the crash after it, low sugar, cold). */
         float tremor = health_get_senses(&g->hl).tremor;
         for (int i = 0; i < v.view_model_count && tremor > 0.01f; i++) {
@@ -2317,7 +2346,9 @@ static void refresh_worlds(game *g)
                          e->info.generator > WORLDGEN_VERSION ? "a newer" : "an older");
                 r->playable = 0;
             } else {
-                snprintf(r->detail, sizeof r->detail, "seed %u   %s", e->info.seed, when);
+                const char *mode = e->info.hardcore ? (e->info.mode == MODE_SPECTATOR ? "Hardcore, over" : "Hardcore")
+                                                    : mode_name(e->info.mode);
+                snprintf(r->detail, sizeof r->detail, "%s   seed %u   %s", mode, e->info.seed, when);
             }
             break;
         case SAVE_PEEK_LEGACY:
@@ -2370,7 +2401,8 @@ static void world_action(game *g, menu_action a)
         }
         uint32_t seed = worlds_seed_from_text(m->text_seed, (uint32_t)time(NULL) * 2654435761u);
         char dir[WORLDS_PATH_MAX] = {0};
-        if (worlds_create(g->worlds_root, name, seed, dir, sizeof dir) != 0) {
+        world_rules rules = rules_new(g->mn.new_mode, g->mn.new_cheats);
+        if (worlds_create(g->worlds_root, name, seed, &rules, dir, sizeof dir) != 0) {
             snprintf(m->note, sizeof m->note, "Could not create the world (see the log).");
             break;
         }
@@ -2467,6 +2499,8 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     snprintf(g->mn.status, sizeof g->mn.status, "Alive %d:%02d   core %.1f" UI_CH_DEGREE "C   %s", mins / 60, mins % 60,
              (double)g->hl.temp, g->hl.dead ? "dead" : "");
     g->mn.can_open = !g->backdrop && !g->mp && !g->client;
+    g->mn.can_switch = !g->backdrop && !g->client && g->rules.cheats && !g->rules.hardcore;
+    g->mn.mode_now = mode_name(g->pl.mode);
     menu_action act = menu_frame(&g->mn, u, &mi, &g->st);
     switch (act) {
     case MENU_RESUME:
@@ -2502,6 +2536,14 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
         }
     } break;
     case MENU_MP_JOIN: menu_join(g); break;
+    case MENU_MODE: {
+        int next = rules_next_mode(&g->rules, g->pl.mode);
+        g->rules.mode = next;
+        gamemode_apply(&g->pl, next);
+        if (g->mp) mp_set_mode(g->mp, next);
+        if (g->sc.db) rules_save(g->sc.db, &g->rules);
+        log_info("game mode: %s", mode_name(next));
+    } break;
     case MENU_MP_OPEN:
         if (g->mn.text_player[0] && !take_mp_name(g)) break;
         menu_host(g);
@@ -2593,7 +2635,10 @@ static int draw_overlay(game *g, double dt, double alpha)
     hs->panel = g_in.panel;
     hs->sel = g_in.sel_part;
     hs->held = NULL;
-    hs->flying = g->pl.flying;
+    hs->no_body = !mode_body(g->pl.mode);
+    hs->mode_hint = g->pl.mode == MODE_CREATIVE    ? "Creative: no injuries, instant building"
+                    : g->pl.mode == MODE_SPECTATOR ? "Spectator: fly through anything and watch"
+                                                   : NULL;
     hs->debug = g_in.debug;
     hs->inv = &g->inv;
     hs->hide_hints = !g->st.show_hints;

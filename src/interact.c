@@ -1,4 +1,5 @@
 #include "interact.h"
+#include "gamemode.h"
 #include "survival.h"
 
 #include <math.h>
@@ -60,7 +61,7 @@ static void do_break(interact *s, world *w, physics *ph, const player *pl, inven
     const block_def *d = block_get(id);
     fx_break(fx, id, b.x, b.y, b.z, (d->flags & BF_BRITTLE) ? 20 : 12);
     o->actions++;
-    if (!pl->flying) {
+    if (!mode_creative(pl->mode)) {
         const item_stack *held = inv_held(inv);
         spill_drops(s, ph, id, held->count ? held->id : 0, b);
         o->broke = 1;
@@ -93,7 +94,7 @@ static void use_item(interact *s, world *w, const physics *ph, thermo *th, const
                      vec3 dir, ray_hit hit, interact_out *o)
 {
     const item_stack *held = inv_held(inv);
-    int creative = pl->flying;
+    int creative = mode_creative(pl->mode);
     /* Feeding a fire comes before placing: logs and planks are blocks too. */
     if (th && hit.hit && hit.id == B_CAMPFIRE && held->count && fuel_units(held->id)) {
         if (thermo_add_fuel(th, w, hit.block.x, hit.block.y, hit.block.z, fuel_units(held->id))) {
@@ -180,7 +181,7 @@ static void pick(inventory *inv, const player *pl, uint8_t id)
             inv->slot[i] = t;
             return;
         }
-    if (pl->flying) inv_set_held(inv, want, item_get(want)->stack);
+    if (mode_creative(pl->mode)) inv_set_held(inv, want, item_get(want)->stack);
 }
 
 interact_out interact_frame(interact *s, world *w, physics *ph, thermo *th, const player *pl, inventory *inv,
@@ -207,7 +208,7 @@ interact_out interact_frame(interact *s, world *w, physics *ph, thermo *th, cons
             s->chip_t = 0.0f;
         }
         s->swinging = 1;
-        if (pl->flying) {
+        if (mode_creative(pl->mode)) {
             /* Creative: a click breaks at once; holding keeps going. */
             s->repeat -= in->dt;
             if (in->attack_click || s->repeat <= 0.0f) {

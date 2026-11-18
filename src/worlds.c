@@ -71,7 +71,8 @@ void worlds_folder_name(const char *name, char *out, size_t cap)
     out[n] = '\0';
 }
 
-int worlds_create(const char *root, const char *name, uint32_t seed, char *dir_out, size_t cap)
+int worlds_create(const char *root, const char *name, uint32_t seed, const world_rules *rules, char *dir_out,
+                  size_t cap)
 {
     if (!save_name_valid(name, strlen(name))) {
         log_error("world name '%s' is not allowed", name);
@@ -104,6 +105,8 @@ int worlds_create(const char *root, const char *name, uint32_t seed, char *dir_o
     ok = ok && save_db_set_meta(db, "generator", WORLDGEN_VERSION) == 0;
     ok = ok && save_db_set_meta(db, "created", (int64_t)time(NULL)) == 0;
     ok = ok && save_db_put_blob(db, "name", name, strlen(name)) == 0;
+    world_rules plain = rules_new(MODE_SURVIVAL, 0);
+    ok = ok && rules_save(db, rules ? rules : &plain) == 0;
     ok = ok && save_db_commit(db) == 0;
     save_db_close(db);
     if (!ok) {
