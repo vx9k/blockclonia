@@ -353,7 +353,7 @@ static void test_knockback(void)
     CHECK(fabs(p.vel.x - 5.0) < 1e-9);
     double x0 = p.pos.x;
     run_steps(&t, &p, &idle, 120);
-    CHECK(p.pos.x - x0 > 1.8 && p.pos.x - x0 < 2.4);
+    CHECK(p.pos.x - x0 > 0.95 && p.pos.x - x0 < 1.15); /* braced feet, 1.2 g */
     CHECK(fabs(p.vel.x) < 1e-9);
     tw_free(&t);
 }
