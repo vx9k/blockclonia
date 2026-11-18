@@ -50,13 +50,14 @@ run (a screenshot through `--frames`/`--screenshot` is the cheapest proof).
 
 The compiler enforces most of these: `cmake/warnings.cmake` turns on
 `-Wconversion -Wsign-conversion -Wdouble-promotion -Wshadow -Wvla
--Wframe-larger-than=16384` and more, and CI builds with `-Werror` on
+-Wframe-larger-than=262144` and more, and CI builds with `-Werror` on
 clang 21 (Ubuntu 26.04), clang 22 (Alpine 3.24) and macOS's Apple clang.
 `.clang-tidy` and `cppcheck` run in `tools/lint.sh`.
 
-- **C11, no extensions.** No VLAs. Stack frames stay under 64 KB
-  (threads get `OS_THREAD_STACK`, 4 MB, on every OS), so big buffers go
-  on the heap. Budgets that depend on the machine (threads, caches,
+- **C11, no extensions.** No VLAs. Stack frames stay under 256 KB
+  (threads get `OS_THREAD_STACK`, 8 MB, on every OS, and frames are
+  probed with `-fstack-clash-protection`). Scratch buffers that fit go on
+  the stack; bigger or long-lived ones go on the heap. Budgets that depend on the machine (threads, caches,
   default view distance) come from `sys_plan`, not fixed numbers. Casts are explicit wherever a conversion narrows
   or changes sign.
 - **Initialise every local**: scalars and pointers to `0`, `0.0f` or

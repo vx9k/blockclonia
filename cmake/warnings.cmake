@@ -21,7 +21,7 @@ set(MC_WARNINGS
   -Wundef
   -Wvla
   -Wimplicit-fallthrough
-  -Wframe-larger-than=65536        # threads get OS_THREAD_STACK (4 MB); keep bigger buffers on the heap
+  -Wframe-larger-than=262144       # 256 KB: about 30 such frames fit OS_THREAD_STACK (8 MB)
   -Wcomma
   -Wunreachable-code-aggressive
   -Wmissing-noreturn
@@ -37,7 +37,15 @@ endif()
 # about the real ones (clang 18 puts the test runner's main at 117 KB);
 # every other build still holds the limit.
 if(MC_SANITIZE)
-  list(REMOVE_ITEM MC_WARNINGS -Wframe-larger-than=65536)
+  list(REMOVE_ITEM MC_WARNINGS -Wframe-larger-than=262144)
+endif()
+
+# A frame bigger than a page could step over the guard page below the
+# stack into another mapping; probing touches each page as the frame
+# grows, so an overflow faults instead. Not every target has it.
+check_c_compiler_flag(-fstack-clash-protection MC_HAS_STACK_CLASH)
+if(MC_HAS_STACK_CLASH)
+  list(APPEND MC_WARNINGS -fstack-clash-protection)
 endif()
 
 if(MC_WERROR)

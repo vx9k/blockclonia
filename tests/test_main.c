@@ -2056,10 +2056,31 @@ static void test_menu(void)
     mem_free(mem);
 }
 
+/* A worker thread holds a frame near the -Wframe-larger-than limit: the
+ * stack os_thread_start gives is not the platform's default (musl's is
+ * 128 KB, macOS's 512 KB). */
+static void big_frame(void *arg)
+{
+    volatile unsigned char buf[192 * 1024] = {0};
+    for (size_t i = 0; i < sizeof buf; i += 4096) buf[i] = (unsigned char)i;
+    *(int *)arg = buf[sizeof buf - 4096] == (unsigned char)(sizeof buf - 4096);
+}
+
+static void test_thread_stack(void)
+{
+    CHECK(OS_THREAD_STACK >= 8u * 1024u * 1024u);
+    int ok = 0;
+    os_thread t = {0};
+    CHECK(os_thread_start(&t, big_frame, &ok) == 0);
+    os_thread_join(t);
+    CHECK(ok == 1);
+}
+
 int main(void)
 {
     mem_init(64);
     mesher_init();
+    test_thread_stack();
     test_gpupool();
     test_save_roundtrip();
     test_save_heights();
