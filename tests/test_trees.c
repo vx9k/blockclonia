@@ -3,6 +3,8 @@
  * trunks, vines, moss), placing a tree across columns, and the faces the
  * mesher gives a log. */
 #include "block.h"
+#include "inventory.h"
+#include "item.h"
 #include "mem.h"
 #include "mesher.h"
 #include "physics.h"
@@ -561,6 +563,155 @@ static void test_tree_place_into(void)
     mem_free(t);
 }
 
+/* The widest reach of a row's leaves from the trunk, or -1 for none. */
+static int row_reach(const tree_shape *t, int y)
+{
+    int r = -1;
+    for (int z = -TREE_REACH; z <= TREE_REACH; z++)
+        for (int x = -TREE_REACH; x <= TREE_REACH; x++) {
+            if (!block_leaves(t->id[tree_cell(x, y, z)])) continue;
+            int a = abs(x) > abs(z) ? abs(x) : abs(z);
+            r = a > r ? a : r;
+        }
+    return r;
+}
+
+/* Conifers grow their crowns in tiers: going up, the leaves narrow and
+ * then spread again at the next whorl, rather than shrinking smoothly to
+ * the point. The palm's single crown never does. */
+static void test_tree_tiers(void)
+{
+    tree_shape *t = mem_alloc(sizeof *t);
+    long rises[TREE_KINDS] = {0};
+    for (int k = 0; k < TREE_KINDS; k++)
+        for (int s = 0; s < SAMPLES; s++) {
+            tree_grow(t, k, AGE_GROWN, sample_hash(s), 0);
+            for (int y = 0, prev = -1; y < TREE_UP; y++) {
+                int r = row_reach(t, y);
+                if (r < 0) continue;
+                rises[k] += prev >= 0 && r > prev;
+                prev = r;
+            }
+        }
+    CHECK(rises[TREE_SPRUCE] >= SAMPLES && rises[TREE_REDWOOD] >= SAMPLES);
+    CHECK(rises[TREE_PALM] == 0);
+    /* An old redwood stacks more tiers than a grown one. */
+    long old = 0;
+    for (int s = 0; s < SAMPLES; s++) {
+        tree_grow(t, TREE_REDWOOD, AGE_OLD, sample_hash(s), 0);
+        for (int y = 0, prev = -1; y < TREE_UP; y++) {
+            int r = row_reach(t, y);
+            if (r < 0) continue;
+            old += prev >= 0 && r > prev;
+            prev = r;
+        }
+    }
+    CHECK(old >= rises[TREE_REDWOOD]);
+    mem_free(t);
+}
+
+/* 1 if (x, y, z) is in the tree's box and holds leaves. */
+static int leaves_at(const tree_shape *t, int x, int y, int z)
+{
+    if (abs(x) > TREE_REACH || abs(z) > TREE_REACH || y < -TREE_DOWN || y >= TREE_UP) return 0;
+    return block_leaves(t->id[tree_cell(x, y, z)]);
+}
+
+static int log_at(const tree_shape *t, int x, int y, int z)
+{
+    if (abs(x) > TREE_REACH || abs(z) > TREE_REACH || y < -TREE_DOWN || y >= TREE_UP) return 0;
+    return block_log(t->id[tree_cell(x, y, z)]);
+}
+
+/* Limbs grow out from the trunk and carry leaves: wood two or more blocks
+ * from the trunk's axis is common in the spreading kinds, none in a
+ * birch, and nearly every limb's tip, the last log going outwards, has
+ * leaves within two blocks of it. */
+static void test_tree_limbs(void)
+{
+    tree_shape *t = mem_alloc(sizeof *t);
+    long limbs[TREE_KINDS] = {0}, tips = 0, bare = 0;
+    for (int k = 0; k < TREE_KINDS; k++)
+        for (int s = 0; s < SAMPLES; s++) {
+            tree_grow(t, k, AGE_GROWN, sample_hash(s), 0);
+            for (int y = 1; y < TREE_UP; y++)
+                for (int z = -TREE_REACH; z <= TREE_REACH; z++)
+                    for (int x = -TREE_REACH; x <= TREE_REACH; x++) {
+                        if (!log_at(t, x, y, z) || (abs(x) < 2 && abs(z) < 2)) continue;
+                        limbs[k]++;
+                        int sx = x > 0 ? 1 : x < 0 ? -1 : 0, sz = z > 0 ? 1 : z < 0 ? -1 : 0, on = 0, near = 0;
+                        for (int dy = -1; dy <= 1; dy++)
+                            on |= log_at(t, x + sx, y + dy, z + sz) || log_at(t, x + sx, y + dy, z) ||
+                                  log_at(t, x, y + dy, z + sz);
+                        if (on) continue;
+                        for (int dz = -2; dz <= 2; dz++)
+                            for (int dy = -2; dy <= 2; dy++)
+                                for (int dx = -2; dx <= 2; dx++) near |= leaves_at(t, x + dx, y + dy, z + dz);
+                        tips++;
+                        bare += !near;
+                    }
+        }
+    static const int SPREADING[] = {TREE_OAK, TREE_WILLOW, TREE_MAPLE, TREE_CHERRY, TREE_BAOBAB, TREE_UMBRELLA};
+    for (size_t i = 0; i < sizeof SPREADING / sizeof SPREADING[0]; i++) CHECK(limbs[SPREADING[i]] >= 4 * SAMPLES);
+    CHECK(limbs[TREE_BIRCH] == 0);
+    CHECK(tips > 10 * SAMPLES && bare * 20 <= tips);
+    mem_free(t);
+}
+
+/* What a felled tree is good for, every kind alike: a log splits into four
+ * planks anywhere and chars over a fire, comes away whole, and an axe
+ * takes it down faster than a hand. Leaves tear into fibre about half the
+ * time, and only an oak's give apples. */
+static int find_recipe(item_id out, item_id in, int station)
+{
+    int found = -1;
+    for (int r = 0; r < g_recipe_count; r++) {
+        const recipe *rc = &g_recipes[r];
+        if (rc->out.id == out && rc->in[0].id == in && rc->in[1].id == 0 && rc->station == station)
+            found = found < 0 ? r : -2;
+    }
+    return found;
+}
+
+static void test_tree_wood(void)
+{
+    for (int k = 0; k < TREE_KINDS; k++) {
+        uint8_t log = g_tree_log[k], leaf = g_tree_leaves[k];
+        int planks = find_recipe(B_PLANKS, log, 0), charcoal = find_recipe(I_CHARCOAL, log, STATION_FIRE);
+        CHECK(planks >= 0 && charcoal >= 0);
+        if (planks < 0 || charcoal < 0) continue;
+        CHECK(g_recipes[planks].out.count == 4 && g_recipes[planks].in[0].count == 1);
+        inventory inv = {0};
+        inv_init(&inv);
+        inv_add(&inv, log, 2);
+        CHECK(!inv_can_craft(&inv, charcoal, 0) && inv_can_craft(&inv, charcoal, STATION_FIRE));
+        CHECK(inv_craft(&inv, planks, 0) && inv_count(&inv, B_PLANKS) == 4 && inv_count(&inv, log) == 1);
+        CHECK(inv_craft(&inv, charcoal, STATION_FIRE) && inv_count(&inv, log) == 0 && inv_count(&inv, I_CHARCOAL) > 0);
+
+        uint32_t rng = 99u + (uint32_t)k;
+        item_stack out[3] = {{0}};
+        CHECK(item_drops(log, &rng, out) == 1 && out[0].id == log && out[0].count == 1);
+        CHECK(block_tool(log) == TOOL_AXE && item_harvests(0, log));
+        CHECK(item_dig_speed(item_tool_id(TOOL_AXE, 0), log) > item_dig_speed(0, log));
+
+        int fibre = 0, apples = 0, other = 0;
+        for (int i = 0; i < 600; i++) {
+            int n = item_drops(leaf, &rng, out);
+            for (int j = 0; j < n; j++) {
+                fibre += out[j].id == I_FIBRE;
+                apples += out[j].id == I_APPLE;
+                other += out[j].id != I_FIBRE && out[j].id != I_APPLE;
+            }
+        }
+        CHECK(fibre > 220 && fibre < 380 && other == 0);
+        CHECK((apples > 0) == (k == TREE_OAK));
+    }
+    /* Vines are all strand. */
+    uint32_t rng = 5;
+    item_stack out[3] = {{0}};
+    for (int i = 0; i < 20; i++) CHECK(item_drops(B_VINES, &rng, out) == 1 && out[0].id == I_FIBRE);
+}
+
 void test_trees_all(void)
 {
     test_tree_shapes();
@@ -574,4 +725,7 @@ void test_trees_all(void)
     test_tree_fall();
     test_tree_corner();
     test_tree_place_into();
+    test_tree_tiers();
+    test_tree_limbs();
+    test_tree_wood();
 }
