@@ -243,7 +243,7 @@ if(MC_BUILD_GAME)
   mc_compile_shaders(blockclonia
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders
     SOURCES block.vert block.frag entity.vert entity.frag line.vert line.frag ui.vert ui.frag post.vert post.frag star.vert
-            star.frag bloom.frag block_shadow.vert block_shadow.frag shadow.vert)
+            star.frag sky.vert sky.frag bloom.frag block_shadow.vert block_shadow.frag shadow.vert)
 
   # PGO compiles the game from a profile; BOLT then lays out the result.
   include(Pgo)

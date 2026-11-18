@@ -98,6 +98,12 @@ static const uint32_t SPV_STAR_VERT[] =
 static const uint32_t SPV_STAR_FRAG[] =
 #include "star.frag.inc"
     ;
+static const uint32_t SPV_SKY_VERT[] =
+#include "sky.vert.inc"
+    ;
+static const uint32_t SPV_SKY_FRAG[] =
+#include "sky.frag.inc"
+    ;
 static const uint32_t SPV_BLOCK_SHADOW_VERT[] =
 #include "block_shadow.vert.inc"
     ;
@@ -313,6 +319,7 @@ struct renderer {
     VkPipelineLayout layout;
     VkPipeline p_opaque, p_trans, p_entity, p_entity_trans, p_line_world, p_line_screen;
     VkPipeline p_star; /* stars and the moon (sky.h), added where the sky shows */
+    VkPipeline p_sky;  /* the sky's gradient and the sun's glow, where the sky shows */
     gbuf stars;        /* SKY_STARS sky_star instances, device local */
     /* Overlay: its own layout (a 2D font atlas, 2D push constants). */
     VkDescriptorSetLayout ui_dsl;
@@ -1991,6 +1998,20 @@ static void create_pipelines(renderer *r)
     r->p_star = make_pipeline(r, &sd);
     vkDestroyShaderModule(r->dev, svs, r->ac);
     vkDestroyShaderModule(r->dev, sfs, r->ac);
+    /* The sky: one triangle over the screen, the same depth test, opaque. */
+    VkShaderModule kvs = make_module(r, SPV_SKY_VERT, sizeof SPV_SKY_VERT);
+    VkShaderModule kfs = make_module(r, SPV_SKY_FRAG, sizeof SPV_SKY_FRAG);
+    pipe_desc kd = sd;
+    kd.vs = kvs;
+    kd.fs = kfs;
+    kd.bindings = NULL;
+    kd.binding_count = 0;
+    kd.attrs = NULL;
+    kd.attr_count = 0;
+    kd.blend = 0;
+    r->p_sky = make_pipeline(r, &kd);
+    vkDestroyShaderModule(r->dev, kvs, r->ac);
+    vkDestroyShaderModule(r->dev, kfs, r->ac);
 
     vkDestroyShaderModule(r->dev, bvs, r->ac);
     vkDestroyShaderModule(r->dev, bfs, r->ac);
@@ -2970,6 +2991,7 @@ void renderer_destroy(renderer *r)
     vkDestroyPipeline(r->dev, r->p_entity_glow, r->ac);
     vkDestroyPipeline(r->dev, r->p_line_world, r->ac);
     vkDestroyPipeline(r->dev, r->p_star, r->ac);
+    vkDestroyPipeline(r->dev, r->p_sky, r->ac);
     buffer_destroy(r, &r->stars);
     vkDestroyPipeline(r->dev, r->p_line_screen, r->ac);
     destroy_shadow(r);
@@ -3334,6 +3356,29 @@ static void draw_shadow(renderer *r, terrain_pass *tp, const world *w, const ren
                   VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                   VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
                   VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+}
+
+/* The sky's gradient where the world left it clear: the horizon in the
+ * colour the frame was cleared to, the sun's glow fading in as it rises
+ * and gone once it is well below the horizon. Restores pv and pf; returns
+ * the draws made (none under water, where the clear is the water's). */
+static int draw_sky(const renderer *r, VkCommandBuffer cmd, const render_view *v, const push_vert *pv,
+                    const push_frag *pf, const float clear[4])
+{
+    if (v->underwater) return 0;
+    push_vert kp = *pv;
+    memcpy(kp.origin, v->sun_dir, sizeof v->sun_dir);
+    float rise = fminf(fmaxf((v->sun_dir[1] + 0.12f) / 0.17f, 0.0f), 1.0f);
+    kp.origin[3] = rise * rise * (3.0f - 2.0f * rise);
+    push_frag kf = *pf;
+    memcpy(kf.color, clear, sizeof kf.color);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_sky);
+    vkCmdPushConstants(cmd, r->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof kp, &kp);
+    vkCmdPushConstants(cmd, r->layout, VK_SHADER_STAGE_FRAGMENT_BIT, PUSH_FRAG_OFFSET, sizeof kf, &kf);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdPushConstants(cmd, r->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof *pv, pv);
+    vkCmdPushConstants(cmd, r->layout, VK_SHADER_STAGE_FRAGMENT_BIT, PUSH_FRAG_OFFSET, sizeof *pf, pf);
+    return 1;
 }
 
 /* The sun's shadow map for this frame, before the scene, timed for Auto.
@@ -3791,6 +3836,9 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         }
     }
 
+    /* The sky's gradient under the stars and before water, which blends
+     * over it. */
+    st.draw_calls += draw_sky(r, cmd, v, &pv, &pf, clears[0].color.float32);
     /* Stars and the moon, added where the sky was left clear: before
      * water, which blends over them. */
     if (v->stars > 0.0f && !v->underwater) {

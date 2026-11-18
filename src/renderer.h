@@ -60,6 +60,7 @@ typedef struct {
     float sky[3];        /* sky and fog colour; all zero: the default day sky */
     float fog[3];        /* the fog's own colour when it differs from the sky's (lightfx_fog); all zero: the sky's */
     lightfx_frame lfx;   /* sky colour, sun, held light and floor for the block shaders; all zero: daylight alone */
+    float sun_dir[3]; /* toward the sun, a unit vector (thermo_sun): the sky's glow; zero: none */
     float stars;         /* how much of the night sky shows, 0..1 (sky_visibility); 0 draws no stars or moon */
     quat star_rot;       /* the star field's orientation (sky_rotation) */
     sky_star moon;       /* sky_moon */

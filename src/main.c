@@ -2234,6 +2234,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     thermo_sky(g->th, v.sky);
     float sun[3] = {0.0f, 1.0f, 0.0f};
     thermo_sun(g->th, sun);
+    memcpy(v.sun_dir, sun, sizeof v.sun_dir);
     const item_stack *carried = &g->inv.slot[g->inv.selected];
     uint32_t held_id = on_title || g->hl.dead || !carried->count ? 0 : carried->id;
     lightfx_build(&v.lfx, sun, thermo_daylight(g->th), held_id, g->st.brightness, now, g->st.flicker);
