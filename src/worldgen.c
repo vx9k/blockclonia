@@ -154,8 +154,7 @@ static OS_THREAD_LOCAL slow_memo g_slow_memo[SLOW_MEMO];
 static slow slow_node(uint32_t seed, int x, int z)
 {
     slow_memo *m = &g_slow_memo[hash2i(seed, x, z) & (SLOW_MEMO - 1)];
-    if (!m->used || m->seed != seed || m->x != x || m->z != z)
-        *m = (slow_memo){seed, x, z, 1, slow_at(seed, x, z)};
+    if (!m->used || m->seed != seed || m->x != x || m->z != z) *m = (slow_memo){seed, x, z, 1, slow_at(seed, x, z)};
     return m->s;
 }
 
