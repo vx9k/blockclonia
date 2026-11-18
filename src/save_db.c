@@ -251,7 +251,8 @@ typedef int (*upgrade_fn)(sqlite3 *h, int from);
 static const upgrade_fn UPGRADE[FORMAT] = {[1] = rebuild_tables, [2] = split_players};
 
 /* Copies the open database into a new file at path (one that is not there
- * yet: never over anything, and never through a symlink). */
+ * yet: never over anything, and never through a symlink). The copy uses a
+ * rollback journal, so it can be read without -wal and -shm files. */
 static int backup_to(sqlite3 *h, const char *path)
 {
     if (os_path_kind(path) != OS_MISSING) return -1;
@@ -262,7 +263,7 @@ static int backup_to(sqlite3 *h, const char *path)
         rc = sqlite3_backup_step(b, -1);
         sqlite3_backup_finish(b);
     }
-    int ok = b && rc == SQLITE_DONE;
+    int ok = b && rc == SQLITE_DONE && exec(d, "PRAGMA journal_mode = DELETE") == 0;
     sqlite3_close(d);
     if (!ok) remove(path);
     return ok ? 0 : -1;
@@ -335,6 +336,43 @@ static int check_or_create(sqlite3 *h, const char *path)
     else if (!ours) log_error("%s has tables this build did not write; refusing it", path);
     if (app != APP_ID || version < 1 || version > FORMAT || !ours) return -1;
     return version < FORMAT ? upgrade(h, path, (int)version) : 0;
+}
+
+int save_db_copy(save_db *db, const char *path)
+{
+    int r = backup_to(db->h, path);
+    if (r != 0) log_error("could not copy the world to %s", path);
+    return r;
+}
+
+static int intact(sqlite3 *h, const char *path); /* below, with the other checks opening does */
+
+int save_db_restore(save_db *db, const char *path)
+{
+    /* The copy is as untrusted as any world: the same checks as opening
+     * one, read-only, and a format this build reads. */
+    sqlite3 *src = NULL;
+    sqlite3_int64 app = 0, version = 0;
+    int empty = 0;
+    int ok = os_path_kind(path) == OS_FILE &&
+             sqlite3_open_v2(path, &src, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOFOLLOW, NULL) == SQLITE_OK &&
+             harden(src) == 0 && exec(src, "PRAGMA locking_mode = NORMAL") == 0 && intact(src, path) == 0 &&
+             pragma_int(src, "PRAGMA application_id", &app) == 0 &&
+             pragma_int(src, "PRAGMA user_version", &version) == 0 && app == APP_ID && version >= 1 &&
+             version <= FORMAT && schema_is_ours(src, &SCHEMA[version], &empty) == 1;
+    if (!ok) {
+        log_error("%s is not a world this build reads; not restoring it", path);
+        sqlite3_close(src);
+        return -1;
+    }
+    /* Page by page into the open world, in one write: it lands whole or
+     * not at all. An older format is upgraded the next time it opens. */
+    sqlite3_backup *b = sqlite3_backup_init(db->h, "main", src, "main");
+    int rc = b ? sqlite3_backup_step(b, -1) : SQLITE_ERROR;
+    if (b) sqlite3_backup_finish(b);
+    if (rc != SQLITE_DONE) log_error("restoring %s failed: %s", path, sqlite3_errmsg(db->h));
+    sqlite3_close(src);
+    return rc == SQLITE_DONE ? 0 : -1;
 }
 
 /* A quick structural check of every page (no index cross-checks): a

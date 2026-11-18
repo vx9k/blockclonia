@@ -514,53 +514,66 @@ static int text_field(ctx *c, float x, float y, float w, const char *label, char
     return c->activate == i;
 }
 
+/* A scrolling list of up to WORLD_ROWS two-line rows from y, with *sel
+ * and *scroll kept in range. Returns the row picked (a second click on
+ * the selected row, or Enter), whether or not it is playable; -1 if none. */
+static int list_rows(ctx *c, float x, float y, float w, const menu_world *rows, int n, int *sel, int *scroll)
+{
+    ui *u = c->u;
+    menu *m = c->m;
+    int picked = -1;
+    if (*sel >= n) *sel = n - 1;
+    if (*sel < 0) *sel = 0;
+    /* Keep the selection in view; the keyboard moves it past the edges. */
+    if (*sel < *scroll) *scroll = *sel;
+    if (*sel >= *scroll + WORLD_ROWS) *scroll = *sel - WORLD_ROWS + 1;
+    int shown = n - *scroll < WORLD_ROWS ? n - *scroll : WORLD_ROWS;
+    for (int r = 0; r < shown; r++) {
+        int k = *scroll + r;
+        const menu_world *wd = &rows[k];
+        float ry = y + (float)r * 22;
+        int hot = 0;
+        int i = item(c, x, ry, w, 20, &hot);
+        float dx = 0.0f, a = entry(c, i, &dx);
+        int is_sel = k == *sel;
+        float hv = fmaxf(hover_of(c, i), is_sel ? 0.6f : 0.0f);
+        cell(u, x + dx, ry, w, 20, hv, a);
+        uint32_t col = wd->playable ? pal_mix(C_TEXT, C_HEAD, hv) : C_DIM;
+        ui_text(u, x + 8 + dx, ry + 3, 1, ui_alpha(col, a), wd->name);
+        ui_text(u, x + 8 + dx, ry + 11, 1, ui_alpha(C_DIM, a), wd->detail);
+        if (m->focus == i) *sel = k;
+        if (hot && c->in->click) {
+            if (is_sel) picked = k;
+            *sel = k;
+        }
+        if (c->activate == i) picked = k;
+    }
+    /* Arrowing off the first or last shown row scrolls the list instead
+     * of leaving it; the focus stays on the edge row. */
+    if (c->in->down && c->focus0 == shown - 1 && *sel + 1 < n) {
+        (*sel)++;
+        m->focus = shown - 1;
+    } else if (c->in->up && c->focus0 == 0 && *scroll > 0) {
+        (*sel)--;
+        m->focus = 0;
+    }
+    return picked;
+}
+
 static void worlds_screen(ctx *c)
 {
     ui *u = c->u;
     menu *m = c->m;
     backdrop(c);
     float x = 0.0f, y = 0.0f;
-    const float w = 340, h = 244;
+    const float w = 360, h = 244;
     panel(u, m->age, w, h, &x, &y, m->host_pick ? "HOST A WORLD" : "WORLDS");
     int n = m->world_count;
-    if (m->world_sel >= n) m->world_sel = n - 1;
-    if (m->world_sel < 0) m->world_sel = 0;
-    /* Keep the selection in view; the keyboard moves it past the edges. */
-    if (m->world_sel < m->world_scroll) m->world_scroll = m->world_sel;
-    if (m->world_sel >= m->world_scroll + WORLD_ROWS) m->world_scroll = m->world_sel - WORLD_ROWS + 1;
-    int shown = n - m->world_scroll < WORLD_ROWS ? n - m->world_scroll : WORLD_ROWS;
     if (n == 0) ui_text(u, x + 8, y + 28, 1, C_DIM, "No worlds yet. Create one to start.");
-    for (int r = 0; r < shown; r++) {
-        int k = m->world_scroll + r;
-        const menu_world *wd = &m->worlds[k];
-        float ry = y + 22 + (float)r * 22;
-        int hot = 0;
-        int i = item(c, x + 8, ry, w - 16, 20, &hot);
-        float dx = 0.0f, a = entry(c, i, &dx);
-        int sel = k == m->world_sel;
-        float hv = fmaxf(hover_of(c, i), sel ? 0.6f : 0.0f);
-        cell(u, x + 8 + dx, ry, w - 16, 20, hv, a);
-        uint32_t col = wd->playable ? pal_mix(C_TEXT, C_HEAD, hv) : C_DIM;
-        ui_text(u, x + 16 + dx, ry + 3, 1, ui_alpha(col, a), wd->name);
-        ui_text(u, x + 16 + dx, ry + 11, 1, ui_alpha(C_DIM, a), wd->detail);
-        if (m->focus == i) m->world_sel = k;
-        if (hot && c->in->click) {
-            /* A second click on the selected row plays it. */
-            if (sel && wd->playable) c->action = MENU_WORLD_PLAY;
-            m->world_sel = k;
-        }
-        if (c->activate == i && wd->playable) c->action = MENU_WORLD_PLAY;
-    }
-    /* Arrowing off the first or last shown row scrolls the list instead
-     * of leaving it; the focus stays on the edge row. */
-    if (c->in->down && c->focus0 == shown - 1 && m->world_sel + 1 < n) {
-        m->world_sel++;
-        m->focus = shown - 1;
-    } else if (c->in->up && c->focus0 == 0 && m->world_scroll > 0) {
-        m->world_sel--;
-        m->focus = 0;
-    }
-    float by = y + h - 8 - ROW_H, bw = (w - 16 - 4 * 4) / 5;
+    /* A second click on the selected row plays it. */
+    int picked = list_rows(c, x + 8, y + 22, w - 16, m->worlds, n, &m->world_sel, &m->world_scroll);
+    if (picked >= 0 && m->worlds[picked].playable) c->action = MENU_WORLD_PLAY;
+    float by = y + h - 8 - ROW_H, bw = (w - 16 - 5 * 4) / 6;
     int have = n > 0 && m->world_sel < n;
     if (button(c, x + 8, by, bw, "Play") && have && m->worlds[m->world_sel].playable) c->action = MENU_WORLD_PLAY;
     if (button(c, x + 8 + (bw + 4), by, bw, "Create")) {
@@ -571,9 +584,36 @@ static void worlds_screen(ctx *c)
         snprintf(m->text_name, sizeof m->text_name, "%s", m->worlds[m->world_sel].name);
         menu_open(m, SCREEN_RENAME_WORLD);
     }
-    if (button(c, x + 8 + 3 * (bw + 4), by, bw, "Delete") && have) menu_open(m, SCREEN_DELETE_WORLD);
-    if (button(c, x + 8 + 4 * (bw + 4), by, bw, "Back")) menu_open(m, m->host_pick ? SCREEN_MULTIPLAYER : SCREEN_TITLE);
+    if (button(c, x + 8 + 3 * (bw + 4), by, bw, "Backups") && have) {
+        m->backup_sel = m->backup_scroll = 0;
+        menu_open(m, SCREEN_BACKUPS);
+        c->action = MENU_WORLD_BACKUPS;
+    }
+    if (button(c, x + 8 + 4 * (bw + 4), by, bw, "Delete") && have) menu_open(m, SCREEN_DELETE_WORLD);
+    if (button(c, x + 8 + 5 * (bw + 4), by, bw, "Back")) menu_open(m, m->host_pick ? SCREEN_MULTIPLAYER : SCREEN_TITLE);
     if (m->note[0]) ui_text(u, x + 8, by - 12, 1, C_ART, m->note);
+}
+
+static void backups_screen(ctx *c)
+{
+    ui *u = c->u;
+    menu *m = c->m;
+    backdrop(c);
+    float x = 0.0f, y = 0.0f;
+    const float w = 360, h = 244;
+    panel(u, m->age, w, h, &x, &y, "BACKUPS");
+    const char *name = m->world_sel < m->world_count ? m->worlds[m->world_sel].name : "";
+    ui_text(u, x + 8, y + 22, 1, C_DIM, name);
+    int n = m->backup_count;
+    if (n == 0)
+        ui_text_wrap(u, x + 8, y + 40, w - 16, 2, 1, C_DIM,
+                     "No backups yet. One is kept each time the world is played.");
+    int picked = list_rows(c, x + 8, y + 34, w - 16, m->backups, n, &m->backup_sel, &m->backup_scroll);
+    float by = y + h - 8 - ROW_H, bw = (w - 16 - 4) / 2;
+    ui_text(u, x + 8, by - 24, 1, C_DIM, "Restoring first backs up the world as it is now.");
+    if (m->note[0]) ui_text(u, x + 8, by - 12, 1, C_ART, m->note);
+    if ((button(c, x + 8, by, bw, "Restore") || picked >= 0) && n > 0) c->action = MENU_WORLD_RESTORE;
+    if (button(c, x + 8 + bw + 4, by, bw, "Back")) menu_open(m, SCREEN_WORLDS);
 }
 
 static void multiplayer_screen(ctx *c)
@@ -703,6 +743,7 @@ menu_action menu_frame(menu *m, ui *u, const menu_input *in, settings *s)
     case SCREEN_WORLDS: worlds_screen(&c); break;
     case SCREEN_CREATE_WORLD: create_world_screen(&c); break;
     case SCREEN_RENAME_WORLD: rename_world_screen(&c); break;
+    case SCREEN_BACKUPS: backups_screen(&c); break;
     case SCREEN_DELETE_WORLD: delete_world_screen(&c); break;
     case SCREEN_MULTIPLAYER: multiplayer_screen(&c); break;
     default: break;

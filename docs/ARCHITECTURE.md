@@ -176,6 +176,13 @@ limiter.
   identity key) and made `meta` hold typed values, the world's name among
   them. Opening also runs `quick_check`, and
   closing hands back freed pages through incremental vacuum.
+- `backups.c` keeps rolling copies in `<world>/backups`: one each time a
+  world is opened to play (at most one per ten minutes), pruned to the
+  three newest plus the newest of each of the last seven days. The copies
+  are written with SQLite's backup API in rollback-journal mode, so each
+  is a plain file. Restoring one checks it like any world, copies the
+  world as it is first, then writes the copy over the open world page by
+  page in one write.
 - SQLite's exclusive locking mode keeps a world open in only one game at
   a time; a second instance pointed at the same folder disables saving
   instead of sharing the database.

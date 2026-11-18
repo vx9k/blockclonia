@@ -37,6 +37,14 @@ save_db *save_db_open(const char *dir);
 void save_db_set_cache_kb(int kb);
 void save_db_close(save_db *db);
 
+/* copy writes the open world to a new file at path (never over an
+ * existing one or through a symlink); restore replaces the open world
+ * with the world in the file at path, which is checked like any world
+ * first. 0, or -1 (logged) with the world unchanged. backups.c uses
+ * them. */
+int save_db_copy(save_db *db, const char *path);
+int save_db_restore(save_db *db, const char *path);
+
 /* A batch of saves in one transaction, so it costs one commit and lands
  * whole or not at all. Not nested. commit returns -1 if it failed, and
  * then nothing written since begin is kept; rollback drops it on purpose. */

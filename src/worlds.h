@@ -7,7 +7,8 @@
  * Folder contents and typed names are untrusted: names are checked
  * (save_name_valid), folder names are made from a safe alphabet, listing
  * only peeks read-only (save_db_peek), and deleting removes the files a
- * world has by name, without following links, and keeps anything else.
+ * world has by name (its backups folder too), without following links,
+ * and keeps anything else.
  * It does not open worlds for play; main.c does, through save_db. */
 #ifndef MC_WORLDS_H
 #define MC_WORLDS_H
