@@ -592,6 +592,32 @@ static void test_lava_ignites(void)
     tw_free(&tw);
 }
 
+/* Plants burn as leaves do: on lava each one catches in the leaves' time
+ * and burns down to ash; one a metre off is untouched. */
+static void test_plants_burn(void)
+{
+    test_world tw = {0};
+    tw_init(&tw);
+    thermo *th = thermo_create(8);
+    hooks h = {0};
+    attach(&tw, &h, th);
+    world *w = &tw.w;
+    dvec3 eye = dv3(0.5, GROUND + 1.6, 6.5);
+    lava_pool(w);
+    world_set(w, 0, GROUND + 1, 0, B_TALL_GRASS, 0);
+    world_set(w, 1, GROUND + 1, 1, B_BUSH, 0);
+    world_set(w, 0, GROUND + 1, 3, B_POPPY, 0); /* a metre off */
+    advance(th, w, 0.5, 1.0 / 60.0, eye);      /* 36 s: too soon */
+    CHECK(world_get(w, 0, GROUND + 1, 0) == B_TALL_GRASS && world_get(w, 1, GROUND + 1, 1) == B_BUSH);
+    advance(th, w, 2.0, 1.0 / 60.0, eye);      /* 180 s, as for leaves */
+    CHECK(world_get(w, 0, GROUND + 1, 0) == B_CAMPFIRE && world_get(w, 1, GROUND + 1, 1) == B_CAMPFIRE);
+    CHECK(world_get(w, 0, GROUND + 1, 3) == B_POPPY);
+    CHECK(thermo_fire_count(th) == 2);
+    detach(&tw);
+    thermo_destroy(th);
+    tw_free(&tw);
+}
+
 /* A body in lava is immersed at its temperature, in water at the water's;
  * a body over lava feels its heat. */
 static void test_lava_body(void)
@@ -701,6 +727,7 @@ void test_thermo_all(void)
     test_lava_heat();
     test_lava_glow();
     test_lava_ignites();
+    test_plants_burn();
     test_lava_body();
     test_lava_lake();
     test_liquid_view();
