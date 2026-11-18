@@ -3,6 +3,7 @@
 #include "atmos.h"
 #include "audio_device.h"
 #include "avatar.h"
+#include "backups.h"
 #include "bench.h"
 #include "camera.h"
 #include "combat.h"
@@ -222,8 +223,9 @@ static void usage(void)
            "  --spawn X,Z       spawn position (default: nearest dry land)\n"
            USAGE_CONFIG
            "  --play            skip the menus and play the default world (or --world)\n"
-           "  --screen NAME     open title, worlds, create, multiplayer, pause, settings,\n"
-           "                    controls or debug-health at start\n"
+           "  --screen NAME     open title, worlds, backups (of the first world listed),\n"
+           "                    create, multiplayer, pause, settings, controls or\n"
+           "                    debug-health at start\n"
            "  --debug           start with the F3 overlay on\n"
            "  --give LIST       start with items, e.g. log:8,sand:4 (names as shown in game)\n"
            "  --mobs LIST       stand creatures 4 m in front of you, e.g. wolf,boar\n"
@@ -315,8 +317,8 @@ static int parse_int_option(options *o, const char *a, const char *v, int *ok)
 
 static int valid_screen(const char *v)
 {
-    static const char *const NAMES[] = {"title", "pause",     "settings", "controls", "debug-health",
-                                        "game",  "inventory", "worlds",   "create",   "multiplayer"};
+    static const char *const NAMES[] = {"title",     "pause",  "settings", "controls",    "debug-health", "game",
+                                        "inventory", "worlds", "create",   "multiplayer", "backups"};
     for (size_t i = 0; i < sizeof NAMES / sizeof NAMES[0]; i++)
         if (strcmp(v, NAMES[i]) == 0) return 1;
     return 0;
@@ -946,6 +948,8 @@ typedef struct {
     GLFWwindow *win;
     world_entry *world_list;  /* WORLDS_MAX, refreshed when the list opens */
     menu_world *world_rows;
+    backup_entry backup_list[BACKUPS_LIST_MAX]; /* the selected world's, for the backups screen */
+    menu_world backup_rows[BACKUPS_LIST_MAX];
     jobs *js;
     renderer *rd;
     int backdrop;             /* the menus' fixed, unsaved world is loaded, not a player's */
@@ -1173,6 +1177,7 @@ static void open_start_screen(game *g)
         else if (!strcmp(o->screen, "controls")) g_in.screen = SCREEN_CONTROLS;
         else if (!strcmp(o->screen, "debug-health")) g_in.screen = SCREEN_DEBUG_HEALTH;
         else if (!strcmp(o->screen, "worlds")) g_in.screen = SCREEN_WORLDS;
+        else if (!strcmp(o->screen, "backups")) g_in.screen = SCREEN_BACKUPS;
         else if (!strcmp(o->screen, "create")) g_in.screen = SCREEN_CREATE_WORLD;
         else if (!strcmp(o->screen, "multiplayer")) g_in.screen = SCREEN_MULTIPLAYER;
         else g_in.screen = SCREEN_NONE;
@@ -1247,6 +1252,8 @@ static uint32_t choose_seed(options *o, save_db **db)
             o->world_dir = NULL;
             return seed;
         }
+        /* The world as it was before this session, should it go wrong. */
+        backups_take(*db, o->world_dir, (int64_t)time(NULL));
         return saved;
     }
     if (got != -1) {
@@ -1661,6 +1668,8 @@ static int starts_in_world(const options *o)
 
 static void refresh_worlds(game *g);
 
+static void refresh_backups(game *g, const world_entry *sel);
+
 static void game_init(game *g)
 {
     g->win = open_window(&g->o);
@@ -1694,6 +1703,7 @@ static void game_init(game *g)
     g_in.debug = g->o.debug;
     open_start_screen(g);
     refresh_worlds(g); /* --screen worlds opens the list without asking for it */
+    if (g->mn.screen == SCREEN_BACKUPS) refresh_backups(g, g->world_count ? &g->world_list[0] : NULL);
     if (g->o.join) start_join(g, g->o.join);
     else if (g->o.host && !g->backdrop) start_host(g);
     snprintf(g->mn.footer, sizeof g->mn.footer, "%s", g->versions);
@@ -2369,6 +2379,24 @@ static void refresh_worlds(game *g)
     g->mn.world_count = g->world_count;
 }
 
+/* Fills the backups screen's rows for the selected world. */
+static void refresh_backups(game *g, const world_entry *sel)
+{
+    int n = sel ? backups_list(sel->dir, g->backup_list, BACKUPS_LIST_MAX) : 0;
+    int64_t now = (int64_t)time(NULL);
+    for (int i = 0; i < n; i++) {
+        menu_world *r = &g->backup_rows[i];
+        time_t t = (time_t)g->backup_list[i].time;
+        struct tm tmv = {0};
+        snprintf(r->name, sizeof r->name, "%s", g->backup_list[i].name);
+        if (localtime_r(&t, &tmv)) strftime(r->name, sizeof r->name, "%Y-%m-%d %H:%M:%S", &tmv);
+        backups_age_text(now - g->backup_list[i].time, r->detail, sizeof r->detail);
+        r->playable = 1;
+    }
+    g->mn.backups = g->backup_rows;
+    g->mn.backup_count = n;
+}
+
 /* Leaves whatever world is loaded and plays the one in dir. */
 static void play_world(game *g, const char *dir)
 {
@@ -2422,6 +2450,22 @@ static void world_action(game *g, menu_action a)
         menu_open(m, SCREEN_WORLDS);
         refresh_worlds(g);
         break;
+    case MENU_WORLD_BACKUPS: refresh_backups(g, sel); break;
+    case MENU_WORLD_RESTORE: {
+        int b = m->backup_sel;
+        if (!sel || b < 0 || b >= m->backup_count) break;
+        char when[32] = {0};
+        snprintf(when, sizeof when, "%s", g->backup_rows[b].name);
+        if (backups_restore(sel->dir, g->backup_list[b].name, (int64_t)time(NULL)) != 0) {
+            refresh_backups(g, sel);
+            snprintf(m->note, sizeof m->note, "Could not restore it (open in another game? see the log).");
+            break;
+        }
+        menu_open(m, SCREEN_WORLDS);
+        refresh_worlds(g);
+        snprintf(m->note, sizeof m->note, "Restored the backup from %s.", when);
+        break;
+    }
     case MENU_WORLD_DELETE:
         if (!sel) break;
         if (worlds_delete(sel->dir) < 0) {
@@ -2521,6 +2565,8 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     case MENU_WORLD_CREATE:
     case MENU_WORLD_RENAME:
     case MENU_WORLD_DELETE:
+    case MENU_WORLD_BACKUPS:
+    case MENU_WORLD_RESTORE:
         if ((act == MENU_WORLD_PLAY || act == MENU_WORLD_CREATE) && g->mn.host_pick && !take_mp_name(g)) {
             menu_open(&g->mn, SCREEN_MULTIPLAYER);
             break;

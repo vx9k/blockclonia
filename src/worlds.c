@@ -1,4 +1,5 @@
 #include "worlds.h"
+#include "backups.h"
 #include "log.h"
 #include "os.h"
 #include "paths.h"
@@ -143,6 +144,29 @@ static int world_file(const char *name)
     return save_column_name(name, &cx, &cz);
 }
 
+/* Removes the backups folder below the world's folder fd: its copies by
+ * name, then the folder if that leaves it empty. 0 if it is gone. */
+static int delete_backups(int fd)
+{
+    int sub = openat(fd, "backups", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    DIR *d = sub >= 0 ? fdopendir(sub) : NULL;
+    if (!d) {
+        if (sub >= 0) close(sub);
+        return -1;
+    }
+    const struct dirent *e = NULL;
+    /* cppcheck-suppress readdirCalled */
+    while ((e = readdir(d)) != NULL) {
+        int64_t t = 0;
+        struct stat st = {0};
+        if (backups_name_time(e->d_name, &t) && fstatat(sub, e->d_name, &st, AT_SYMLINK_NOFOLLOW) == 0 &&
+            !S_ISDIR(st.st_mode))
+            unlinkat(sub, e->d_name, 0);
+    }
+    closedir(d); /* closes sub */
+    return unlinkat(fd, "backups", AT_REMOVEDIR);
+}
+
 int worlds_delete(const char *dir)
 {
     save_peek p = {0};
@@ -172,8 +196,13 @@ int worlds_delete(const char *dir)
     while ((e = readdir(d)) != NULL) {
         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
         struct stat st = {0};
-        int ours = world_file(e->d_name) && fstatat(fd, e->d_name, &st, AT_SYMLINK_NOFOLLOW) == 0 &&
-                   !S_ISDIR(st.st_mode);
+        int got = fstatat(fd, e->d_name, &st, AT_SYMLINK_NOFOLLOW) == 0;
+        if (got && S_ISDIR(st.st_mode) && strcmp(e->d_name, "backups") == 0) {
+            if (delete_backups(fd) == 0) removed++;
+            else kept++;
+            continue;
+        }
+        int ours = world_file(e->d_name) && got && !S_ISDIR(st.st_mode);
         if (ours && unlinkat(fd, e->d_name, 0) == 0) removed++;
         else kept++;
     }

@@ -21,6 +21,7 @@ typedef enum {
     SCREEN_WORLDS,       /* the player's worlds */
     SCREEN_CREATE_WORLD,
     SCREEN_RENAME_WORLD,
+    SCREEN_BACKUPS,      /* a world's backups, to restore one */
     SCREEN_DELETE_WORLD, /* the confirmation */
     SCREEN_MULTIPLAYER   /* join by address, or pick a world to host */
 } screen_id;
@@ -32,6 +33,8 @@ typedef enum {
     MENU_WORLD_CREATE, /* create text_name with the seed in text_seed ("" for a random one) */
     MENU_WORLD_RENAME, /* rename worlds[world_sel] to text_name */
     MENU_WORLD_DELETE, /* delete worlds[world_sel]; the player has confirmed */
+    MENU_WORLD_BACKUPS, /* the backups screen opened: fill backups/backup_count for worlds[world_sel] */
+    MENU_WORLD_RESTORE, /* restore backups[backup_sel] into worlds[world_sel] */
     MENU_RESUME,       /* pause: back to the game */
     MENU_TO_TITLE,     /* pause: save and return to the title screen */
     MENU_QUIT,         /* quit the game */
@@ -97,6 +100,8 @@ typedef struct {
      * what went wrong last. */
     const menu_world *worlds;
     int world_count, world_sel, world_scroll;
+    const menu_world *backups; /* the selected world's, newest first */
+    int backup_count, backup_sel, backup_scroll;
     char text_name[MENU_NAME_MAX + 1];
     char text_seed[MENU_SEED_MAX + 1];
     char note[96];

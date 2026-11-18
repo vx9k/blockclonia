@@ -399,7 +399,15 @@ generator, and folders written by builds from before the database
 played. A world saved in an older database format is upgraded when it
 is opened, after a copy of the original is kept beside it as
 `world.db.format<N>`; a newer format is refused, as is a database that
-fails SQLite's integrity check. Only one running game can hold a world's database open at a
+fails SQLite's integrity check.
+
+Opening a world to play first copies it to `backups/backup-<time>.db` in
+its folder, unless the newest copy is under ten minutes old. The three
+newest copies are kept, plus the newest of each of the last seven days.
+**Backups** in the world list lists them and restores one; the world as
+it is gets copied first, so a restore can be undone. Copies are checked
+like any world before they are restored, and deleting a world deletes
+its backups. Only one running game can hold a world's database open at a
 time: the list shows such a world as open in another game, and pointing a
 second instance at the same directory disables saving for it instead of
 touching the world.
@@ -517,7 +525,7 @@ cmake --preset native && cmake --build --preset native
 blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
             [--threads N] [--pool-mb N] [--gpu N] [--world DIR | --no-save]
             [--config FILE] [--validate] [--no-sound]
-            [--play] [--screen title|worlds|create|multiplayer|pause|settings|controls|debug-health|inventory]
+            [--play] [--screen title|worlds|backups|create|multiplayer|pause|settings|controls|debug-health|inventory]
             [--debug] [--time HH] [--mode NAME] [--give LIST] [--mobs LIST] [--figures LIST] [--hurt LIST]
             [--frames N] [--screenshot F] [--look YAW,PITCH] [--spawn X,Z]
             [--demo] [--health-panel] [--bench] [--mem-stats]

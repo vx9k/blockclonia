@@ -2060,6 +2060,7 @@ int main(void)
     test_paths_all();
     test_save_db_all();
     test_worlds_all();
+    test_backups_all();
     test_hud_all();
     test_discord_all();
     test_netcrypto_all();
