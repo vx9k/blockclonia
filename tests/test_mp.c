@@ -143,11 +143,16 @@ static void check_modes(host_side *h, client_side *c)
     mp_avatar me = {0}, host = {0};
     gamemode_apply(&h->pl, MODE_SPECTATOR);
     mp_set_mode(h->m, MODE_SPECTATOR);
-    for (int i = 0; i < 30; i++) frame(h, c, NULL);
+    /* Until it arrives, not a fixed count: a slow runner can take more
+     * than a few frames over the loopback socket. */
+    for (int i = 0; i < 2000 && !(c->pl.mode == MODE_SPECTATOR && !avatar(c->m, 0, &host)); i++) frame(h, c, NULL);
+    for (int i = 0; i < 30; i++) frame(h, c, NULL); /* and then it stays */
     CHECK(c->pl.mode == MODE_SPECTATOR && c->pl.flying);
     CHECK(!avatar(c->m, 0, &host) && !avatar(h->m, 1, &me));
     gamemode_apply(&h->pl, MODE_SURVIVAL);
     mp_set_mode(h->m, MODE_SURVIVAL);
+    for (int i = 0; i < 2000 && !(c->pl.mode == MODE_SURVIVAL && avatar(c->m, 0, &host) && avatar(h->m, 1, &me)); i++)
+        frame(h, c, NULL);
     for (int i = 0; i < 30; i++) frame(h, c, NULL);
     CHECK(c->pl.mode == MODE_SURVIVAL && !c->pl.flying); /* the client's fly intent is refused */
     CHECK(avatar(c->m, 0, &host) && avatar(h->m, 1, &me));
