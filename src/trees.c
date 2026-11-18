@@ -93,7 +93,7 @@ static void blob(grower *g, pos c, int rx, int ry, int rz, int ragged)
     for (int dy = -ry; dy <= ry; dy++)
         for (int dz = -rz; dz <= rz; dz++)
             for (int dx = -rx; dx <= rx; dx++) {
-                long d = dx * dx * ax * ax + dy * dy * ay * ay + dz * dz * az * az;
+                long d = (long)dx * dx * ax * ax + (long)dy * dy * ay * ay + (long)dz * dz * az * az;
                 if (d > lim + lim / 4) continue;
                 if (d * 20 > lim * 11 && chance(g, ragged)) continue;
                 put(g, c.x + dx, c.y + dy, c.z + dz, g->leaf);
