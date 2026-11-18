@@ -67,9 +67,10 @@ static inline int fluid_drop(const mesh_input *in, int i)
 /* A log's face: end grain where its axis comes out (a limb has none),
  * moss where moss grows, else bark. Upright bark cycles through the windows of a strip
  * four blocks tall, so a trunk shows no seam and no repeat a block apart;
- * where in the cycle a trunk starts varies with (x, z). Sections start on
- * multiples of 16, so the section's own coordinates give the same answer
- * as the world's. */
+ * where in the cycle a trunk starts varies with (x, z), over all four
+ * windows: x * 7 + z * 13 and x ^ z have the same parity, so the xor goes
+ * in shifted a bit. Sections start on multiples of 16, so the section's
+ * own coordinates give the same answer as the world's. */
 static inline int log_face(const mesh_input *in, int pi, int f, uint8_t b)
 {
     int kind = block_tree(b), meta = in->meta[pi], axis = meta & 3, d = f / 2;
@@ -77,7 +78,7 @@ static inline int log_face(const mesh_input *in, int pi, int f, uint8_t b)
     if (meta & LOG_MOSS && (axis == LOG_UP || f == 2)) return tree_tex_mossy(kind);
     if (axis != LOG_UP) return tree_tex_sideways(kind);
     int x = pi % MESH_PAD - 1, z = pi / MESH_PAD % MESH_PAD - 1, y = pi / (MESH_PAD * MESH_PAD) - 1;
-    return tree_tex_bark(kind, (y + x * 7 + z * 13 + (x ^ z)) & (TREE_BARK_WINDOWS - 1));
+    return tree_tex_bark(kind, (y + x * 7 + z * 13 + ((x ^ z) >> 1)) & (TREE_BARK_WINDOWS - 1));
 }
 
 static inline uint32_t face_key(const mesh_input *in, const uint8_t *cls, int pi, int ni, int f, int su, int sv)

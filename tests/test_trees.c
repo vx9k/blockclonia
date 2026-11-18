@@ -712,6 +712,75 @@ static void test_tree_wood(void)
     for (int i = 0; i < 20; i++) CHECK(item_drops(B_VINES, &rng, out) == 1 && out[0].id == I_FIBRE);
 }
 
+/* One log alone at (x, y, z) of a section: the texture layer of each of
+ * its six faces. */
+static void log_faces_at(mesh_input *in, uint32_t *out, uint8_t id, uint8_t meta, int x, int y, int z, int layer[6])
+{
+    memset(in->blocks, B_AIR, sizeof in->blocks);
+    memset(in->meta, 0, sizeof in->meta);
+    in->blocks[mesh_pidx(x, y, z)] = id;
+    in->meta[mesh_pidx(x, y, z)] = meta;
+    mesh_counts mc = {0};
+    CHECK(mesh_section_counts(in, out, &mc) == 6);
+    for (int f = 0; f < 6; f++) layer[f] = (int)(out[4 * f] >> 20 & 0xFFu);
+}
+
+/* 1 if a layer is one of a kind's own log layers. */
+static int own_layer(int k, int layer)
+{
+    if (layer >= tree_tex_bark(k, 0) && layer < tree_tex_bark(k, 0) + TREE_BARK_WINDOWS) return 1;
+    return layer == tree_tex_sideways(k) || layer == tree_tex_mossy(k) || layer == tree_tex_end(k);
+}
+
+/* Every kind's logs, every way they lie, wear only that kind's layers;
+ * trunks in a stand start their bark strips at all four windows, so
+ * neighbours seldom match; and the strip runs on across a section's top
+ * into the next, as sections start on multiples of the strip. */
+static void test_log_faces_all(void)
+{
+    mesh_input *in = mem_alloc(sizeof *in);
+    uint32_t *out = mem_alloc(sizeof(uint32_t) * MESH_OUT_VERTS);
+    int l[6] = {0}, foreign = 0, ends = 0;
+    for (int k = 0; k < TREE_KINDS; k++)
+        for (int m = 0; m < 8; m++) {
+            log_faces_at(in, out, g_tree_log[k], (uint8_t)m, 4, 6, 9, l);
+            for (int f = 0; f < 6; f++) {
+                foreign += !own_layer(k, l[f]);
+                ends += l[f] == tree_tex_end(k);
+            }
+            /* Two end faces on a log along an axis, none on a limb. */
+            CHECK(ends == ((m & 3) == LOG_BRANCH ? 0 : 2));
+            ends = 0;
+        }
+    CHECK(foreign == 0);
+
+    int start[TREE_BARK_WINDOWS] = {0}, same = 0, pairs = 0;
+    for (int z = 0; z < CHUNK_W; z++)
+        for (int x = 0; x < CHUNK_W; x++) {
+            log_faces_at(in, out, B_LOG, LOG_UP, x, 0, z, l);
+            int w = l[0] - tree_tex_bark(TREE_OAK, 0);
+            CHECK(w >= 0 && w < TREE_BARK_WINDOWS);
+            if (w < 0 || w >= TREE_BARK_WINDOWS) continue;
+            start[w]++;
+            if (x > 0) {
+                int was = l[0];
+                log_faces_at(in, out, B_LOG, LOG_UP, x - 1, 0, z, l);
+                same += l[0] == was;
+                pairs++;
+            }
+        }
+    for (int w = 0; w < TREE_BARK_WINDOWS; w++) CHECK(start[w] >= CHUNK_W * CHUNK_W / 8);
+    CHECK(same * 2 < pairs);
+
+    log_faces_at(in, out, B_LOG, LOG_UP, 3, CHUNK_W - 1, 3, l);
+    int top = l[0] - tree_tex_bark(TREE_OAK, 0);
+    log_faces_at(in, out, B_LOG, LOG_UP, 3, 0, 3, l);
+    int bottom = l[0] - tree_tex_bark(TREE_OAK, 0);
+    CHECK((top + 1) % TREE_BARK_WINDOWS == bottom);
+    mem_free(out);
+    mem_free(in);
+}
+
 void test_trees_all(void)
 {
     test_tree_shapes();
@@ -728,4 +797,5 @@ void test_trees_all(void)
     test_tree_tiers();
     test_tree_limbs();
     test_tree_wood();
+    test_log_faces_all();
 }
