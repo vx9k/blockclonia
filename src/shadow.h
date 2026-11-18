@@ -14,6 +14,7 @@
 #ifndef MC_SHADOW_H
 #define MC_SHADOW_H
 
+#include "bloom.h"
 #include "mathlib.h"
 
 #include <stdint.h>
@@ -38,6 +39,13 @@
 /* Auto keeps shadows when drawing the map costs under this: on the Intel
  * N-series iGPU the shaders are tuned on, it doesn't. */
 #define SHADOW_BUDGET_MS 0.5f
+/* Starts Auto over. On an integrated GPU it decides Off without a trial:
+ * there the map costs more than the budget anyway (0.95 ms on the Intel
+ * N-series), and on that driver drawing it even for the trial's 61 frames
+ * leaves every later frame 0.28 ms slower, though nothing is drawn after.
+ * A discrete GPU gets the timed trial. */
+void shadow_auto_reset(bloom_auto *a, int integrated);
+
 /* Columns around the eye whose sections can cast into the map. */
 #define SHADOW_REACH 9 /* 2 SHADOW_RADIUS / 16 + 1 */
 

@@ -127,6 +127,14 @@ static void test_auto(void)
     bloom_auto_reset(&a);
     for (int i = 0; i < BLOOM_WARMUP + BLOOM_SAMPLES; i++) bloom_auto_add(&a, 0.4f);
     CHECK(a.decided && !a.on);
+    /* An integrated GPU skips the trial: Off at once, and nothing it
+     * measures later turns it on; On still overrides it. */
+    shadow_auto_reset(&a, 1);
+    CHECK(a.decided && !a.on && !bloom_active(SHADOW_AUTO, &a, 1) && bloom_active(SHADOW_ON, &a, 1));
+    CHECK(bloom_auto_add_within(&a, 0.1f, SHADOW_BUDGET_MS) == 0 && !a.on);
+    /* A discrete GPU gets the trial, drawing while it measures. */
+    shadow_auto_reset(&a, 0);
+    CHECK(!a.decided && a.count == 0 && bloom_active(SHADOW_AUTO, &a, 1));
 }
 
 /* The casters' reach, in columns, covers the map's radius and the column

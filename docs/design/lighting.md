@@ -111,7 +111,10 @@ shadows, light shafts and the sky's gradient finished the series
   nothing else is shadowed.
 - **Setting:** Off, On or Auto (the default). Auto times the pass with
   GPU timestamps, like bloom, and keeps it while it costs under 0.5 ms
-  a frame. `MC_VK_DISABLE=shadow` turns it off; bare Vulkan 1.2 gets it
+  a frame. On an integrated GPU Auto is Off without a trial: on the Intel
+  N-series the map costs 0.95 ms, and drawing it even for the trial's 61
+  frames left every later frame 0.28 ms slower (driver state; recreating
+  the map didn't clear it). `MC_VK_DISABLE=shadow` turns it off; bare Vulkan 1.2 gets it
   through the render-pass path.
 - **Light shafts:** the terrain shader takes eight taps along the line
   from the eye to the fragment in the shadow map. The lit fraction,

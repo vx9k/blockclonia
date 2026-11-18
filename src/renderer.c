@@ -2729,6 +2729,9 @@ static void create_frames(renderer *r, uint32_t pool_mb)
     VkSemaphoreCreateInfo tsi = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &ti};
     VK_CHECK(vkCreateSemaphore(r->dev, &tsi, r->ac, &r->timeline));
 
+    shadow_auto_reset(&r->shadow_auto, r->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
+    if (r->shadow_mode == SHADOW_AUTO && r->shadow_auto.decided)
+        log_info("sun shadows (auto): off on an integrated GPU");
     r->pool_host_visible = r->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ||
                            r->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
     /* Developer switch: exercise the discrete-GPU staging path anywhere. */
@@ -2876,7 +2879,6 @@ renderer *renderer_create(GLFWwindow *win, const render_opts *o)
     r->bloom_mode = o->bloom;
     bloom_auto_reset(&r->bloom_auto);
     r->shadow_mode = o->shadows;
-    bloom_auto_reset(&r->shadow_auto);
     bloom_glow_mask(r->glow_mask);
     r->radius = o->render_radius < 32 ? o->render_radius : 32;
     r->shot_usage = o->screenshots;
@@ -3032,7 +3034,8 @@ void renderer_set_smooth_light(renderer *r, int enabled) { r->smooth_light = !!e
 
 void renderer_set_shadows(renderer *r, int mode)
 {
-    if (mode == SHADOW_AUTO && r->shadow_mode != SHADOW_AUTO) bloom_auto_reset(&r->shadow_auto);
+    if (mode == SHADOW_AUTO && r->shadow_mode != SHADOW_AUTO)
+        shadow_auto_reset(&r->shadow_auto, r->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
     r->shadow_mode = mode;
 }
 

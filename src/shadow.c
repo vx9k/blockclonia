@@ -76,3 +76,9 @@ uint32_t shadow_groups(const float dir[3])
     }
     return g;
 }
+
+void shadow_auto_reset(bloom_auto *a, int integrated)
+{
+    bloom_auto_reset(a);
+    a->decided = integrated != 0; /* and on stays 0 */
+}
