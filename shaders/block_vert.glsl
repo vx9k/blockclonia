@@ -23,7 +23,8 @@ layout(set = 1, binding = 0) uniform ShadowMap { mat4 clip; } u_sh;
 layout(location = 4) out vec4 f_sh;
 #endif
 
-const float FACE_SHADE[6] = float[](0.80, 0.80, 1.00, 0.50, 0.65, 0.65);
+// Faces 6 and 7 are a plant's crossed quads, lit from all round.
+const float FACE_SHADE[8] = float[](0.80, 0.80, 1.00, 0.50, 0.65, 0.65, 0.85, 0.85);
 const float AO_CURVE[4] = float[](0.45, 0.65, 0.82, 1.00);
 const float TAU = 6.2831853;
 // The sun shades the sky's light on faces turned from it (lightfx.h): a
@@ -86,13 +87,23 @@ void main()
     // coordinate flat and rebuilding it there from f_uv measured slower.
     vec3 n = vec3(equal(uvec3(face >> 1), uvec3(0u, 1u, 2u))) * (0.5 - float(face & 1u));
     vec3 q = p + 1.0 + n;
+    // A plant (n is zero) takes its light half a cell up, from its own
+    // cell and the one above, not from the soil it stands in.
+    bool plant = face >= 6u;
+    q.y += plant ? 0.5 : 0.0;
     vec3 base = vec3(float(i_light & 2047u), float((i_light >> 11) & 2047u), float(i_light >> 22));
     f_luv = (base + q.xzy) * vec3(LIGHT_INV_X, LIGHT_INV_Y, LIGHT_INV_Z);
     p.y -= float(drop) * 0.125;
 
     vec3 rel = p + i_origin;
     vec3 world = rel + pc.origin.xyz;
-    float t = pc.fog.z;
+    // Time past 4096 s means a still world (the sway setting is off):
+    // leaves and plants stand, water and flames run as ever.
+    float t = pc.fog.z, sway = 1.0;
+    if (t >= 4096.0) {
+        t -= 4096.0;
+        sway = 0.0;
+    }
     // Face shade and AO darken both kinds of light; daylight scales only the sky's.
     float shade = FACE_SHADE[face] * AO_CURVE[ao];
     vec2 scroll = vec2(0.0);
@@ -112,7 +123,12 @@ void main()
         // travelling across the canopy: phase from the position, 8 cycles
         // per 256 m in x, 5 in z, and one per 32 m up.
         float ph = TAU * (fract(t / 2.4) + dot(world.xz, vec2(8.0, 5.0) / 256.0) + world.y / 32.0);
-        rel.xz += vec2(0.03 * sin(ph), 0.02 * cos(ph));
+        rel.xz += sway * vec2(0.03 * sin(ph), 0.02 * cos(ph));
+    } else if (layer - PLANT_FIRST < PLANT_COUNT) {
+        // Plants bend from the foot: only the top edge (AO 3) moves, 8 cm
+        // in the same gust as the leaves, a little faster for a light stem.
+        float ph = TAU * (fract(t / 2.0) + dot(world.xz, vec2(8.0, 5.0) / 256.0));
+        rel.xz += sway * float(ao == 3u) * vec2(0.08 * sin(ph), 0.05 * cos(ph));
     } else if (layer - FIRE_FIRST < 4u) {
         // Flames: a flip-book at 8 frames/s, full brightness day and night.
         layer = FIRE_FIRST + (uint(t * 8.0) + layer) % 4u;
@@ -127,7 +143,9 @@ void main()
     // As a shift of the sky's level, which block.frag adds before its one
     // exp2: flat, so it costs no interpolation, in bits f_layer has spare.
     vec3 sun = vec3(pc.origin.w, pc.fog.w, pc.fog.w * SUN_Z);
-    float m = 1.0 - FACE_SUN * (length(sun) - max(dot(2.0 * n, sun), 0.0));
+    // A plant takes the sun as a top face does: its blades face every way.
+    vec3 ns = plant ? vec3(0.0, 0.5, 0.0) : n;
+    float m = 1.0 - FACE_SUN * (length(sun) - max(dot(2.0 * ns, sun), 0.0));
     f_layer = layer | uint(-log2(m) * (SUN_STEPS / LIGHT_K) + 0.5) << 16;
 #ifdef SHADOWS
     // Out of the sun a face keeps the sky light of one turned from it:

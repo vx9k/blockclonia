@@ -56,6 +56,7 @@ typedef struct {
     const entity_instance *view_model; /* at most RENDER_MAX_VIEW_MODEL */
     int view_model_count;
     float time;          /* s, drives animated textures */
+    int sway;            /* leaves and plants move in the wind (the setting) */
     float daylight;      /* 0 night .. 1 noon: scales the light */
     float sky[3];        /* sky and fog colour; all zero: the default day sky */
     float fog[3];        /* the fog's own colour when it differs from the sky's (lightfx_fog); all zero: the sky's */

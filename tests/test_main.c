@@ -340,6 +340,37 @@ static void test_mesher(void)
     CHECK(mesh_section_counts(in, out, &mc) == 29 && mc.opaque == 23 && mc.face_end[5] == 6 && mc.trans == 6);
     uint32_t layer_cut = out[4 * 6] >> 20 & 0xFFu, layer_trans = out[4 * 23] >> 20 & 0xFFu;
     CHECK(layer_cut == T_LEAVES && layer_trans == T_GLASS && (out[0] >> 20 & 0xFFu) == T_STONE);
+    CHECK(mc.leaf_end == 23);
+
+    /* A plant is four quads, two crossed on the cell's diagonals each
+     * wound both ways, after the leaves in the cut-out range. It hides no
+     * face: the grass under it keeps its top. Its top edge (AO 3) is the
+     * one that sways, its foot sits on the cell's floor. */
+    fill_input(in, B_AIR);
+    in->blocks[mesh_pidx(3, 4, 3)] = B_GRASS;
+    in->blocks[mesh_pidx(3, 5, 3)] = B_POPPY;
+    in->blocks[mesh_pidx(8, 8, 8)] = B_LEAVES;
+    CHECK(mesh_section_counts(in, out, &mc) == 16 && mc.opaque == 16 && mc.trans == 0);
+    CHECK(mc.face_end[5] == 6 && mc.leaf_end == 12);
+    int faces[8] = {0}, tops = 0, feet = 0;
+    for (int v = 4 * 12; v < 4 * 16; v++) {
+        uint32_t d = out[v];
+        int x = (int)(d & 31u), y = (int)(d >> 5 & 31u), z = (int)(d >> 10 & 31u), ao = (int)(d >> 18 & 3u);
+        faces[d >> 15 & 7u]++;
+        CHECK((d >> 20 & 0xFFu) == T_POPPY && (d >> 28) == 0);
+        CHECK(x >= 3 && x <= 4 && z >= 3 && z <= 4 && (y == 5 || y == 6));
+        CHECK((ao == 3) == (y == 6));
+        tops += y == 6;
+        feet += y == 5;
+    }
+    CHECK(faces[6] == 8 && faces[7] == 8 && tops == 8 && feet == 8);
+    /* Each diagonal's two quads are the same corners in opposite order. */
+    CHECK(out[4 * 12] == out[4 * 13 + 1] && out[4 * 12 + 1] == out[4 * 13] && out[4 * 12 + 2] == out[4 * 13 + 3]);
+    /* Plants only: the leaves' range is empty, the cut-out range is not. */
+    in->blocks[mesh_pidx(8, 8, 8)] = B_AIR;
+    in->blocks[mesh_pidx(15, 15, 15)] = B_REEDS;
+    CHECK(mesh_section_counts(in, out, &mc) == 14 && mc.leaf_end == 6 && mc.opaque == 14);
+    CHECK((out[4 * 13 + 2] & 31u) <= 16 && (out[4 * 13 + 2] >> 5 & 31u) == 16);
 
     /* Fully buried section has nothing to draw. */
     fill_input(in, B_STONE);
@@ -1744,6 +1775,16 @@ static void test_settings(void)
     CHECK(settings_parse(&t, "shadows 0\n") == 1 && t.shadows == SHADOW_OFF);
     CHECK(settings_parse(&t, "shadows 1\n") == 1 && t.shadows == SHADOW_ON);
     CHECK(settings_parse(&t, "shadows 3\n") == 0 && t.shadows == SHADOW_ON);
+    /* Leaves and plants sway unless told to stand still, and the choice
+     * is written back. */
+    CHECK(t.sway == 1);
+    CHECK(settings_parse(&t, "sway 0\n") == 1 && t.sway == 0);
+    CHECK(settings_parse(&t, "sway 2\n") == 0 && t.sway == 0);
+    char sw[4096] = {0};
+    CHECK(settings_format(&t, sw, (int)sizeof sw) > 0 && strstr(sw, "sway 0") != NULL);
+    settings back = {0};
+    settings_default(&back);
+    CHECK(back.sway == 1 && settings_parse(&back, sw) > 0 && back.sway == 0);
     /* A tiny buffer truncates instead of overflowing. */
     char tiny[8] = {0};
     CHECK(settings_format(&s, tiny, (int)sizeof tiny) == 7 && tiny[7] == '\0');

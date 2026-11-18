@@ -6,6 +6,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 typedef struct { uint8_t r, g, b, a; } rgba;
 
@@ -177,6 +178,104 @@ static rgba leaf(int layer, int x, int y, rgba c, int holes, int grain)
     return (rgba){(uint8_t)(t.r * 3 / 5), (uint8_t)(t.g * 3 / 5), (uint8_t)(t.b * 3 / 5), 0};
 }
 
+/* One stem of a plant drawn bottom up: stem i of `seed` stands at a
+ * hashed column, lo..hi texels tall, leaning up to `lean` texels at its
+ * tip. Returns how far row `up` (0 at the foot) is below the tip, 0 above
+ * it, and the stem's column there in *cx. */
+static int stem(uint32_t seed, int i, int up, int lo, int hi, int lean, int *cx)
+{
+    uint32_t h = hash2i(seed, i, 7);
+    int height = lo + (int)((h >> 8) % (uint32_t)(hi - lo + 1));
+    int l = (int)((h >> 16) % (uint32_t)(2 * lean + 1)) - lean;
+    *cx = 2 + (int)(h % 12u) + l * up * up / (15 * 15);
+    return up < height ? height - up : 0;
+}
+
+/* A flower's head: a diamond of petals round (cx, cy), its middle in the
+ * centre colour. */
+static int petal(int x, int y, int cx, int cy) { return abs(x - cx) + abs(y - cy) <= (x == cx || y == cy ? 2 : 1); }
+
+/* Ground plants, drawn on crossed quads, rows top down. A clear texel
+ * keeps the plant's colour, so the box-filtered mips fade a plant out
+ * instead of darkening its edges; past a few metres the thin ones are
+ * gone, which the eye takes for distance. */
+static rgba plant(int layer, int x, int y)
+{
+    int up = 15 - y, n = px_noise(layer, x, y, 10), cx = 0;
+    const rgba clear = {70, 104, 46, 0};
+    uint32_t seed = 0x9A5u + (uint32_t)layer * 131u, h = hash2i(seed, x, y);
+    switch (layer) {
+    case T_GRASS_TUFT:
+    case T_TALL_GRASS: {
+        int tall = layer == T_TALL_GRASS;
+        for (int i = 0; i < (tall ? 10 : 8); i++) {
+            int tip = stem(seed, i, up, tall ? 9 : 4, tall ? 15 : 9, tall ? 3 : 2, &cx);
+            if (!tip || x != cx) continue;
+            /* Tall grass in seed: a pale head on the tallest stems. */
+            if (tall && tip <= 2 && up >= 10 && (i & 1)) return shade(150, 150, 92, 255, n);
+            return shade(64 + up * 3, 112 + up * 4, 42, 255, n);
+        }
+        return clear;
+    }
+    case T_FERN:
+        /* Fronds arching out from the middle, leaflets on alternate rows. */
+        for (int i = 0; i < 5; i++) {
+            int tip = stem(seed, i, up, 8, 13, 6, &cx);
+            if (!tip) continue;
+            if (x == cx || (tip > 2 && abs(x - cx) == 1 && ((up + i) & 1)))
+                return shade(48 + up * 2, 104 + up * 3, 40, 255, n);
+        }
+        return clear;
+    case T_REEDS:
+        for (int i = 0; i < 6; i++) {
+            int tip = stem(seed, i, up, 11, 16, 1, &cx);
+            if (!tip) continue;
+            /* A brown seed head near the top of some stems. */
+            if (i < 3 && tip >= 2 && tip <= 5 && (x == cx || x == cx + 1)) return shade(110, 70, 40, 255, n);
+            if (x == cx) return shade(96 + up, 122 + up * 2, 58, 255, n);
+        }
+        return clear;
+    case T_HEATHER: {
+        /* A low mound, its tips flowering pink. */
+        float dx = ((float)x - 7.5f) / 7.5f, dy = (float)up / 6.5f;
+        if (dx * dx + dy * dy >= 1.0f || h % 5u == 0) return clear;
+        if (up >= 2 && h % 100u < 18u + (uint32_t)up * 5u) return shade(178, 92, 152, 255, n);
+        return shade(58, 82, 50, 255, n);
+    }
+    case T_DRY_SHRUB:
+        for (int i = 0; i < 7; i++) {
+            int tip = stem(seed, i, up, 6, 11, 4, &cx);
+            if (tip && (x == cx || (up % 3 == 1 && x == cx + 1 && tip > 1))) return shade(128, 104, 78, 255, n);
+        }
+        return clear;
+    case T_BUSH: {
+        /* A round, dense bush with a few gaps and red berries. */
+        float dx = (float)x - 7.5f, dy = (float)y - 8.5f;
+        if (dx * dx + dy * dy > 49.0f || h % 9u == 0) return clear;
+        if (h % 31u == 1) return shade(176, 34, 40, 255, n / 2);
+        return shade(48, 94, 40, 255, n);
+    }
+    default: {
+        /* Flowers: two to a texture, a tall one and a short one, on
+         * stems with a leaf. */
+        static const rgba HEAD[4] = {{204, 40, 32, 255},
+                                     {240, 200, 44, 255},
+                                     {74, 104, 214, 255},
+                                     {236, 236, 226, 255}};
+        static const rgba MID[4] = {{40, 20, 20, 255}, {226, 168, 30, 255}, {44, 60, 150, 255}, {232, 188, 40, 255}};
+        int k = layer - T_POPPY;
+        for (int f = 0; f < 2; f++) {
+            int sx = f ? 11 : 5, top = f ? 9 : 12;
+            if (petal(x, y, sx, 15 - top))
+                return x == sx && y == 15 - top ? MID[k] : shade(HEAD[k].r, HEAD[k].g, HEAD[k].b, 255, n / 2);
+            if (x == sx && up < top - 1) return shade(64, 116, 44, 255, n);
+            if (up == top / 2 && x == sx + (f ? -1 : 1)) return shade(70, 126, 48, 255, n);
+        }
+        return clear;
+    }
+    }
+}
+
 /* The trees' bark, and the birch's end grain. */
 static rgba bark(int layer, int x, int y, int n)
 {
@@ -211,6 +310,7 @@ static rgba texel(int layer, int x, int y)
     if (mobskin_texel(layer, x, y, px)) return (rgba){px[0], px[1], px[2], px[3]};
     if (layer >= T_CRACK0 && layer <= T_CRACK3) return crack(layer - T_CRACK0, x, y);
     if (layer >= T_FIRE0 && layer <= T_FIRE3) return flame(layer - T_FIRE0, x, y);
+    if (layer >= T_PLANT_FIRST && layer <= T_PLANT_LAST) return plant(layer, x, y);
     for (int i = 0; i < (int)(sizeof ORE_ART / sizeof ORE_ART[0]); i++) {
         if (ORE_ART[i].layer != layer) continue;
         /* Rock with clusters of mineral: a texel is ore where a coarse

@@ -43,6 +43,7 @@ static const field FIELDS[] = {
     {"bloom", 0, 2},
     {"flicker", 0, 1},
     {"shadows", 0, 2},
+    {"sway", 0, 1},
 };
 #define NFIELDS ((int)(sizeof FIELDS / sizeof FIELDS[0]))
 _Static_assert(sizeof FIELDS / sizeof FIELDS[0] * sizeof(int) == sizeof(settings), "every setting needs a FIELDS row");
@@ -75,6 +76,7 @@ void settings_default(settings *s)
     s->bloom = BLOOM_AUTO;
     s->flicker = 1;
     s->shadows = SHADOW_AUTO;
+    s->sway = 1;
 }
 
 static int *field_ptr(settings *s, int i)
@@ -105,7 +107,8 @@ static int *field_ptr(settings *s, int i)
     case 22: return &s->smooth_light;
     case 23: return &s->bloom;
     case 24: return &s->flicker;
-    default: return &s->shadows;
+    case 25: return &s->shadows;
+    default: return &s->sway;
     }
 }
 

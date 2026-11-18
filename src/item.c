@@ -379,6 +379,19 @@ int item_drops(uint8_t block, uint32_t *rng, item_stack out[3])
         if (block == B_LEAVES && chance(rng, 1, 6)) out[n++] = (item_stack){I_APPLE, 1, 0};
         break;
     case B_GRASS: out[n++] = (item_stack){B_DIRT, 1, 0}; break;
+    case B_GRASS_TUFT:
+    case B_TALL_GRASS:
+    case B_FERN:
+    case B_HEATHER:
+        /* Grasses tear into fibre now and then. */
+        if (chance(rng, 1, 3)) out[n++] = (item_stack){I_FIBRE, 1, 0};
+        break;
+    case B_REEDS: out[n++] = (item_stack){I_FIBRE, 1, 0}; break; /* long, tough stems */
+    case B_DRY_SHRUB:
+    case B_BUSH:
+        if (chance(rng, 1, 2)) out[n++] = (item_stack){I_STICK, 1, 0};
+        if (chance(rng, 1, 3)) out[n++] = (item_stack){I_FIBRE, 1, 0};
+        break;
     case B_GLASS: break; /* shatters */
     case B_CAMPFIRE: out[n++] = (item_stack){I_STICK, 2, 0}; break; /* the unburnt ends */
     case B_WATER:

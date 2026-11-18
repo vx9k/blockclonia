@@ -2231,6 +2231,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     v.underwater = block_fluid(eye_block);
     if (v.underwater) fluid_view(eye_block, v.under_fog, &v.under_range);
     v.time = (float)fmod(now, 3600.0);
+    v.sway = g->st.sway;
     /* Brightness lifts the darkest light toward dusk; days are unchanged. */
     v.daylight = fmaxf(thermo_daylight(g->th), 0.006f * (float)g->st.brightness);
     thermo_sky(g->th, v.sky);

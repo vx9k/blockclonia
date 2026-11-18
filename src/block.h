@@ -80,6 +80,19 @@ typedef enum {
     B_SPRUCE_LEAVES,
     B_PINE_LEAVES,
     B_THORN_LEAVES,
+    /* Ground plants: crossed quads, no collision, broken by hand. Grasses
+     * and low shrubs, then the flowers. */
+    B_GRASS_TUFT,
+    B_TALL_GRASS,
+    B_FERN,
+    B_REEDS,
+    B_HEATHER,
+    B_DRY_SHRUB,
+    B_BUSH,
+    B_POPPY,
+    B_DANDELION,
+    B_CORNFLOWER,
+    B_OXEYE,
     B_COUNT
 } block_id;
 
@@ -236,6 +249,19 @@ typedef enum {
     T_SPRUCE_LEAVES,
     T_PINE_LEAVES,
     T_THORN_LEAVES,
+    /* The ground plants, in their blocks' order: together, so the shaders
+     * sway them as one range. */
+    T_GRASS_TUFT,
+    T_TALL_GRASS,
+    T_FERN,
+    T_REEDS,
+    T_HEATHER,
+    T_DRY_SHRUB,
+    T_BUSH,
+    T_POPPY,
+    T_DANDELION,
+    T_CORNFLOWER,
+    T_OXEYE,
     T_COUNT
 } tex_id;
 
@@ -246,6 +272,8 @@ _Static_assert(T_COUNT <= 256, "a texture layer is one byte in block_def and the
 #define T_FIRE_FRAMES 4
 #define T_LEAVES_FIRST T_BIRCH_LEAVES
 #define T_LEAVES_LAST T_THORN_LEAVES
+#define T_PLANT_FIRST T_GRASS_TUFT
+#define T_PLANT_LAST T_OXEYE
 
 /* What a block is made of, as far as tools and sound care: the tool that
  * digs it and the noise it makes. */
@@ -310,8 +338,11 @@ static inline int block_fluid(uint8_t id) { return id < B_COUNT && (g_blocks[id]
 /* A tree's trunk or branch, of any kind. */
 static inline int block_log(uint8_t id) { return id == B_LOG || (id >= B_BIRCH_LOG && id <= B_THORN_LOG); }
 
+/* A ground plant: crossed quads, no collision, uprooted with its soil. */
+static inline int block_plant(uint8_t id) { return id >= B_GRASS_TUFT && id <= B_OXEYE; }
+
 /* Leaves of any tree: drawn cut out, so the sky shows between them. */
-static inline int block_leaves(uint8_t id) { return id < B_COUNT && g_blocks[id].mat == BM_LEAVES; }
+static inline int block_leaves(uint8_t id) { return id < B_COUNT && g_blocks[id].mat == BM_LEAVES && !block_plant(id); }
 
 /* Blocks that keep a 0..7 value in the column's meta array: liquids (their
  * level, 0 = full) and campfires (fuel left, 0 = full). */

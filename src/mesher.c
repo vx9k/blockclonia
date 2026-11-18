@@ -26,9 +26,10 @@ void mesher_init(void)
 {
     for (int i = 0; i < 256; i++) {
         uint8_t c = 0;
-        if (i == B_AIR || i == B_TORCH) c = C_AIR; /* a torch is a model (renderer.c), not faces */
+        /* A torch is a model (renderer.c), a plant crossed quads: neither has faces. */
+        if (i == B_AIR || i == B_TORCH || block_plant((uint8_t)i)) c = C_AIR;
         else if (i < B_COUNT && (g_blocks[i].flags & BF_FLUID)) c = C_FLUID;
-        else if (i < B_COUNT && g_blocks[i].mat == BM_LEAVES) c = C_CUT; /* the sky shows through */
+        else if (block_leaves((uint8_t)i)) c = C_CUT; /* the sky shows through */
         else if (i >= B_COUNT || (g_blocks[i].flags & BF_OPAQUE)) c = C_OPAQUE; /* unknown/unloaded: hide faces */
         else c = C_TRANS;
         g_class[i] = c;
@@ -114,6 +115,29 @@ static inline uint32_t face_key(const mesh_input *in, const uint8_t *cls, int pi
      * as holes through to the sky. */
     if (cb == C_CUT) key |= K_NOMERGE | K_CUT;
     return key;
+}
+
+/* Plants: two quads crossed on the cell's diagonals, each wound both ways
+ * so either side shows, appended to the cut-out quads at cut[n]. Faces 6
+ * and 7 tell block.vert they are plants; the top edge has AO 3 (it sways),
+ * the foot 2, a little darker. Returns the new count. */
+static uint32_t mesh_plants(const mesh_input *in, uint32_t *cut, uint32_t n)
+{
+    static const int END[2][2][2] = {{{0, 0}, {1, 1}}, {{1, 0}, {0, 1}}};
+    for (int y = 0; y < 16; y++)
+        for (int z = 0; z < 16; z++)
+            for (int x = 0; x < 16; x++) {
+                uint8_t b = in->blocks[mesh_pidx(x, y, z)];
+                if (!block_plant(b)) continue;
+                for (int d = 0; d < 2; d++)
+                    for (int side = 0; side < 2; side++, n++)
+                        for (int v = 0; v < 4; v++) {
+                            int e = (v == 1 || v == 2) ^ side, top = v >= 2;
+                            int p[3] = {x + END[d][e][0], y + top, z + END[d][e][1]};
+                            cut[4u * n + (uint32_t)v] = pack_vertex(p, 6 + d, top ? 3 : 2, g_blocks[b].tex[0], 0);
+                        }
+            }
+    return n;
 }
 
 uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *mc)
@@ -207,10 +231,14 @@ uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *m
         mc->face_end[f] = (uint16_t)nopq;
     }
 
+    mc->leaf_end = (uint16_t)(nopq + ncut);
+    ncut = mesh_plants(in, out + 4u * MESH_MAX_QUADS, ncut);
+
     /* The cut-out quads, gathered past the end, follow the opaque ones; the
      * translucent quads, written backwards from the end, follow those. A
-     * block has one quad per face at most, so the three fit in the first
-     * half and the cut-out ones land short of the translucent ones. */
+     * block has one quad per face at most and a plant four, so the three
+     * fit in the first half and the cut-out ones land short of the
+     * translucent ones. */
     if (ncut) memcpy(out + 4u * nopq, out + 4u * MESH_MAX_QUADS, sizeof(uint32_t) * 4u * ncut);
     if (ntr) memmove(out + 4u * (nopq + ncut), out + 4u * (MESH_MAX_QUADS - ntr), sizeof(uint32_t) * 4u * ntr);
     nopq += ncut;

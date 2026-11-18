@@ -962,6 +962,94 @@ static const uint16_t TREES[BIOME_COUNT] = {
     [BIOME_SCRUB] = 40,   [BIOME_STEPPE] = 12, [BIOME_ALPINE] = 3,
 };
 
+/* ------------------------------------------------------------ plants */
+
+/* Ground cover per thousand cells of open soil, by biome: short grass,
+ * tall grass, ferns, heather, dry shrubs, bushes and flowers. */
+typedef struct {
+    uint16_t tuft, tall, fern, heather, dry, bush, flower;
+} cover;
+
+static const cover COVER[BIOME_COUNT] = {
+    [BIOME_BEACH] = {0, 0, 0, 0, 6, 0, 0},          [BIOME_TUNDRA] = {120, 0, 0, 90, 0, 0, 8},
+    [BIOME_TAIGA] = {80, 20, 90, 70, 0, 12, 4},     [BIOME_FOREST] = {150, 60, 70, 0, 0, 14, 16},
+    [BIOME_MEADOW] = {330, 140, 0, 0, 0, 6, 45},    [BIOME_STEPPE] = {200, 260, 0, 0, 12, 0, 20},
+    [BIOME_SCRUB] = {120, 40, 0, 0, 60, 8, 8},      [BIOME_DESERT] = {0, 0, 0, 0, 10, 0, 0},
+    [BIOME_WETLAND] = {120, 250, 50, 0, 0, 10, 20}, [BIOME_ALPINE] = {220, 0, 0, 120, 0, 0, 40},
+};
+
+/* The flowers each open country has: the patch field picks one of them. */
+static uint8_t flower_at(biome b, float pick)
+{
+    static const uint8_t ALL[4] = {B_POPPY, B_DANDELION, B_CORNFLOWER, B_OXEYE};
+    int k = clampi((int)((pick + 1.0f) * 2.0f), 0, 3);
+    switch (b) {
+    case BIOME_ALPINE:
+    case BIOME_TUNDRA: return k < 2 ? B_CORNFLOWER : B_OXEYE;
+    case BIOME_FOREST:
+    case BIOME_TAIGA: return k < 2 ? B_OXEYE : B_DANDELION;
+    case BIOME_STEPPE:
+    case BIOME_SCRUB: return k < 2 ? B_POPPY : B_CORNFLOWER;
+    default: return ALL[k];
+    }
+}
+
+/* What grows in the cell above soil `ground`: reeds by still water, a
+ * forest floor's ferns in the shade of a canopy, else the biome's cover,
+ * its flowers in patches of one kind (`patch` above 0.35 is a patch). The
+ * roll u is per thousand. */
+static uint8_t plant_at(biome b, uint8_t ground, int wet, int shade, uint32_t u, float patch, float pick)
+{
+    int m = block_get(ground)->mat;
+    if (m != BM_GRASS && m != BM_DIRT && m != BM_SAND) return B_AIR; /* bare rock, gravel, snow */
+    if (wet) return u < 450u ? B_REEDS : B_AIR;
+    if (ground == B_SAND) return u < COVER[b].dry ? B_DRY_SHRUB : B_AIR;
+    if (ground != B_GRASS && ground != B_PODZOL) return B_AIR;
+    if (shade) return u < 150u ? B_FERN : (u < 230u ? B_GRASS_TUFT : (u < 245u ? B_BUSH : B_AIR));
+    const cover *c = &COVER[b];
+    uint32_t flowers = patch > 0.35f ? (uint32_t)c->flower * 3u : (uint32_t)c->flower / 4u;
+    if (u < flowers) return flower_at(b, pick);
+    u -= flowers;
+    const uint16_t share[6] = {c->tuft, c->tall, c->fern, c->heather, c->dry, c->bush};
+    static const uint8_t KIND[6] = {B_GRASS_TUFT, B_TALL_GRASS, B_FERN, B_HEATHER, B_DRY_SHRUB, B_BUSH};
+    for (int i = 0; i < 6; i++) {
+        if (u < share[i]) return KIND[i];
+        u -= share[i];
+    }
+    return B_AIR;
+}
+
+/* Ground plants on every open cell of soil in the column, after the trees
+ * so they keep out of trunks and read the canopy's shade. Reeds want a
+ * cell of water beside them, at their foot or level with it. */
+static void place_plants(uint32_t seed, column *c, const hm_row *gm, const int *lvl, const local (*loc)[CHUNK_W])
+{
+    int bx = c->cx * CHUNK_W, bz = c->cz * CHUNK_W;
+    for (int z = 0; z < CHUNK_W; z++)
+        for (int x = 0; x < CHUNK_W; x++) {
+            int y = gm[z + 1][x + 1];
+            if (lvl[z * CHUNK_W + x] || y < 1 || y >= WORLD_H - 1) continue;
+            if (c->blocks[col_index(x, y, z)] != B_AIR) continue;
+            uint8_t ground = c->blocks[col_index(x, y - 1, z)];
+            if (!block_solid(ground)) continue;
+            int wet = 0, shade = 0;
+            static const int N4[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+            /* Frozen water grows no reeds. */
+            for (int k = 0; k < 4 && !wet && loc[z][x].temp > 0.0f; k++) {
+                int nx = x + N4[k][0], nz = z + N4[k][1];
+                if (nx < 0 || nx >= CHUNK_W || nz < 0 || nz >= CHUNK_W) continue;
+                wet = c->blocks[col_index(nx, y - 1, nz)] == B_WATER || c->blocks[col_index(nx, y, nz)] == B_WATER;
+            }
+            for (int ly = y + 1; ly < imin(y + 12, WORLD_H) && !shade; ly++)
+                shade = block_leaves(c->blocks[col_index(x, ly, z)]);
+            uint32_t h = hash2i(seed ^ 0x9E3779B9u, bx + x, bz + z);
+            float patch = noise2d(seed + 331, (bx + x) / 24.0, (bz + z) / 24.0);
+            float pick = noise2d(seed + 337, (bx + x) / 90.0, (bz + z) / 90.0);
+            uint8_t p = plant_at(loc[z][x].b, ground, wet, shade, h % 1000u, patch, pick);
+            if (p != B_AIR) c->blocks[col_index(x, y, z)] = p;
+        }
+}
+
 /* ------------------------------------------------------------ column */
 
 /* Soil over the rock: what lies on top, what under it, the lowest layer
@@ -1176,4 +1264,5 @@ void worldgen_column(uint32_t seed, column *c)
             c->blocks[col_index(x, y - 1, z)] = B_DIRT;
             grow_tree(c, h >> 8, x, y, z, kind, tree_age_at(loc[z][x].b, h));
         }
+    place_plants(seed, c, (const hm_row *)gm, lvl, (const local(*)[CHUNK_W])loc);
 }

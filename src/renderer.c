@@ -178,6 +178,7 @@ typedef struct {
 _Static_assert(sizeof(entity_instance) == 52, "entity_instance is the instance vertex layout");
 _Static_assert(T_FIRE0 == 22 && T_WATER == 14 && T_LEAVES == 8, "update the layer constants in push_vert.glsl");
 _Static_assert(T_LEAVES_FIRST == 117 && T_LEAVES_LAST == T_LEAVES_FIRST + 3, "update LEAVES_FIRST in push_vert.glsl");
+_Static_assert(T_PLANT_FIRST == 121 && T_PLANT_LAST == T_PLANT_FIRST + 10, "update PLANT_FIRST in push_vert.glsl");
 _Static_assert(TEX_SIZE == 16, "update TEXELS in block.frag");
 
 typedef struct {
@@ -2859,6 +2860,7 @@ static int on_mesh_ready(void *user, column *c, int sy, const uint32_t *verts, c
     m->trans_quads = mc->trans;
     m->glow = (uint8_t)bloom_quads_glow(verts + mc->opaque * 4u, mc->trans, r->glow_mask);
     memcpy(m->face_end, mc->face_end, sizeof m->face_end);
+    m->leaf_end = mc->leaf_end;
     m->block = (uint8_t)blk;
     m->light_slot = light_upload(r, f, x);
     return 1;
@@ -3372,9 +3374,10 @@ static void draw_shadow(renderer *r, terrain_pass *tp, const world *w, const ren
             g = e + 1;
         }
         /* Leaves cast a whole shadow: the map's pass has no fragment
-         * shader to cut them out, and a canopy's shade is near solid. */
+         * shader to cut them out, and a canopy's shade is near solid.
+         * Plants, after them, would cast squares, so they cast none. */
         uint32_t c0 = s->face_end[5];
-        if (s->opaque_quads > c0) pass_draw(tp, s->block, s->vtx_offset + c0 * 4, s->opaque_quads - c0, (uint32_t)i);
+        if (s->leaf_end > c0) pass_draw(tp, s->block, s->vtx_offset + c0 * 4, s->leaf_end - c0, (uint32_t)i);
     }
     pass_flush(tp);
     tp->bound = -1;
@@ -3706,6 +3709,15 @@ static void draw_glow(terrain_pass *tp, int nvis, int n_trans, int first, VkDevi
     tp->st->draw_calls++;
 }
 
+/* The shaders' clock, s. With sway off it runs 4096 s on, which block.vert
+ * reads as "hold leaves and plants still"; the other readers only shift
+ * (stars) or step a whole cycle (the flames' 8 frames/s flip-book of 4). */
+static float shader_time(const render_view *v)
+{
+    float t = (float)fmod((double)v->time, 3600.0);
+    return v->sway ? t : t + 4096.0f;
+}
+
 void renderer_end_frame(renderer *r, const world *w, const physics *ph, const render_view *v, double alpha)
 {
     if (!r->frame_active) return;
@@ -3762,7 +3774,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     pv.origin[3] = v->lfx.sun[0]; /* block.vert's sun; its z follows from y */
     pv.fog[0] = fog_start;
     pv.fog[1] = 1.0f / (fog_end - fog_start);
-    pv.fog[2] = (float)fmod((double)v->time, 3600.0);
+    pv.fog[2] = shader_time(v);
     pv.fog[3] = v->lfx.sun[1];
     push_frag pf = {0};
     for (int i = 0; i < 3; i++) pf.color[i] = r->swap_srgb ? srgb_to_linear(fogc[i]) : fogc[i];

@@ -432,6 +432,7 @@ starts with the defaults and doesn't save changes over it.
 | Video | Sun shadows | Auto (default): on where the GPU's timestamps show the shadow map costing under 0.5 ms a frame, off on integrated GPUs and without timestamps or a filterable depth format; On; Off. Trees, walls and overhangs cast the sun's (by night the moon's) shadow within 64 m, and light shafts show through the air where it is broken |
 | Video | Bloom | Auto (default): on where the GPU's timestamps show it costing under 0.3 ms a frame, off without timestamps; On; Off. A soft glow around fire, lava, torches, foxfire and the moon |
 | Video | Light flicker | on (default)/off: flames, torches and other fire waver; off, they burn at a steady level |
+| Video | Leaves and grass sway | on (default)/off: leaves, grass and flowers move in the wind; off, they stand still |
 | Video | Brightness (nights) | 0–100% (default 0): a floor under all light, for dark nights and caves; daylight is unchanged |
 | Display | Fullscreen | on/off (also F11): borderless at the monitor's own resolution |
 | Display | VSync | on/off |

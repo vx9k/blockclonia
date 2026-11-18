@@ -52,7 +52,7 @@ static int bare_rock(uint8_t b) { return block_get(b)->mat == BM_STONE && !item_
 
 /* What may stand on the ground: nothing that belongs to the ground. */
 static int above_ground(uint8_t b)
-{ return b == B_AIR || b == B_WATER || b == B_ICE || block_log(b) || block_leaves(b); }
+{ return b == B_AIR || b == B_WATER || b == B_ICE || block_log(b) || block_leaves(b) || block_plant(b); }
 
 /* The derivative noise2d_grad reports is the slope of noise2d. */
 static void test_noise_grad(void)
@@ -125,7 +125,7 @@ static void test_climate(void)
 static void test_generators(void)
 {
     /* Worlds keep growing exactly as they began. */
-    CHECK(hash_columns(1337) == 0x3865b90e73af5c3bull);
+    CHECK(hash_columns(1337) == 0x16293fedd9811a9cull);
 
     long ore[3] = {0}, cave = 0, under = 0, bad_band = 0, hanging = 0, no_bedrock = 0, bad_ground = 0;
     long mouths = 0, mouth_cols = 0, cols = 0, fox = 0, bad_fox = 0;
@@ -798,6 +798,97 @@ static void test_tree_items(void)
     CHECK(apples[0] > 20 && apples[1] == 0 && fibre > 200);
 }
 
+/* Plants are cut out like leaves, but thin: a share of each texture is
+ * clear and a share solid, and a clear texel keeps a plant's colour (no
+ * dark rim in the mips). Each flower shows its own colour. */
+static void test_plant_textures(void)
+{
+    for (int l = T_PLANT_FIRST; l <= T_PLANT_LAST; l++) {
+        int clear = 0, dark = 0;
+        for (int y = 0; y < TEX_SIZE; y++)
+            for (int x = 0; x < TEX_SIZE; x++) {
+                uint8_t t[4] = {0};
+                texgen_texel(l, x, y, t);
+                clear += t[3] == 0;
+                dark += t[3] == 0 && t[0] + t[1] + t[2] < 120;
+                CHECK(t[3] == 0 || t[3] == 255);
+            }
+        CHECK(clear > TEX_SIZE * TEX_SIZE / 5 && clear < TEX_SIZE * TEX_SIZE - 12 && dark == 0);
+    }
+    /* Red, yellow, blue and white heads; the stem green. */
+    static const int RGB[4][3] = {{1, 0, 0}, {1, 1, 0}, {0, 0, 1}, {1, 1, 1}};
+    for (int k = 0; k < 4; k++) {
+        int head = 0;
+        for (int y = 0; y < 8; y++)
+            for (int x = 0; x < TEX_SIZE; x++) {
+                uint8_t t[4] = {0};
+                texgen_texel(T_POPPY + k, x, y, t);
+                const int on[3] = {t[0] > 180, t[1] > 180, t[2] > 180};
+                head += t[3] && on[0] == RGB[k][0] && on[1] == RGB[k][1] && on[2] == RGB[k][2];
+            }
+        CHECK(head >= 6);
+    }
+}
+
+/* Every plant stands on soil in open air, never under water; reeds stand
+ * by water; and each country has its own cover: flowers and grass on the
+ * meadows, ferns in the woods' shade, tall grass on the steppe, heather in
+ * the cold, dry shrubs in the dry. */
+static void test_plants(void)
+{
+    long kinds[BIOME_COUNT][B_COUNT] = {{0}}, open[BIOME_COUNT] = {0};
+    int bad = 0, dry_reeds = 0, reeds = 0, shaded_ferns = 0;
+    /* A spread of columns, and a shore at 24,-31 for the reeds. */
+    for (int i = 0; i < 64; i++) {
+        int cx = i < 48 ? (i * 1187) % 1500 - 750 : 24 + (i - 48) % 4;
+        int cz = i < 48 ? (i * 1733) % 1500 - 750 : -31 + (i - 48) / 4;
+        column *c = column_alloc(cx, cz);
+        worldgen_column(1337, c);
+        for (int z = 0; z < CHUNK_W; z++)
+            for (int x = 0; x < CHUNK_W; x++)
+                for (int y = 1; y < WORLD_H - 1; y++) {
+                    uint8_t b = c->blocks[col_index(x, y, z)];
+                    if (!block_plant(b)) continue;
+                    uint8_t below = c->blocks[col_index(x, y - 1, z)], above = c->blocks[col_index(x, y + 1, z)];
+                    int m = block_get(below)->mat;
+                    bad += !block_solid(below) || (m != BM_GRASS && m != BM_DIRT && m != BM_SAND);
+                    bad += block_fluid(above);
+                    worldgen_point p = worldgen_sample(1337, cx * CHUNK_W + x, cz * CHUNK_W + z);
+                    kinds[p.b][b]++;
+                    open[p.b]++;
+                    if (b == B_REEDS && x > 0 && x < CHUNK_W - 1 && z > 0 && z < CHUNK_W - 1) {
+                        int wet = 0;
+                        for (int k = 0; k < 4; k++) {
+                            int nx = x + (k == 0) - (k == 1), nz = z + (k == 2) - (k == 3);
+                            wet |= c->blocks[col_index(nx, y - 1, nz)] == B_WATER ||
+                                   c->blocks[col_index(nx, y, nz)] == B_WATER;
+                        }
+                        dry_reeds += !wet;
+                        reeds++;
+                    }
+                    if (b == B_FERN)
+                        for (int ly = y + 1; ly < y + 12 && ly < WORLD_H; ly++)
+                            if (block_leaves(c->blocks[col_index(x, ly, z)])) {
+                                shaded_ferns++;
+                                break;
+                            }
+                }
+        column_free(c);
+    }
+    CHECK(bad == 0);
+    CHECK(reeds > 0 && dry_reeds == 0);
+    long meadow_flowers = 0;
+    for (int f = B_POPPY; f <= B_OXEYE; f++) meadow_flowers += kinds[BIOME_MEADOW][f];
+    CHECK(kinds[BIOME_MEADOW][B_GRASS_TUFT] > kinds[BIOME_MEADOW][B_TALL_GRASS] && meadow_flowers > 0);
+    CHECK(kinds[BIOME_FOREST][B_FERN] > 0 && shaded_ferns > 0);
+    CHECK(kinds[BIOME_STEPPE][B_TALL_GRASS] > kinds[BIOME_STEPPE][B_GRASS_TUFT]);
+    CHECK(kinds[BIOME_TAIGA][B_HEATHER] + kinds[BIOME_TUNDRA][B_HEATHER] + kinds[BIOME_ALPINE][B_HEATHER] > 0);
+    CHECK(kinds[BIOME_SCRUB][B_DRY_SHRUB] > 0 && kinds[BIOME_DESERT][B_GRASS_TUFT] == 0);
+    CHECK(kinds[BIOME_MEADOW][B_HEATHER] == 0 && kinds[BIOME_TUNDRA][B_TALL_GRASS] == 0);
+    /* Ground cover, not a carpet: under half the open ground of a meadow. */
+    CHECK(open[BIOME_MEADOW] > 100);
+}
+
 static void test_smelting(void)
 {
     int furnace = -1, iron = -1;
@@ -849,5 +940,7 @@ void test_worldgen_all(void)
     test_trees_stand();
     test_leaf_textures();
     test_tree_items();
+    test_plant_textures();
+    test_plants();
     test_smelting();
 }

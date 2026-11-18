@@ -31,6 +31,7 @@ typedef struct {
     int bloom;            /* BLOOM_OFF, BLOOM_ON or BLOOM_AUTO (bloom.h): glow around light sources */
     int flicker;          /* flames and carried fire waver; off: they burn steady, for light-sensitive eyes */
     int shadows;          /* SHADOW_OFF, SHADOW_ON or SHADOW_AUTO (shadow.h): the sun's and moon's shadows */
+    int sway; /* leaves and plants move in the wind; off: they stand still, for motion-sensitive eyes */
 } settings;
 
 #define SETTINGS_FOV_MIN 50

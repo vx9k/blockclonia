@@ -774,7 +774,7 @@ static void maintain(thermo *t, const world *w, dvec3 player, int have_player)
  * oil, which gives off vapour far below lava's heat, at once. */
 static int fuel_block(uint8_t id, int level, double *ignite_s)
 {
-    if (block_leaves(id)) {
+    if (block_leaves(id) || block_plant(id)) {
         *ignite_s = 120.0;
         return 1;
     }

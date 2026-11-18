@@ -252,6 +252,17 @@ static void test_materials(void)
         [B_SPRUCE_LEAVES] = {-1, -1, MAT_LEAVES, 0.4f, 0.0f},
         [B_PINE_LEAVES] = {-1, -1, MAT_LEAVES, 0.4f, 0.0f},
         [B_THORN_LEAVES] = {-1, -1, MAT_LEAVES, 0.4f, 0.0f},
+        [B_GRASS_TUFT] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
+        [B_TALL_GRASS] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
+        [B_FERN] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
+        [B_REEDS] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
+        [B_HEATHER] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
+        [B_DRY_SHRUB] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
+        [B_BUSH] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
+        [B_POPPY] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
+        [B_DANDELION] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
+        [B_CORNFLOWER] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
+        [B_OXEYE] = {-1, -1, MAT_LEAVES, 1.0f, 0.0f},
     };
     int bad = 0;
     for (int b = 0; b < B_COUNT; b++) {
@@ -371,8 +382,86 @@ static void test_inv3_ids(void)
     }
 }
 
+/* Plants: nothing collides with them, light passes, the leaves' sound,
+ * and broken by hand, faster than anything solid. Grass tears into fibre
+ * now and then, reeds always; shrubs give sticks; a flower is itself. */
+static void test_plant_blocks(void)
+{
+    for (int b = B_GRASS_TUFT; b <= B_OXEYE; b++) {
+        uint8_t id = (uint8_t)b;
+        CHECK(block_plant(id) && !block_solid(id) && !block_opaque(id) && !block_leaves(id) && !block_log(id));
+        CHECK(item_harvests(0, id) && block_get(id)->hardness > 0.0f && block_get(id)->hardness < 0.5f);
+        CHECK(block_get(id)->mat == BM_LEAVES && synth_material_of(id) == MAT_LEAVES);
+    }
+    CHECK(!block_plant(B_THORN_LEAVES) && !block_plant(B_GRASS) && !block_plant(B_COUNT) && !block_plant(B_AIR));
+    uint32_t rng = 5;
+    int fibre[3] = {0}, sticks = 0, flowers = 0;
+    for (int k = 0; k < 300; k++) {
+        static const uint8_t TRY[5] = {B_TALL_GRASS, B_REEDS, B_BUSH, B_CORNFLOWER, B_GRASS_TUFT};
+        item_stack out[3] = {{0}};
+        int n = item_drops(TRY[k % 5], &rng, out);
+        for (int j = 0; j < n; j++) {
+            if (out[j].id == I_FIBRE) fibre[k % 5 == 1 ? 1 : (k % 5 == 2 ? 2 : 0)]++;
+            sticks += out[j].id == I_STICK;
+            flowers += out[j].id == B_CORNFLOWER;
+        }
+    }
+    CHECK(fibre[0] > 10 && fibre[0] < 120 && fibre[1] == 60 && sticks > 15 && flowers == 60);
+}
+
+/* Breaking the soil under a plant uproots it, and its drops come with
+ * it; a block aimed at a plant replaces it; and a flower takes root in
+ * soil but not on stone. */
+static void test_plants_by_hand(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    world_set(&t.w, 4, GROUND, 4, B_REEDS, 0);
+    world_set(&t.w, 4, GROUND + 1, 4, B_REEDS, 0);
+    world_set(&t.w, 6, GROUND, 4, B_TALL_GRASS, 0);
+    fx_state *fx = mem_calloc(1, sizeof *fx);
+    fx_init(fx, 1);
+    player pl = {0};
+    pl.pos = dv3(4.5, GROUND + 1.0, 1.5);
+    inventory inv = {0};
+    inv_init(&inv);
+    interact ia = {0};
+    interact_init(&ia, 3);
+    interact_input dig = {.attack = 1, .can_act = 1, .speed = 1.0f, .dt = 1.0f / 60.0f};
+    ray_hit hit = {.hit = 1, .block = {4, GROUND - 1, 4}, .before = {4, GROUND - 1, 3}, .id = B_GRASS};
+    vec3 dir = {0.0f, 0.0f, 1.0f};
+    for (int f = 0; f < 6000 && world_get(&t.w, 4, GROUND - 1, 4) == B_GRASS; f++)
+        interact_frame(&ia, &t.w, &t.ph, NULL, &pl, &inv, fx, pl.pos, dir, hit, &dig);
+    CHECK(world_get(&t.w, 4, GROUND - 1, 4) == B_AIR);
+    CHECK(world_get(&t.w, 4, GROUND, 4) == B_AIR && world_get(&t.w, 4, GROUND + 1, 4) == B_AIR);
+    int fibre = 0;
+    for (int i = 0; i < t.ph.item_count; i++) fibre += t.ph.items[i].id == I_FIBRE;
+    CHECK(fibre == 2); /* both reeds, and the dirt besides */
+    CHECK(world_get(&t.w, 6, GROUND, 4) == B_TALL_GRASS);
+
+    /* Planks aimed at the grass go where it stood. */
+    interact_input use = {.use_click = 1, .can_act = 1, .speed = 1.0f, .dt = 1.0f / 60.0f};
+    inv_add(&inv, B_PLANKS, 1);
+    hit = (ray_hit){1, {6, GROUND, 4}, {6, GROUND, 3}, B_TALL_GRASS};
+    interact_frame(&ia, &t.w, &t.ph, NULL, &pl, &inv, fx, pl.pos, dir, hit, &use);
+    CHECK(world_get(&t.w, 6, GROUND, 4) == B_PLANKS && world_get(&t.w, 6, GROUND, 3) == B_AIR);
+
+    /* A poppy: not on the planks, but on the grass beside them. */
+    inv_set_held(&inv, B_POPPY, 2);
+    hit = (ray_hit){1, {6, GROUND, 4}, {6, GROUND + 1, 4}, B_PLANKS};
+    interact_out o = interact_frame(&ia, &t.w, &t.ph, NULL, &pl, &inv, fx, pl.pos, dir, hit, &use);
+    CHECK(world_get(&t.w, 6, GROUND + 1, 4) == B_AIR && o.msg != NULL && inv_held(&inv)->count == 2);
+    hit = (ray_hit){1, {8, GROUND - 1, 4}, {8, GROUND, 4}, B_GRASS};
+    interact_frame(&ia, &t.w, &t.ph, NULL, &pl, &inv, fx, pl.pos, dir, hit, &use);
+    CHECK(world_get(&t.w, 8, GROUND, 4) == B_POPPY && inv_held(&inv)->count == 1);
+    mem_free(fx);
+    tw_free(&t);
+}
+
 void test_tools_all(void)
 {
+    test_plant_blocks();
+    test_plants_by_hand();
     test_ground();
     test_materials();
     test_rules();

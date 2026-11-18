@@ -2,8 +2,10 @@
  *
  * Vertex format: one uint32 per vertex (4 bytes), decoded in block.vert:
  *   bits  0-4  x (0..16)     bits  5-9  y     bits 10-14 z
- *   bits 15-17 face (0..5: +X -X +Y -Y +Z -Z)
- *   bits 18-19 ambient occlusion (0 = darkest, 3 = unoccluded)
+ *   bits 15-17 face (0..5: +X -X +Y -Y +Z -Z; 6, 7: a plant's crossed
+ *              quads, on the cell's two diagonals)
+ *   bits 18-19 ambient occlusion (0 = darkest, 3 = unoccluded; on a
+ *              plant 3 marks the top edge, which sways)
  *   bits 20-27 texture layer
  *   bits 28-31 vertical drop in 1/8 block (water surfaces, and the foot of
  *              the side face on a step down to lower water)
@@ -38,9 +40,11 @@ typedef struct {
     uint32_t opaque, trans;
     /* Opaque quads are grouped by face (+X -X +Y -Y +Z -Z); group f ends
      * at quad face_end[f], so the renderer can skip groups facing away.
-     * The cut-out quads (leaves) follow, up to `opaque`: they are drawn
-     * with depth like the rest, in their own pipeline. */
+     * The cut-out quads follow, up to `opaque`: they are drawn with depth
+     * like the rest, in their own pipeline. Leaves come first, up to
+     * leaf_end, then plants, which cast no shadow. */
     uint16_t face_end[6];
+    uint16_t leaf_end;
 } mesh_counts;
 
 /* Writes opaque quads first, then cut-out ones, then translucent ones.
