@@ -14,10 +14,12 @@
 #include "mathlib.h"
 #include "mem.h"
 #include "noise.h"
+#include "os.h"
 #include "physics.h"
 #include "trees.h"
 #include "world.h"
 
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -135,6 +137,27 @@ static slow slow_at(uint32_t seed, int x, int z)
     return s;
 }
 
+/* slow_at is the dearest call in the generator (the rain shadow alone
+ * shapes the land five times), and every point query a column makes for
+ * its own blocks, its rivers and the trees rooted around it asks again for
+ * the same few grid points. Each thread keeps the latest ones; a hit
+ * returns exactly what slow_at would, so nothing depends on which thread
+ * or column asked first. */
+#define SLOW_MEMO 256
+typedef struct {
+    uint32_t seed;
+    int x, z, used;
+    slow s;
+} slow_memo;
+static OS_THREAD_LOCAL slow_memo g_slow_memo[SLOW_MEMO];
+
+static slow slow_node(uint32_t seed, int x, int z)
+{
+    slow_memo *m = &g_slow_memo[hash2i(seed, x, z) & (SLOW_MEMO - 1)];
+    if (!m->used || m->seed != seed || m->x != x || m->z != z) *m = (slow_memo){seed, x, z, 1, slow_at(seed, x, z)};
+    return m->s;
+}
+
 /* Bilinear between the four grid points around a block: a at (x0, z0), b
  * at (x0 + SLOW, z0), c at (x0, z0 + SLOW), d at (x0 + SLOW, z0 + SLOW). */
 static float mix4(float a, float b, float c, float d, float u, float w)
@@ -154,8 +177,8 @@ static slow slow_mix(const slow *a, const slow *b, const slow *c, const slow *d,
 static slow slow_point(uint32_t seed, int x, int z)
 {
     int x0 = (int)(floor(x / (double)SLOW) * SLOW), z0 = (int)(floor(z / (double)SLOW) * SLOW);
-    slow a = slow_at(seed, x0, z0), b = slow_at(seed, x0 + SLOW, z0);
-    slow c = slow_at(seed, x0, z0 + SLOW), d = slow_at(seed, x0 + SLOW, z0 + SLOW);
+    slow a = slow_node(seed, x0, z0), b = slow_node(seed, x0 + SLOW, z0);
+    slow c = slow_node(seed, x0, z0 + SLOW), d = slow_node(seed, x0 + SLOW, z0 + SLOW);
     return slow_mix(&a, &b, &c, &d, (float)(x - x0) / SLOW, (float)(z - z0) / SLOW);
 }
 
@@ -297,7 +320,7 @@ static int wet_far(const wet_field *f) { return f->dist >= RIVER_REACH && f->lak
  * it, so a river runs below its banks. */
 static float level_corner(uint32_t seed, int x, int z)
 {
-    slow s = slow_at(seed, x, z);
+    slow s = slow_node(seed, x, z);
     float fine = 0.0f;
     return land_at(seed, x, z, &s, &fine) - 2.0f;
 }
@@ -820,31 +843,105 @@ static void place_ores(uint32_t seed, column *c)
 
 /* ------------------------------------------------------------- trees */
 
-/* Which tree grows: by biome, warmth and rain, with a slow patch field so
- * neighbours tend to be the same kind and a forest comes in stands of it.
- * Willows grow by water, redwoods in the wettest mild forests, palms on
- * warm beaches, baobabs and umbrella pines in hot dry country. Returns -1
- * for none. */
-static int tree_kind_at(biome b, const local *l, float patch, uint32_t h, int by_water)
+/* A wood is mostly one kind of tree: a birch wood, an oak wood, a cherry
+ * grove, with a few of one other kind among them. Which wood grows where
+ * is a cell pattern of STAND_CELL metres (the nearest of one jittered
+ * point per cell, looked up through a warp so the edges wander), and what
+ * a wood can be depends on the biome and climate at each tree. */
+#define STAND_CELL 160
+#define STAND_MAIN 85 /* % of a wood's trees of its main kind */
+
+typedef struct {
+    uint8_t main, mate;
+} stand;
+
+static const stand TAIGA_WOODS[] = {{TREE_SPRUCE, TREE_BIRCH},
+                                    {TREE_PINE, TREE_SPRUCE},
+                                    {TREE_SPRUCE, TREE_PINE},
+                                    {TREE_BIRCH, TREE_SPRUCE}};
+static const stand ALPINE_WOODS[] = {{TREE_MOUNTAIN_PINE, TREE_SPRUCE},
+                                     {TREE_SPRUCE, TREE_MOUNTAIN_PINE},
+                                     {TREE_MOUNTAIN_PINE, TREE_PINE}};
+static const stand COLD_WOODS[] = {{TREE_SPRUCE, TREE_BIRCH},
+                                   {TREE_BIRCH, TREE_SPRUCE},
+                                   {TREE_MAPLE, TREE_BIRCH},
+                                   {TREE_OAK, TREE_SPRUCE}};
+static const stand RAIN_WOODS[] = {{TREE_REDWOOD, TREE_MAPLE},
+                                   {TREE_REDWOOD, TREE_BIRCH},
+                                   {TREE_OAK, TREE_MAPLE},
+                                   {TREE_MAPLE, TREE_BIRCH}};
+static const stand WARM_WOODS[] = {{TREE_OAK, TREE_UMBRELLA},
+                                   {TREE_UMBRELLA, TREE_OAK},
+                                   {TREE_CHERRY, TREE_MAPLE},
+                                   {TREE_MAPLE, TREE_OAK}};
+static const stand MILD_WOODS[] = {{TREE_OAK, TREE_BIRCH},    {TREE_BIRCH, TREE_OAK},  {TREE_MAPLE, TREE_OAK},
+                                   {TREE_CHERRY, TREE_BIRCH}, {TREE_PINE, TREE_BIRCH}, {TREE_OAK, TREE_MAPLE}};
+static const stand WET_WOODS[] = {{TREE_WILLOW, TREE_BIRCH}, {TREE_BIRCH, TREE_WILLOW}, {TREE_OAK, TREE_WILLOW}};
+static const stand MEADOW_WOODS[] = {{TREE_OAK, TREE_BIRCH},
+                                     {TREE_BIRCH, TREE_OAK},
+                                     {TREE_CHERRY, TREE_OAK},
+                                     {TREE_MAPLE, TREE_BIRCH}};
+static const stand HOT_DRY_WOODS[] = {{TREE_THORN, TREE_BAOBAB},
+                                      {TREE_BAOBAB, TREE_THORN},
+                                      {TREE_UMBRELLA, TREE_THORN}};
+static const stand WARM_DRY_WOODS[] = {{TREE_UMBRELLA, TREE_THORN},
+                                       {TREE_THORN, TREE_PINE},
+                                       {TREE_PINE, TREE_UMBRELLA}};
+static const stand COOL_DRY_WOODS[] = {{TREE_PINE, TREE_THORN}, {TREE_THORN, TREE_PINE}};
+
+#define WOODS(a) (a), (int)(sizeof(a) / sizeof((a)[0]))
+
+/* The hash of the wood (x, z) lies in: the same for every tree in it. */
+static uint32_t stand_at(uint32_t seed, int x, int z)
 {
-    int u = clampi((int)(h % 100u) + (int)(patch * 30.0f), 0, 99);
+    double wx = x + 40.0 * (double)fbm2d(seed + 313, x / 90.0, z / 90.0, 2);
+    double wz = z + 40.0 * (double)fbm2d(seed + 317, x / 90.0, z / 90.0, 2);
+    int cx = (int)floor(wx / STAND_CELL), cz = (int)floor(wz / STAND_CELL);
+    double best = 1e300;
+    uint32_t won = 0;
+    for (int dz = -1; dz <= 1; dz++)
+        for (int dx = -1; dx <= 1; dx++) {
+            uint32_t h = hash2i(seed ^ 0x5A17D5EEU, cx + dx, cz + dz);
+            double px = (cx + dx + (h & 0xFFFFu) / 65536.0) * STAND_CELL - wx;
+            double pz = (cz + dz + (h >> 16) / 65536.0) * STAND_CELL - wz;
+            double d = px * px + pz * pz;
+            if (d < best) {
+                best = d;
+                won = hash_u32(h);
+            }
+        }
+    return won;
+}
+
+static int stand_pick(const stand *woods, int n, uint32_t wood, uint32_t h)
+{
+    const stand *s = &woods[wood % (uint32_t)n];
+    return h % 100u < STAND_MAIN ? s->main : s->mate;
+}
+
+/* Which tree grows: the kind the wood around it is of, by biome, warmth
+ * and rain. Willows grow by water, redwoods in the wettest mild forests,
+ * palms on warm beaches, baobabs and umbrella pines in hot dry country.
+ * Returns -1 for none. */
+static int tree_kind_at(biome b, const local *l, uint32_t wood, uint32_t h, int by_water)
+{
     float t = l->temp;
     if (by_water && t > 4.0f && b != BIOME_BEACH && b != BIOME_DESERT && (h >> 7) % 100u < 60u) return TREE_WILLOW;
     switch (b) {
-    case BIOME_TAIGA: return u < 50 ? TREE_SPRUCE : (u < 82 ? TREE_PINE : TREE_BIRCH);
-    case BIOME_ALPINE: return u < 60 ? TREE_MOUNTAIN_PINE : (u < 88 ? TREE_SPRUCE : TREE_PINE);
+    case BIOME_TAIGA: return stand_pick(WOODS(TAIGA_WOODS), wood, h);
+    case BIOME_ALPINE: return stand_pick(WOODS(ALPINE_WOODS), wood, h);
     case BIOME_FOREST:
-        if (t < 5.0f) return u < 35 ? TREE_SPRUCE : (u < 65 ? TREE_BIRCH : (u < 85 ? TREE_OAK : TREE_MAPLE));
-        if (l->rain > 0.65f && t < 16.0f && u >= 60) return TREE_REDWOOD;
-        if (t > 14.0f) return u < 35 ? TREE_OAK : (u < 55 ? TREE_UMBRELLA : (u < 75 ? TREE_CHERRY : TREE_MAPLE));
-        return u < 40 ? TREE_OAK : (u < 55 ? TREE_BIRCH : (u < 77 ? TREE_MAPLE : (u < 87 ? TREE_CHERRY : TREE_PINE)));
-    case BIOME_WETLAND: return u < 45 ? TREE_WILLOW : (u < 75 ? TREE_BIRCH : TREE_OAK);
-    case BIOME_MEADOW: return u < 55 ? TREE_OAK : (u < 70 ? TREE_BIRCH : (u < 85 ? TREE_CHERRY : TREE_MAPLE));
+        if (t < 5.0f) return stand_pick(WOODS(COLD_WOODS), wood, h);
+        if (l->rain > 0.65f && t < 16.0f) return stand_pick(WOODS(RAIN_WOODS), wood, h);
+        if (t > 14.0f) return stand_pick(WOODS(WARM_WOODS), wood, h);
+        return stand_pick(WOODS(MILD_WOODS), wood, h);
+    case BIOME_WETLAND: return stand_pick(WOODS(WET_WOODS), wood, h);
+    case BIOME_MEADOW: return stand_pick(WOODS(MEADOW_WOODS), wood, h);
     case BIOME_SCRUB:
     case BIOME_STEPPE:
-        if (t > 16.0f) return u < 55 ? TREE_THORN : (u < 80 ? TREE_BAOBAB : TREE_UMBRELLA);
-        if (t > 10.0f) return u < 40 ? TREE_UMBRELLA : (u < 70 ? TREE_THORN : TREE_PINE);
-        return u < 65 ? TREE_PINE : TREE_THORN;
+        if (t > 16.0f) return stand_pick(WOODS(HOT_DRY_WOODS), wood, h);
+        if (t > 10.0f) return stand_pick(WOODS(WARM_DRY_WOODS), wood, h);
+        return stand_pick(WOODS(COOL_DRY_WOODS), wood, h);
     case BIOME_BEACH: return t > 18.0f ? TREE_PALM : -1;
     default: return TREE_OAK;
     }
@@ -1056,32 +1153,42 @@ static uint8_t top_at(uint32_t seed, int x, int z, int h, const slow *s, const l
     return soil_at(l->b, h, slope, rise, l, fine, B_STONE).top;
 }
 
-/* A tree rooted at (x, z), and everything it needs to grow there: each
- * column it reaches works this out alone, from the seed. */
+/* A tree rooted at (x, z), and everything it needs to grow there. */
 typedef struct {
-    int y, kind, vines;
+    int x, y, z, kind, vines;
     tree_age age;
     uint32_t h;
 } tree_site;
 
-static int tree_site_at(uint32_t seed, int x, int z, tree_site *out)
+/* At most one tree roots in each TREE_CELL square, somewhere in it: the
+ * densest forest (TREES_MAX) fills under half the cells, and a column has
+ * a sixteenth of the candidates it would have tried block by block. */
+#define TREE_CELL 4
+#define TREE_CELLS (CHUNK_W / TREE_CELL)
+_Static_assert(CHUNK_W % TREE_CELL == 0, "tree cells tile a column");
+_Static_assert(TREES_MAX * TREE_CELL * TREE_CELL < 10000u, "a cell holds one tree at most");
+_Static_assert(TREE_REACH <= CHUNK_W, "a tree reaches no further than the next column");
+
+static int tree_site_at(uint32_t seed, int gx, int gz, tree_site *out)
 {
-    uint32_t h = hash2i(seed ^ 0xA5A5A5A5U, x, z), roll = h % 10000u;
+    uint32_t h = hash2i(seed ^ 0xA5A5A5A5U, gx, gz), g = hash_u32(h), roll = (h >> 8) % 10000u;
+    const uint32_t area = TREE_CELL * TREE_CELL;
+    int x = gx * TREE_CELL + (int)(h & (TREE_CELL - 1)), z = gz * TREE_CELL + (int)((h >> 4) & (TREE_CELL - 1));
     /* The cheap tests first: most ground grows no tree. */
-    if (roll >= TREES_MAX) return 0;
+    if (roll >= TREES_MAX * area) return 0;
     float stand = sat(0.55f + 1.4f * fbm2d(seed + 301, x / 120.0, z / 120.0, 2));
-    if ((float)roll >= (float)TREES_MAX * stand) return 0;
+    if ((float)roll >= (float)(TREES_MAX * area) * stand) return 0;
     slow s = {{0}, 0.0f, 0.0f, 0.0f, 0.0f};
     int h0 = 0;
     wet self = wet_point(seed, x, z, &h0, &s);
     if (self.water || self.river) return 0;
     local l = local_at(seed, x, z, &s, h0);
-    if ((float)roll >= (float)TREES[l.b] * stand) return 0;
+    if ((float)roll >= (float)(TREES[l.b] * area) * stand) return 0;
     int level = 0, y = ground_at(seed, x, z, &level, NULL, NULL);
     if (level || y >= WORLD_H - TREE_UP) return 0;
     wet_field f = wet_field_at(seed, x, z);
-    int kind = tree_kind_at(l.b, &l, fbm2d(seed + 311, x / 70.0, z / 70.0, 2), h >> 8,
-                            f.dist < 8.0f || f.lake > LAKE_RIM - 0.08f);
+    h = g;
+    int kind = tree_kind_at(l.b, &l, stand_at(seed, x, z), h >> 8, f.dist < 8.0f || f.lake > LAKE_RIM - 0.08f);
     if (kind < 0) return 0;
     uint8_t top = top_at(seed, x, z, y, &s, &l);
     if (kind == TREE_PALM ? top != B_SAND : top != B_GRASS && top != B_PODZOL) return 0;
@@ -1100,25 +1207,87 @@ static int tree_site_at(uint32_t seed, int x, int z, tree_site *out)
             if (ground_at(seed, cx, cz, &lv, NULL, NULL) != y || lv || cave_hollow(seed, cx, cz, y, 2)) age = AGE_GROWN;
         }
     }
-    *out = (tree_site){y, kind, l.rain > 0.6f && l.temp > 12.0f && (l.b == BIOME_FOREST || l.b == BIOME_WETLAND), age,
-                       h >> 8};
+    *out = (tree_site){
+        x, y, z, kind, l.rain > 0.6f && l.temp > 12.0f && (l.b == BIOME_FOREST || l.b == BIOME_WETLAND), age, h >> 8};
     return 1;
 }
 
+/* The trees rooted in one column's footprint. Every column a tree reaches
+ * needs it, so up to four columns would each work out the same sites;
+ * instead the first to ask keeps the list in a table every worker shares.
+ * A list is a pure function of the seed and the column, so which worker
+ * made it never shows. Each slot has a spin lock held only for the copy. */
+typedef struct {
+    uint32_t seed;
+    int cx, cz, n, used;
+    tree_site site[TREE_CELLS * TREE_CELLS];
+} site_list;
+
+#define SITE_CACHE 512
+static site_list g_sites[SITE_CACHE];
+static atomic_int g_sites_busy[SITE_CACHE];
+
+static void sites_lock(atomic_int *l)
+{
+    while (atomic_exchange_explicit(l, 1, memory_order_acquire))
+        while (atomic_load_explicit(l, memory_order_relaxed)) {
+            /* wait without writing, so the line stays shared until it frees */
+        }
+}
+
+static void column_sites(uint32_t seed, int cx, int cz, site_list *out)
+{
+    uint32_t slot = hash2i(seed ^ 0x51735173U, cx, cz) & (SITE_CACHE - 1);
+    sites_lock(&g_sites_busy[slot]);
+    const site_list *k = &g_sites[slot];
+    int hit = k->used && k->seed == seed && k->cx == cx && k->cz == cz;
+    if (hit) *out = *k;
+    atomic_store_explicit(&g_sites_busy[slot], 0, memory_order_release);
+    if (hit) return;
+    *out = (site_list){.seed = seed, .cx = cx, .cz = cz, .used = 1};
+    for (int gz = 0; gz < TREE_CELLS; gz++)
+        for (int gx = 0; gx < TREE_CELLS; gx++) {
+            tree_site s = {0, 0, 0, 0, 0, AGE_GROWN, 0};
+            if (tree_site_at(seed, cx * TREE_CELLS + gx, cz * TREE_CELLS + gz, &s)) out->site[out->n++] = s;
+        }
+    sites_lock(&g_sites_busy[slot]);
+    g_sites[slot] = *out;
+    atomic_store_explicit(&g_sites_busy[slot], 0, memory_order_release);
+}
+
+void worldgen_forget(void)
+{
+    for (int i = 0; i < SITE_CACHE; i++) g_sites[i].used = 0;
+}
+
 /* Every tree rooted within reach of the column, in the same order in
- * every column, so where two trees' crowns meet, both columns keep the
- * same one. */
+ * every column (by z, then x), so where two trees' crowns meet, both
+ * columns keep the same one. */
 static void grow_trees(uint32_t seed, column *c)
 {
     int bx = c->cx * CHUNK_W, bz = c->cz * CHUNK_W;
-    tree_shape t;
-    for (int z = bz - TREE_REACH; z < bz + CHUNK_W + TREE_REACH; z++)
-        for (int x = bx - TREE_REACH; x < bx + CHUNK_W + TREE_REACH; x++) {
-            tree_site s = {0, 0, 0, AGE_GROWN, 0};
-            if (!tree_site_at(seed, x, z, &s)) continue;
-            tree_grow(&t, s.kind, s.age, s.h, s.vines);
-            tree_place(&t, c, x, s.y, z);
+    tree_site near[9 * TREE_CELLS * TREE_CELLS];
+    int n = 0;
+    site_list l;
+    for (int dz = -1; dz <= 1; dz++)
+        for (int dx = -1; dx <= 1; dx++) {
+            column_sites(seed, c->cx + dx, c->cz + dz, &l);
+            for (int i = 0; i < l.n; i++) {
+                tree_site s = l.site[i];
+                if (s.x < bx - TREE_REACH || s.x >= bx + CHUNK_W + TREE_REACH || s.z < bz - TREE_REACH ||
+                    s.z >= bz + CHUNK_W + TREE_REACH)
+                    continue;
+                int j = n++;
+                for (; j > 0 && (near[j - 1].z > s.z || (near[j - 1].z == s.z && near[j - 1].x > s.x)); j--)
+                    near[j] = near[j - 1];
+                near[j] = s;
+            }
         }
+    tree_shape t;
+    for (int i = 0; i < n; i++) {
+        tree_grow(&t, near[i].kind, near[i].age, near[i].h, near[i].vines);
+        tree_place(&t, c, near[i].x, near[i].y, near[i].z);
+    }
 }
 
 void worldgen_column(uint32_t seed, column *c)
@@ -1130,7 +1299,7 @@ void worldgen_column(uint32_t seed, column *c)
     geo gnode[4][4];
     for (int k = 0; k < 4; k++)
         for (int i = 0; i < 4; i++) {
-            node[k][i] = slow_at(seed, bx + (i - 1) * SLOW, bz + (k - 1) * SLOW);
+            node[k][i] = slow_node(seed, bx + (i - 1) * SLOW, bz + (k - 1) * SLOW);
             gnode[k][i] = geo_at(seed, bx + (i - 1) * SLOW, bz + (k - 1) * SLOW);
         }
 

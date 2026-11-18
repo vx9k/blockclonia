@@ -15,6 +15,7 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 static uint64_t hash_columns(uint32_t seed)
 {
@@ -127,7 +128,7 @@ static void test_climate(void)
 static void test_generators(void)
 {
     /* Worlds keep growing exactly as they began. */
-    CHECK(hash_columns(1337) == 0xbc3b53f430ec2608ull);
+    CHECK(hash_columns(1337) == 0x49a91d26b64c5f7dull);
 
     long ore[3] = {0}, cave = 0, under = 0, bad_band = 0, hanging = 0, no_bedrock = 0, bad_ground = 0;
     long mouths = 0, mouth_cols = 0, cols = 0, fox = 0, bad_fox = 0;
@@ -974,7 +975,7 @@ static void test_tree_climate(void)
 {
     long feet = 0, wrong = 0, lying = 0, lying_wrong = 0;
     int seen[TREE_KINDS] = {0};
-    for (int i = 0; i < 120; i++) {
+    for (int i = 0; i < 200; i++) {
         int cx = (i * 2741) % 2400 - 1200, cz = (i * 3571) % 2400 - 1200;
         column *c = column_alloc(cx, cz);
         worldgen_column(1337, c);
@@ -1112,8 +1113,255 @@ static void test_tree_seams(void)
     mem_free(g);
 }
 
+/* The generator remembers the slow fields it worked out last (and, for
+ * trees, which grow where). A remembered answer must be the one it would
+ * work out again: the same points, sampled cold, after another seed and
+ * after enough other points to push them out, come back bit for bit, and
+ * a column grown after its neighbours is the column grown alone. */
+static void test_worldgen_memo(void)
+{
+    enum { N = 40 };
+    worldgen_point first[N] = {{0}};
+    for (int i = 0; i < N; i++) first[i] = worldgen_sample(4242, i * 97 - 1900, i * 61 + 300);
+    for (int i = 0; i < 3000; i++) (void)worldgen_sample(i & 1 ? 4242 : 4243, i * 13 - 20000, i * 7);
+    int same = 1;
+    for (int i = 0; i < N; i++) {
+        (void)worldgen_sample(4243, i * 97 - 1900, i * 61 + 300); /* the same point in another world */
+        worldgen_point again = worldgen_sample(4242, i * 97 - 1900, i * 61 + 300);
+        same &= again.height == first[i].height && again.level == first[i].level && again.temp == first[i].temp &&
+                again.rain == first[i].rain && again.b == first[i].b;
+    }
+    CHECK(same);
+
+    column *alone = column_alloc(3, -2);
+    worldgen_column(4242, alone);
+    for (int dz = -1; dz <= 1; dz++)
+        for (int dx = -1; dx <= 1; dx++) {
+            column *n = column_alloc(3 + dx, -2 + dz);
+            worldgen_column(dx ? 4243 : 4242, n);
+            column_free(n);
+        }
+    column *after = column_alloc(3, -2);
+    worldgen_column(4242, after);
+    CHECK(memcmp(alone->blocks, after->blocks, COL_VOL) == 0);
+    CHECK(!alone->meta == !after->meta && (!alone->meta || memcmp(alone->meta, after->meta, COL_VOL) == 0));
+    column_free(alone);
+    column_free(after);
+}
+
+/* Standing trunks in a column by kind: a log standing on something that
+ * is neither log, leaves nor air, with a log above it. */
+static int count_trunks(const column *c, int seen[TREE_KINDS])
+{
+    int feet = 0;
+    for (int z = 0; z < CHUNK_W; z++)
+        for (int x = 0; x < CHUNK_W; x++)
+            for (int y = 2; y < WORLD_H - 1; y++) {
+                int ci = col_index(x, y, z);
+                uint8_t b = c->blocks[ci], under = c->blocks[ci - COL_AREA], m = c->meta ? c->meta[ci] : 0;
+                if (!block_log(b) || block_log(under) || block_leaves(under) || under == B_AIR) continue;
+                if ((m & 3) != LOG_UP || !block_log(c->blocks[ci + COL_AREA])) continue;
+                seen[block_tree(b)]++;
+                feet++;
+            }
+    return feet;
+}
+
+/* Trunks counted around up to eight spots of the given biomes, far apart:
+ * how many spots, how many trunks were of each spot's commonest kind, of
+ * how many, and how many different kinds were commonest somewhere. A spot
+ * is span x span columns whose middle and four points around it all lie
+ * in one of the biomes, with at least 8 trunks to judge by. */
+typedef struct {
+    int spots, kinds;
+    long main_feet, all_feet;
+} woods_tally;
+
+static woods_tally tally_woods(const biome *want, int nwant, int span)
+{
+    woods_tally t = {0, 0, 0, 0};
+    int mains[TREE_KINDS] = {0}, r = span * CHUNK_W / 2;
+    for (int i = 0; i < 6000 && t.spots < 8; i++) {
+        int x = (i * 7919) % 60000 - 30000, z = (i * 104729) % 60000 - 30000;
+        int inside = 1;
+        for (int k = 0; k < 5 && inside; k++) {
+            worldgen_point p = worldgen_sample(1337, x + (k == 1) * r - (k == 2) * r, z + (k == 3) * r - (k == 4) * r);
+            inside = 0;
+            for (int w = 0; w < nwant; w++) inside |= p.b == want[w];
+        }
+        if (!inside) continue;
+        int seen[TREE_KINDS] = {0}, feet = 0;
+        int cx = (int)floor((x - r) / (double)CHUNK_W), cz = (int)floor((z - r) / (double)CHUNK_W);
+        for (int dz = 0; dz < span; dz++)
+            for (int dx = 0; dx < span; dx++) {
+                column *c = column_alloc(cx + dx, cz + dz);
+                worldgen_column(1337, c);
+                feet += count_trunks(c, seen);
+                column_free(c);
+            }
+        if (feet < 8) continue;
+        int top = 0;
+        for (int k = 1; k < TREE_KINDS; k++)
+            if (seen[k] > seen[top]) top = k;
+        mains[top] = 1;
+        t.main_feet += seen[top];
+        t.all_feet += feet;
+        t.spots++;
+    }
+    for (int k = 0; k < TREE_KINDS; k++) t.kinds += mains[k];
+    return t;
+}
+
+/* Woods are mostly of one kind, and not every wood is of the same kind.
+ * Trees used to take their kind one by one, so a forest mixed four or
+ * five kinds evenly: around a spot the commonest was 58 % of the trunks
+ * in forest, 55 % in taiga and 84 % in dry country. Counting willows by
+ * the streams and each wood's companion kind, woods make it 70 %, 78 %
+ * and 94 %. */
+static void test_forest_woods(void)
+{
+    static const biome FOREST[] = {BIOME_FOREST}, CONIFER[] = {BIOME_TAIGA}, DRY[] = {BIOME_SCRUB, BIOME_STEPPE};
+    woods_tally f = tally_woods(FOREST, 1, 2);
+    CHECK(f.spots >= 5 && f.kinds >= 2);
+    CHECK(f.main_feet * 100 >= f.all_feet * 65);
+    woods_tally c = tally_woods(CONIFER, 1, 2);
+    CHECK(c.spots >= 3 && c.kinds >= 2);
+    CHECK(c.main_feet * 100 >= c.all_feet * 70);
+    /* Dry country is thinly wooded: look over nine columns a spot. */
+    woods_tally d = tally_woods(DRY, 2, 3);
+    CHECK(d.spots >= 3);
+    CHECK(d.main_feet * 100 >= d.all_feet * 90);
+}
+
+/* Whether a trunk stands on the ground at (x, z) of a column: an upright
+ * log with an upright log above it and soil under it. */
+static int trunk_foot(const column *c, int x, int z)
+{
+    for (int y = 2; y < WORLD_H - 1; y++) {
+        int ci = col_index(x, y, z);
+        uint8_t b = c->blocks[ci], under = c->blocks[ci - COL_AREA], m = c->meta ? c->meta[ci] : 0;
+        if (!block_log(b) || block_log(under) || block_leaves(under) || under == B_AIR) continue;
+        if ((m & 3) == LOG_UP && block_log(c->blocks[ci + COL_AREA])) return 1;
+    }
+    return 0;
+}
+
+/* Trees root at most one to a 4 x 4 cell. Trunk feet that touch (a
+ * redwood's broad foot and buttresses, or two trees side by side across a
+ * cell edge) count as one tree, at their middle. Over the inner cells of
+ * 2 x 2 columns at a dozen forest spots, returns the most trees in one
+ * cell and counts the trees. */
+static int trees_per_cell(int *trees)
+{
+    static uint8_t foot[32][32], done[32][32];
+    static int stack[1024][2];
+    int most = 0, spots = 0;
+    *trees = 0;
+    for (int i = 0; i < 6000 && spots < 12; i++) {
+        int x = (i * 7919) % 60000 - 30000, z = (i * 104729) % 60000 - 30000;
+        biome b = worldgen_sample(1337, x + 16, z + 16).b;
+        if (b != BIOME_FOREST && b != BIOME_TAIGA) continue;
+        spots++;
+        memset(done, 0, sizeof done);
+        int cx = (int)floor(x / (double)CHUNK_W), cz = (int)floor(z / (double)CHUNK_W);
+        for (int q = 0; q < 4; q++) {
+            column *c = column_alloc(cx + (q & 1), cz + (q >> 1));
+            worldgen_column(1337, c);
+            for (int bz = 0; bz < CHUNK_W; bz++)
+                for (int bx = 0; bx < CHUNK_W; bx++)
+                    foot[(q >> 1) * CHUNK_W + bz][(q & 1) * CHUNK_W + bx] = (uint8_t)trunk_foot(c, bx, bz);
+            column_free(c);
+        }
+        int count[8][8] = {{0}};
+        for (int z0 = 0; z0 < 32; z0++)
+            for (int x0 = 0; x0 < 32; x0++) {
+                if (!foot[z0][x0] || done[z0][x0]) continue;
+                int n = 1, sx = 0, sz = 0, k = 0, edge = 0;
+                stack[0][0] = x0;
+                stack[0][1] = z0;
+                done[z0][x0] = 1;
+                while (n > 0) {
+                    n--;
+                    int px = stack[n][0], pz = stack[n][1];
+                    sx += px;
+                    sz += pz;
+                    k++;
+                    edge |= px == 0 || pz == 0 || px == 31 || pz == 31;
+                    for (int d = 0; d < 9; d++) {
+                        int nx = px + d % 3 - 1, nz = pz + d / 3 - 1;
+                        if (nx < 0 || nz < 0 || nx > 31 || nz > 31 || !foot[nz][nx] || done[nz][nx]) continue;
+                        done[nz][nx] = 1;
+                        stack[n][0] = nx;
+                        stack[n][1] = nz;
+                        n++;
+                    }
+                }
+                if (edge) continue;
+                int *cell = &count[sz / k / 4][sx / k / 4];
+                (*cell)++;
+                (*trees)++;
+                if (*cell > most) most = *cell;
+            }
+    }
+    return most;
+}
+
+/* Trees used to be tried block by block, so two could root a block or two
+ * apart (main had 2 in one cell of 71 trees here); now each 4 x 4 cell
+ * roots one tree at a jittered spot or none. */
+static void test_tree_cells(void)
+{
+    int trees = 0, most = trees_per_cell(&trees);
+    CHECK(trees >= 40);
+    CHECK(most == 1);
+}
+
+/* Columns grown on several workers at once, sharing the remembered tree
+ * sites as they fill them in, are the columns one thread grows alone. */
+typedef struct {
+    job j;
+    column *c;
+} gen_job;
+
+static void gen_run(job *j) { worldgen_column(777001, ((gen_job *)j)->c); }
+static void gen_done(job *j) { (void)j; }
+
+static void test_worldgen_threads(void)
+{
+    enum { W = 4, N = W * W };
+    column *ref[N] = {NULL}, *par[N] = {NULL};
+    gen_job work[N] = {{{NULL, NULL, NULL}, NULL}};
+    worldgen_forget();
+    for (int i = 0; i < N; i++) {
+        ref[i] = column_alloc(i % W, i / W);
+        worldgen_column(777001, ref[i]);
+    }
+    worldgen_forget();
+    jobs *js = jobs_create(4);
+    for (int i = 0; i < N; i++) {
+        par[i] = column_alloc(i % W, i / W);
+        work[i] = (gen_job){{gen_run, gen_done, NULL}, par[i]};
+        jobs_submit(js, &work[i].j);
+    }
+    jobs_wait_idle(js);
+    jobs_poll(js, -1);
+    jobs_destroy(js);
+    int same = 1;
+    for (int i = 0; i < N; i++) {
+        same &= memcmp(ref[i]->blocks, par[i]->blocks, COL_VOL) == 0;
+        same &= !ref[i]->meta == !par[i]->meta && (!ref[i]->meta || memcmp(ref[i]->meta, par[i]->meta, COL_VOL) == 0);
+        column_free(ref[i]);
+        column_free(par[i]);
+    }
+    CHECK(same);
+}
+
 void test_worldgen_all(void)
 {
+    test_worldgen_threads();
+    test_forest_woods();
+    test_tree_cells();
+    test_worldgen_memo();
     test_noise_grad();
     test_noise_wrap();
     test_noise_ranges();

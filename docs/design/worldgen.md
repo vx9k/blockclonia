@@ -153,6 +153,17 @@ should look different for a reason you could explain.
    the leaves, so the shadow map can leave them out; the vertex shader
    bends their tops in the leaves' wind, and the "Leaves and grass
    sway" setting holds both still. Flowers by season wait for seasons.
+
+   *Woods (2026-11-18).* Picking every tree's kind on its own mixed
+   four or five kinds evenly through a forest. Now a forest is made of
+   woods: a cell pattern about 160 m across (the nearest of one
+   jittered point per cell, with wandering edges) gives each spot a
+   wood, and the wood grows one main kind (85 %) and one companion: a
+   birch wood with spruce, an oak wood with maple, a cherry grove, a
+   redwood grove in the wettest mild forest. Which woods a biome can
+   hold follows its climate, as before. Trees root at most one per 4 x 4
+   cell, and each column's list of sites is worked out once and shared
+   by the columns its trees reach.
 8. **Settlements**, as designed below, on top of the new terrain.
 
 **Settlements: villages, houses and towns.** Settlements in the generated
