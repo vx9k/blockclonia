@@ -262,7 +262,9 @@ static void test_tracers(void)
 }
 
 static int near3(const float a[3], float x, float y, float z, float tol)
-{ return fabsf(a[0] - x) < tol && fabsf(a[1] - y) < tol && fabsf(a[2] - z) < tol; }
+{
+    return fabsf(a[0] - x) < tol && fabsf(a[1] - y) < tol && fabsf(a[2] - z) < tol;
+}
 
 /* The shot leaves the barrel's end along the bore: down the sights the bore
  * runs 5.8 cm under the line of sight, parallel to it; at the hip it is low,
