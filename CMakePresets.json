@@ -22,11 +22,11 @@
     },
     {
       "name": "release",
-      "displayName": "Release: -O2 + ThinLTO + PGO + BOLT (where they can run), portable CPU baseline",
+      "displayName": "Release: -O3 + ThinLTO + PGO + BOLT (where they can run), portable CPU baseline",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_C_FLAGS_RELEASE": "-O2 -DNDEBUG",
+        "CMAKE_C_FLAGS_RELEASE": "-O3 -DNDEBUG",
         "MC_LTO": "ON",
         "MC_PGO": "AUTO",
         "MC_BOLT": "AUTO"
