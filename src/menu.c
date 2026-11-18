@@ -1,5 +1,6 @@
 #include "menu.h"
 #include "anim.h"
+#include "gamemode.h"
 #include "health.h"
 #include "palette.h"
 
@@ -259,7 +260,9 @@ static void pause_screen(ctx *c)
     menu *m = c->m;
     ui_rect(u, 0, 0, u->w, u->h, ui_rgba(0, 0, 0, (int)(150.0f * ease_out_cubic(m->age / 0.25f))));
     float x = 0.0f, y = 0.0f;
-    const float w = 200, h = m->can_open ? 184.0f : 162.0f;
+    float h = m->can_open ? 184.0f : 162.0f;
+    const float w = 200;
+    if (m->can_switch) h += 22.0f;
     panel(u, m->age, w, h, &x, &y, "PAUSED");
     if (m->status[0]) ui_text_wrap(u, x + 8, y + 22, w - 16, 2, 1, C_DIM, m->status);
     float by = y + 46, bw = w - 16;
@@ -267,6 +270,12 @@ static void pause_screen(ctx *c)
     if (m->can_open) {
         by += 22;
         if (button(c, x + 8, by, bw, "Open to other players")) c->action = MENU_MP_OPEN;
+    }
+    if (m->can_switch) {
+        by += 22;
+        char label[48] = {0};
+        snprintf(label, sizeof label, "Mode: %s", m->mode_now ? m->mode_now : "?");
+        if (button(c, x + 8, by, bw, label)) c->action = MENU_MODE;
     }
     if (button(c, x + 8, by + 22, bw, "Settings")) menu_open(m, SCREEN_SETTINGS);
     if (button(c, x + 8, by + 44, bw, "Controls")) menu_open(m, SCREEN_CONTROLS);
@@ -403,7 +412,7 @@ static void controls_screen(ctx *c)
         {"Ctrl / double-tap W", "Sprint"},
         {"Shift", "Sneak (won't walk off edges)"},
         {"Space", "Jump / swim up"},
-        {"F", "Fly (no injuries)"},
+        {"F", "Fly (creative)"},
         {"Left click (hold)", "Break / strike / fire"},
         {"Right click", "Place / use / aim (hold)"},
         {"Middle click", "Pick block"},
@@ -598,12 +607,26 @@ static void create_world_screen(ctx *c)
     menu *m = c->m;
     backdrop(c);
     float x = 0.0f, y = 0.0f;
-    const float w = 300, h = 124;
+    const float w = 300, h = 168;
     panel(u, m->age, w, h, &x, &y, "CREATE WORLD");
     int go = text_field(c, x + 8, y + 24, w - 16, "Name", m->text_name, sizeof m->text_name, "New world");
     go |= text_field(c, x + 8, y + 46, w - 16, "Seed", m->text_seed, sizeof m->text_seed, "random");
-    if (m->note[0]) ui_text(u, x + 8, y + 70, 1, C_ART, m->note);
-    float by = y + h - 8 - ROW_H, bw = (w - 16 - 4) / 2;
+    /* Survival, creative or hardcore; a spectator world makes no sense to
+     * start in. Hardcore never allows cheats. */
+    char label[48] = {0};
+    float hw = (w - 16 - 4) / 2;
+    snprintf(label, sizeof label, "Mode: %s", mode_name(m->new_mode));
+    if (button(c, x + 8, y + 70, hw, label))
+        m->new_mode = m->new_mode == MODE_HARDCORE ? MODE_SURVIVAL : m->new_mode + 1;
+    if (m->new_mode == MODE_HARDCORE) m->new_cheats = 0;
+    snprintf(label, sizeof label, "Allow cheats: %s", m->new_cheats ? "On" : "Off");
+    if (button(c, x + 8 + hw + 4, y + 70, hw, label) && m->new_mode != MODE_HARDCORE) m->new_cheats = !m->new_cheats;
+    ui_text(u, x + 8, y + 94, 1, C_DIM,
+            m->new_mode == MODE_CREATIVE   ? "Fly, build freely, no body to look after."
+            : m->new_mode == MODE_HARDCORE ? "One life. After death, you can only watch."
+                                           : "Gather, build and stay alive.");
+    if (m->note[0]) ui_text(u, x + 8, y + 108, 1, C_ART, m->note);
+    float by = y + h - 8 - ROW_H, bw = hw;
     go |= button(c, x + 8, by, bw, "Create");
     if (button(c, x + 8 + bw + 4, by, bw, "Cancel")) menu_open(m, SCREEN_WORLDS);
     if (go && m->screen == SCREEN_CREATE_WORLD) c->action = MENU_WORLD_CREATE;

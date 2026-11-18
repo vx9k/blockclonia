@@ -75,6 +75,7 @@ void test_mp_all(void);
 void test_ballistics_all(void);
 void test_muzzle_all(void);
 void test_recoil_all(void);
+void test_gamemode_all(void);
 void test_worldgen_all(void);
 void test_edge_all(void);
 void test_tools_all(void);

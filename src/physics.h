@@ -67,6 +67,7 @@ typedef struct {
     float yaw, pitch;
     int on_ground;
     int flying;
+    int mode;            /* MODE_* (gamemode.h): what this player may do */
     double submerged;    /* 0..1 fraction of the body in water */
     int sprinting;       /* running flat out (see player_input.sprint) */
     int sneaking;

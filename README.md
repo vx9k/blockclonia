@@ -84,7 +84,7 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
 | Left Ctrl, or double-tap W | Sprint (hold, or toggle in Settings → Controls) |
 | Left Shift | Sneak: slower, and you won't walk off edges (in fly mode: down) |
 | Space | Jump / swim up (in fly mode: up) |
-| F | Toggle fly mode (no injuries while flying) |
+| F | Toggle flying (creative; a spectator always flies) |
 | Left click (hold) | Break the block; takes the material's hardness in seconds, less with the right tool. Strikes a creature or player in reach instead. Fires a held rifle |
 | Right click | Place the held block, use the held item (fill or empty a bucket, eat food, feed a campfire, put a defibrillator's pads on or take them off). Hold with a rifle to bring it up to the cheek and aim down its iron sights: the view zooms 1.25×, and aimed shots spread far less than shots from the hip |
 | Middle click | Pick the targeted block into the hand |
@@ -359,6 +359,24 @@ the coal can. Rock in place holds together as one mass, so a cave roof
 stays up when you dig into it, while a stone block you set yourself can
 only hang as far as any masonry (see [Physics](#physics)).
 
+## Game modes
+
+Each world is made in one mode, chosen on the Create World screen:
+
+| Mode | What it is |
+|---|---|
+| Survival | The whole game: the body is simulated, blocks are dug and placed from the inventory, and flying is off. |
+| Creative | Fly (F), place blocks without using them up, break any block in one click with nothing dropped, and no body to feed, warm or heal. |
+| Hardcore | Survival with one life. Death ends it for good: the world stays open, but only to watch, as a spectator from where you fell. |
+| Spectator | Fly through blocks to look around, with no hands and no body. Reached by switching, or after a hardcore death. |
+
+**Allow cheats** on the same screen lets the world switch modes later:
+a **Mode** button in the pause menu cycles survival, creative and
+spectator, and a host's switch takes every player with it. A world made
+without cheats keeps its mode, and hardcore never allows them. The mode
+and the cheats flag are stored in the world, and the world list shows
+each world's mode.
+
 ## Saves
 
 **Play** on the title screen opens the world list: every world under the
@@ -497,7 +515,7 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
             [--threads N] [--pool-mb N] [--gpu N] [--world DIR | --no-save]
             [--config FILE] [--validate] [--no-sound]
             [--play] [--screen title|worlds|create|multiplayer|pause|settings|controls|debug-health|inventory]
-            [--debug] [--time HH] [--give LIST] [--mobs LIST] [--figures LIST] [--hurt LIST]
+            [--debug] [--time HH] [--mode NAME] [--give LIST] [--mobs LIST] [--figures LIST] [--hurt LIST]
             [--frames N] [--screenshot F] [--look YAW,PITCH] [--spawn X,Z]
             [--demo] [--health-panel] [--bench] [--mem-stats]
             [--host [--port N] [--client-server] | --join ADDR[:PORT]] [--name NAME]
@@ -508,7 +526,8 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
 - `--give log:8,sand:4` starts you with items (names as shown in game).
   `--mobs wolf,boar` stands creatures side by side 4 m in front of you, and
   `--figures walk,run,sneak` does the same with players' figures, moving on the spot.
-  `--time 21` starts at 21:00.
+  `--time 21` starts at 21:00, and `--mode creative` plays this session in
+  a mode (survival, creative, hardcore or spectator) without changing the world's.
 - `--hurt` starts you injured, to try treatments or take screenshots: a
   comma list of names (`--help` lists them all: bleeds, fractures, burns
   of each degree, frostbite, dislocation, crush, infection, hypothermia,

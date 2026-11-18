@@ -408,6 +408,8 @@ void save_db_peek(const char *dir, save_peek *p)
     }
     if (peek_meta(h, "generator", &v) == 0 && v >= 1 && v <= 1000000) p->generator = (int)v;
     if (peek_meta(h, "last_played", &v) == 0 && v > 0) p->last_played = v;
+    if (peek_meta(h, "mode", &v) == 0 && v >= 0 && v <= 3) p->mode = (int)v;
+    if (peek_meta(h, "hardcore", &v) == 0 && v == 1) p->hardcore = 1;
     sqlite3_stmt *s = NULL;
     if (sqlite3_prepare_v2(h, STMT_SQL[S_GET_BLOB], -1, &s, NULL) == SQLITE_OK) {
         sqlite3_bind_text(s, 1, "name", -1, SQLITE_STATIC);

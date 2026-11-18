@@ -1,4 +1,5 @@
 #include "survival.h"
+#include "gamemode.h"
 #include "thermo.h"
 
 #include <math.h>
@@ -23,7 +24,7 @@ void survival_env(const world *w, const player *p, const survival_before *b, int
     e->on_ground = p->on_ground;
     e->jumped = b->on_ground && !p->on_ground && p->vel.y > 3.0;
     e->actions = actions;
-    e->invulnerable = p->flying;
+    e->invulnerable = p->flying || !mode_body(p->mode);
     e->crouched = p->sneaking && p->on_ground;
     e->water_temp = SURVIVAL_WATER_TEMP;
     e->air_temp = e->contact_temp = SURVIVAL_AIR_TEMP;
@@ -47,7 +48,7 @@ void survival_env_thermal(health_env *e, double air_temp, double radiant, double
 
 void survival_impacts(health *h, const world *w, const player_contact *c, const player *p, const survival_before *b)
 {
-    if (p->flying || h->dead) return;
+    if (p->flying || !mode_body(p->mode) || h->dead) return;
     const block_def *ground = block_get(block_at(w, dv3(p->pos.x, p->pos.y - 0.05, p->pos.z)));
     /* Landing on ground: the whole downward speed goes in one stop. */
     int landed = !b->on_ground && p->on_ground;
@@ -97,7 +98,7 @@ void survival_impacts(health *h, const world *w, const player_contact *c, const 
 
 void survival_limit_input(const health *h, const player *p, player_input *in)
 {
-    if (p->flying) return; /* creative flight ignores the body */
+    if (p->flying || !mode_body(p->mode)) return; /* flight and creative ignore the body */
     health_limits l = health_get_limits(h);
     if (!l.has_control) {
         memset(in, 0, sizeof *in);

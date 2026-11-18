@@ -491,7 +491,7 @@ static void hud(ui *u, const health *h, const hud_state *s)
 {
     /* With the F3 overlay up, the vitals move below its left column. */
     const float x = 4, y = s->debug ? DEBUG_LEFT_BOTTOM : 4;
-    vitals(u, h, x, y);
+    if (!s->no_body) vitals(u, h, x, y);
     float ay = y + 60;
     if (s->animated) {
         /* Slide in with an ease-out, fade when cleared. */
@@ -530,10 +530,8 @@ static void hud(ui *u, const health *h, const hud_state *s)
     float by = u->h - 14;
     draw_thought(u, h, s, by - 58);
     if (s->held) ui_text(u, (u->w - ui_text_width(s->held, 1)) * 0.5f, by - 30, 1, C_TEXT, s->held);
-    if (s->flying) {
-        const char *t = "Flying: no injuries, instant building";
-        ui_text_shadow(u, (u->w - ui_text_width(t, 1)) * 0.5f, by - 42, 1, C_DIM, t);
-    }
+    if (s->mode_hint)
+        ui_text_shadow(u, (u->w - ui_text_width(s->mode_hint, 1)) * 0.5f, by - 42, 1, C_DIM, s->mode_hint);
     if (!s->hide_hints) {
         const char *hint = s->chat ? "H: health   Tab: inventory   T: chat" : "H: health   Tab: inventory";
         ui_text_shadow(u, u->w - ui_text_width(hint, 1) - 4, by, 1, ui_alpha(C_DIM, 0.8f), hint);

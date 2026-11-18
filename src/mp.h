@@ -108,6 +108,8 @@ int mp_welcome(const mp *m, uint32_t *seed);
 void mp_attach(mp *m, const mp_world *ctx);
 void mp_destroy(mp *m);
 int mp_is_host(const mp *m);
+/* Host: puts every other player in this mode (the host switched it). */
+void mp_set_mode(mp *m, int mode);
 
 /* Network events: joins and leaves, chat, and on a client everything the
  * host sends. Call once a frame before simulating. */

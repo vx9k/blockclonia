@@ -41,6 +41,7 @@ typedef enum {
     MENU_MP,           /* the multiplayer screen opened: fill text_player if empty */
     MENU_MP_JOIN,      /* join text_addr as text_player */
     MENU_MP_OPEN,      /* pause: open the world being played to other players */
+    MENU_MODE,         /* pause: switch to the next game mode the world allows */
 } menu_action;
 
 typedef struct {
@@ -99,6 +100,12 @@ typedef struct {
     char text_name[MENU_NAME_MAX + 1];
     char text_seed[MENU_SEED_MAX + 1];
     char note[96];
+    int new_mode;      /* create world: MODE_SURVIVAL, _CREATIVE or _HARDCORE */
+    int new_cheats;    /* create world: allow switching modes later */
+    /* Pause: the mode being played, and whether this world may switch
+     * (cheats on, single player or the host). */
+    const char *mode_now;
+    int can_switch;
     int text_focus;    /* a text field had the focus last frame */
     /* Multiplayer: the name and address typed, whether the world picked
      * next is hosted (the world list was opened from the multiplayer
