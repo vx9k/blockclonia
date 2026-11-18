@@ -157,11 +157,16 @@ static void test_shot_drift(void)
     /* Find a moment with a good crosswind across a shot fired east. */
     while (fabs(atmos_wind(c.wind_seed, c.time).z) < 3.0) c.time += 60.0;
     double wz = atmos_wind(c.wind_seed, c.time).z;
-    c.b[0] = (bullet){dv3(8.5, GROUND + 3.0, 8.5), dv3(400.0, 0.0, 0.0), 4.0f, 0, AMMO_BLACK_LEAD};
+    c.b[0] = (bullet){dv3(-44.5, GROUND + 3.0, 8.5), dv3(400.0, 0.0, 0.0), 4.0f, 0, AMMO_BLACK_LEAD};
     c.count = 1;
-    for (int i = 0; i < 12 && c.count; i++) combat_step(&c, &ms, &t.ph, &tg);
-    CHECK(c.count == 1 && c.b[0].pos.x > 60.0);
+    for (int i = 0; i < 10 && c.count; i++) combat_step(&c, &ms, &t.ph, &tg);
+    CHECK(c.count == 1 && c.b[0].pos.x > 15.0);
     CHECK((c.b[0].pos.z - 8.5) * wz > 0.0 && c.b[0].vel.x < 400.0);
+    /* It flies on until the loaded world ends, then stops there rather than
+     * crossing terrain that isn't loaded. */
+    int steps = 10;
+    for (; steps < 600 && c.count; steps++) combat_step(&c, &ms, &t.ph, &tg);
+    CHECK(c.count == 0 && steps < 20);
     mem_free(h);
     tw_free(&t);
 }
@@ -299,6 +304,57 @@ static void test_shot_energy(void)
     tw_free(&t);
 }
 
+/* Range comes from the flight, not a timer. */
+static void test_shot_range(void)
+{
+    test_world t = {0};
+    tw_init(&t);
+    mobs ms = {0};
+    mobs_init(&ms, 7);
+    combat c = {0};
+    combat_init(&c, 7);
+    combat_targets tg = {NULL, NULL, 0};
+    /* Straight up at 60 m/s: still climbing or falling well past the old
+     * 4 s limit, and back on the ground in about 10 s. */
+    c.b[0] = (bullet){dv3(0.5, GROUND + 1.0, 0.5), dv3(0.0, 60.0, 0.0), 60.0f, 0, AMMO_BLACK_LEAD};
+    c.count = 1;
+    int steps = 0;
+    double top = 0.0;
+    for (; steps < 60 * 60 && c.count; steps++) {
+        combat_step(&c, &ms, &t.ph, &tg);
+        if (c.count) top = fmax(top, c.b[0].pos.y);
+        if (steps == 5 * 60) CHECK(c.count == 1);
+    }
+    CHECK(c.count == 0 && steps > 6 * 60 && steps < 30 * 60);
+    /* Drag takes height: less than the vacuum's v²/2g = 183 m. */
+    CHECK(top - (GROUND + 1.0) > 80.0 && top - (GROUND + 1.0) < 183.0);
+
+    /* A shot already outside the loaded world ends at once. */
+    c.b[0] = (bullet){dv3(5000.5, GROUND + 3.0, 0.5), dv3(-400.0, 0.0, 0.0), 60.0f, 0, AMMO_BLACK_LEAD};
+    c.count = 1;
+    CHECK(combat_step(&c, &ms, &t.ph, &tg) == 0 && c.count == 0);
+
+    /* With every slot in flight, a trigger pull still fires: the shot fired
+     * longest ago gives way. */
+    inventory inv = {0};
+    inv_init(&inv);
+    inv_add(&inv, I_RIFLE, 1);
+    inv_add(&inv, I_CARTRIDGE, 1);
+    for (int i = 0; i < COMBAT_SHOTS; i++)
+        c.b[i] = (bullet){dv3(0.5, GROUND + 50.0, 0.5), dv3(0.0, 50.0, 0.0), 20.0f + (float)i, 0, AMMO_BLACK_LEAD};
+    c.b[7].life = 2.0f;
+    c.count = COMBAT_SHOTS;
+    combat_out o = combat_frame(&c, &ms, &t.ph, &tg, 0, &inv, dv3(0.5, GROUND + 1.6, 0.5), v3(1.0f, 0.0f, 0.0f), 5.0, 1,
+                                1.0f, 1.0f / 60.0f);
+    int old = 0, fresh = 0;
+    for (int i = 0; i < c.count; i++) {
+        old += c.b[i].life < 3.0f;
+        fresh += c.b[i].life > 59.0f;
+    }
+    CHECK(o.fired && c.count == COMBAT_SHOTS && old == 0 && fresh == 1 && inv_count(&inv, I_CARTRIDGE) == 0);
+    tw_free(&t);
+}
+
 void test_ballistics_all(void)
 {
     test_atmos();
@@ -308,4 +364,5 @@ void test_ballistics_all(void)
     test_trajectories();
     test_shot_drift();
     test_shot_energy();
+    test_shot_range();
 }

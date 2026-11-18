@@ -7,7 +7,10 @@
 
 #define BULLET_DAMAGE 14.0f
 #define BULLET_JOULES 2100.0 /* the energy BULLET_DAMAGE stands for: the black-powder rifle's at the muzzle */
-#define BULLET_LIFE 4.0f
+/* Only a backstop: a shot ends where it lands, hits or leaves the loaded
+ * world, so its range comes from the flight. The longest any round flies
+ * is about 35 s, a 7.62 mm shot at 37 degrees. */
+#define BULLET_LIFE 60.0f
 /* Steps of flight per physics step: a rifle bullet covers 7 to 14 m in
  * one, too far for one straight segment to follow its drop. */
 #define BULLET_SUBSTEPS 4
@@ -125,6 +128,16 @@ static void injure(combat *c, health *h, int part, float damage, int edged)
     if (part == BP_HEAD && damage >= BULLET_DAMAGE) health_blunt(h, part, 9.0);
 }
 
+/* Makes room for a shot when every slot is in flight by dropping the one
+ * fired longest ago, so a trigger pull that took a cartridge always fires. */
+static void shot_free_oldest(combat *c)
+{
+    int old = 0;
+    for (int i = 1; i < c->count; i++)
+        if (c->b[i].life < c->b[old].life) old = i;
+    c->b[old] = c->b[--c->count];
+}
+
 combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *t, int who, inventory *inv, dvec3 eye,
                         vec3 dir, double block_dist, int attack_click, float aim, float dt)
 {
@@ -140,6 +153,7 @@ combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *
             o.msg = "No cartridges";
             return o;
         }
+        if (c->count == COMBAT_SHOTS) shot_free_oldest(c);
         if (c->count < COMBAT_SHOTS) {
             /* Spread: aimed, a rifle held standing (4 mrad, not clamped in a
              * vice); from the hip the eye isn't behind the sights and shots
@@ -195,6 +209,14 @@ int combat_creatures(combat *c, mobs *ms, physics *ph, const combat_targets *t, 
         health_cut(t->hl[b->who], b->part, 0.1f + 0.12f * frand(c), frand(c) < 0.03f, 0.7f);
     }
     return ev.bite_count + combat_step(c, ms, ph, t);
+}
+
+/* Is the column holding `p` loaded? Past it there is no terrain to hit, so
+ * a shot that flew on would pass through hills that aren't there. */
+static int shot_in_world(const world *w, dvec3 p)
+{
+    int x = (int)floor(p.x), z = (int)floor(p.z);
+    return world_column(w, chunk_of(x), chunk_of(z)) != NULL;
 }
 
 /* One stretch of a bullet's flight, from its position to `to` at speed
@@ -255,7 +277,7 @@ int combat_step(combat *c, mobs *ms, physics *ph, const combat_targets *t)
                 dvec3 to = b->pos, vel = b->vel;
                 ballistics_step(a, &air, &to, &vel, PHYS_DT / BULLET_SUBSTEPS);
                 double speed = dv3_len(b->vel);
-                done = speed < 1.0 || bullet_segment(c, ms, ph, t, b, to, speed, &hits);
+                done = speed < 1.0 || !shot_in_world(ph->w, to) || bullet_segment(c, ms, ph, t, b, to, speed, &hits);
                 b->pos = to;
                 b->vel = vel;
             }
