@@ -11,12 +11,11 @@
 #include "texgen.h"
 #include "thermo.h"
 #include "world.h"
-
-#include <string.h>
 #include "worldgen.h"
 
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 static uint64_t hash_columns(uint32_t seed)
 {
