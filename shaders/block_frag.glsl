@@ -22,10 +22,12 @@ layout(set = 1, binding = 1) uniform mediump sampler2DShadow u_shadow;
 layout(location = 4) in vec4 f_sh;  // highp: depth to a hundredth of a metre in 800; w: shafts
 // The map's matrix (block_vert.glsl): its last column is the eye's place.
 layout(set = 1, binding = 0) uniform ShadowMap { mat4 clip; } u_sh;
-// The sunlight the haze scatters: warm white, before the tone curve.
+// The sunlight the haze scatters, warm white, times the sky's brightness
+// and colour: faint and cool under the moon, orange at dusk.
 const mediump vec3 SHAFT_LIGHT = vec3(1.0, 0.92, 0.78);
 const int SHAFT_TAPS = 8;
-// f_layer's bits 8-15 hold the shadow's extra shift (block_vert.glsl).
+// f_layer's bits 8-15 hold the shadow's extra shift in pairs of steps
+// (block_vert.glsl).
 #define LAYER(f) ((f) & 0xFFu)
 #else
 #define LAYER(f) ((f) & 0xFFFFu)
@@ -112,7 +114,7 @@ void main()
                             texture(u_shadow, f_sh.xyz + vec3(-T, T, 0.0)) + texture(u_shadow, f_sh.xyz + vec3(T, T, 0.0));
         vec2 e = abs(f_sh.xy - 0.5) * 2.0;
         mediump float fade = clamp((1.0 - max(e.x, e.y)) * 8.0, 0.0, 1.0);
-        sun_shift += (1.0 - 0.25 * lit) * fade * float((f_layer >> 8) & 0xFFu);
+        sun_shift += (1.0 - 0.25 * lit) * fade * float((f_layer >> 8) & 0xFFu) * 2.0;
     }
 #endif
     mediump vec3 sky = pc.sky + (l.a - sun_shift * SUN_STEP);
@@ -132,7 +134,7 @@ void main()
         mediump float sunlit = 0.0;
         for (int i = 0; i < SHAFT_TAPS; i++)
             sunlit += texture(u_shadow, mix(eye, f_sh.xyz, (float(i) + j) / float(SHAFT_TAPS)));
-        x += SHAFT_LIGHT * (f_sh.w * sunlit / float(SHAFT_TAPS));
+        x += SHAFT_LIGHT * exp2(pc.sky * LIGHT_K) * (f_sh.w * sunlit / float(SHAFT_TAPS));
     }
 #endif
     mediump vec3 u = max(x - TONE_KNEE, 0.0);

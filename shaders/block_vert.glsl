@@ -31,6 +31,15 @@ const float TAU = 6.2831853;
 // in a plane tilted by the latitude, so its z is its y times tan(40 deg)
 // and the push constants carry only x and y (times the contrast).
 const float SUN_SHADE = 0.4;  // LIGHTFX_SUN_SHADE
+#ifdef SHADOWS
+// With shadows, out of the sun (shadowed or turned from it) a face keeps
+// 30% of the sky's light at full contrast: on a clear day direct sun is
+// most of the light, and skylight alone leaves shade about a third as
+// bright. Without them, a gentler 60% stands in, since nothing is shadowed.
+const float FACE_SUN = 0.7;
+#else
+const float FACE_SUN = SUN_SHADE;
+#endif
 const float SUN_Z = 0.8391;
 const float LIGHT_K = 4.8289214;  // LIGHT_CURVE_K
 const float SUN_STEPS = 1024.0;  // 1 / LIGHTFX_SUN_STEP
@@ -118,13 +127,14 @@ void main()
     // As a shift of the sky's level, which block.frag adds before its one
     // exp2: flat, so it costs no interpolation, in bits f_layer has spare.
     vec3 sun = vec3(pc.origin.w, pc.fog.w, pc.fog.w * SUN_Z);
-    float m = 1.0 - SUN_SHADE * (length(sun) - max(dot(2.0 * n, sun), 0.0));
+    float m = 1.0 - FACE_SUN * (length(sun) - max(dot(2.0 * n, sun), 0.0));
     f_layer = layer | uint(-log2(m) * (SUN_STEPS / LIGHT_K) + 0.5) << 16;
 #ifdef SHADOWS
     // Out of the sun a face keeps the sky light of one turned from it:
-    // the extra shift, in bits 8-15 (layers fit in 8; at most 157 steps).
-    float turned = 1.0 - SUN_SHADE * length(sun);
-    f_layer |= uint(max(log2(m) - log2(turned), 0.0) * (SUN_STEPS / LIGHT_K) + 0.5) << 8;
+    // the extra shift, in pairs of steps in bits 8-15 (layers fit in 8; at
+    // most 368 steps, 184 pairs).
+    float turned = 1.0 - FACE_SUN * length(sun);
+    f_layer |= uint(max(log2(m) - log2(turned), 0.0) * (SUN_STEPS / LIGHT_K) * 0.5 + 0.5) << 8;
     vec4 s = u_sh.clip * vec4(rel, 1.0);
     // Light shafts: sunlit haze between the eye and the face, brighter
     // looking toward the light (forward scattering) and thicker with
