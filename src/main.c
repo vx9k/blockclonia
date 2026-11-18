@@ -43,6 +43,7 @@
 #include "ui.h"
 #include "viewmodel.h"
 #include "world.h"
+#include "worldgen.h"
 #include "worlds.h"
 
 #define GLFW_INCLUDE_NONE
@@ -819,7 +820,8 @@ static void find_spawn(uint32_t seed, double *sx, double *sz)
         for (int a = 0; a < 16; a++) {
             double ang = a * (2 * MC_PI / 16);
             int x = (int)(cos(ang) * r), z = (int)(sin(ang) * r);
-            if (worldgen_height(seed, x, z) > SEA_LEVEL + 2) {
+            worldgen_point p = worldgen_sample(seed, x, z);
+            if (p.height > SEA_LEVEL + 2 && !p.level) {
                 *sx = x + 0.5;
                 *sz = z + 0.5;
                 return;

@@ -4,6 +4,7 @@
 #include "inventory.h"
 #include "item.h"
 #include "jobs.h"
+#include "mem.h"
 #include "noise.h"
 #include "physics.h"
 #include "test_util.h"
@@ -122,7 +123,7 @@ static void test_climate(void)
 static void test_generators(void)
 {
     /* Worlds keep growing exactly as they began. */
-    CHECK(hash_columns(1337) == 0xab58b795f49ee954ull);
+    CHECK(hash_columns(1337) == 0x04ce156fbc37b205ull);
 
     long ore[3] = {0}, cave = 0, under = 0, bad_band = 0, hanging = 0, no_bedrock = 0, bad_ground = 0;
     long mouths = 0, mouth_cols = 0, cols = 0, fox = 0, bad_fox = 0;
@@ -235,7 +236,7 @@ static int slope_at(uint32_t seed, int x, int z, int h, int *rise)
 
 typedef struct {
     long seen[BIOME_COUNT], wrong, warm_snow, cold_grass, bad_ice;
-    long cliffs, scree, sand_beach, desert_sand, snow, ice;
+    long cliffs, scree, sand_beach, desert_sand, snow, ice, beds;
 } soil_tally;
 
 /* What the top block of the ground should be (B_ROCK for any bare rock),
@@ -269,6 +270,12 @@ static void soil_column(int cx, int cz, int step, soil_tally *t)
             uint8_t top = c->blocks[col_index(x, h - 1, z)];
             t->seen[p.b]++;
             if (top == B_AIR) continue; /* a cave mouth */
+            if (p.level > SEA_LEVEL) {
+                /* An inland river or lake: a bed of gravel, sand or clay. */
+                t->beds++;
+                t->wrong += top != B_GRAVEL && top != B_SAND && top != B_CLAY;
+                continue;
+            }
             uint8_t want = soil_want(p, slope, rise, t);
             t->wrong += want != B_AIR && (want == B_ROCK ? !bare_rock(top) : top != want);
             t->sand_beach += p.b == BIOME_BEACH && top == B_SAND;
@@ -423,6 +430,151 @@ static void test_sample(void)
     CHECK(differ > 250);
 }
 
+/* The first block of an inland river or lake found walking out from the
+ * origin in 64 m steps, or 0 when there is none within 8 km. */
+static int find_river(uint32_t seed, int *rx, int *rz)
+{
+    for (int r = 0; r < 8000; r += 64)
+        for (int a = -r; a <= r; a += 64) {
+            int pts[4][2] = {{a, -r}, {a, r}, {-r, a}, {r, a}};
+            for (int k = 0; k < 4; k++)
+                if (worldgen_sample(seed, pts[k][0], pts[k][1]).level > SEA_LEVEL) {
+                    *rx = pts[k][0];
+                    *rz = pts[k][1];
+                    return 1;
+                }
+        }
+    return 0;
+}
+
+/* Rivers and lakes run above the sea, and their water lies still as
+ * generated: over the 5 x 5 columns around one, no water block has air
+ * beside it or below it, across column borders too, and every column has
+ * the ground and water the single-point query says. */
+static void test_rivers(void)
+{
+    int rx = 0, rz = 0;
+    CHECK(find_river(1337, &rx, &rz));
+    int cx0 = (int)floor(rx / (double)CHUNK_W) - 2, cz0 = (int)floor(rz / (double)CHUNK_W) - 2;
+    enum { N = 5, W = N * CHUNK_W };
+    uint8_t *b = mem_alloc((size_t)W * W * WORLD_H);
+    for (int cz = 0; cz < N; cz++)
+        for (int cx = 0; cx < N; cx++) {
+            column *c = column_alloc(cx0 + cx, cz0 + cz);
+            worldgen_column(1337, c);
+            for (int y = 0; y < WORLD_H; y++)
+                for (int z = 0; z < CHUNK_W; z++)
+                    for (int x = 0; x < CHUNK_W; x++)
+                        b[((size_t)y * W + (size_t)(cz * CHUNK_W + z)) * W + (size_t)(cx * CHUNK_W + x)] =
+                            c->blocks[col_index(x, y, z)];
+            column_free(c);
+        }
+#define AT(x, y, z) b[((size_t)(y) * W + (size_t)(z)) * W + (size_t)(x)]
+    long water = 0, inland = 0, leaks = 0, wrong = 0;
+    for (int z = 0; z < W; z++)
+        for (int x = 0; x < W; x++) {
+            worldgen_point p = worldgen_sample(1337, cx0 * CHUNK_W + x, cz0 * CHUNK_W + z);
+            /* The water (or its ice) fills from the ground to the level, under
+             * nothing but air or a canopy from the bank. */
+            if (p.level) {
+                uint8_t at = AT(x, p.height, z), surf = AT(x, p.level - 1, z), over = AT(x, p.level, z);
+                wrong += (at != B_WATER && at != B_ICE) || (surf != B_WATER && surf != B_ICE) ||
+                         (over != B_AIR && over != B_LEAVES && over != B_LOG);
+                inland += p.level > SEA_LEVEL;
+            } else {
+                wrong += AT(x, p.height - 1, z) == B_WATER;
+            }
+            for (int y = 1; y < WORLD_H; y++) {
+                if (AT(x, y, z) != B_WATER) continue;
+                water++;
+                leaks += AT(x, y - 1, z) == B_AIR;
+                if (x > 0) leaks += AT(x - 1, y, z) == B_AIR;
+                if (x < W - 1) leaks += AT(x + 1, y, z) == B_AIR;
+                if (z > 0) leaks += AT(x, y, z - 1) == B_AIR;
+                if (z < W - 1) leaks += AT(x, y, z + 1) == B_AIR;
+            }
+        }
+#undef AT
+    mem_free(b);
+    CHECK(inland > 20 && water > 100);
+    CHECK(leaks == 0 && wrong == 0);
+}
+
+/* Over a 6 km square sampled about every 30 m: inland water stays below the hills
+ * (no level above 70 m over the sea) and comes in terraces 3 m apart, every water column's ground lies under its level, the dry ground
+ * beside water is never below it, and another seed puts its rivers
+ * elsewhere. */
+static void test_river_levels(void)
+{
+    long inland = 0, high = 0, off_step = 0, under = 0, low_bank = 0, other = 0, same = 0;
+    for (int z = -3000; z < 3000; z += 31)
+        for (int x = -3000; x < 3000; x += 29) {
+            worldgen_point p = worldgen_sample(1337, x, z);
+            if (p.level) under += p.height >= p.level;
+            if (p.level <= SEA_LEVEL) continue;
+            inland++;
+            high += p.level > SEA_LEVEL + 70;
+            off_step += (p.level - SEA_LEVEL) % 3 != 0;
+            static const int D[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+            for (int k = 0; k < 4; k++) {
+                worldgen_point q = worldgen_sample(1337, x + D[k][0], z + D[k][1]);
+                /* A drier neighbour holds this water in: as high as it. */
+                low_bank += !q.level && q.height < p.level;
+            }
+            worldgen_point o = worldgen_sample(4242, x, z);
+            other += o.level > SEA_LEVEL;
+            same += o.level == p.level;
+        }
+    CHECK(inland > 30 && high == 0 && off_step == 0);
+    CHECK(under == 0 && low_bank == 0);
+    CHECK(other > 0 && same < inland / 2);
+}
+
+/* Rivers sit in lowland and run dry in the desert: most inland water lies
+ * within 30 m of the sea, and none lies in the driest country. */
+static void test_river_climate(void)
+{
+    long low = 0, all = 0, dry = 0;
+    for (int z = -6000; z < 6000; z += 67)
+        for (int x = -6000; x < 6000; x += 61) {
+            worldgen_point p = worldgen_sample(1337, x, z);
+            if (p.level <= SEA_LEVEL) continue;
+            all++;
+            low += p.level <= SEA_LEVEL + 30;
+            dry += p.rain < 0.12f;
+        }
+    CHECK(all > 30 && low * 2 > all && dry == 0);
+}
+
+/* A river's bed and banks hold: over the columns around one, no cave opens
+ * within a block of inland water (water would drain into it), and the beds
+ * are gravel, sand or clay rather than the soil of the land around. */
+static void test_river_beds(void)
+{
+    int rx = 0, rz = 0;
+    CHECK(find_river(1337, &rx, &rz));
+    int cx0 = (int)floor(rx / (double)CHUNK_W) - 1, cz0 = (int)floor(rz / (double)CHUNK_W) - 1;
+    long beds = 0, odd = 0, holes = 0;
+    for (int cz = cz0; cz < cz0 + 3; cz++)
+        for (int cx = cx0; cx < cx0 + 3; cx++) {
+            column *c = column_alloc(cx, cz);
+            worldgen_column(1337, c);
+            for (int z = 0; z < CHUNK_W; z++)
+                for (int x = 0; x < CHUNK_W; x++) {
+                    worldgen_point p = worldgen_sample(1337, cx * CHUNK_W + x, cz * CHUNK_W + z);
+                    if (p.level <= SEA_LEVEL) continue;
+                    uint8_t bed = c->blocks[col_index(x, p.height - 1, z)];
+                    beds++;
+                    odd += bed != B_GRAVEL && bed != B_SAND && bed != B_CLAY;
+                    /* The ground under the bed down to the stone is solid. */
+                    for (int y = p.height - 6; y < p.height; y++)
+                        holes += y > 0 && c->blocks[col_index(x, y, z)] == B_AIR;
+                }
+            column_free(c);
+        }
+    CHECK(beds > 20 && odd == 0 && holes == 0);
+}
+
 /* At the world's edge, 2000 km out, the terrain is as sane as near the
  * origin: heights in range, known biomes, no cliff between neighbouring
  * columns that the land's slope could not make, and the small-scale
@@ -556,6 +708,10 @@ void test_worldgen_all(void)
     test_cave_shapes();
     test_landforms();
     test_sample();
+    test_rivers();
+    test_river_levels();
+    test_river_climate();
+    test_river_beds();
     test_far_edge();
     test_climate_zones();
     test_dry_landforms();

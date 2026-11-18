@@ -38,6 +38,7 @@ static inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (
 static inline double clampd(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
 static inline int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 static inline int imax(int a, int b) { return a > b ? a : b; }
+static inline int imin(int a, int b) { return a < b ? a : b; }
 
 static inline mat4 m4_identity(void)
 {

@@ -297,8 +297,9 @@ void worldgen_column(uint32_t seed, column *c);
 /* Bump when worldgen_column makes different terrain for the same seed:
  * worlds record the version they were made with, and a build refuses a
  * world from any other generator instead of joining new terrain onto it. */
-#define WORLDGEN_VERSION 4
-/* Terrain surface height before trees/water; needs nothing loaded. */
+#define WORLDGEN_VERSION 5
+/* The ground's height (the first block above it: air, or the water of the
+ * sea, a river or a lake) before trees; needs nothing loaded. */
 int worldgen_height(uint32_t seed, int x, int z);
 
 /* Column lifetime. alloc returns a COL_LOADING column whose blocks are

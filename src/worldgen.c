@@ -249,21 +249,210 @@ static local local_at(uint32_t seed, int x, int z, const slow *s, int height)
     return l;
 }
 
-worldgen_point worldgen_sample(uint32_t seed, int x, int z)
+/* ------------------------------------------------------------ rivers */
+
+/* Rivers run along the zero line of a slow noise field, bent by a slower
+ * one so they meander, and lakes fill where a third field peaks. Their
+ * water must lie still the moment it is generated, from columns built
+ * one at a time with no neighbour loaded, so the level is a function of
+ * (x, z) alone: the ground on a RIVER_GRID lattice, blended and cut into
+ * RIVER_STEP terraces. Where the level falls a step, the upper pool's
+ * edge becomes a sill of rock as high as its water (a ledge the river
+ * pours over in a real one), and a bank beside any water is raised to
+ * that water's level, so no water block ever has air beside it. A column
+ * settles from its own state and its four sides', which every column
+ * works out the same way. */
+#define RIVER_GRID 16       /* m between the points the level is taken at */
+#define RIVER_STEP 3        /* m the level falls at each sill */
+#define RIVER_REACH 30.0f   /* m: the widest a valley spreads either side of its river */
+#define LAKE_IN 0.62f       /* the lake field above this is water */
+#define LAKE_RIM 0.48f      /* ... and above this the shore slopes down to it */
+
+/* The river and lake fields at a block: metres from a river's middle, and
+ * the lake field. */
+typedef struct {
+    float dist, lake;
+} wet_field;
+
+static wet_field wet_field_at(uint32_t seed, int x, int z)
+{
+    double wx = x + 90.0 * (double)noise2d(seed + 503, x / 420.0, z / 420.0);
+    double wz = z + 90.0 * (double)noise2d(seed + 505, x / 420.0, z / 420.0);
+    float ax = 0.0f, az = 0.0f, bx = 0.0f, bz = 0.0f;
+    float n = noise2d_grad(seed + 501, wx / 900.0, wz / 900.0, &ax, &az) +
+              0.35f * noise2d_grad(seed + 507, wx / 300.0, wz / 300.0, &bx, &bz);
+    /* Distance from the zero line: the value over its slope per metre (the
+     * slow bend's own slope is left out; it only stretches the estimate). */
+    float gx = ax / 900.0f + 0.35f * bx / 300.0f, gz = az / 900.0f + 0.35f * bz / 300.0f;
+    wet_field f = {fabsf(n) / fmaxf(sqrtf(gx * gx + gz * gz), 1e-6f), noise2d(seed + 521, x / 220.0, z / 220.0)};
+    return f;
+}
+
+/* Too far from any river and outside every lake's shore: the ground stays
+ * as it is. */
+static int wet_far(const wet_field *f) { return f->dist >= RIVER_REACH && f->lake <= LAKE_RIM; }
+
+/* The ground at a lattice point, 2 m down: the level is set a little under
+ * it, so a river runs below its banks. */
+static float level_corner(uint32_t seed, int x, int z)
+{
+    slow s = slow_at(seed, x, z);
+    float fine = 0.0f;
+    return land_at(seed, x, z, &s, &fine) - 2.0f;
+}
+
+/* The level field from the four lattice points around (x, z): c00 at the
+ * cell's low corner, c10 one step along x, c01 along z. */
+static float level_mix(float c00, float c10, float c01, float c11, int x, int z)
+{
+    int x0 = (int)(floor(x / (double)RIVER_GRID) * RIVER_GRID), z0 = (int)(floor(z / (double)RIVER_GRID) * RIVER_GRID);
+    return mix4(c00, c10, c01, c11, (float)(x - x0) / RIVER_GRID, (float)(z - z0) / RIVER_GRID);
+}
+
+static float level_at(uint32_t seed, int x, int z)
+{
+    int x0 = (int)(floor(x / (double)RIVER_GRID) * RIVER_GRID), z0 = (int)(floor(z / (double)RIVER_GRID) * RIVER_GRID);
+    return level_mix(level_corner(seed, x0, z0), level_corner(seed, x0 + RIVER_GRID, z0),
+                     level_corner(seed, x0, z0 + RIVER_GRID), level_corner(seed, x0 + RIVER_GRID, z0 + RIVER_GRID), x,
+                     z);
+}
+
+/* A column's water before it settles against its sides. */
+typedef struct {
+    int water;  /* a river, lake or the sea fills it */
+    int level;  /* water: the first air block above it */
+    int ground; /* the first air or water block above the ground */
+    int river;  /* water: a river or lake, not the sea */
+} wet;
+
+/* The column at (x, z) with ground h0 and rainfall rain, given its fields
+ * and its level field lv (unused when the fields are far). */
+static wet wet_at(int h0, float rain, const wet_field *f, float lv)
+{
+    wet r = {0, 0, h0, 0};
+    if (h0 < SEA_LEVEL) {
+        r.water = 1;
+        r.level = SEA_LEVEL;
+        return r;
+    }
+    if (wet_far(f)) return r;
+    float elev = fmaxf(lv - SEA, 0.0f);
+    int lvl = SEA_LEVEL + RIVER_STEP * (int)(elev / RIVER_STEP);
+    float above = (float)(h0 - lvl);
+    /* Wide and slow near the sea, a narrow stream high up, none above
+     * 70 m or in dry country; and none where it would have to cut a
+     * gorge deeper than 26 m to keep level. */
+    float half = (1.5f + 6.5f * (1.0f - smooth(4.0f, 50.0f, elev))) * smooth(0.12f, 0.35f, rain) *
+                 (1.0f - smooth(45.0f, 70.0f, elev)) * (1.0f - smooth(14.0f, 26.0f, above));
+    float lake = f->lake * (1.0f - smooth(40.0f, 60.0f, elev)) * smooth(0.15f, 0.3f, rain) *
+                 (1.0f - smooth(8.0f, 16.0f, above));
+    int ground = h0;
+    if (half > 0.75f && f->dist < half) {
+        float x = f->dist / half, depth = 1.0f + 3.0f * smooth(2.0f, 8.0f, half);
+        r.water = r.river = 1;
+        ground = lvl - 1 - (int)(depth * (1.0f - x * x));
+    }
+    if (lake > LAKE_IN) {
+        int bed = lvl - 1 - (int)fminf(6.0f, (lake - LAKE_IN) * 40.0f);
+        ground = r.water ? imin(ground, bed) : bed;
+        r.water = r.river = 1;
+    }
+    if (!r.water) {
+        /* The valley sides, and a lake's shore, slope down to a bank one
+         * block over the water; ground already lower stays. */
+        float t = 1.0f;
+        if (half > 0.75f) {
+            float side = fminf(RIVER_REACH, half + 3.0f + 0.8f * fmaxf(above, 0.0f));
+            t = fminf(t, smooth(half, side, f->dist));
+        }
+        if (lake > LAKE_RIM) t = fminf(t, 1.0f - smooth(LAKE_RIM, LAKE_IN, lake));
+        /* Toward the smooth level, not the stepped one, or every step
+         * would cut a cliff across the valley. It never lies below the
+         * stepped level, so the bank stays over the water. */
+        float base = fmaxf(lv, (float)lvl) + 1.0f;
+        ground = imin(h0, (int)(base + t * ((float)h0 - base)));
+    }
+    r.ground = ground;
+    r.level = r.water ? lvl : 0;
+    return r;
+}
+
+/* Settles a column against its four sides: water beside a lower pool
+ * becomes the sill that holds it, and dry ground beside water rises to
+ * its level. Returns the final ground; *level gets the water's first air
+ * block, or 0. */
+static int wet_settle(const wet *self, const wet *const side[4], int *level)
+{
+    if (self->water) {
+        for (int k = 0; k < 4; k++)
+            if (side[k]->water && side[k]->level < self->level) {
+                *level = 0;
+                return self->level;
+            }
+        *level = self->level;
+        return self->ground;
+    }
+    int g = self->ground;
+    for (int k = 0; k < 4; k++)
+        if (side[k]->water && side[k]->level > g) g = side[k]->level;
+    *level = 0;
+    return g;
+}
+
+/* One block's wet state from scratch, for the single-point queries. */
+static wet wet_point(uint32_t seed, int x, int z, int *h0_out, slow *s_out)
 {
     slow s = slow_point(seed, x, z);
     float fine = 0.0f;
-    int height = height_of(land_at(seed, x, z, &s, &fine));
-    local l = local_at(seed, x, z, &s, height);
-    worldgen_point p = {height, l.temp, l.rain, l.b};
+    int h0 = height_of(land_at(seed, x, z, &s, &fine));
+    wet_field f = wet_field_at(seed, x, z);
+    if (h0_out) *h0_out = h0;
+    if (s_out) *s_out = s;
+    return wet_at(h0, s.rain, &f, wet_far(&f) || h0 < SEA_LEVEL ? 0.0f : level_at(seed, x, z));
+}
+
+/* The settled ground and water level at (x, z); h0 and s get the ground
+ * before rivers and the slow fields there. */
+static int ground_at(uint32_t seed, int x, int z, int *level, int *h0, slow *s)
+{
+    wet self = wet_point(seed, x, z, h0, s);
+    /* Most of the world is far from any river: a block a little further
+     * out than the reach has neighbours out of it too, so none of them is
+     * water that would raise it. The sea needs no settling either: it is
+     * the lowest water, so it holds no sill and raises nothing it meets. */
+    wet_field own = wet_field_at(seed, x, z);
+    if ((!self.water && own.dist >= RIVER_REACH + 2.0f && own.lake <= LAKE_RIM - 0.02f) ||
+        (self.water && !self.river)) {
+        *level = self.level;
+        return self.ground;
+    }
+    wet side[4] = {{0}};
+    static const int D[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    for (int k = 0; k < 4; k++) {
+        /* A side far from every river and lake is dry ground, whatever
+         * its height: settling only looks at water. */
+        wet_field f = wet_field_at(seed, x + D[k][0], z + D[k][1]);
+        if (!wet_far(&f) || self.water) side[k] = wet_point(seed, x + D[k][0], z + D[k][1], NULL, NULL);
+    }
+    const wet *sp[4] = {&side[0], &side[1], &side[2], &side[3]};
+    return wet_settle(&self, sp, level);
+}
+
+worldgen_point worldgen_sample(uint32_t seed, int x, int z)
+{
+    slow s = {{0}, 0.0f, 0.0f, 0.0f, 0.0f};
+    int h0 = 0, level = 0;
+    int height = ground_at(seed, x, z, &level, &h0, &s);
+    /* The climate and biome of the land the river runs through. */
+    local l = local_at(seed, x, z, &s, h0);
+    worldgen_point p = {height, level, l.temp, l.rain, l.b};
     return p;
 }
 
 int worldgen_height(uint32_t seed, int x, int z)
 {
-    slow s = slow_point(seed, x, z);
-    float fine = 0.0f;
-    return height_of(land_at(seed, x, z, &s, &fine));
+    int level = 0;
+    return ground_at(seed, x, z, &level, NULL, NULL);
 }
 
 float worldgen_sea_temp(uint32_t seed, int x, int z)
@@ -305,7 +494,7 @@ static int rows_of(int f, int h) { return (f == 3 ? h - 13 : h - 1) / CAVE_STEP 
 /* A row of the height map, with the one-block rim on each side. */
 typedef int hm_row[CHUNK_W + 2];
 
-static void carve_caves(uint32_t seed, column *c, const hm_row *hm)
+static void carve_caves(uint32_t seed, column *c, const hm_row *hm, const uint8_t *wet_near)
 {
     int bx = c->cx * CHUNK_W, bz = c->cz * CHUNK_W, top = 0;
     for (int z = 0; z < CHUNK_W; z++)
@@ -334,9 +523,9 @@ static void carve_caves(uint32_t seed, column *c, const hm_row *hm)
     for (int z = 0; z < CHUNK_W; z++)
         for (int x = 0; x < CHUNK_W; x++) {
             int h = hm[z + 1][x + 1];
-            /* On land a tunnel may break out of the ground; under water
-             * and on beaches it stays sealed below the stone. */
-            int land = h > SEA_LEVEL + 3, mouth = -1; /* -1: not looked up yet */
+            /* On land a tunnel may break out of the ground; under water,
+             * beside it and on beaches it stays sealed below the stone. */
+            int land = h > SEA_LEVEL + 3 && !wet_near[z * CHUNK_W + x], mouth = -1; /* -1: not looked up yet */
             int i = x / CAVE_STEP, k = z / CAVE_STEP;
             float u = (float)(x % CAVE_STEP) / CAVE_STEP, w = (float)(z % CAVE_STEP) / CAVE_STEP;
             /* Blend across x and z once per grid height; each block then
@@ -708,6 +897,7 @@ void worldgen_column(uint32_t seed, column *c)
         }
 
     int hm[CHUNK_W + 2][CHUNK_W + 2] = {0};
+    float rain[CHUNK_W + 2][CHUNK_W + 2] = {{0}};
     local loc[CHUNK_W][CHUNK_W] = {{{0}}};
     float fine[CHUNK_W][CHUNK_W] = {{0}};
     strata st[COL_AREA] = {{0}};
@@ -724,6 +914,7 @@ void worldgen_column(uint32_t seed, column *c)
             int wx = bx + x - 1, wz = bz + z - 1;
             float f = 0.0f;
             hm[z][x] = height_of(land_at(seed, wx, wz, &s, &f));
+            rain[z][x] = s.rain;
             if (x < 1 || x > CHUNK_W || z < 1 || z > CHUNK_W) continue;
             fine[z - 1][x - 1] = f;
             loc[z - 1][x - 1] = local_at(seed, wx, wz, &s, hm[z][x]);
@@ -737,28 +928,76 @@ void worldgen_column(uint32_t seed, column *c)
             st[(z - 1) * CHUNK_W + x - 1] = strata_at(seed, wx, wz, &s, &g, hm[z][x], f);
         }
 
+    /* Rivers and lakes: the level lattice around the column (its corners
+     * at multiples of RIVER_GRID, one cell beyond it on every side for
+     * the rim), each block's water, then the column's settled ground. */
+    float lat[4][4] = {{0}};
+    int lat_done = 0;
+    wet raw[CHUNK_W + 2][CHUNK_W + 2] = {{{0}}};
+    for (int z = 0; z < CHUNK_W + 2; z++)
+        for (int x = 0; x < CHUNK_W + 2; x++) {
+            int wx = bx + x - 1, wz = bz + z - 1;
+            wet_field f = wet_field_at(seed, wx, wz);
+            float lv = 0.0f;
+            if (!wet_far(&f) && hm[z][x] >= SEA_LEVEL) {
+                if (!lat_done) {
+                    for (int k = 0; k < 4; k++)
+                        for (int i = 0; i < 4; i++)
+                            lat[k][i] = level_corner(seed, bx + (i - 1) * RIVER_GRID, bz + (k - 1) * RIVER_GRID);
+                    lat_done = 1;
+                }
+                int i = (wx - (bx - RIVER_GRID)) / RIVER_GRID, k = (wz - (bz - RIVER_GRID)) / RIVER_GRID;
+                lv = level_mix(lat[k][i], lat[k][i + 1], lat[k + 1][i], lat[k + 1][i + 1], wx, wz);
+            }
+            raw[z][x] = wet_at(hm[z][x], rain[z][x], &f, lv);
+        }
+    /* The settled ground, with the rim's own before settling (the rim only
+     * shapes slopes), and the water level in the column. */
+    int gm[CHUNK_W + 2][CHUNK_W + 2] = {0}, lvl[COL_AREA] = {0};
+    uint8_t wet_near[COL_AREA] = {0};
+    for (int z = 0; z < CHUNK_W + 2; z++)
+        for (int x = 0; x < CHUNK_W + 2; x++) gm[z][x] = raw[z][x].ground;
+    for (int z = 1; z <= CHUNK_W; z++)
+        for (int x = 1; x <= CHUNK_W; x++) {
+            const wet *side[4] = {&raw[z][x + 1], &raw[z][x - 1], &raw[z + 1][x], &raw[z - 1][x]};
+            int i = (z - 1) * CHUNK_W + x - 1;
+            gm[z][x] = wet_settle(&raw[z][x], side, &lvl[i]);
+            wet_near[i] = (uint8_t)(raw[z][x].river || side[0]->river || side[1]->river || side[2]->river ||
+                                    side[3]->river);
+        }
+
     /* The soil of every block first, then the column a layer at a time:
      * a layer is contiguous in memory, a block's own stack is not. */
     soil so[COL_AREA] = {{0}};
     int hs[COL_AREA] = {0}, top = SEA_LEVEL;
     for (int z = 0; z < CHUNK_W; z++)
         for (int x = 0; x < CHUNK_W; x++) {
-            int h = hm[z + 1][x + 1], i = z * CHUNK_W + x;
-            int w = hm[z + 1][x], e = hm[z + 1][x + 2], n = hm[z][x + 1], s = hm[z + 2][x + 1];
+            int h = gm[z + 1][x + 1], i = z * CHUNK_W + x;
+            int w = gm[z + 1][x], e = gm[z + 1][x + 2], n = gm[z][x + 1], s = gm[z + 2][x + 1];
             int slope = clampi(abs(w - e) + abs(n - s), 0, 64);
             int rise = imax(imax(w, e), imax(n, s)) - h;
             /* The soil depends on the rock a few blocks down, where it
              * weathers from. */
             so[i] = soil_at(loc[z][x].b, h, slope, rise, &loc[z][x], fine[z][x], rock_at(&st[i], beds, h - 4));
+            const wet *r = &raw[z + 1][x + 1];
+            /* A river's bed: gravel where it runs fast high up, clay in wet
+             * lowland, sand elsewhere; at sea level it is the sea's floor. A
+             * sill is bare rock. */
+            if (r->river && lvl[i] > SEA_LEVEL) {
+                uint8_t bed = r->level > SEA_LEVEL + 15 ? B_GRAVEL : loc[z][x].rain > 0.6f ? B_CLAY : B_SAND;
+                so[i] = (soil){bed, bed, 0, 2};
+            } else if (r->river && !lvl[i]) {
+                so[i] = (soil){0, 0, 0, 0};
+            }
             hs[i] = h;
-            top = imax(top, h);
+            top = imax(top, imax(h, lvl[i]));
         }
     memset(c->blocks, B_BEDROCK, COL_AREA);
     for (int y = 1; y < top; y++) {
         uint8_t *layer = &c->blocks[y * COL_AREA];
         for (int i = 0; i < COL_AREA; i++) {
             int h = hs[i], d = so[i].depth;
-            if (y >= h) layer[i] = y < SEA_LEVEL ? B_WATER : B_AIR;
+            if (y >= h) layer[i] = y < lvl[i] ? B_WATER : B_AIR;
             else if (y < h - d) {
                 if (y >= st[i].run_end) st[i].run_rock = rock_run(&st[i], beds, y, &st[i].run_end);
                 layer[i] = st[i].run_rock;
@@ -767,14 +1006,13 @@ void worldgen_column(uint32_t seed, column *c)
         }
     }
     memset(&c->blocks[top * COL_AREA], B_AIR, (size_t)(WORLD_H - top) * COL_AREA);
-    /* Cold seas freeze over. */
+    /* Cold seas, rivers and lakes freeze over. */
     for (int i = 0; i < COL_AREA; i++)
-        if (hs[i] < SEA_LEVEL && loc[i / CHUNK_W][i % CHUNK_W].temp < -2.0f)
-            c->blocks[(SEA_LEVEL - 1) * COL_AREA + i] = B_ICE;
+        if (lvl[i] && loc[i / CHUNK_W][i % CHUNK_W].temp < -2.0f) c->blocks[(lvl[i] - 1) * COL_AREA + i] = B_ICE;
 
     place_ores(seed, c);
-    carve_caves(seed, c, (const hm_row *)hm);
-    place_foxfire(seed, c, (const hm_row *)hm);
+    carve_caves(seed, c, (const hm_row *)gm, wet_near);
+    place_foxfire(seed, c, (const hm_row *)gm);
 
     /* Trees only where the whole canopy fits in this column: avoids needing
      * neighbour data on worker threads, at the cost of no trees on the
@@ -788,7 +1026,7 @@ void worldgen_column(uint32_t seed, column *c)
             if (roll >= rate) continue;
             float stand = fbm2d(seed + 301, (bx + x) / 120.0, (bz + z) / 120.0, 2);
             if ((float)roll >= (float)rate * sat(0.55f + 1.4f * stand)) continue;
-            int y = hm[z + 1][x + 1];
+            int y = gm[z + 1][x + 1];
             uint8_t ground = c->blocks[col_index(x, y - 1, z)];
             if (ground != B_GRASS && ground != B_PODZOL) continue;
             /* Over a cave the soil, not the ground, would carry the tree, and
