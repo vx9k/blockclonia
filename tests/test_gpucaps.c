@@ -29,6 +29,7 @@ static gpu_offer full_offer(void)
     o.present_relaxed = 1;
     o.pipeline_cache = 1;
     o.light_4bit = 1;
+    o.shadow_depth = 1;
     return o;
 }
 
@@ -169,7 +170,7 @@ static void test_choose_versions(void)
     gpu_offer o = full_offer();
     gpu_choice c = {0};
     uint32_t always = GPUCAP_MDI | GPUCAP_ANISO | GPUCAP_TIMESTAMPS | GPUCAP_PCACHE | GPUCAP_RELAXED | GPUCAP_BUDGET |
-                      GPUCAP_LIGHT4;
+                      GPUCAP_LIGHT4 | GPUCAP_SHADOW;
 
     /* Below the floor nothing is offered (the renderer refuses it). */
     o.instance_api = GPU_API(1, 1);
@@ -286,7 +287,7 @@ static void test_overrides(void)
 {
     gpu_offer o = full_offer();
     gpu_choice c = {0};
-    uint32_t off = gpucaps_parse_disable("mdi,dynrend,sync2,aniso,hostcopy,budget,timestamps,pcache,light4", NULL, 0);
+    uint32_t off = gpucaps_parse_disable("mdi,dynrend,sync2,aniso,hostcopy,budget,timestamps,pcache,light4,shadow", NULL, 0);
     gpucaps_choose(&o, off, &c);
     CHECK(c.enabled == GPUCAP_RELAXED);
     CHECK(c.disabled == off);
@@ -304,6 +305,20 @@ static void test_overrides(void)
     CHECK(!(c.enabled & GPUCAP_LIGHT4) && (c.enabled & GPUCAP_MDI));
     CHECK(gpucaps_parse_disable("light4", NULL, 0) == GPUCAP_LIGHT4 &&
           strcmp(gpucaps_name(GPUCAP_LIGHT4), "light4") == 0);
+    /* Without a filterable depth format there are no sun shadows; the
+     * rest is unaffected. */
+    o = full_offer();
+    o.shadow_depth = 0;
+    gpucaps_choose(&o, 0, &c);
+    CHECK(!(c.enabled & GPUCAP_SHADOW) && (c.enabled & GPUCAP_LIGHT4));
+    o.shadow_depth = 1;
+    gpucaps_choose(&o, gpucaps_parse_disable("shadow", NULL, 0), &c);
+    CHECK(!(c.enabled & GPUCAP_SHADOW) && (c.disabled & GPUCAP_SHADOW));
+    CHECK(strcmp(gpucaps_name(GPUCAP_SHADOW), "shadow") == 0);
+    char sum[256] = {0};
+    gpucaps_choose(&o, 0, &c);
+    gpucaps_summary(&c, sum, sizeof sum);
+    CHECK(strstr(sum, "sun shadows") != NULL);
     /* MC_VK_API=1.2 as the renderer applies it: the KHR paths, no 1.4. */
     uint32_t cap = 0;
     CHECK(gpucaps_parse_api("1.2", &cap));
@@ -322,9 +337,9 @@ static void test_summary(void)
     gpucaps_choose(&o, 0, &c);
     gpucaps_summary(&c, s, sizeof s);
     CHECK(strcmp(s, "Vulkan 1.4: multi-draw indirect, dynamic rendering, synchronization2, pipeline cache, "
-                    "8x anisotropic, host image copy, memory budget, GPU timestamps, 4-bit light") == 0);
+                    "8x anisotropic, host image copy, memory budget, GPU timestamps, 4-bit light, sun shadows") == 0);
     o.instance_api = GPU_API(1, 2);
-    gpucaps_choose(&o, GPUCAP_MDI | GPUCAP_PCACHE | GPUCAP_LIGHT4, &c);
+    gpucaps_choose(&o, GPUCAP_MDI | GPUCAP_PCACHE | GPUCAP_LIGHT4 | GPUCAP_SHADOW, &c);
     gpucaps_summary(&c, s, sizeof s);
     CHECK(strcmp(s, "Vulkan 1.2: dynamic rendering (KHR), synchronization2 (KHR), 8x anisotropic, "
                     "memory budget, GPU timestamps") == 0);

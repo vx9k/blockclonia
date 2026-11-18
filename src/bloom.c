@@ -18,6 +18,11 @@ void bloom_auto_reset(bloom_auto *a) { memset(a, 0, sizeof *a); }
 
 int bloom_auto_add(bloom_auto *a, float ms)
 {
+    return bloom_auto_add_within(a, ms, BLOOM_BUDGET_MS);
+}
+
+int bloom_auto_add_within(bloom_auto *a, float ms, float budget_ms)
+{
     if (a->decided) return 0;
     if (a->frames++ < BLOOM_WARMUP) return 0;
     a->ms[a->count++] = ms;
@@ -33,7 +38,7 @@ int bloom_auto_add(bloom_auto *a, float ms)
             s[j - 1] = t;
         }
     a->median = s[BLOOM_SAMPLES / 2];
-    a->on = a->median < BLOOM_BUDGET_MS;
+    a->on = a->median < budget_ms;
     a->decided = 1;
     return 1;
 }

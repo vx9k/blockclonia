@@ -26,6 +26,7 @@ static const struct {
     {GPUCAP_PCACHE, "pcache"},
     {GPUCAP_RELAXED, "relaxed"},
     {GPUCAP_LIGHT4, "light4"},
+    {GPUCAP_SHADOW, "shadow"},
 };
 
 static uint32_t strip_patch(uint32_t v) { return GPU_API(GPU_API_MAJOR(v), GPU_API_MINOR(v)); }
@@ -139,6 +140,7 @@ static uint32_t offered(const gpu_offer *o, uint32_t api, int *dynrend_khr, int 
     if (o->pipeline_cache) m |= GPUCAP_PCACHE;
     if (o->present_relaxed) m |= GPUCAP_RELAXED;
     if (o->light_4bit) m |= GPUCAP_LIGHT4;
+    if (o->shadow_depth) m |= GPUCAP_SHADOW;
     return m;
 }
 
@@ -188,6 +190,7 @@ void gpucaps_summary(const gpu_choice *c, char *buf, size_t n)
         {GPUCAP_TIMESTAMPS, "GPU timestamps"},
         {GPUCAP_RELAXED, "relaxed vsync"},
         {GPUCAP_LIGHT4, "4-bit light"},
+        {GPUCAP_SHADOW, "sun shadows"},
     };
     int len = snprintf(buf, n, "Vulkan %u.%u", GPU_API_MAJOR(c->device_api), GPU_API_MINOR(c->device_api));
     int first = 1;

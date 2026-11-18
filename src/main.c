@@ -1657,6 +1657,7 @@ static void game_init_world(game *g)
                       .filtering = g->st.filtering,
                       .smooth_light = g->st.smooth_light,
                       .bloom = g->st.bloom,
+                      .shadows = g->st.shadows,
                       .pipeline_cache = g_paths.pipelines};
     g->rd = renderer_create(g->win, &ro);
 }
@@ -2635,6 +2636,7 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
         renderer_set_filtering(g->rd, g->st.filtering);
         renderer_set_smooth_light(g->rd, g->st.smooth_light);
         renderer_set_bloom(g->rd, g->st.bloom);
+        renderer_set_shadows(g->rd, g->st.shadows);
         set_fullscreen(g, g->st.fullscreen);
         apply_volumes(g);
         apply_discord(g);

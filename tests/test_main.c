@@ -1,5 +1,6 @@
 /* Unit tests for the engine core (no GPU, no window). */
 #include "bloom.h"
+#include "shadow.h"
 #include "camera.h"
 #include "debug.h"
 #include "fx.h"
@@ -1703,6 +1704,7 @@ static void test_settings(void)
     s.mute_unfocused = 0;
     s.smooth_light = 0;
     s.bloom = BLOOM_ON;
+    s.shadows = SHADOW_OFF;
     int n = settings_format(&s, buf, (int)sizeof buf);
     CHECK(n > 0 && n < (int)sizeof buf);
     CHECK(strstr(buf, "smooth_light 0\n") != NULL); /* saved under its key */
@@ -1726,6 +1728,11 @@ static void test_settings(void)
     CHECK(settings_parse(&t, "bloom 0\n") == 1 && t.bloom == BLOOM_OFF);
     CHECK(settings_parse(&t, "bloom 1\n") == 1 && t.bloom == BLOOM_ON);
     CHECK(settings_parse(&t, "bloom 3\nbloom -1\n") == 0 && t.bloom == BLOOM_ON);
+    /* So do shadows, and a file from before them leaves them on Auto. */
+    CHECK(t.shadows == SHADOW_AUTO);
+    CHECK(settings_parse(&t, "shadows 0\n") == 1 && t.shadows == SHADOW_OFF);
+    CHECK(settings_parse(&t, "shadows 1\n") == 1 && t.shadows == SHADOW_ON);
+    CHECK(settings_parse(&t, "shadows 3\n") == 0 && t.shadows == SHADOW_ON);
     /* A tiny buffer truncates instead of overflowing. */
     char tiny[8] = {0};
     CHECK(settings_format(&s, tiny, (int)sizeof tiny) == 7 && tiny[7] == '\0');
@@ -2164,6 +2171,7 @@ int main(void)
     test_fear_all();
     test_dark_all();
     test_lamps_all();
+    test_shadow_all();
     test_mobmodel_all();
     test_avatar_all();
     test_cardio_all();
