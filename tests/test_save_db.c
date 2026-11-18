@@ -421,7 +421,9 @@ static void test_import(void)
 /* Stands in for the game's player: written by the world's on_save hook. */
 static int g_player_fails;
 static int save_test_player(void *user)
-{ return g_player_fails ? -1 : save_db_put_player(user, SAVE_DB_LOCAL_PLAYER, "new", 3); }
+{
+    return g_player_fails ? -1 : save_db_put_player(user, SAVE_DB_LOCAL_PLAYER, "new", 3);
+}
 
 static int player_is(save_db *db, const char *want)
 {
