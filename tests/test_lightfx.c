@@ -55,7 +55,7 @@ static void build_at(lightfx_frame *f, double day, uint32_t held, int brightness
     thermo *th = thermo_create(4);
     float d[3] = {0.0f, 0.0f, 0.0f};
     sun_at(th, day, d);
-    lightfx_build(f, d, thermo_daylight(th), held, brightness, 12.0);
+    lightfx_build(f, d, thermo_daylight(th), held, brightness, 12.0, 1);
     thermo_destroy(th);
 }
 
@@ -83,7 +83,7 @@ static void test_sky_colour(void)
     thermo *th = thermo_create(5);
     float d[3] = {0.0f, 0.0f, 0.0f};
     sun_at(th, 0.25, d);
-    lightfx_build(&f, d, thermo_daylight(th), 0, 0, 0.0);
+    lightfx_build(&f, d, thermo_daylight(th), 0, 0, 0.0, 1);
     CHECK(len3(f.sun) < 0.01f);
     thermo_destroy(th);
 }
@@ -131,6 +131,20 @@ static void test_floor_and_flicker(void)
     CHECK(lo >= 0.9f && hi <= 1.0f);
     CHECK(hi - lo > 0.04f); /* it does move */
     CHECK(lightfx_flicker(3.7) == lightfx_flicker(3.7));
+    CHECK(fabsf(0.5f * (lo + hi) - LIGHTFX_STEADY) < 0.02f); /* steady sits mid-way */
+
+    /* Flicker off: a held torch is the same at every moment. */
+    float d[3] = {0.0f, 1.0f, 0.0f}, first = -1.0f;
+    for (int i = 0; i < 50; i++) {
+        lightfx_build(&f, d, 1.0f, B_TORCH, 0, i * 0.037, 0);
+        if (i == 0) first = f.held[0];
+        CHECK(f.held[0] == first);
+    }
+    CHECK(first > 0.0f);
+    lightfx_build(&f, d, 1.0f, B_TORCH, 0, 0.0, 1);
+    float a = f.held[0];
+    lightfx_build(&f, d, 1.0f, B_TORCH, 0, 0.11, 1);
+    CHECK(a != f.held[0]); /* on, it moves */
 }
 
 static void test_faces(void)

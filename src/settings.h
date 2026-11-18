@@ -29,6 +29,7 @@ typedef struct {
     int inner_voice;      /* thoughts and body sensations on the HUD */
     int smooth_light;     /* light blends across faces; off: each face takes its own cell's light, flat */
     int bloom;            /* BLOOM_OFF, BLOOM_ON or BLOOM_AUTO (bloom.h): glow around light sources */
+    int flicker;          /* flames and carried fire waver; off: they burn steady, for light-sensitive eyes */
 } settings;
 
 #define SETTINGS_FOV_MIN 50

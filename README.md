@@ -430,6 +430,7 @@ starts with the defaults and doesn't save changes over it.
 | Video | View bobbing, FOV effects | on/off |
 | Video | Smooth lighting | on (default): light blends across each face from the cells around it; off: each face takes the light of the cell in front of it, in flat steps |
 | Video | Bloom | Auto (default): on where the GPU's timestamps show it costing under 0.3 ms a frame, off without timestamps; On; Off. A soft glow around fire, lava, torches, foxfire and the moon |
+| Video | Light flicker | on (default)/off: flames, torches and other fire waver; off, they burn at a steady level |
 | Video | Brightness (nights) | 0–100% (default 0): a floor under all light, for dark nights and caves; daylight is unchanged |
 | Display | Fullscreen | on/off (also F11): borderless at the monitor's own resolution |
 | Display | VSync | on/off |

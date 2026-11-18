@@ -42,9 +42,10 @@ typedef struct {
 
 /* Fills f for a sun at sun_dir (thermo_sun), daylight 0..1
  * (thermo_daylight), the held item (0 for none), the brightness setting
- * 0..100 and the time in seconds (a flame's flicker). */
+ * 0..100, the time in seconds and whether flames flicker (the setting;
+ * off, a flame holds LIGHTFX_STEADY). */
 void lightfx_build(lightfx_frame *f, const float sun_dir[3], float daylight, uint32_t held_item, int brightness,
-                   double time);
+                   double time, int flicker);
 
 /* Adds a muzzle flash at `flash` 0..1 of its full brightness to the held
  * light: a warm white at level 15 at the eye that falls off with distance
@@ -52,7 +53,9 @@ void lightfx_build(lightfx_frame *f, const float sun_dir[3], float daylight, uin
  * or two. A brighter light already held stays. */
 void lightfx_flash(lightfx_frame *f, float flash);
 
-/* What a flame flickers by at time t: 0.9..1, the same at any frame rate. */
+/* What a flame flickers by at time t: 0.9..1, the same at any frame rate.
+ * LIGHTFX_STEADY is its mean, for when flicker is off. */
+#define LIGHTFX_STEADY 0.95f
 float lightfx_flicker(double t);
 
 /* The share of the sky's light that reaches face 0..5 (+x, -x, +y, -y,
