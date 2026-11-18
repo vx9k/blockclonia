@@ -314,7 +314,10 @@ static void carve_caves(uint32_t seed, column *c, const hm_row *hm)
     int ny = (top - 1) / CAVE_STEP + 2;
     if (ny > CAVE_NY) ny = CAVE_NY;
     size_t plane = (size_t)ny * CAVE_NX * CAVE_NX;
-    float *g = mem_calloc((size_t)CAVE_FIELDS * plane, sizeof *g);
+    /* 39 KB, left uninitialised: the fill below writes every row a block
+     * up to the column's top reads (rows_of grows with the height), and
+     * zeroing it would cost as much as filling it. */
+    float g[CAVE_FIELDS * CAVE_NY * CAVE_NX * CAVE_NX];
 #define G(f, j, k, i) g[(size_t)(f) * plane + ((size_t)(j) * CAVE_NX + (size_t)(k)) * CAVE_NX + (size_t)(i)]
     static const struct {
         uint32_t seed;
@@ -370,7 +373,6 @@ static void carve_caves(uint32_t seed, column *c, const hm_row *hm)
             }
         }
 #undef G
-    mem_free(g);
 }
 
 /* ------------------------------------------------------------ strata */
@@ -708,7 +710,7 @@ void worldgen_column(uint32_t seed, column *c)
     int hm[CHUNK_W + 2][CHUNK_W + 2] = {0};
     local loc[CHUNK_W][CHUNK_W] = {{{0}}};
     float fine[CHUNK_W][CHUNK_W] = {{0}};
-    strata *st = mem_calloc(COL_AREA, sizeof *st);
+    strata st[COL_AREA] = {{0}};
     float beds[BED_N] = {0};
     bed_sequence(seed, beds);
     for (int z = 0; z < CHUNK_W + 2; z++)
@@ -764,7 +766,6 @@ void worldgen_column(uint32_t seed, column *c)
             else layer[i] = y == h - d && so[i].base ? so[i].base : so[i].filler;
         }
     }
-    mem_free(st);
     memset(&c->blocks[top * COL_AREA], B_AIR, (size_t)(WORLD_H - top) * COL_AREA);
     /* Cold seas freeze over. */
     for (int i = 0; i < COL_AREA; i++)

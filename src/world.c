@@ -1136,12 +1136,16 @@ size_t world_column_encode(world *w, int cx, int cz, uint8_t *out, size_t cap)
     mem_free(saved);
     /* Never edited (or unreadable here): the client gets fresh terrain,
      * 0.35 ms of generation on the main thread. */
-    column *g = column_alloc(cx, cz);
-    (w->generator ? w->generator : worldgen_column)(w->seed, g);
-    mem_free(g->meta);
-    g->meta = NULL;
-    size_t len = save_encode_column(g, out, cap);
-    column_free(g);
+    /* On the stack: the column only lives for the encode. Generators
+     * write every block, like they do into column_alloc's. */
+    /* cppcheck-suppress unassignedVariable ; written through g.blocks */
+    uint8_t blocks[COL_VOL];
+    column g = {.cx = cx, .cz = cz, .state = COL_LOADING, .blocks = blocks};
+    (w->generator ? w->generator : worldgen_column)(w->seed, &g);
+    mem_free(g.meta);
+    g.meta = NULL;
+    size_t len = save_encode_column(&g, out, cap);
+    light_free(&g.light);
     return len;
 }
 
