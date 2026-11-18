@@ -32,7 +32,8 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
   beaches and twisted pines up the mountains. Each grows its own way, with
   limbs out from the trunk, tiers or a crown of leaves the sky shows
   through, and its own bark, cut grain and leaves, every tree tinted a
-  little apart from its neighbours. They come young and old, in stands,
+  little apart from its neighbours. A forest grows in woods of mostly one
+  kind (a birch wood, an oak wood, a cherry grove), young and old,
   some with roots, moss or hanging vines, among dead snags and fallen
   trunks; they reach across chunk edges and stand as the structure physics
   would hold them. Under them grows the ground cover of each

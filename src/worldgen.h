@@ -3,7 +3,9 @@
  * height and the biome they make. The terrain, the trees and the heat
  * model (thermo.c) all read this one field, so a tundra is cold to stand
  * in, not only white. It does not build columns (worldgen_column in
- * world.h does) or keep any state: every call starts from the seed. */
+ * world.h does) or keep any state of its own: every call starts from the
+ * seed, and what it remembers to save time (worldgen.c: the slow fields,
+ * the trees rooted in a column) is what it would work out again. */
 #ifndef MC_WORLDGEN_H
 #define MC_WORLDGEN_H
 
@@ -52,5 +54,9 @@ worldgen_point worldgen_sample(uint32_t seed, int x, int z);
  * lapse from. Cheap (a few noise samples) and smooth across kilometres. */
 float worldgen_sea_temp(uint32_t seed, int x, int z);
 const char *biome_name(biome b);
+/* Drops which trees the generator remembered rooting where (worldgen.c).
+ * Generated terrain is the same either way; tests use it to start cold.
+ * Call it only while no column is being generated. */
+void worldgen_forget(void);
 
 #endif

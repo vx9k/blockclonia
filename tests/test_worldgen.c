@@ -129,7 +129,7 @@ static void test_climate(void)
 static void test_generators(void)
 {
     /* Worlds keep growing exactly as they began. */
-    CHECK(hash_columns(1337) == 0xbc3b53f430ec2608ull);
+    CHECK(hash_columns(1337) == 0x49a91d26b64c5f7dull);
 
     long ore[3] = {0}, cave = 0, under = 0, bad_band = 0, hanging = 0, no_bedrock = 0, bad_ground = 0;
     long mouths = 0, mouth_cols = 0, cols = 0, fox = 0, bad_fox = 0;
@@ -976,7 +976,7 @@ static void test_tree_climate(void)
 {
     long feet = 0, wrong = 0, lying = 0, lying_wrong = 0;
     int seen[TREE_KINDS] = {0};
-    for (int i = 0; i < 120; i++) {
+    for (int i = 0; i < 200; i++) {
         int cx = (i * 2741) % 2400 - 1200, cz = (i * 3571) % 2400 - 1200;
         column *c = column_alloc(cx, cz);
         worldgen_column(1337, c);
@@ -1129,7 +1129,8 @@ static void test_worldgen_memo(void)
     for (int i = 0; i < N; i++) {
         (void)worldgen_sample(4243, i * 97 - 1900, i * 61 + 300); /* the same point in another world */
         worldgen_point again = worldgen_sample(4242, i * 97 - 1900, i * 61 + 300);
-        same &= memcmp(&again, &first[i], sizeof again) == 0;
+        same &= again.height == first[i].height && again.level == first[i].level && again.temp == first[i].temp &&
+                again.rain == first[i].rain && again.b == first[i].b;
     }
     CHECK(same);
 
@@ -1149,8 +1150,110 @@ static void test_worldgen_memo(void)
     column_free(after);
 }
 
+/* Standing trunks in a column by kind: a log standing on something that
+ * is neither log, leaves nor air, with a log above it. */
+static int count_trunks(const column *c, int seen[TREE_KINDS])
+{
+    int feet = 0;
+    for (int z = 0; z < CHUNK_W; z++)
+        for (int x = 0; x < CHUNK_W; x++)
+            for (int y = 2; y < WORLD_H - 1; y++) {
+                int ci = col_index(x, y, z);
+                uint8_t b = c->blocks[ci], under = c->blocks[ci - COL_AREA], m = c->meta ? c->meta[ci] : 0;
+                if (!block_log(b) || block_log(under) || block_leaves(under) || under == B_AIR) continue;
+                if ((m & 3) != LOG_UP || !block_log(c->blocks[ci + COL_AREA])) continue;
+                seen[block_tree(b)]++;
+                feet++;
+            }
+    return feet;
+}
+
+/* Woods are mostly of one kind: in a forest, the commonest trunk around a
+ * spot is most of them, and not every wood is the same kind. Trees used
+ * to take their kind one by one, so a forest had four or five kinds
+ * mixed evenly, the commonest well under half. */
+static void test_forest_woods(void)
+{
+    int spots = 0, mains[TREE_KINDS] = {0};
+    long main_feet = 0, all_feet = 0;
+    for (int i = 0; i < 4000 && spots < 8; i++) {
+        int x = (i * 7919) % 60000 - 30000, z = (i * 104729) % 60000 - 30000;
+        int forest = 1;
+        for (int k = 0; k < 5 && forest; k++) {
+            worldgen_point p = worldgen_sample(1337, x + (k == 1) * 24 - (k == 2) * 24,
+                                               z + (k == 3) * 24 - (k == 4) * 24);
+            forest = p.b == BIOME_FOREST || p.b == BIOME_TAIGA;
+        }
+        if (!forest) continue;
+        int seen[TREE_KINDS] = {0}, feet = 0;
+        int cx = (int)floor(x / (double)CHUNK_W), cz = (int)floor(z / (double)CHUNK_W);
+        for (int dz = 0; dz < 2; dz++)
+            for (int dx = 0; dx < 2; dx++) {
+                column *c = column_alloc(cx + dx, cz + dz);
+                worldgen_column(1337, c);
+                feet += count_trunks(c, seen);
+                column_free(c);
+            }
+        if (feet < 8) continue;
+        int top = 0;
+        for (int k = 1; k < TREE_KINDS; k++)
+            if (seen[k] > seen[top]) top = k;
+        mains[top] = 1;
+        main_feet += seen[top];
+        all_feet += feet;
+        spots++;
+    }
+    int kinds = 0;
+    for (int k = 0; k < TREE_KINDS; k++) kinds += mains[k];
+    CHECK(spots >= 5);
+    CHECK(main_feet * 10 >= all_feet * 7); /* the commonest kind is 70 % or more */
+    CHECK(kinds >= 2);
+}
+
+/* Columns grown on several workers at once, sharing the remembered tree
+ * sites as they fill them in, are the columns one thread grows alone. */
+typedef struct {
+    job j;
+    column *c;
+} gen_job;
+
+static void gen_run(job *j) { worldgen_column(777001, ((gen_job *)j)->c); }
+static void gen_done(job *j) { (void)j; }
+
+static void test_worldgen_threads(void)
+{
+    enum { W = 4, N = W * W };
+    column *ref[N] = {NULL}, *par[N] = {NULL};
+    gen_job work[N] = {{{NULL, NULL, NULL}, NULL}};
+    worldgen_forget();
+    for (int i = 0; i < N; i++) {
+        ref[i] = column_alloc(i % W, i / W);
+        worldgen_column(777001, ref[i]);
+    }
+    worldgen_forget();
+    jobs *js = jobs_create(4);
+    for (int i = 0; i < N; i++) {
+        par[i] = column_alloc(i % W, i / W);
+        work[i] = (gen_job){{gen_run, gen_done, NULL}, par[i]};
+        jobs_submit(js, &work[i].j);
+    }
+    jobs_wait_idle(js);
+    jobs_poll(js, -1);
+    jobs_destroy(js);
+    int same = 1;
+    for (int i = 0; i < N; i++) {
+        same &= memcmp(ref[i]->blocks, par[i]->blocks, COL_VOL) == 0;
+        same &= !ref[i]->meta == !par[i]->meta && (!ref[i]->meta || memcmp(ref[i]->meta, par[i]->meta, COL_VOL) == 0);
+        column_free(ref[i]);
+        column_free(par[i]);
+    }
+    CHECK(same);
+}
+
 void test_worldgen_all(void)
 {
+    test_worldgen_threads();
+    test_forest_woods();
     test_worldgen_memo();
     test_noise_grad();
     test_noise_wrap();
