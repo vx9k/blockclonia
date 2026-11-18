@@ -128,7 +128,7 @@ working or not. A native Metal renderer is deferred;
 | Preset | For |
 |---|---|
 | `native` | Playing: optimised for the CPU you build on |
-| `release` | Packages: -O2, ThinLTO, PGO and BOLT, runs on any CPU of the architecture |
+| `release` | Packages: -O3, ThinLTO, PGO and BOLT, runs on any CPU of the architecture |
 | `dev` | Working on the code: debug build |
 | `macos` | macOS with MoltenVK |
 | `core` | Everything except the game itself; needs no Vulkan, GLFW or audio |
