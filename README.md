@@ -396,7 +396,10 @@ with, and a build only plays worlds from its own generator: new terrain
 would not join the old without seams. Worlds made by an older or newer
 generator, and folders written by builds from before the database
 (`level.dat`, `player.dat`, `c.X.Z.bin`), are listed but can't be
-played. Only one running game can hold a world's database open at a
+played. A world saved in an older database format is upgraded when it
+is opened, after a copy of the original is kept beside it as
+`world.db.format<N>`; a newer format is refused, as is a database that
+fails SQLite's integrity check. Only one running game can hold a world's database open at a
 time: the list shows such a world as open in another game, and pointing a
 second instance at the same directory disables saving for it instead of
 touching the world.

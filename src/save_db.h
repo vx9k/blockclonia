@@ -20,10 +20,14 @@
 
 typedef struct save_db save_db;
 
-/* Opens dir/world.db, creating it if missing. NULL, with the reason
- * logged, if it is not a regular file, not a blockclonia world of this
- * format, damaged, or open in another game. A refused file is left as it
- * was. */
+/* The world format this build writes. Older formats are upgraded when
+ * opened (the original kept as world.db.format<N>); newer ones refused. */
+#define SAVE_DB_FORMAT 2
+
+/* Opens dir/world.db, creating it if missing and upgrading an older
+ * format. NULL, with the reason logged, if it is not a regular file, not a
+ * blockclonia world of a format this build reads, damaged, or open in
+ * another game. A refused file is left as it was. */
 save_db *save_db_open(const char *dir);
 /* The page cache each database opened afterwards gets, in KB (sys_plan);
  * SQLite's own default (2 MB) until set. */

@@ -166,6 +166,13 @@ limiter.
   so the two on disk always match. A saved column that cannot be read is
   shown as generated terrain and never written over, so its real data stays
   on disk.
+- The database format is a number in the file's header (`SAVE_DB_FORMAT`).
+  Every format's exact schema is kept in `save_db.c`, so a file whose
+  tables match a known older format is upgraded on open: copied first to
+  `world.db.format<N>`, then rebuilt in one transaction that either
+  finishes or leaves the file as it was. Format 2 made the tables STRICT
+  with CHECKs on keys and sizes. Opening also runs `quick_check`, and
+  closing hands back freed pages through incremental vacuum.
 - SQLite's exclusive locking mode keeps a world open in only one game at
   a time; a second instance pointed at the same folder disables saving
   instead of sharing the database.

@@ -117,7 +117,18 @@ static void test_delete(void)
     char notes[WORLDS_PATH_MAX + 32] = {0};
     path_in(notes, sizeof notes, dir, "notes.txt");
     write_text(notes, "mine");
+    /* The copy an upgrade kept goes too; names merely like it stay. */
+    const char *const names[] = {"world.db.format1", "world.db.format", "world.db.format1x", "world.db.format12345"};
+    for (size_t i = 0; i < 4; i++) {
+        path_in(p, sizeof p, dir, names[i]);
+        write_text(p, "old");
+    }
     CHECK(worlds_delete(dir) == 1);
+    for (size_t i = 0; i < 4; i++) {
+        path_in(p, sizeof p, dir, names[i]);
+        CHECK(exists(p) == (i != 0));
+        if (i) tmp_remove(p);
+    }
     path_in(p, sizeof p, dir, "world.db");
     CHECK(!exists(p) && exists(notes) && exists(victim));
     if (linked) {
