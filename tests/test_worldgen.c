@@ -8,6 +8,7 @@
 #include "noise.h"
 #include "physics.h"
 #include "test_util.h"
+#include "texgen.h"
 #include "thermo.h"
 #include "world.h"
 #include "worldgen.h"
@@ -50,7 +51,8 @@ static int ore_band_ok(uint8_t b, int y)
 static int bare_rock(uint8_t b) { return block_get(b)->mat == BM_STONE && !item_valid(b); }
 
 /* What may stand on the ground: nothing that belongs to the ground. */
-static int above_ground(uint8_t b) { return b == B_AIR || b == B_WATER || b == B_ICE || b == B_LOG || b == B_LEAVES; }
+static int above_ground(uint8_t b)
+{ return b == B_AIR || b == B_WATER || b == B_ICE || block_log(b) || block_leaves(b); }
 
 /* The derivative noise2d_grad reports is the slope of noise2d. */
 static void test_noise_grad(void)
@@ -123,7 +125,7 @@ static void test_climate(void)
 static void test_generators(void)
 {
     /* Worlds keep growing exactly as they began. */
-    CHECK(hash_columns(1337) == 0x04ce156fbc37b205ull);
+    CHECK(hash_columns(1337) == 0x3865b90e73af5c3bull);
 
     long ore[3] = {0}, cave = 0, under = 0, bad_band = 0, hanging = 0, no_bedrock = 0, bad_ground = 0;
     long mouths = 0, mouth_cols = 0, cols = 0, fox = 0, bad_fox = 0;
@@ -311,9 +313,19 @@ static void test_soil(void)
 
 /* Trees grow by the rain: thick in forest and taiga, sparse on the
  * steppe, none in the desert or the sea. */
+/* Which wood a trunk is, by the climate it grows in: temperate (forest,
+ * meadow, wetland), cold (taiga, alpine) and dry (scrub, steppe). */
+static int tree_climate(biome b)
+{
+    if (b == BIOME_TAIGA || b == BIOME_ALPINE) return 1;
+    if (b == BIOME_SCRUB || b == BIOME_STEPPE) return 2;
+    return 0;
+}
+
 static void test_trees(void)
 {
-    long trunks[BIOME_COUNT] = {0}, ground[BIOME_COUNT] = {0};
+    long trunks[BIOME_COUNT] = {0}, ground[BIOME_COUNT] = {0}, kind[3][B_COUNT] = {{0}};
+    long snags = 0, young = 0, tall = 0;
     for (int i = 0; i < 160; i++) {
         int cx = (i * 1187) % 1500 - 750, cz = (i * 1733) % 1500 - 750;
         column *c = column_alloc(cx, cz);
@@ -322,10 +334,37 @@ static void test_trees(void)
             for (int x = 2; x < CHUNK_W - 2; x += 2) {
                 worldgen_point p = worldgen_sample(1337, cx * CHUNK_W + x, cz * CHUNK_W + z);
                 ground[p.b]++;
-                trunks[p.b] += p.height < WORLD_H && c->blocks[col_index(x, p.height, z)] == B_LOG;
+                trunks[p.b] += p.height < WORLD_H && block_log(c->blocks[col_index(x, p.height, z)]);
             }
+        /* Every trunk, by its foot on the ground: its kind by climate, its
+         * height, and whether it has leaves at all. */
+        for (int z = 0; z < CHUNK_W; z++)
+            for (int x = 0; x < CHUNK_W; x++)
+                for (int y = 2; y < WORLD_H - 2; y++) {
+                    uint8_t b = c->blocks[col_index(x, y, z)], under = c->blocks[col_index(x, y - 1, z)];
+                    if (!block_log(b) || block_log(under) || block_leaves(under) || under == B_AIR) continue;
+                    int top = y;
+                    while (top < WORLD_H - 1 && block_log(c->blocks[col_index(x, top + 1, z)])) top++;
+                    worldgen_point p = worldgen_sample(1337, cx * CHUNK_W + x, cz * CHUNK_W + z);
+                    kind[tree_climate(p.b)][b]++;
+                    snags += top + 1 < WORLD_H && c->blocks[col_index(x, top + 1, z)] == B_AIR;
+                    young += top - y < 4;
+                    tall += top - y >= 7;
+                    break;
+                }
         column_free(c);
     }
+    /* Oak and birch in the temperate woods, conifers in the cold, the
+     * thorn tree only where it is dry. */
+    CHECK(kind[0][B_LOG] > 0 && kind[0][B_BIRCH_LOG] > 0);
+    CHECK(kind[1][B_SPRUCE_LOG] > kind[1][B_LOG] && kind[1][B_PINE_LOG] > 0);
+    CHECK(kind[0][B_THORN_LOG] == 0 && kind[1][B_THORN_LOG] == 0 && kind[1][B_LOG] == 0);
+    CHECK(kind[2][B_THORN_LOG] > 0);
+    /* Mostly grown trees, some young and short, a few tall, a few dead. */
+    long all = 0;
+    for (int q = 0; q < 3; q++)
+        for (int b = 0; b < B_COUNT; b++) all += kind[q][b];
+    CHECK(young > 0 && tall > 0 && snags > 0 && snags < all / 10 && young < all / 2);
     double forest = (double)(trunks[BIOME_FOREST] + trunks[BIOME_TAIGA]) /
                     (double)(ground[BIOME_FOREST] + ground[BIOME_TAIGA] + 1);
     double steppe = (double)trunks[BIOME_STEPPE] / (double)(ground[BIOME_STEPPE] + 1);
@@ -668,6 +707,97 @@ static void test_caves_stand(void)
     jobs_destroy(js);
 }
 
+/* Every tree in a stretch of mixed forest stands as generated: no leaf
+ * hangs beyond what its span carries. */
+static void test_trees_stand(void)
+{
+    jobs *js = jobs_create(0);
+    world w = {0};
+    world_init(&w, 1337, 4, js, NULL);
+    world_load_blocking(&w, 72.0, -72.0, 3);
+    physics ph = {0};
+    physics_init(&ph, &w);
+    int leaves = 0, logs = 0, fell = 0;
+    for (int z = -104; z < -40; z++)
+        for (int x = 40; x < 104; x++)
+            for (int y = 40; y < WORLD_H - 1; y++) {
+                uint8_t b = world_get(&w, x, y, z);
+                if (!block_log(b) && !block_leaves(b)) continue;
+                leaves += block_leaves(b);
+                logs += block_log(b);
+                fell += physics_check_structure(&ph, x, y, z);
+            }
+    CHECK(leaves > 300 && logs > 50 && leaves > 3 * logs);
+    CHECK(fell == 0);
+    physics_destroy(&ph);
+    world_destroy(&w);
+    jobs_destroy(js);
+}
+
+/* Leaves are cut out: a share of each leaf texture is see-through, but under
+ * half, so every coarser mip, averaged over the gaps, is solid and a
+ * distant canopy closes up. */
+static void test_leaf_textures(void)
+{
+    static const int LEAF[] = {T_LEAVES, T_BIRCH_LEAVES, T_SPRUCE_LEAVES, T_PINE_LEAVES, T_THORN_LEAVES};
+    uint8_t *tex = mem_alloc(texgen_total_bytes());
+    texgen_build(tex);
+    for (int i = 0; i < 5; i++) {
+        int gaps = 0;
+        for (int y = 0; y < TEX_SIZE; y++)
+            for (int x = 0; x < TEX_SIZE; x++) {
+                uint8_t t[4] = {0};
+                texgen_texel(LEAF[i], x, y, t);
+                gaps += t[3] < 128;
+                /* A gap keeps a leaf colour, for whatever draws it whole. */
+                CHECK(t[1] > t[2] && t[1] > 20);
+            }
+        CHECK(gaps > TEX_SIZE * TEX_SIZE / 10 && gaps < TEX_SIZE * TEX_SIZE * 2 / 5);
+        int thin = 0;
+        for (int m = 2; m < TEX_MIPS; m++) {
+            const uint8_t *mip = tex + texgen_offset(LEAF[i], m);
+            int n = TEX_SIZE >> m;
+            for (int t = 0; t < n * n; t++) thin += mip[4 * t + 3] < 128;
+        }
+        CHECK(thin == 0);
+    }
+    /* Bark and stone stay solid. */
+    uint8_t t[4] = {0};
+    texgen_texel(T_BIRCH_SIDE, 3, 3, t);
+    CHECK(t[3] == 255 && t[0] > 150);
+    mem_free(tex);
+}
+
+/* Every kind of log splits into planks and chars, and only an oak's
+ * leaves give apples. */
+static void test_tree_items(void)
+{
+    static const uint8_t LOGS[] = {B_LOG, B_BIRCH_LOG, B_SPRUCE_LOG, B_PINE_LOG, B_THORN_LOG};
+    for (int i = 0; i < 5; i++) {
+        CHECK(block_log(LOGS[i]) && !block_leaves(LOGS[i]) &&
+              block_leaves((uint8_t)(LOGS[i] == B_LOG ? B_LEAVES : LOGS[i] + 4)));
+        int planks = 0, charcoal = 0;
+        for (int r = 0; r < g_recipe_count; r++) {
+            if (g_recipes[r].in[0].id != LOGS[i]) continue;
+            planks += g_recipes[r].out.id == B_PLANKS && g_recipes[r].out.count == 4;
+            charcoal += g_recipes[r].out.id == I_CHARCOAL;
+        }
+        CHECK(planks == 1 && charcoal == 1);
+    }
+    CHECK(!block_log(B_PLANKS) && !block_leaves(B_GRASS) && !block_leaves(B_COUNT));
+    uint32_t rng = 11;
+    int apples[2] = {0}, fibre = 0;
+    for (int k = 0; k < 600; k++) {
+        item_stack out[3] = {{0}};
+        int n = item_drops(k & 1 ? B_PINE_LEAVES : B_LEAVES, &rng, out);
+        for (int j = 0; j < n; j++) {
+            apples[k & 1] += out[j].id == I_APPLE;
+            fibre += out[j].id == I_FIBRE;
+        }
+    }
+    CHECK(apples[0] > 20 && apples[1] == 0 && fibre > 200);
+}
+
 static void test_smelting(void)
 {
     int furnace = -1, iron = -1;
@@ -716,5 +846,8 @@ void test_worldgen_all(void)
     test_climate_zones();
     test_dry_landforms();
     test_caves_stand();
+    test_trees_stand();
+    test_leaf_textures();
+    test_tree_items();
     test_smelting();
 }

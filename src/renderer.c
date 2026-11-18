@@ -177,6 +177,7 @@ typedef struct {
 
 _Static_assert(sizeof(entity_instance) == 52, "entity_instance is the instance vertex layout");
 _Static_assert(T_FIRE0 == 22 && T_WATER == 14 && T_LEAVES == 8, "update the layer constants in push_vert.glsl");
+_Static_assert(T_LEAVES_FIRST == 117 && T_LEAVES_LAST == T_LEAVES_FIRST + 3, "update LEAVES_FIRST in push_vert.glsl");
 _Static_assert(TEX_SIZE == 16, "update TEXELS in block.frag");
 
 typedef struct {
@@ -305,7 +306,7 @@ struct renderer {
     VkDescriptorPool shadow_dpool;
     VkDescriptorSet shadow_dset;
     VkPipelineLayout sh_layout;
-    VkPipeline p_shadow, p_opaque_sh, p_trans_sh;
+    VkPipeline p_shadow, p_opaque_sh, p_trans_sh, p_cut_sh;
     gbuf shadow_ubo;
     VkDeviceSize shadow_stride; /* bytes per frame slot in shadow_ubo */
     float shadow_dir[3];        /* toward the light the map was last drawn for */
@@ -317,7 +318,7 @@ struct renderer {
     VkDescriptorPool dpool;
     VkDescriptorSet dsets[4];     /* bit 0: terrain with sampler_filtered, not r->sampler; bit 1: flat light */
     VkPipelineLayout layout;
-    VkPipeline p_opaque, p_trans, p_entity, p_entity_trans, p_line_world, p_line_screen;
+    VkPipeline p_opaque, p_cut, p_trans, p_entity, p_entity_trans, p_line_world, p_line_screen;
     VkPipeline p_star; /* stars and the moon (sky.h), added where the sky shows */
     VkPipeline p_sky;  /* the sky's gradient and the sun's glow, where the sky shows */
     gbuf stars;        /* SKY_STARS sky_star instances, device local */
@@ -1790,6 +1791,7 @@ static void destroy_shadow(renderer *r)
     vkFreeMemory(r->dev, r->shadow_mem, r->ac);
     vkDestroyPipeline(r->dev, r->p_shadow, r->ac);
     vkDestroyPipeline(r->dev, r->p_opaque_sh, r->ac);
+    vkDestroyPipeline(r->dev, r->p_cut_sh, r->ac);
     vkDestroyPipeline(r->dev, r->p_trans_sh, r->ac);
     vkDestroyPipelineLayout(r->dev, r->sh_layout, r->ac);
     vkDestroyDescriptorSetLayout(r->dev, r->shadow_dsl, r->ac);
@@ -1843,12 +1845,12 @@ static void create_pipelines(renderer *r)
                                       {2, 2 * sizeof(float), sizeof(float)}};
     VkSpecializationInfo spec = {3, se, sizeof inv, inv};
     /* block.frag: the glowing layers, then what alpha holds (opaque,
-     * blended, the glow pass). */
-    uint32_t fconst[3][BLOOM_MASK_WORDS + 1] = {{0}};
+     * blended, the glow pass, cut out). */
+    uint32_t fconst[4][BLOOM_MASK_WORDS + 1] = {{0}};
     VkSpecializationMapEntry fe[BLOOM_MASK_WORDS + 1] = {{0}};
     for (uint32_t i = 0; i <= BLOOM_MASK_WORDS; i++) fe[i] = (VkSpecializationMapEntry){i, i * 4u, 4u};
-    VkSpecializationInfo fspec[3] = {{0}};
-    for (uint32_t m = 0; m < 3; m++) {
+    VkSpecializationInfo fspec[4] = {{0}};
+    for (uint32_t m = 0; m < 4; m++) {
         memcpy(fconst[m], r->glow_mask, sizeof r->glow_mask);
         fconst[m][BLOOM_MASK_WORDS] = m;
         fspec[m] = (VkSpecializationInfo){BLOOM_MASK_WORDS + 1, fe, sizeof fconst[m], fconst[m]};
@@ -1884,6 +1886,8 @@ static void create_pipelines(renderer *r)
                    VK_FORMAT_UNDEFINED,
                    VK_NULL_HANDLE};
     r->p_opaque = make_pipeline(r, &d);
+    d.fspec = &fspec[3];
+    r->p_cut = make_pipeline(r, &d);
     d.depth_write = 0;
     d.blend = 1;
     d.fspec = &fspec[1];
@@ -1903,6 +1907,8 @@ static void create_pipelines(renderer *r)
         sh.blend = 0;
         sh.fspec = &fspec[0];
         r->p_opaque_sh = make_pipeline(r, &sh);
+        sh.fspec = &fspec[3];
+        r->p_cut_sh = make_pipeline(r, &sh);
         sh.depth_write = 0;
         sh.blend = 1;
         sh.fspec = &fspec[1];
@@ -2986,6 +2992,7 @@ void renderer_destroy(renderer *r)
     vkDestroySampler(r->dev, r->sampler_linear, r->ac);
     vkDestroyDescriptorSetLayout(r->dev, r->ui_dsl, r->ac);
     vkDestroyPipeline(r->dev, r->p_opaque, r->ac);
+    vkDestroyPipeline(r->dev, r->p_cut, r->ac);
     vkDestroyPipeline(r->dev, r->p_trans, r->ac);
     vkDestroyPipeline(r->dev, r->p_entity, r->ac);
     vkDestroyPipeline(r->dev, r->p_entity_trans, r->ac);
@@ -3185,6 +3192,23 @@ static void pass_draw(terrain_pass *p, int block, uint32_t first_vertex, uint32_
     }
 }
 
+/* Leaves, cut out, in their own pipeline after the rest: one that may
+ * discard loses the early depth test, which the opaque pass keeps. The
+ * gaps show both faces, so no face group is skipped. */
+static void pass_draw_cut(terrain_pass *p, int nvis, int shadows)
+{
+    VkPipeline pipe = shadows ? p->r->p_cut_sh : p->r->p_cut;
+    int cuts = 0;
+    for (int i = 0; i < nvis; i++) {
+        const section_mesh *m = p->r->vis[i].m;
+        uint32_t c0 = m->face_end[5];
+        if (m->opaque_quads <= c0) continue;
+        if (!cuts++) vkCmdBindPipeline(p->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+        pass_draw(p, m->block, m->vtx_offset + c0 * 4, m->opaque_quads - c0, (uint32_t)i);
+    }
+    pass_flush(p);
+}
+
 /* Bit f set: face group f (+X, -X, +Y, -Y, +Z, -Z) of a section whose min
  * corner is at camera-relative o can face the camera. */
 static uint32_t facing_groups(vec3 o)
@@ -3347,6 +3371,10 @@ static void draw_shadow(renderer *r, terrain_pass *tp, const world *w, const ren
             if (q1 > q0) pass_draw(tp, s->block, s->vtx_offset + q0 * 4, q1 - q0, (uint32_t)i);
             g = e + 1;
         }
+        /* Leaves cast a whole shadow: the map's pass has no fragment
+         * shader to cut them out, and a canopy's shade is near solid. */
+        uint32_t c0 = s->face_end[5];
+        if (s->opaque_quads > c0) pass_draw(tp, s->block, s->vtx_offset + c0 * 4, s->opaque_quads - c0, (uint32_t)i);
     }
     pass_flush(tp);
     tp->bound = -1;
@@ -3795,6 +3823,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         }
     }
     pass_flush(&tp);
+    pass_draw_cut(&tp, nvis, shadows);
 
     /* Entities: falling bodies plus the game's items, particles and
      * overlays, one static cube instanced per entity. Opaque instances are

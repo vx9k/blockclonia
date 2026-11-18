@@ -369,9 +369,14 @@ int item_drops(uint8_t block, uint32_t *rng, item_stack out[3])
     int n = 0;
     switch (block) {
     case B_LEAVES:
-        /* Torn apart by hand: fibre about half the time, sometimes an apple. */
+    case B_BIRCH_LEAVES:
+    case B_SPRUCE_LEAVES:
+    case B_PINE_LEAVES:
+    case B_THORN_LEAVES:
+        /* Torn apart by hand: fibre about half the time, and from an oak
+         * sometimes an apple. */
         if (chance(rng, 1, 2)) out[n++] = (item_stack){I_FIBRE, 1, 0};
-        if (chance(rng, 1, 6)) out[n++] = (item_stack){I_APPLE, 1, 0};
+        if (block == B_LEAVES && chance(rng, 1, 6)) out[n++] = (item_stack){I_APPLE, 1, 0};
         break;
     case B_GRASS: out[n++] = (item_stack){B_DIRT, 1, 0}; break;
     case B_GLASS: break; /* shatters */

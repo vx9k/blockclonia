@@ -85,8 +85,7 @@ static int fuel_units(item_id id)
     switch (id) {
     case I_STICK: return 1;
     case B_PLANKS: return 2;
-    case B_LOG: return 4;
-    default: return 0;
+    default: return block_log((uint8_t)id) && id < B_COUNT ? 4 : 0;
     }
 }
 

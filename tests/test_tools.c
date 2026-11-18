@@ -244,6 +244,14 @@ static void test_materials(void)
         [B_TORCH] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.0f},
         [B_LAMP] = {-1, -1, MAT_GLASS, 1.0f, 0.0f},
         [B_FOXFIRE] = {TOOL_SHOVEL, -1, MAT_DIRT, 0.7f, 0.1f},
+        [B_BIRCH_LOG] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.3f},
+        [B_SPRUCE_LOG] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.3f},
+        [B_PINE_LOG] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.3f},
+        [B_THORN_LOG] = {TOOL_AXE, -1, MAT_WOOD, 1.0f, 0.3f},
+        [B_BIRCH_LEAVES] = {-1, -1, MAT_LEAVES, 0.35f, 0.0f},
+        [B_SPRUCE_LEAVES] = {-1, -1, MAT_LEAVES, 0.4f, 0.0f},
+        [B_PINE_LEAVES] = {-1, -1, MAT_LEAVES, 0.4f, 0.0f},
+        [B_THORN_LEAVES] = {-1, -1, MAT_LEAVES, 0.4f, 0.0f},
     };
     int bad = 0;
     for (int b = 0; b < B_COUNT; b++) {

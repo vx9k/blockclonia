@@ -70,6 +70,16 @@ typedef enum {
     B_TORCH,     /* a light on a stick; drawn as a small model, not a block */
     B_LAMP,      /* an oil lamp behind glass */
     B_FOXFIRE,   /* glowing fungus on a damp cave floor */
+    /* Trees besides the oak (B_LOG, B_LEAVES): the logs, then the leaves,
+     * each in the same order. */
+    B_BIRCH_LOG,
+    B_SPRUCE_LOG,
+    B_PINE_LOG,
+    B_THORN_LOG, /* the flat-crowned tree of dry country */
+    B_BIRCH_LEAVES,
+    B_SPRUCE_LEAVES,
+    B_PINE_LEAVES,
+    B_THORN_LEAVES,
     B_COUNT
 } block_id;
 
@@ -215,6 +225,17 @@ typedef enum {
     T_SMOKE1,
     T_SMOKE2,
     T_FLASH,
+    /* The trees' bark and the birch's pale end grain; then their leaves,
+     * together, so the shaders sway them as one range. */
+    T_BIRCH_SIDE,
+    T_BIRCH_TOP,
+    T_SPRUCE_SIDE,
+    T_PINE_SIDE,
+    T_THORN_SIDE,
+    T_BIRCH_LEAVES,
+    T_SPRUCE_LEAVES,
+    T_PINE_LEAVES,
+    T_THORN_LEAVES,
     T_COUNT
 } tex_id;
 
@@ -223,6 +244,8 @@ _Static_assert(T_COUNT <= 256, "a texture layer is one byte in block_def and the
 #define T_MOB_LAST T_MOB_SOLE
 
 #define T_FIRE_FRAMES 4
+#define T_LEAVES_FIRST T_BIRCH_LEAVES
+#define T_LEAVES_LAST T_THORN_LEAVES
 
 /* What a block is made of, as far as tools and sound care: the tool that
  * digs it and the noise it makes. */
@@ -283,6 +306,12 @@ static inline int block_opaque(uint8_t id)
 
 /* Liquids flow and keep their level in the cell's meta (world.h). */
 static inline int block_fluid(uint8_t id) { return id < B_COUNT && (g_blocks[id].flags & BF_FLUID); }
+
+/* A tree's trunk or branch, of any kind. */
+static inline int block_log(uint8_t id) { return id == B_LOG || (id >= B_BIRCH_LOG && id <= B_THORN_LOG); }
+
+/* Leaves of any tree: drawn cut out, so the sky shows between them. */
+static inline int block_leaves(uint8_t id) { return id < B_COUNT && g_blocks[id].mat == BM_LEAVES; }
 
 /* Blocks that keep a 0..7 value in the column's meta array: liquids (their
  * level, 0 = full) and campfires (fuel left, 0 = full). */

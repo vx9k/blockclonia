@@ -306,7 +306,7 @@ static void test_save_files(void)
 static void test_mesher(void)
 {
     mesh_input *in = mem_alloc(sizeof *in);
-    uint32_t *out = mem_alloc(sizeof(uint32_t) * 4 * MESH_MAX_QUADS);
+    uint32_t *out = mem_alloc(sizeof(uint32_t) * MESH_OUT_VERTS);
     uint32_t o = 0, t = 0;
 
     fill_input(in, B_AIR);
@@ -319,17 +319,27 @@ static void test_mesher(void)
 
     /* Leaves sway and nothing else does: a log and a leaf side by side both
      * keep the faces between them, and leaves never merge, since a merged
-     * quad's straight edge would not follow the sway of its neighbours. */
+     * quad's straight edge would not follow the sway of its neighbours.
+     * They are cut out, so two leaves keep the faces between them too, or
+     * the sky would show through a canopy's gaps into its inside; and the
+     * leaves' quads come after the opaque face groups. */
     fill_input(in, B_AIR);
     in->blocks[mesh_pidx(5, 5, 5)] = B_LOG;
     in->blocks[mesh_pidx(6, 5, 5)] = B_LEAVES;
-    CHECK(mesh_section(in, out, &o, &t) == 12);
-    in->blocks[mesh_pidx(5, 5, 5)] = B_LEAVES;
-    CHECK(mesh_section(in, out, &o, &t) == 10 && o == 10);
+    mesh_counts mc = {0};
+    CHECK(mesh_section_counts(in, out, &mc) == 12 && mc.opaque == 12 && mc.face_end[5] == 6);
+    in->blocks[mesh_pidx(5, 5, 5)] = B_SPRUCE_LEAVES;
+    CHECK(mesh_section_counts(in, out, &mc) == 12 && mc.opaque == 12 && mc.face_end[5] == 0);
     /* Unloaded space next to a leaf still hides its face. */
     in->blocks[mesh_pidx(-1, 5, 5)] = B_UNLOADED;
     in->blocks[mesh_pidx(0, 5, 5)] = B_LEAVES;
-    CHECK(mesh_section(in, out, &o, &t) == 15);
+    CHECK(mesh_section(in, out, &o, &t) == 17);
+    /* The cut-out quads sit between the opaque and the translucent ones. */
+    in->blocks[mesh_pidx(9, 9, 9)] = B_STONE;
+    in->blocks[mesh_pidx(12, 9, 9)] = B_GLASS;
+    CHECK(mesh_section_counts(in, out, &mc) == 29 && mc.opaque == 23 && mc.face_end[5] == 6 && mc.trans == 6);
+    uint32_t layer_cut = out[4 * 6] >> 20 & 0xFFu, layer_trans = out[4 * 23] >> 20 & 0xFFu;
+    CHECK(layer_cut == T_LEAVES && layer_trans == T_GLASS && (out[0] >> 20 & 0xFFu) == T_STONE);
 
     /* Fully buried section has nothing to draw. */
     fill_input(in, B_STONE);

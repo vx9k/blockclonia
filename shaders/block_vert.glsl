@@ -107,7 +107,7 @@ void main()
         // The texture drifts one tile per 40 s along x and per 60 s along
         // the other axis (2.5 and 1.7 cm/s).
         scroll = fract(t * vec2(1.0 / 40.0, 1.0 / 60.0));
-    } else if (layer == LEAVES_LAYER) {
+    } else if (layer == LEAVES_LAYER || layer - LEAVES_FIRST < 4u) {
         // Leaves sway 3 cm on an ellipse, 0.42 Hz (2.4 s), a wind gust
         // travelling across the canopy: phase from the position, 8 cycles
         // per 256 m in x, 5 in z, and one per 32 m up.

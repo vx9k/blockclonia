@@ -774,10 +774,16 @@ static void maintain(thermo *t, const world *w, dvec3 player, int have_player)
  * oil, which gives off vapour far below lava's heat, at once. */
 static int fuel_block(uint8_t id, int level, double *ignite_s)
 {
+    if (block_leaves(id)) {
+        *ignite_s = 120.0;
+        return 1;
+    }
+    if (block_log(id)) {
+        *ignite_s = 600.0;
+        return 4;
+    }
     switch (id) {
-    case B_LEAVES: *ignite_s = 120.0; return 1;
     case B_PLANKS: *ignite_s = 300.0; return 2;
-    case B_LOG: *ignite_s = 600.0; return 4;
     case B_PEAT: *ignite_s = 900.0; return 4;
     case B_CRUDE_OIL: *ignite_s = 20.0; return (level + 1) / 2;
     default: *ignite_s = 0.0; return 0;

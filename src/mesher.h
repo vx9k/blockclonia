@@ -16,8 +16,10 @@
 #define MESH_PAD 18
 #define MESH_PAD_VOL (MESH_PAD * MESH_PAD * MESH_PAD)
 /* Every quad is one face of one block, so a section never exceeds 6 faces
- * per block. */
+ * per block. The mesher's output buffer holds twice that: the cut-out
+ * quads gather in the second half while it runs. */
 #define MESH_MAX_QUADS (16 * 16 * 16 * 6)
+#define MESH_OUT_VERTS (2 * MESH_MAX_QUADS * 4)
 
 typedef struct {
     uint8_t blocks[MESH_PAD_VOL]; /* section plus a 1-block border */
@@ -35,12 +37,14 @@ void mesher_init(void);
 typedef struct {
     uint32_t opaque, trans;
     /* Opaque quads are grouped by face (+X -X +Y -Y +Z -Z); group f ends
-     * at quad face_end[f], so the renderer can skip groups facing away. */
+     * at quad face_end[f], so the renderer can skip groups facing away.
+     * The cut-out quads (leaves) follow, up to `opaque`: they are drawn
+     * with depth like the rest, in their own pipeline. */
     uint16_t face_end[6];
 } mesh_counts;
 
-/* Writes opaque quads first, then translucent ones. `out` must hold
- * MESH_MAX_QUADS * 4 vertices. Returns total quad count. */
+/* Writes opaque quads first, then cut-out ones, then translucent ones.
+ * `out` must hold MESH_OUT_VERTS vertices. Returns total quad count. */
 uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *mc);
 uint32_t mesh_section(const mesh_input *in, uint32_t *out, uint32_t *opaque_quads,
                       uint32_t *trans_quads);

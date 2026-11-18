@@ -187,6 +187,25 @@ const block_def g_blocks[B_COUNT] = {
                  0},
     [B_LAMP] = {"oil lamp", BF_SOLID, ALL(T_LAMP), 0, 1500.0f, 0.6f, 0.2f, 0.3f, 600.0f, 1.0f, BM_GLASS, 1.0f, 0.0f, 0,
                 0},
+    /* Birch is the densest and hardest of these; the conifers are light
+     * and soft, and the thorn tree's wood is dense and tough. Leaves as the
+     * oak's: needles are a little denser. */
+    [B_BIRCH_LOG] = {"birch log", BF_SOLID | BF_OPAQUE, SIDES_TOP_BOTTOM(T_BIRCH_SIDE, T_BIRCH_TOP, T_BIRCH_TOP), 6,
+                     650.0f, 0.6f, 0.3f, 3.0f, 1700.0f, 0.15f, BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_SPRUCE_LOG] = {"spruce log", BF_SOLID | BF_OPAQUE, SIDES_TOP_BOTTOM(T_SPRUCE_SIDE, T_LOG_TOP, T_LOG_TOP), 6,
+                      450.0f, 0.6f, 0.3f, 2.5f, 1700.0f, 0.12f, BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_PINE_LOG] = {"pine log", BF_SOLID | BF_OPAQUE, SIDES_TOP_BOTTOM(T_PINE_SIDE, T_LOG_TOP, T_LOG_TOP), 6, 520.0f,
+                    0.6f, 0.3f, 2.5f, 1700.0f, 0.13f, BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_THORN_LOG] = {"thorn log", BF_SOLID | BF_OPAQUE, SIDES_TOP_BOTTOM(T_THORN_SIDE, T_LOG_TOP, T_LOG_TOP), 6, 800.0f,
+                     0.6f, 0.3f, 3.5f, 1700.0f, 0.17f, BM_WOOD, 1.0f, 0.3f, 0, 0},
+    [B_BIRCH_LEAVES] = {"birch leaves", BF_SOLID | BF_OPAQUE, ALL(T_BIRCH_LEAVES), 3, 150.0f, 0.4f, 0.1f, 0.25f,
+                        2000.0f, 0.1f, BM_LEAVES, 0.35f, 0.0f, 0, 0},
+    [B_SPRUCE_LEAVES] = {"spruce needles", BF_SOLID | BF_OPAQUE, ALL(T_SPRUCE_LEAVES), 3, 180.0f, 0.4f, 0.1f, 0.25f,
+                         2000.0f, 0.1f, BM_LEAVES, 0.4f, 0.0f, 0, 0},
+    [B_PINE_LEAVES] = {"pine needles", BF_SOLID | BF_OPAQUE, ALL(T_PINE_LEAVES), 3, 170.0f, 0.4f, 0.1f, 0.25f, 2000.0f,
+                       0.1f, BM_LEAVES, 0.4f, 0.0f, 0, 0},
+    [B_THORN_LEAVES] = {"thorn leaves", BF_SOLID | BF_OPAQUE, ALL(T_THORN_LEAVES), 3, 140.0f, 0.4f, 0.1f, 0.25f,
+                        2000.0f, 0.1f, BM_LEAVES, 0.4f, 0.0f, 0, 0},
     [B_FOXFIRE] = {"foxfire", BF_SOLID | BF_OPAQUE, ALL(T_FOXFIRE), 2, 1100.0f, 0.6f, 0.1f, 0.5f, 2500.0f, 0.4f,
                    BM_DIRT, 0.7f, 0.1f, 0, 0},
 };

@@ -514,7 +514,7 @@ typedef struct mesh_job {
 static void mesh_run(job *j)
 {
     mesh_job *m = (mesh_job *)j;
-    uint32_t *scratch = jobs_scratch(sizeof(uint32_t) * 4 * MESH_MAX_QUADS);
+    uint32_t *scratch = jobs_scratch(sizeof(uint32_t) * MESH_OUT_VERTS);
     uint32_t quads = mesh_section_counts(&m->in, scratch, &m->mc);
     if (quads) {
         m->verts = mem_alloc(sizeof(uint32_t) * 4 * quads);

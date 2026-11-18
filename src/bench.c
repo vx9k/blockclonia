@@ -33,7 +33,7 @@ int bench_run(uint32_t seed)
     world_init(&w, seed, 8, js, NULL);
     world_load_blocking(&w, 8.0, 8.0, 5);
     mesh_input *in = mem_alloc(sizeof *in);
-    uint32_t *out = mem_alloc(sizeof(uint32_t) * 4 * MESH_MAX_QUADS);
+    uint32_t *out = mem_alloc(sizeof(uint32_t) * MESH_OUT_VERTS);
     uint64_t quads = 0;
     int sections = 0;
     t0 = os_now();
