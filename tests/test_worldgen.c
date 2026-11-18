@@ -1168,27 +1168,33 @@ static int count_trunks(const column *c, int seen[TREE_KINDS])
     return feet;
 }
 
-/* Woods are mostly of one kind: in a forest, the commonest trunk around a
- * spot is most of them, and not every wood is the same kind. Trees used
- * to take their kind one by one, so a forest had four or five kinds
- * mixed evenly, the commonest well under half. */
-static void test_forest_woods(void)
+/* Trunks counted around up to eight spots of the given biomes, far apart:
+ * how many spots, how many trunks were of each spot's commonest kind, of
+ * how many, and how many different kinds were commonest somewhere. A spot
+ * is span x span columns whose middle and four points around it all lie
+ * in one of the biomes, with at least 8 trunks to judge by. */
+typedef struct {
+    int spots, kinds;
+    long main_feet, all_feet;
+} woods_tally;
+
+static woods_tally tally_woods(const biome *want, int nwant, int span)
 {
-    int spots = 0, mains[TREE_KINDS] = {0};
-    long main_feet = 0, all_feet = 0;
-    for (int i = 0; i < 4000 && spots < 8; i++) {
+    woods_tally t = {0, 0, 0, 0};
+    int mains[TREE_KINDS] = {0}, r = span * CHUNK_W / 2;
+    for (int i = 0; i < 6000 && t.spots < 8; i++) {
         int x = (i * 7919) % 60000 - 30000, z = (i * 104729) % 60000 - 30000;
-        int forest = 1;
-        for (int k = 0; k < 5 && forest; k++) {
-            worldgen_point p = worldgen_sample(1337, x + (k == 1) * 24 - (k == 2) * 24,
-                                               z + (k == 3) * 24 - (k == 4) * 24);
-            forest = p.b == BIOME_FOREST || p.b == BIOME_TAIGA;
+        int inside = 1;
+        for (int k = 0; k < 5 && inside; k++) {
+            worldgen_point p = worldgen_sample(1337, x + (k == 1) * r - (k == 2) * r, z + (k == 3) * r - (k == 4) * r);
+            inside = 0;
+            for (int w = 0; w < nwant; w++) inside |= p.b == want[w];
         }
-        if (!forest) continue;
+        if (!inside) continue;
         int seen[TREE_KINDS] = {0}, feet = 0;
-        int cx = (int)floor(x / (double)CHUNK_W), cz = (int)floor(z / (double)CHUNK_W);
-        for (int dz = 0; dz < 2; dz++)
-            for (int dx = 0; dx < 2; dx++) {
+        int cx = (int)floor((x - r) / (double)CHUNK_W), cz = (int)floor((z - r) / (double)CHUNK_W);
+        for (int dz = 0; dz < span; dz++)
+            for (int dx = 0; dx < span; dx++) {
                 column *c = column_alloc(cx + dx, cz + dz);
                 worldgen_column(1337, c);
                 feet += count_trunks(c, seen);
@@ -1199,15 +1205,33 @@ static void test_forest_woods(void)
         for (int k = 1; k < TREE_KINDS; k++)
             if (seen[k] > seen[top]) top = k;
         mains[top] = 1;
-        main_feet += seen[top];
-        all_feet += feet;
-        spots++;
+        t.main_feet += seen[top];
+        t.all_feet += feet;
+        t.spots++;
     }
-    int kinds = 0;
-    for (int k = 0; k < TREE_KINDS; k++) kinds += mains[k];
-    CHECK(spots >= 5);
-    CHECK(main_feet * 10 >= all_feet * 7); /* the commonest kind is 70 % or more */
-    CHECK(kinds >= 2);
+    for (int k = 0; k < TREE_KINDS; k++) t.kinds += mains[k];
+    return t;
+}
+
+/* Woods are mostly of one kind, and not every wood is of the same kind.
+ * Trees used to take their kind one by one, so a forest mixed four or
+ * five kinds evenly: around a spot the commonest was 58 % of the trunks
+ * in forest, 55 % in taiga and 84 % in dry country. Counting willows by
+ * the streams and each wood's companion kind, woods make it 70 %, 78 %
+ * and 94 %. */
+static void test_forest_woods(void)
+{
+    static const biome FOREST[] = {BIOME_FOREST}, CONIFER[] = {BIOME_TAIGA}, DRY[] = {BIOME_SCRUB, BIOME_STEPPE};
+    woods_tally f = tally_woods(FOREST, 1, 2);
+    CHECK(f.spots >= 5 && f.kinds >= 2);
+    CHECK(f.main_feet * 100 >= f.all_feet * 65);
+    woods_tally c = tally_woods(CONIFER, 1, 2);
+    CHECK(c.spots >= 3 && c.kinds >= 2);
+    CHECK(c.main_feet * 100 >= c.all_feet * 70);
+    /* Dry country is thinly wooded: look over nine columns a spot. */
+    woods_tally d = tally_woods(DRY, 2, 3);
+    CHECK(d.spots >= 3);
+    CHECK(d.main_feet * 100 >= d.all_feet * 90);
 }
 
 /* Columns grown on several workers at once, sharing the remembered tree
