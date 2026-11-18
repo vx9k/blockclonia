@@ -171,7 +171,10 @@ limiter.
   tables match a known older format is upgraded on open: copied first to
   `world.db.format<N>`, then rebuilt in one transaction that either
   finishes or leaves the file as it was. Format 2 made the tables STRICT
-  with CHECKs on keys and sizes. Opening also runs `quick_check`, and
+  with CHECKs on keys and sizes. Format 3 gave every player a row in
+  `players` (the single player's is `local`, others are keyed by their
+  identity key) and made `meta` hold typed values, the world's name among
+  them. Opening also runs `quick_check`, and
   closing hands back freed pages through incremental vacuum.
 - SQLite's exclusive locking mode keeps a world open in only one game at
   a time; a second instance pointed at the same folder disables saving

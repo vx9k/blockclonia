@@ -675,7 +675,7 @@ static int save_player(void *user)
     const save_ctx *sc = user;
     uint8_t buf[PLAYER_FILE_SIZE] = {0};
     size_t n = survival_encode_player(sc->pl, sc->inv, thermo_day_time(sc->th), buf, sizeof buf);
-    if (!n || save_db_put_blob(sc->db, "player", buf, n) != 0) {
+    if (!n || save_db_put_player(sc->db, SAVE_DB_LOCAL_PLAYER, buf, n) != 0) {
         log_warn("could not save the player");
         return -1;
     }
@@ -692,7 +692,7 @@ static int load_player(save_db *db, player *pl, inventory *inv, double *day)
 {
     if (!db) return 0;
     uint8_t buf[PLAYER_FILE_SIZE + 1] = {0};
-    long n = save_db_get_blob(db, "player", buf, sizeof buf);
+    long n = save_db_get_player(db, SAVE_DB_LOCAL_PLAYER, buf, sizeof buf);
     if (n < 0) return n == -2 ? -1 : 0;
     if (survival_decode_player(pl, inv, day, buf, (size_t)n) != 0) {
         log_warn("the saved player is corrupt; starting fresh");
@@ -1409,7 +1409,7 @@ static void open_world(game *g, const char *dir, int backdrop)
      * valid one is used. */
     g->world_name[0] = '\0';
     char name[SAVE_NAME_MAX + 1] = {0};
-    long len = g->db ? save_db_get_blob(g->db, "name", name, SAVE_NAME_MAX) : -1;
+    long len = g->db ? save_db_get_text(g->db, "name", name, sizeof name) : -1;
     if (len > 0 && save_name_valid(name, (size_t)len)) memcpy(g->world_name, name, (size_t)len + 1);
     g->play_start = (int64_t)time(NULL);
 }

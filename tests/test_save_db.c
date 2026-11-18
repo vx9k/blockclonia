@@ -285,7 +285,12 @@ static void test_bad_rows(void)
     CHECK(!raw_sql(dir, "INSERT INTO columns VALUES (125000000, 0, x'00')"));
     CHECK(!raw_sql(dir, "INSERT INTO columns VALUES (0, -125000001, x'00')"));
     CHECK(!raw_sql(dir, "INSERT INTO blobs VALUES ('player', 'text')"));
-    CHECK(!raw_sql(dir, "INSERT INTO meta VALUES ('k', 'text')"));
+    CHECK(!raw_sql(dir, "INSERT INTO meta VALUES ('k', x'00')"));
+    CHECK(!raw_sql(dir, "INSERT INTO meta VALUES ('k', printf('%.257c', 'a'))"));
+    CHECK(!raw_sql(dir, "INSERT INTO players VALUES ('a', 'text', 0)"));
+    CHECK(!raw_sql(dir, "INSERT INTO players VALUES ('a', x'', 0)"));
+    CHECK(!raw_sql(dir, "INSERT INTO players VALUES ('a', x'00', -1)"));
+    CHECK(!raw_sql(dir, "INSERT INTO players VALUES ('', x'00', 0)"));
     CHECK(!raw_sql(dir, "INSERT INTO meta VALUES ('', 1)"));
     CHECK(raw_sql(dir, "INSERT INTO columns VALUES (124999999, -125000000, x'00')")); /* the edges are in */
     save_db *db = save_db_open(dir);
@@ -324,7 +329,7 @@ static void test_read_fails(void)
     save_db *db = save_db_open(dir);
     column *c = edited_column(0, 0); /* planks at 3,GROUND,4 */
     CHECK(db && save_db_set_seed(db, 1) == 0 && save_db_put_column(db, c) == 0);
-    CHECK(db && save_db_put_blob(db, "player", "P", 1) == 0);
+    CHECK(db && save_db_put_player(db, SAVE_DB_LOCAL_PLAYER, "P", 1) == 0);
     save_db_close(db);
     column_free(c);
     db = save_db_open(dir); /* nothing of it cached yet */
@@ -338,7 +343,7 @@ static void test_read_fails(void)
     char buf[4] = {0};
     uint8_t *b = NULL;
     CHECK(save_db_get_seed(db, &seed) == -2);
-    CHECK(save_db_get_blob(db, "player", buf, sizeof buf) == -2);
+    CHECK(save_db_get_player(db, SAVE_DB_LOCAL_PLAYER, buf, sizeof buf) == -2);
     CHECK(save_db_get_column(db, 0, 0, &b) == -3 && b == NULL);
     CHECK(save_db_import(db, dir) == -1);
     jobs *js = jobs_create(1);
@@ -398,7 +403,7 @@ static void test_import(void)
     b = NULL;
     CHECK(save_db_get_column(db, 1, 0, &b) == -1 && save_db_get_column(db, 3, 3, &b) == -1);
     char buf[16] = {0};
-    CHECK(save_db_get_blob(db, "player", buf, sizeof buf) == 6 && memcmp(buf, "PLAYER", 6) == 0);
+    CHECK(save_db_get_player(db, SAVE_DB_LOCAL_PLAYER, buf, sizeof buf) == 6 && memcmp(buf, "PLAYER", 6) == 0);
     CHECK(save_db_import(db, dir) == 0); /* once only */
     save_db_close(db);
     path_in(p, sizeof p, dir, "player.dat");
@@ -415,12 +420,13 @@ static void test_import(void)
 
 /* Stands in for the game's player: written by the world's on_save hook. */
 static int g_player_fails;
-static int save_test_player(void *user) { return g_player_fails ? -1 : save_db_put_blob(user, "player", "new", 3); }
+static int save_test_player(void *user)
+{ return g_player_fails ? -1 : save_db_put_player(user, SAVE_DB_LOCAL_PLAYER, "new", 3); }
 
 static int player_is(save_db *db, const char *want)
 {
     char buf[8] = {0};
-    long n = save_db_get_blob(db, "player", buf, sizeof buf);
+    long n = save_db_get_player(db, SAVE_DB_LOCAL_PLAYER, buf, sizeof buf);
     return n == (long)strlen(want) && memcmp(buf, want, (size_t)n) == 0;
 }
 
@@ -434,7 +440,7 @@ static void test_save_with_player(void)
     save_db *db = save_db_open(dir);
     CHECK(db != NULL);
     if (!db) return;
-    CHECK(save_db_put_blob(db, "player", "old", 3) == 0);
+    CHECK(save_db_put_player(db, SAVE_DB_LOCAL_PLAYER, "old", 3) == 0);
     jobs *js = jobs_create(1);
     world w = {0};
     world_init(&w, 1, 2, js, db);
@@ -542,6 +548,38 @@ static void test_unload_save_fails(void)
     fault_vfs_remove();
 }
 
+/* Players by id and typed meta values. */
+static void test_players_and_text(void)
+{
+    char dir[400] = {0};
+    make_world(dir, sizeof dir, "typed", NULL);
+    save_db *db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (!db) return;
+    char buf[300] = {0};
+    CHECK(save_db_put_player(db, SAVE_DB_LOCAL_PLAYER, "me", 2) == 0 && save_db_put_player(db, "k1", "you", 3) == 0);
+    CHECK(save_db_get_player(db, SAVE_DB_LOCAL_PLAYER, buf, sizeof buf) == 2 && memcmp(buf, "me", 2) == 0);
+    CHECK(save_db_get_player(db, "k1", buf, sizeof buf) == 3 && memcmp(buf, "you", 3) == 0);
+    CHECK(save_db_get_player(db, "k1", buf, 2) == -1 && save_db_get_player(db, "k2", buf, sizeof buf) == -1);
+    CHECK(save_db_put_player(db, "k1", "", 0) == -1); /* refused by the table */
+    char id[80] = {0};
+    memset(id, 'a', 65);
+    CHECK(save_db_put_player(db, id, "x", 1) == -1);
+
+    CHECK(save_db_set_text(db, "name", "Hello", 5) == 0);
+    CHECK(save_db_get_text(db, "name", buf, sizeof buf) == 5 && strcmp(buf, "Hello") == 0);
+    CHECK(save_db_get_text(db, "name", buf, 5) == -1); /* no room for the terminator */
+    int64_t v = 0;
+    CHECK(save_db_get_meta(db, "name", &v) == -1); /* text is not an integer */
+    CHECK(save_db_set_meta(db, "n", 3) == 0 && save_db_get_text(db, "n", buf, sizeof buf) == -1);
+    memset(buf, 'b', 257);
+    CHECK(save_db_set_text(db, "long", buf, 257) == -1 && save_db_set_text(db, "long", buf, 256) == 0);
+    CHECK(save_db_get_text(db, "long", buf, sizeof buf) == 256 && buf[256] == '\0');
+    CHECK(save_db_get_text(db, "none", buf, sizeof buf) == -1);
+    save_db_close(db);
+    CHECK(raw_pragma(dir, "world.db", "SELECT min(saved) FROM players") > 0);
+}
+
 /* A world exactly as a format 1 build wrote it, with sql run on it after. */
 static void make_format1(char *dir, size_t cap, const char *name, const char *sql)
 {
@@ -552,7 +590,8 @@ static void make_format1(char *dir, size_t cap, const char *name, const char *sq
                        "PRIMARY KEY(cx, cz)) WITHOUT ROWID;"
                        "CREATE TABLE blobs(name TEXT PRIMARY KEY NOT NULL, data BLOB NOT NULL) WITHOUT ROWID;"
                        "INSERT INTO meta VALUES ('seed', 77);"
-                       "INSERT INTO blobs VALUES ('name', x'4F6C64')"));
+                       "INSERT INTO blobs VALUES ('name', x'4F6C64'), ('player', x'50'), ('player:abcd', x'5151'), "
+                       "('player:', x'52'), ('note', x'00')"));
     if (sql) CHECK(raw_sql(dir, sql));
 }
 
@@ -592,12 +631,18 @@ static void test_upgrade(void)
         long n = save_db_get_column(db, 2, -3, &b);
         CHECK(n == (long)len && b && memcmp(b, enc, len) == 0);
         mem_free(b);
-        CHECK(save_db_get_blob(db, "name", name, sizeof name) == 3 && memcmp(name, "Old", 3) == 0);
+        CHECK(save_db_get_text(db, "name", name, sizeof name) == 3 && strcmp(name, "Old") == 0);
+        CHECK(save_db_get_blob(db, "name", name, sizeof name) == -1); /* moved, not copied */
+        CHECK(save_db_get_player(db, SAVE_DB_LOCAL_PLAYER, name, sizeof name) == 1 && name[0] == 'P');
+        CHECK(save_db_get_player(db, "abcd", name, sizeof name) == 2 && memcmp(name, "QQ", 2) == 0);
+        CHECK(save_db_get_blob(db, "note", name, sizeof name) == 1); /* what has no table stays */
         CHECK(save_db_set_seed(db, 78) == 0); /* and it writes */
         save_db_close(db);
     }
     CHECK(raw_pragma(dir, "world.db", "PRAGMA user_version") == SAVE_DB_FORMAT);
     CHECK(raw_pragma(dir, "world.db", "PRAGMA auto_vacuum") == 2);
+    CHECK(raw_pragma(dir, "world.db", "SELECT count(*) FROM players") == 2);
+    CHECK(raw_pragma(dir, "world.db", "SELECT count(*) FROM blobs") == 1);
     CHECK(!raw_sql(dir, "INSERT INTO columns VALUES (9, 9, 'text')")); /* STRICT now */
     CHECK(raw_pragma(dir, "world.db.format1", "PRAGMA user_version") == 1);
     CHECK(raw_pragma(dir, "world.db.format1", "SELECT value FROM meta WHERE key = 'seed'") == 77);
@@ -606,6 +651,22 @@ static void test_upgrade(void)
     CHECK(db != NULL);
     save_db_close(db);
     CHECK(raw_pragma(dir, "world.db.format1", "SELECT count(*) FROM columns") == 1);
+
+    /* Rows no build could have read are dropped, not carried over. */
+    make_format1(dir, sizeof dir, "updrop",
+                 "UPDATE blobs SET data = zeroblob(100) WHERE name = 'name';"
+                 "UPDATE blobs SET data = x'' WHERE name = 'player'");
+    db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (db) {
+        char got[8] = {0};
+        CHECK(save_db_get_text(db, "name", got, sizeof got) == -1);
+        CHECK(save_db_get_player(db, SAVE_DB_LOCAL_PLAYER, got, sizeof got) == -1);
+        CHECK(save_db_get_player(db, "abcd", got, sizeof got) == 2);
+        save_db_close(db);
+    }
+    save_db_peek(dir, &pk);
+    CHECK(pk.status == SAVE_PEEK_OK && pk.name[0] == '\0' && pk.seed == 77);
 
     /* A row format 2 refuses: the upgrade fails whole, the file unchanged. */
     make_format1(dir, sizeof dir, "upbad", "INSERT INTO columns VALUES (0, 0, 'text')");
@@ -669,9 +730,10 @@ static void test_tidy_and_damage(void)
 /* Deletes what the tests made (one level of subfolders). */
 static void clean_up(void)
 {
-    const char *subs[] = {"rt",   "garbage",    "foreign",  "trigger", "index", "view",    "altered", "newer",
-                          "app",  "link0",      "link1",    "link2",   "rows",  "old",     "none",    "world",
-                          "full", "unreadable", "together", "upgrade", "upbad", "upextra", "uplink",  "tidy"};
+    const char *subs[] = {"rt",      "garbage", "foreign", "trigger",    "index",    "view",    "altered",
+                          "newer",   "app",     "link0",   "link1",      "link2",    "rows",    "old",
+                          "none",    "world",   "full",    "unreadable", "together", "upgrade", "upbad",
+                          "upextra", "uplink",  "tidy",    "updrop",     "typed"};
     const char *files[] = {"world.db",   "world.db-wal", "world.db-shm", "world.db-journal", "level.dat",
                            "player.dat", "c.0.-1.bin",   "c.01.0.bin",   "c.3.3.bin",        "world.db.format1"};
     char d[400] = {0}, p[512] = {0};
@@ -696,6 +758,7 @@ void test_save_db_all(void)
     test_roundtrip();
     test_refused();
     test_bad_rows();
+    test_players_and_text();
     test_upgrade();
     test_tidy_and_damage();
     test_read_fails();

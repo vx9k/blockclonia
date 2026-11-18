@@ -22,7 +22,10 @@ typedef struct save_db save_db;
 
 /* The world format this build writes. Older formats are upgraded when
  * opened (the original kept as world.db.format<N>); newer ones refused. */
-#define SAVE_DB_FORMAT 2
+#define SAVE_DB_FORMAT 3
+/* The players row of the single player; other players' rows are keyed by
+ * their identity key in hex (mp.c). */
+#define SAVE_DB_LOCAL_PLAYER "local"
 
 /* Opens dir/world.db, creating it if missing and upgrading an older
  * format. NULL, with the reason logged, if it is not a regular file, not a
@@ -50,6 +53,11 @@ int save_db_set_seed(save_db *db, uint32_t seed);
  * database error. */
 int save_db_get_meta(save_db *db, const char *key, int64_t *v);
 int save_db_set_meta(save_db *db, const char *key, int64_t v);
+/* Text facts about the world ("name"), up to 256 bytes: get copies the
+ * text and a terminator into buf and returns its length, -1 if missing,
+ * not text or not shorter than cap, -2 on a database error. */
+long save_db_get_text(save_db *db, const char *key, char *buf, size_t cap);
+int save_db_set_text(save_db *db, const char *key, const char *text, size_t len);
 
 /* What the world list shows, read without changing anything: the file is
  * opened read-only with the same checks as save_db_open, nothing is
@@ -80,9 +88,15 @@ void save_db_peek(const char *dir, save_peek *p);
 long save_db_get_column(save_db *db, int cx, int cz, uint8_t **out);
 int save_db_put_column(save_db *db, const column *c);
 
-/* Named blobs ("player"): get returns the length, -1 if missing, not a
- * blob or larger than cap, or -2 if it could not be read (a database
- * error). */
+/* A player's saved state (survival_encode_player) by id: get returns the
+ * length, -1 if missing or larger than cap, or -2 if it could not be read
+ * (a database error). put records when it was saved. */
+long save_db_get_player(save_db *db, const char *id, void *buf, size_t cap);
+int save_db_put_player(save_db *db, const char *id, const void *data, size_t len);
+
+/* Named blobs, for payloads the tables above have no place for: get
+ * returns the length, -1 if missing, not a blob or larger than cap, or -2
+ * if it could not be read (a database error). */
 long save_db_get_blob(save_db *db, const char *name, void *buf, size_t cap);
 int save_db_put_blob(save_db *db, const char *name, const void *data, size_t len);
 

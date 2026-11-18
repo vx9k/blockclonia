@@ -132,7 +132,7 @@ combat_targets mp_targets(mp *m);
  * (positions, headings and kinds only, for drawing). */
 const mobs *mp_client_mobs(const mp *m);
 /* Host: writes every joined player, present or gone this session, into
- * the world database as "player:<key hex>" (the single-player record:
+ * the world's players table under its key in hex (the single-player record:
  * position, view, inventory), for the next time that key joins. Call
  * inside the transaction that saves the world. A dead player keeps the
  * record saved before. 0, or -1 if a write failed. */

@@ -93,7 +93,7 @@ static void test_create_list_rename(void)
     path_in(p, sizeof p, a, "world.db");
     CHECK(exists(p));
     /* A name a crafted file carries is shown only if valid. */
-    CHECK(save_db_put_blob(db, "name", "bad\nname", 8) == 0);
+    CHECK(save_db_set_text(db, "name", "bad\nname", 8) == 0);
     save_db_close(db);
     save_db_peek(a, &pk);
     CHECK(pk.status == SAVE_PEEK_OK && pk.name[0] == '\0');

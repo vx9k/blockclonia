@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* Longest world folder path, resolved; Linux's PATH_MAX, fixed here so
  * the buffers do not shrink where PATH_MAX is smaller. */
@@ -44,7 +45,7 @@ _Static_assert(SAVE_MAX_FILE == 393280, "update DATA_MAX");
  * no automatic indexes either. From format 2 the tables are STRICT and
  * CHECK their rows, so SQLite itself refuses a wrongly typed or oversized
  * row; the decoders in save.c still check every field. */
-#define TBL_MAX 3
+#define TBL_MAX 4
 typedef struct {
     int count;
     const char *name[TBL_MAX];
@@ -67,9 +68,35 @@ static const schema SCHEMA[FORMAT + 1] = {
              "PRIMARY KEY(cx, cz)) STRICT, WITHOUT ROWID"),
             ("CREATE TABLE blobs(name TEXT PRIMARY KEY NOT NULL CHECK(length(name) BETWEEN 1 AND 80), "
              "data BLOB NOT NULL CHECK(length(data) <= " DATA_MAX ")) STRICT, WITHOUT ROWID")}},
+    /* Format 3: meta holds typed values (the world's name is text there),
+     * and every player has a row of its own. */
+    [3] = {4,
+           {"meta", "columns", "blobs", "players"},
+           {("CREATE TABLE meta(key TEXT PRIMARY KEY NOT NULL CHECK(length(key) BETWEEN 1 AND 64), "
+             "value ANY NOT NULL CHECK(typeof(value) IN ('integer', 'real', 'text') AND "
+             "(typeof(value) <> 'text' OR length(value) <= 256))) STRICT, WITHOUT ROWID"),
+            ("CREATE TABLE columns(cx INTEGER NOT NULL CHECK(cx BETWEEN " COL_KEY_MIN " AND " COL_KEY_MAX "), "
+             "cz INTEGER NOT NULL CHECK(cz BETWEEN " COL_KEY_MIN " AND " COL_KEY_MAX "), "
+             "data BLOB NOT NULL CHECK(length(data) BETWEEN 1 AND " DATA_MAX "), "
+             "PRIMARY KEY(cx, cz)) STRICT, WITHOUT ROWID"),
+            ("CREATE TABLE blobs(name TEXT PRIMARY KEY NOT NULL CHECK(length(name) BETWEEN 1 AND 80), "
+             "data BLOB NOT NULL CHECK(length(data) <= " DATA_MAX ")) STRICT, WITHOUT ROWID"),
+            ("CREATE TABLE players(id TEXT PRIMARY KEY NOT NULL CHECK(length(id) BETWEEN 1 AND 64), "
+             "data BLOB NOT NULL CHECK(length(data) BETWEEN 1 AND " DATA_MAX "), "
+             "saved INTEGER NOT NULL CHECK(saved >= 0)) STRICT, WITHOUT ROWID")}},
 };
 
-enum { S_GET_COLUMN, S_PUT_COLUMN, S_GET_BLOB, S_PUT_BLOB, S_GET_META, S_PUT_META, S_COUNT };
+enum {
+    S_GET_COLUMN,
+    S_PUT_COLUMN,
+    S_GET_BLOB,
+    S_PUT_BLOB,
+    S_GET_META,
+    S_PUT_META,
+    S_GET_PLAYER,
+    S_PUT_PLAYER,
+    S_COUNT
+};
 static const char *const STMT_SQL[S_COUNT] = {
     "SELECT data FROM columns WHERE cx = ?1 AND cz = ?2",
     "INSERT OR REPLACE INTO columns(cx, cz, data) VALUES (?1, ?2, ?3)",
@@ -77,6 +104,8 @@ static const char *const STMT_SQL[S_COUNT] = {
     "INSERT OR REPLACE INTO blobs(name, data) VALUES (?1, ?2)",
     "SELECT value FROM meta WHERE key = ?1",
     "INSERT OR REPLACE INTO meta(key, value) VALUES (?1, ?2)",
+    "SELECT data FROM players WHERE id = ?1",
+    "INSERT OR REPLACE INTO players(id, data, saved) VALUES (?1, ?2, ?3)",
 };
 
 struct save_db {
@@ -190,10 +219,36 @@ static int rebuild_tables(sqlite3 *h, int from)
     return 0;
 }
 
+/* Format 3: meta's values become typed, the name blob moves into it as
+ * text, and the player blobs ("player", "player:<key hex>") become rows
+ * of players, the single player's under SAVE_DB_LOCAL_PLAYER. Rows that
+ * could never have been read (an empty player, an oversized name) are
+ * dropped rather than failing the upgrade. */
+static int split_players(sqlite3 *h, int from)
+{
+    (void)from;
+    const schema *b = &SCHEMA[3];
+    const char *steps[] = {
+        "ALTER TABLE meta RENAME TO old_meta",
+        b->sql[0],
+        "INSERT INTO meta SELECT key, value FROM old_meta",
+        "DROP TABLE old_meta",
+        b->sql[3],
+        ("INSERT OR REPLACE INTO meta SELECT 'name', CAST(data AS TEXT) FROM blobs "
+         "WHERE name = 'name' AND length(data) BETWEEN 1 AND 64"),
+        ("INSERT INTO players SELECT '" SAVE_DB_LOCAL_PLAYER "', data, 0 FROM blobs "
+         "WHERE name = 'player' AND length(data) > 0"),
+        ("INSERT OR IGNORE INTO players SELECT substr(name, 8), data, 0 FROM blobs "
+         "WHERE substr(name, 1, 7) = 'player:' AND length(name) BETWEEN 8 AND 71 AND length(data) > 0"),
+        "DELETE FROM blobs WHERE name IN ('name', 'player') OR substr(name, 1, 7) = 'player:'",
+    };
+    return exec_all(h, steps, (int)(sizeof steps / sizeof steps[0]));
+}
+
 /* UPGRADE[v] takes a world from format v to v + 1, inside the upgrade's
  * one transaction. Format 2 made the tables STRICT with CHECKs. */
 typedef int (*upgrade_fn)(sqlite3 *h, int from);
-static const upgrade_fn UPGRADE[FORMAT] = {[1] = rebuild_tables};
+static const upgrade_fn UPGRADE[FORMAT] = {[1] = rebuild_tables, [2] = split_players};
 
 /* Copies the open database into a new file at path (one that is not there
  * yet: never over anything, and never through a symlink). */
@@ -268,10 +323,8 @@ static int check_or_create(sqlite3 *h, const char *path)
         snprintf(head, sizeof head, "PRAGMA application_id = %d", APP_ID);
         snprintf(tail, sizeof tail, "PRAGMA user_version = %d", FORMAT);
         const schema *sc = &SCHEMA[FORMAT];
-        const char *steps[] = {
-            "PRAGMA auto_vacuum = INCREMENTAL", "BEGIN", sc->sql[0], sc->sql[1], sc->sql[2], head, tail, "COMMIT"};
-        _Static_assert(TBL_MAX == 3, "list every table above");
-        if (exec_all(h, steps, (int)(sizeof steps / sizeof steps[0])) == 0) return 0;
+        const char *start[] = {"PRAGMA auto_vacuum = INCREMENTAL", "BEGIN"}, *end[] = {head, tail, "COMMIT"};
+        if (exec_all(h, start, 2) == 0 && exec_all(h, sc->sql, sc->count) == 0 && exec_all(h, end, 3) == 0) return 0;
         log_error("%s: cannot create the world database: %s", path, sqlite3_errmsg(h));
         exec(h, "ROLLBACK");
         return -1;
@@ -489,6 +542,63 @@ int save_db_get_seed(save_db *db, uint32_t *seed)
 
 int save_db_set_seed(save_db *db, uint32_t seed) { return save_db_set_meta(db, "seed", (int64_t)seed); }
 
+/* A text result shorter than cap bytes, copied with its terminator: the
+ * length, -1 if there is none, it is not text or it is too long, or -2 if
+ * it could not be read. */
+static long read_text(sqlite3_stmt *s, char *buf, size_t cap)
+{
+    long r = -1;
+    int rc = sqlite3_step(s);
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+        r = -2;
+    } else if (rc == SQLITE_ROW && sqlite3_column_type(s, 0) == SQLITE_TEXT) {
+        const unsigned char *p = sqlite3_column_text(s, 0);
+        int n = sqlite3_column_bytes(s, 0);
+        if (!p) r = -2; /* out of memory */
+        else if (n >= 0 && (size_t)n < cap) {
+            memcpy(buf, p, (size_t)n);
+            buf[n] = '\0';
+            r = n;
+        }
+    }
+    sqlite3_reset(s);
+    sqlite3_clear_bindings(s);
+    return r;
+}
+
+long save_db_get_text(save_db *db, const char *key, char *buf, size_t cap)
+{
+    sqlite3_stmt *s = db->st[S_GET_META];
+    sqlite3_bind_text(s, 1, key, -1, SQLITE_STATIC);
+    return read_text(s, buf, cap);
+}
+
+int save_db_set_text(save_db *db, const char *key, const char *text, size_t len)
+{
+    if (len > 256) return -1;
+    sqlite3_stmt *s = db->st[S_PUT_META];
+    sqlite3_bind_text(s, 1, key, -1, SQLITE_STATIC);
+    sqlite3_bind_text(s, 2, text, (int)len, SQLITE_STATIC);
+    return step_write(db, s);
+}
+
+long save_db_get_player(save_db *db, const char *id, void *buf, size_t cap)
+{
+    sqlite3_stmt *s = db->st[S_GET_PLAYER];
+    sqlite3_bind_text(s, 1, id, -1, SQLITE_STATIC);
+    return read_blob(s, buf, cap);
+}
+
+int save_db_put_player(save_db *db, const char *id, const void *data, size_t len)
+{
+    if (len > SAVE_MAX_FILE) return -1;
+    sqlite3_stmt *s = db->st[S_PUT_PLAYER];
+    sqlite3_bind_text(s, 1, id, -1, SQLITE_STATIC);
+    sqlite3_bind_blob(s, 2, data, (int)len, SQLITE_STATIC);
+    sqlite3_bind_int64(s, 3, (sqlite3_int64)time(NULL));
+    return step_write(db, s);
+}
+
 /* One integer from meta on a bare connection (the peek has no prepared
  * statements); -1 missing or not an integer, -2 on an error. */
 static int peek_meta(sqlite3 *h, const char *key, int64_t *v)
@@ -555,11 +665,13 @@ void save_db_peek(const char *dir, save_peek *p)
     if (peek_meta(h, "last_played", &v) == 0 && v > 0) p->last_played = v;
     if (peek_meta(h, "mode", &v) == 0 && v >= 0 && v <= 3) p->mode = (int)v;
     if (peek_meta(h, "hardcore", &v) == 0 && v == 1) p->hardcore = 1;
+    /* Before format 3 the name was a blob (the world is upgraded when it is
+     * played; the list only reads). */
     sqlite3_stmt *s = NULL;
-    if (sqlite3_prepare_v2(h, STMT_SQL[S_GET_BLOB], -1, &s, NULL) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(h, STMT_SQL[version < 3 ? S_GET_BLOB : S_GET_META], -1, &s, NULL) == SQLITE_OK) {
         sqlite3_bind_text(s, 1, "name", -1, SQLITE_STATIC);
         char name[SAVE_NAME_MAX + 1] = {0};
-        long len = read_blob(s, name, SAVE_NAME_MAX);
+        long len = version < 3 ? read_blob(s, name, SAVE_NAME_MAX) : read_text(s, name, sizeof name);
         if (len > 0 && save_name_valid(name, (size_t)len)) {
             memcpy(p->name, name, (size_t)len);
             p->name[len] = '\0';
@@ -640,7 +752,7 @@ static int import_file(save_db *db, const char *dir, const char *name, int *fail
      * the folder would have failed as well. */
     long len = save_read_file(path, db->buf, SAVE_MAX_FILE);
     if (len < 0) return 0;
-    int r = player ? save_db_put_blob(db, "player", db->buf, (size_t)len)
+    int r = player ? (len > 0 ? save_db_put_player(db, SAVE_DB_LOCAL_PLAYER, db->buf, (size_t)len) : 0)
                    : put_column_bytes(db, cx, cz, db->buf, (size_t)len);
     if (r != 0) *failed = 1;
     return r == 0;

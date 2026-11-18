@@ -219,7 +219,7 @@ static void check_saved_players(host_side *h, const nc_keypair *kh, const char *
     CHECK(db != NULL);
     nc_keypair kp[3] = {0};
     for (int i = 0; i < 3; i++) nc_keypair_new(&kp[i]);
-    char name[80] = {0}, khex[2 * NC_KEY_BYTES + 1] = {0};
+    char khex[2 * NC_KEY_BYTES + 1] = {0};
     player was = h->pl;
     was.pos.x += 2.0;
     was.yaw = 1.25f;
@@ -229,11 +229,9 @@ static void check_saved_players(host_side *h, const nc_keypair *kh, const char *
     uint8_t rec[PLAYER_FILE_SIZE] = {0};
     size_t rn = survival_encode_player(&was, &kept, 0.5, rec, sizeof rec);
     nc_key_hex(kp[0].pk, khex);
-    snprintf(name, sizeof name, "player:%s", khex);
-    CHECK(rn && save_db_put_blob(db, name, rec, rn) == 0);
+    CHECK(rn && save_db_put_player(db, khex, rec, rn) == 0);
     nc_key_hex(kp[1].pk, khex);
-    snprintf(name, sizeof name, "player:%s", khex);
-    CHECK(save_db_put_blob(db, name, "junk", 4) == 0);
+    CHECK(save_db_put_player(db, khex, "junk", 4) == 0);
 
     net *on = net_offline_host(kh, "Host");
     const char *names[3] = {"A", "B", "C"};
@@ -251,9 +249,8 @@ static void check_saved_players(host_side *h, const nc_keypair *kh, const char *
     inventory got[3] = {0};
     for (int i = 0; i < 3; i++) {
         nc_key_hex(kp[i].pk, khex);
-        snprintf(name, sizeof name, "player:%s", khex);
         uint8_t b[PLAYER_FILE_SIZE + 1] = {0};
-        long bn = save_db_get_blob(db, name, b, sizeof b);
+        long bn = save_db_get_player(db, khex, b, sizeof b);
         CHECK(bn > 0 && survival_decode_player(&back, &got[i], NULL, b, (size_t)bn) == 0);
     }
     CHECK(inv_count(&got[0], I_COAL) == 7);
