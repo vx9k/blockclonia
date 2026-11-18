@@ -73,6 +73,7 @@ void test_wire_all(void);
 void test_net_all(void);
 void test_mp_all(void);
 void test_ballistics_all(void);
+void test_muzzle_all(void);
 void test_worldgen_all(void);
 void test_edge_all(void);
 void test_tools_all(void);

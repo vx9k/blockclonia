@@ -10,6 +10,7 @@
 #define MC_COMBAT_H
 
 #include "ballistics.h"
+#include "entity.h"
 #include "health.h"
 #include "inventory.h"
 #include "mob.h"
@@ -51,7 +52,8 @@ typedef struct {
     int fired;           /* a shot went off */
     int killed;          /* a mob died this frame */
     item_id tool_broke;  /* item id that wore out, else 0 */
-    dvec3 at;            /* where a blow landed or the shot left */
+    dvec3 at;            /* where a blow landed or the shot left (the muzzle) */
+    vec3 dir;            /* a shot's bore axis, unit */
     const char *msg;     /* feedback, or NULL */
 } combat_out;
 
@@ -60,6 +62,11 @@ void combat_init(combat *c, uint32_t seed);
 /* 1 if a mob or another player is in reach along the ray and nearer than
  * block_dist: the attack button then strikes instead of digging. */
 int combat_aim(const mobs *ms, const combat_targets *t, int who, dvec3 eye, vec3 dir, double block_dist);
+
+/* The rifle's muzzle for an eye looking along look (unit) at aim (0 hip ..
+ * 1 sights), in the world: the barrel's end and the bore's unit axis
+ * (viewmodel_muzzle). w, when given, catches a barrel through a wall. */
+void combat_muzzle(const world *w, dvec3 eye, vec3 look, float aim, dvec3 *at, vec3 *bore);
 
 /* Player `who`'s hands this frame: on attack_click a blow, or a shot when
  * holding the rifle with a cartridge in the inventory. aim (0 at the hip ..
@@ -78,5 +85,11 @@ int combat_creatures(combat *c, mobs *ms, physics *ph, const combat_targets *t, 
 
 /* The damage a blow does with this item in hand (hit points; a fist is 1). */
 float combat_blow(item_id held);
+
+/* Glowing streaks for the tracers in flight: each the stretch it covers in
+ * one physics step, ending where it is `alpha` of the way into the next,
+ * and never thinner than about a pixel however far away. A bullet's age is
+ * BULLET_LIFE less its life. Writes up to max; returns how many. */
+int combat_tracers(const combat *c, dvec3 eye, double alpha, entity_instance *out, int max);
 
 #endif

@@ -1,6 +1,7 @@
 #include "combat.h"
 #include "mathlib.h"
 #include "noise.h"
+#include "viewmodel.h"
 
 #include <math.h>
 #include <string.h>
@@ -11,6 +12,10 @@
  * world, so its range comes from the flight. The longest any round flies
  * is about 35 s, a 7.62 mm shot at 37 degrees. */
 #define BULLET_LIFE 60.0f
+/* A tracer's compound lights about 40 m out, clear of the shooter's eyes. */
+#define TRACER_DELAY 0.05f
+/* Past full light, as a flash's sparks: the tone curve whitens the core. */
+#define TRACER_LIGHT 3.0f
 /* Steps of flight per physics step: a rifle bullet covers 7 to 14 m in
  * one, too far for one straight segment to follow its drop. */
 #define BULLET_SUBSTEPS 4
@@ -138,6 +143,26 @@ static void shot_free_oldest(combat *c)
     c->b[old] = c->b[--c->count];
 }
 
+void combat_muzzle(const world *w, dvec3 eye, vec3 look, float aim, dvec3 *at, vec3 *bore)
+{
+    float p[3] = {0}, d[3] = {0};
+    viewmodel_muzzle(aim, p, d);
+    /* The view's axes: x right, y up, -z along the look. */
+    vec3 r = v3(-look.z, 0.0f, look.x);
+    float rl = sqrtf(r.x * r.x + r.z * r.z);
+    r = rl > 1e-6f ? v3(r.x / rl, 0.0f, r.z / rl) : v3(1.0f, 0.0f, 0.0f);
+    vec3 u = v3(r.y * look.z - r.z * look.y, r.z * look.x - r.x * look.z, r.x * look.y - r.y * look.x);
+    vec3 off = v3(r.x * p[0] + u.x * p[1] - look.x * p[2], r.y * p[0] + u.y * p[1] - look.y * p[2],
+                  r.z * p[0] + u.z * p[1] - look.z * p[2]);
+    *bore = v3(r.x * d[0] + u.x * d[1] - look.x * d[2], r.y * d[0] + u.y * d[1] - look.y * d[2],
+               r.z * d[0] + u.z * d[1] - look.z * d[2]);
+    *at = dv3(eye.x + (double)off.x, eye.y + (double)off.y, eye.z + (double)off.z);
+    /* Pressed against a wall the barrel would poke through it; the shot
+     * then starts at the eye and meets the wall, rather than skipping it. */
+    float ol = sqrtf(off.x * off.x + off.y * off.y + off.z * off.z);
+    if (w && ol > 0.0f && physics_raycast(w, eye, v3(off.x / ol, off.y / ol, off.z / ol), (double)ol).hit) *at = eye;
+}
+
 combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *t, int who, inventory *inv, dvec3 eye,
                         vec3 dir, double block_dist, int attack_click, float aim, float dt)
 {
@@ -153,21 +178,29 @@ combat_out combat_frame(combat *c, mobs *ms, physics *ph, const combat_targets *
             o.msg = "No cartridges";
             return o;
         }
+        /* The bullet leaves the barrel's end along the bore, which down the
+         * sights runs under the line of sight and at the hip points where
+         * the rifle does, not at the crosshair. */
+        float a = isfinite(aim) ? fminf(fmaxf(aim, 0.0f), 1.0f) : 0.0f;
+        dvec3 from = eye;
+        vec3 bore = dir;
+        combat_muzzle(ph ? ph->w : NULL, eye, dir, a, &from, &bore);
         if (c->count == COMBAT_SHOTS) shot_free_oldest(c);
         if (c->count < COMBAT_SHOTS) {
             /* Spread: aimed, a rifle held standing (4 mrad, not clamped in a
-             * vice); from the hip the eye isn't behind the sights and shots
-             * wander by a few degrees. */
-            float a = isfinite(aim) ? fminf(fmaxf(aim, 0.0f), 1.0f) : 0.0f;
+             * vice); from the hip it isn't braced and shots wander by a few
+             * degrees. */
             float sp = 0.004f + HIP_SPREAD * (1.0f - a);
-            vec3 d = v3(dir.x + (frand(c) - 0.5f) * sp, dir.y + (frand(c) - 0.5f) * sp, dir.z + (frand(c) - 0.5f) * sp);
+            vec3 d = v3(bore.x + (frand(c) - 0.5f) * sp, bore.y + (frand(c) - 0.5f) * sp,
+                        bore.z + (frand(c) - 0.5f) * sp);
             double v = (double)ammo_get(CARTRIDGE_AMMO)->muzzle;
-            c->b[c->count++] = (bullet){eye, dv3((double)d.x * v, (double)d.y * v, (double)d.z * v), BULLET_LIFE, who,
+            c->b[c->count++] = (bullet){from, dv3((double)d.x * v, (double)d.y * v, (double)d.z * v), BULLET_LIFE, who,
                                         CARTRIDGE_AMMO};
         }
         c->cooldown[who] = 1.2f; /* working the action */
         o.fired = 1;
-        o.at = eye;
+        o.at = from;
+        o.dir = bore;
         item_id was = held->id;
         if (inv_wear_held(inv, 1)) o.tool_broke = was;
         return o;
@@ -285,4 +318,38 @@ int combat_step(combat *c, mobs *ms, physics *ph, const combat_targets *t)
         if (done) c->b[i--] = c->b[--c->count];
     }
     return hits;
+}
+
+int combat_tracers(const combat *c, dvec3 eye, double alpha, entity_instance *out, int max)
+{
+    int n = 0;
+    for (int i = 0; i < c->count && n < max; i++) {
+        const bullet *b = &c->b[i];
+        const ammo_def *a = ammo_get(b->ammo);
+        float age = BULLET_LIFE - b->life;
+        double speed = dv3_len(b->vel);
+        if (!a || a->tracer <= 0.0f || age < TRACER_DELAY || age > a->tracer || speed < 1.0) continue;
+        dvec3 d = dv3_scale(b->vel, 1.0 / speed);
+        double back = (1.0 - alpha) * PHYS_DT, len = speed * PHYS_DT;
+        dvec3 mid = dv3(b->pos.x - b->vel.x * back - d.x * len * 0.5, b->pos.y - b->vel.y * back - d.y * len * 0.5,
+                        b->pos.z - b->vel.z * back - d.z * len * 0.5);
+        dvec3 rel = dv3(mid.x - eye.x, mid.y - eye.y, mid.z - eye.z);
+        /* 1.5 mrad: a pixel or two on a 1080p screen at any range. */
+        float w = (float)fmax(0.03, dv3_len(rel) * 0.0015);
+        entity_instance e = {0};
+        e.pos[0] = (float)rel.x;
+        e.pos[1] = (float)rel.y;
+        e.pos[2] = (float)rel.z;
+        e.tex = (uint32_t)T_FLASH * 0x010101u;
+        /* The box's z axis turned onto the flight; a box is the same
+         * either way along it, so straight back needs no turn. */
+        entity_set_rot(&e, quat_axis((float)-d.y, (float)d.x, 0.0f, (float)acos(fmin(fmax(d.z, -1.0), 1.0))));
+        e.scale[0] = w;
+        e.scale[1] = w;
+        e.scale[2] = (float)len;
+        e.light = TRACER_LIGHT;
+        e.tint = entity_tint(0xFF6A3Au); /* strontium's red */
+        out[n++] = e;
+    }
+    return n;
 }

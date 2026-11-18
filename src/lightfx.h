@@ -46,6 +46,12 @@ typedef struct {
 void lightfx_build(lightfx_frame *f, const float sun_dir[3], float daylight, uint32_t held_item, int brightness,
                    double time);
 
+/* Adds a muzzle flash at `flash` 0..1 of its full brightness to the held
+ * light: a warm white at level 15 at the eye that falls off with distance
+ * as a torch's does, so the walls and ground nearby light up for a frame
+ * or two. A brighter light already held stays. */
+void lightfx_flash(lightfx_frame *f, float flash);
+
 /* What a flame flickers by at time t: 0.9..1, the same at any frame rate. */
 float lightfx_flicker(double t);
 

@@ -334,6 +334,21 @@ static rgba texel(int layer, int x, int y)
         return shade(214, 214, 214, 255, (fat ? 36 : 0) + n);
     }
     case T_MAT_GRAIN: return shade(212, 212, 212, 255, px_noise(layer, x, y, 40));
+    case T_SMOKE0:
+    case T_SMOKE1:
+    case T_SMOKE2: {
+        /* A soft round puff, densest in the middle, so a cube of it reads as
+         * a blob from any side; each later step lets more light through. */
+        static const int DENSITY[3] = {170, 105, 50};
+        int dx = x * 2 - 15, dy = y * 2 - 15, d2 = dx * dx + dy * dy;
+        int a = DENSITY[layer - T_SMOKE0] * (256 - d2) / 256 + px_noise(layer, x, y, 20);
+        return shade(196, 194, 188, (uint8_t)(a < 0 ? 0 : (a > 255 ? 255 : a)), n / 3);
+    }
+    case T_FLASH: {
+        /* Burning powder gas: white at the core, yellow toward the edge. */
+        int dx = x * 2 - 15, dy = y * 2 - 15, d2 = dx * dx + dy * dy;
+        return d2 < 90 ? shade(255, 250, 225, 255, n / 4) : shade(255, 205, 110, 255, n / 3);
+    }
     default: return (rgba){255, 0, 255, 255};
     }
 }

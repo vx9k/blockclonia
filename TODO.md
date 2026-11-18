@@ -185,8 +185,8 @@ first block.
 
 - [x] Ballistic flight: an ammunition table, G1/G7 drag, air density
       from altitude and temperature, wind
-- [ ] Muzzle effects: a flash that lights the area, drifting
-      black-powder smoke, tracers
+- [x] Muzzle effects: a flash that lights the area, drifting
+      black-powder smoke, tracers, all from the muzzle along the bore
 - [ ] Penetration and ricochet through blocks by material
 - [ ] Wound ballistics into the health model: the path, construction,
       pass-throughs

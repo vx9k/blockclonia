@@ -10,6 +10,8 @@ void fx_init(fx_state *f, uint32_t seed)
 {
     f->count = 0;
     f->rng = seed ? seed : 1u;
+    f->wind = dv3(0.0, 0.0, 0.0);
+    f->flash = 0.0f;
 }
 
 static float frand(fx_state *f)
@@ -22,11 +24,18 @@ static float srand1(fx_state *f) { return frand(f) * 2.0f - 1.0f; }
 
 static particle *spawn(fx_state *f)
 {
-    if (f->count < FX_MAX_PARTICLES) return &f->p[f->count++];
-    /* Full: recycle the oldest-looking one (least life left). */
-    int best = 0;
-    for (int i = 1; i < f->count; i++)
-        if (f->p[i].life < f->p[best].life) best = i;
+    int best = f->count;
+    if (f->count < FX_MAX_PARTICLES) {
+        f->count++;
+    } else {
+        /* Full: recycle the oldest-looking one (least life left). */
+        best = 0;
+        for (int i = 1; i < f->count; i++)
+            if (f->p[i].life < f->p[best].life) best = i;
+    }
+    /* Cleared: a free slot still holds the last particle moved out of it,
+     * and a puff of smoke must not come back as debris's kind or spin. */
+    f->p[best] = (particle){0};
     return &f->p[best];
 }
 
@@ -85,6 +94,46 @@ void fx_splash(fx_state *f, dvec3 at, double speed)
     }
 }
 
+/* Light given to a flash's sparks: past full, so the tone curve whitens
+ * them whatever the light around. */
+#define FX_GLOW_LIGHT 3.0f
+
+void fx_muzzle(fx_state *f, dvec3 at, dvec3 dir, int black)
+{
+    /* The flash: hot gas a hand's length past the muzzle, flung forward and
+     * stopped by the air within a few centimetres. */
+    for (int i = 0; i < 6; i++) {
+        particle *p = spawn(f);
+        double ahead = 0.05 + 0.25 * (double)frand(f);
+        p->pos = p->prev_pos = dv3(at.x + dir.x * ahead, at.y + dir.y * ahead, at.z + dir.z * ahead);
+        p->vel = dv3(dir.x * 20.0 + (double)srand1(f) * 4.0, dir.y * 20.0 + (double)srand1(f) * 4.0,
+                     dir.z * 20.0 + (double)srand1(f) * 4.0);
+        p->max_life = p->life = 0.04f + 0.03f * frand(f);
+        p->size = 0.05f + 0.07f * frand(f);
+        p->spin = frand(f) * 6.28f;
+        p->tex = T_FLASH;
+        p->kind = FXP_GLOW;
+    }
+    /* The smoke leaves fast and is stopped by the air within a metre or
+     * two; black powder's hangs in a cloud for several seconds. */
+    int n = black ? 14 : 3;
+    for (int i = 0; i < n; i++) {
+        particle *p = spawn(f);
+        double ahead = 0.1 + 0.4 * (double)frand(f), v = (black ? 6.0 : 3.0) * (0.4 + (double)frand(f));
+        p->pos = p->prev_pos = dv3(at.x + dir.x * ahead + (double)srand1(f) * 0.05,
+                                   at.y + dir.y * ahead + (double)srand1(f) * 0.05,
+                                   at.z + dir.z * ahead + (double)srand1(f) * 0.05);
+        p->vel = dv3(dir.x * v + (double)srand1(f) * 0.8, dir.y * v + (double)srand1(f) * 0.8,
+                     dir.z * v + (double)srand1(f) * 0.8);
+        p->max_life = p->life = black ? 5.0f + 4.0f * frand(f) : 1.2f + frand(f);
+        p->size = black ? 0.18f + 0.14f * frand(f) : 0.08f + 0.05f * frand(f);
+        p->spin = frand(f) * 6.28f;
+        p->spin_rate = srand1(f) * 0.6f;
+        p->tex = T_SMOKE0;
+        p->kind = FXP_SMOKE;
+    }
+}
+
 void fx_step(fx_state *f, const world *w, double dt)
 {
     for (int i = 0; i < f->count; i++) {
@@ -95,9 +144,19 @@ void fx_step(fx_state *f, const world *w, double dt)
             continue;
         }
         p->prev_pos = p->pos;
-        p->vel.y -= 9.81 * dt;
-        double drag = 1.0 / (1.0 + 1.5 * dt);
-        p->vel = dv3_scale(p->vel, drag);
+        if (p->kind == FXP_SMOKE) {
+            /* The air carries smoke: its velocity settles to the wind's in
+             * about half a second, and the warm cloud rises a little. */
+            double k = 1.0 - exp(-2.0 * dt);
+            p->vel = dv3(p->vel.x + (f->wind.x - p->vel.x) * k, p->vel.y + (f->wind.y + 0.25 - p->vel.y) * k,
+                         p->vel.z + (f->wind.z - p->vel.z) * k);
+        } else if (p->kind == FXP_GLOW) {
+            p->vel = dv3_scale(p->vel, exp(-12.0 * dt));
+        } else {
+            p->vel.y -= 9.81 * dt;
+            double drag = 1.0 / (1.0 + 1.5 * dt);
+            p->vel = dv3_scale(p->vel, drag);
+        }
         dvec3 next = dv3_add(p->pos, dv3_scale(p->vel, dt));
         /* Axis by axis against solid cells: a cheap bounce. */
         double e = (double)p->bounce / 255.0;
@@ -234,6 +293,19 @@ void fx_build_entities(const fx_state *f, const physics *ph, const fx_crack *cra
         float life = pt->life / pt->max_life;
         float s = pt->size * (life < 0.33f ? life * 3.0f : 1.0f);
         quat q = quat_axis(0.3f, 1.0f, 0.2f, pt->spin);
+        if (pt->kind == FXP_SMOKE) {
+            /* A puff spreads as it thins: three times its size and two
+             * steps fainter by the end. */
+            float age = 1.0f - life, ss = pt->size * (1.0f + 2.0f * age);
+            uint8_t tex = (uint8_t)(T_SMOKE0 + (age < 0.3f ? 0 : (age < 0.65f ? 1 : 2)));
+            float light = fmaxf(0.9f * lit(ph, p, daylight), f->flash);
+            put_trans(&l, cube_at(p, eye, same_tex(tex), q, ss, ss, ss, light));
+            continue;
+        }
+        if (pt->kind == FXP_GLOW) {
+            put_opaque(&l, cube_at(p, eye, same_tex(pt->tex), q, pt->size, pt->size, pt->size, FX_GLOW_LIGHT));
+            continue;
+        }
         entity_instance e = cube_at(p, eye, same_tex(pt->tex), q, s, s, s, 0.9f * lit(ph, p, daylight));
         if (pt->tex == T_WATER || pt->tex == T_GLASS || pt->tex == T_ICE) put_trans(&l, e);
         else put_opaque(&l, e);
