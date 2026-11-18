@@ -40,11 +40,13 @@ typedef struct {
 } combat;
 
 /* The bodies that can be hit, by player index: pl[i] or hl[i] NULL for an
- * absent or dead player. */
+ * absent or dead player. sense[i] is what creatures can make out of
+ * player i in the light (mobs_step); NULL for plain view. */
 typedef struct {
     player *const *pl;
     health *const *hl;
     int n;
+    const mob_sense *sense;
 } combat_targets;
 
 #define COMBAT_CYCLE_S 1.2f /* s from a shot to the next: recoil settles, the bolt is worked */

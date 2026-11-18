@@ -30,6 +30,14 @@ static const mob_rule RULES[MOB_KINDS] = {
 #define CHARGE 8.0       /* m from its prey a stalking wolf breaks into a run */
 #define CALM 45.0f       /* s after a world opens before the first wolf */
 #define LOOK_RANGE 8.0   /* m a creature glances at a player from */
+#define LIT_FULL 0.5f /* light level a body is in plain view at */
+#define FIRE_FEAR 0.45f /* firelight (mob_sense.fire) a wolf will not hunt into */
+#define FIRE_KEEP 6.0 /* m a wolf keeps from prey standing in firelight */
+
+/* The share of its daylight sight a creature keeps in the dark: wolves
+ * hunt by night and have a reflecting layer behind the retina, boars
+ * rely on smell and see poorly. */
+static const float DARK_EYES[MOB_KINDS] = {[MOB_BOAR] = 0.4f, [MOB_WOLF] = 0.6f};
 
 static dvec3 sub(dvec3 a, dvec3 b) { return dv3(a.x - b.x, a.y - b.y, a.z - b.z); }
 
@@ -129,14 +137,24 @@ static void try_spawn(mobs *s, const physics *ph, player *const *players, int n,
 }
 
 /* The nearest present player within range of p, -1 for none. */
-static int nearest(player *const *players, int n, dvec3 p, double range, double *d)
+double mobs_sight(int kind, double range, float level)
+{
+    float eyes = kind >= 0 && kind < MOB_KINDS ? DARK_EYES[kind] : 1.0f;
+    float lit = level < LIT_FULL ? (level > 0.0f ? level / LIT_FULL : 0.0f) : 1.0f;
+    return range * (double)(eyes + (1.0f - eyes) * lit);
+}
+
+/* The nearest player a creature of kind notices within range, each seen
+ * from as far as the light around them allows. */
+static int nearest(player *const *players, const mob_sense *sense, int n, int kind, dvec3 p, double range, double *d)
 {
     int best = -1;
     *d = range;
     for (int i = 0; i < n; i++) {
         if (!players[i]) continue;
         double di = dv3_len(sub(players[i]->pos, p));
-        if (di < *d) {
+        double ri = sense ? mobs_sight(kind, range, sense[i].level) : range;
+        if (di < ri && di < *d) {
             *d = di;
             best = i;
         }
@@ -145,16 +163,23 @@ static int nearest(player *const *players, int n, dvec3 p, double range, double 
 }
 
 /* Decides this step's movement for one mob, and reports a bite. */
-static player_input think(mob *m, player *const *players, int n, float daylight, mob_events *ev)
+static player_input think(mob *m, player *const *players, const mob_sense *sense, int n, float daylight, mob_events *ev)
 {
     player_input in = {0};
     player *b = &m->body;
     double d = 0.0;
     int target = -1;
     if (m->kind == MOB_WOLF && (daylight < NIGHT || m->angry_t > 0.0f))
-        target = nearest(players, n, b->pos, HUNT_RANGE, &d);
+        target = nearest(players, sense, n, m->kind, b->pos, HUNT_RANGE, &d);
+    /* Fire keeps a hunting wolf off, unless it has been hurt. */
+    int wary = target >= 0 && sense && sense[target].fire >= FIRE_FEAR && m->angry_t <= 0.0f;
 
-    if (target >= 0) {
+    if (wary) {
+        /* It circles out of the light: backs off when close, watches from
+         * the edge otherwise. */
+        b->yaw = yaw_to(b->pos, players[target]->pos);
+        in.forward = d < FIRE_KEEP ? -0.6f : 0.0f;
+    } else if (target >= 0) {
         /* Hunt: stalk at a walk, charge the last few metres, and bite when
          * close; the player gets a moment to see it coming. */
         b->yaw = yaw_to(b->pos, players[target]->pos);
@@ -186,7 +211,7 @@ static player_input think(mob *m, player *const *players, int n, float daylight,
     /* Where the head points, for drawing: at a player close by, down to the
      * grass while a boar stands grazing, low while a wolf stalks. */
     double near_d = 0.0;
-    int seen = nearest(players, n, b->pos, LOOK_RANGE, &near_d);
+    int seen = nearest(players, sense, n, m->kind, b->pos, LOOK_RANGE, &near_d);
     float look = 0.0f, nod = 0.0f;
     if (target >= 0) {
         nod = d >= CHARGE ? 0.3f : 0.0f;
@@ -207,7 +232,8 @@ static player_input think(mob *m, player *const *players, int n, float daylight,
     return in;
 }
 
-void mobs_step(mobs *s, physics *ph, player *const *players, int n, float daylight, mob_events *ev)
+void mobs_step(mobs *s, physics *ph, player *const *players, const mob_sense *sense, int n, float daylight,
+               mob_events *ev)
 {
     memset(ev, 0, sizeof *ev);
     s->age += (float)PHYS_DT;
@@ -219,11 +245,11 @@ void mobs_step(mobs *s, physics *ph, player *const *players, int n, float daylig
     for (int i = 0; i < s->count; i++) {
         mob *m = &s->m[i];
         double d = 0.0;
-        if (nearest(players, n, m->body.pos, DESPAWN, &d) < 0 || m->body.pos.y < -32.0) {
+        if (nearest(players, NULL, n, m->kind, m->body.pos, DESPAWN, &d) < 0 || m->body.pos.y < -32.0) {
             remove_at(s, i--);
             continue;
         }
-        player_input in = think(m, players, n, daylight, ev);
+        player_input in = think(m, players, sense, n, daylight, ev);
         physics_move_player(ph, &m->body, &in);
         m->stride += (float)(PHYS_DT * sqrt(m->body.vel.x * m->body.vel.x + m->body.vel.z * m->body.vel.z)) * 4.0f;
     }

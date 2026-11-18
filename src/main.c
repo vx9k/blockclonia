@@ -1878,6 +1878,11 @@ static void frame_simulate(game *g, const player_input *raw, double dt)
     const player_input *in = &lim;
     while (g->acc >= PHYS_DT && steps < MAX_STEPS_PER_FRAME) {
         survival_before sb = survival_capture(&g->pl);
+        /* What the light shows of the player: to creatures, and to their own eyes. */
+        const item_stack *held = &g->inv.slot[g->inv.selected];
+        mob_sense me = {0};
+        me.level = lightfx_seen(&g->w, g->pl.pos.x, g->pl.pos.y + PLAYER_EYE, g->pl.pos.z, thermo_daylight(g->th),
+                                held->count ? held->id : 0, &me.fire);
         if (g->mp) {
             mp_host_step(g->mp, in);
         } else {
@@ -1885,7 +1890,7 @@ static void frame_simulate(game *g, const player_input *raw, double dt)
             if (!g->backdrop) {
                 player *tp[1] = {g->hl.dead ? NULL : &g->pl};
                 health *th[1] = {g->hl.dead ? NULL : &g->hl};
-                combat_targets t = {tp, th, 1};
+                combat_targets t = {tp, th, 1, &me};
                 combat_creatures(&g->cb, &g->mobs, &g->ph, &t, thermo_daylight(g->th));
             }
         }
@@ -1894,6 +1899,7 @@ static void frame_simulate(game *g, const player_input *raw, double dt)
         survival_env(&g->w, &g->pl, &sb, g->actions, &env);
         survival_thermal(g->th, &g->w, &g->pl, &env);
         env.fear = mobs_fear(&g->mobs, &g->pl, thermo_daylight(g->th));
+        env.dark = lightfx_dark(me.level);
         g->actions = 0;
         survival_impacts(&g->hl, &g->w, &g->ph.contact[0], &g->pl, &sb);
         /* Per-step physics events, cleared by the next step. */
@@ -1996,7 +2002,7 @@ static void frame_interact(game *g, double dt)
          * behind it; the rifle fires on right-click. */
         player *tp[1] = {&g->pl};
         health *th[1] = {&g->hl};
-        combat_targets t = g->mp ? mp_targets(g->mp) : (combat_targets){tp, th, 1};
+        combat_targets t = g->mp ? mp_targets(g->mp) : (combat_targets){tp, th, 1, NULL};
         double block_d = g->hit.hit ? dv3_len(dv3(g->hit.block.x + 0.5 - g->eye.x, g->hit.block.y + 0.5 - g->eye.y,
                                                   g->hit.block.z + 0.5 - g->eye.z))
                                     : 5.0;

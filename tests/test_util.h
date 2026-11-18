@@ -90,6 +90,7 @@ void test_thoughts_all(void);
 void test_drugs_all(void);
 void test_faint_all(void);
 void test_fear_all(void);
+void test_dark_all(void);
 void test_mobmodel_all(void);
 void test_avatar_all(void);
 void test_materials_all(void);

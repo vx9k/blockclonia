@@ -13,6 +13,8 @@
 
 #include <stdint.h>
 
+struct world;
+
 /* A face turned from the sun keeps 1 - LIGHTFX_SUN_SHADE of the sky's
  * light at full contrast (block.vert's SUN_SHADE). */
 #define LIGHTFX_SUN_SHADE 0.4f
@@ -52,6 +54,20 @@ void lightfx_build(lightfx_frame *f, const float sun_dir[3], float daylight, uin
  * as a torch's does, so the walls and ground nearby light up for a frame
  * or two. A brighter light already held stays. */
 void lightfx_flash(lightfx_frame *f, float flash);
+
+/* The light level 0..1 at a world position as an eye there meets it: the
+ * cell's sky light shifted by daylight, its block light, and what the
+ * body carries (held_item, 0 for none), whichever is brightest. Levels,
+ * not brightness, because the curve has a floor: a moonlit field and a
+ * sealed cave differ by a level but barely in brightness. *fire gets how
+ * much of it is firelight, 0..1: warm light, red over blue, which
+ * campfires, torches, lamps and lava give and foxfire does not. */
+float lightfx_seen(const struct world *w, double x, double y, double z, float daylight, uint32_t held_item,
+                   float *fire);
+
+/* How dark it is for a light level from lightfx_seen, 0 (enough to see
+ * by) .. 1 (pitch black): a moonlit field is about 0.9. */
+float lightfx_dark(float level);
 
 /* What a flame flickers by at time t: 0.9..1, the same at any frame rate.
  * LIGHTFX_STEADY is its mean, for when flicker is off. */

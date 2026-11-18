@@ -153,7 +153,7 @@ static void test_shot_drift(void)
     health *h = new_body(3);
     player *tp[1] = {&pl};
     health *th[1] = {h};
-    combat_targets tg = {tp, th, 1};
+    combat_targets tg = {tp, th, 1, NULL};
     /* Find a moment with a good crosswind across a shot fired east. */
     while (fabs(atmos_wind(c.wind_seed, c.time).z) < 3.0) c.time += 60.0;
     double wz = atmos_wind(c.wind_seed, c.time).z;
@@ -250,7 +250,7 @@ static float shot_damage(test_world *t, double speed)
     ms.m[i].hp = 1000.0f;
     combat c = {0};
     combat_init(&c, 4);
-    combat_targets tg = {NULL, NULL, 0};
+    combat_targets tg = {NULL, NULL, 0, NULL};
     c.b[0] = (bullet){dv3(8.5, GROUND + 0.6, 8.5), dv3(speed, 0.0, 0.0), 4.0f, 0, AMMO_BLACK_LEAD};
     c.count = 1;
     int hits = 0;
@@ -267,7 +267,7 @@ static int lob(test_world *t, double path[2][120], int *broke)
     mobs_init(&ms, 5);
     combat c = {0};
     combat_init(&c, 5);
-    combat_targets tg = {NULL, NULL, 0};
+    combat_targets tg = {NULL, NULL, 0, NULL};
     for (int y = GROUND; y < GROUND + 6; y++) world_set(&t->w, 30, y, 8, B_GLASS, 0);
     c.b[0] = (bullet){dv3(8.5, GROUND + 1.0, 8.5), dv3(60.0, 14.0, 0.0), 4.0f, 0, AMMO_BLACK_LEAD};
     c.count = 1;
@@ -313,7 +313,7 @@ static void test_shot_range(void)
     mobs_init(&ms, 7);
     combat c = {0};
     combat_init(&c, 7);
-    combat_targets tg = {NULL, NULL, 0};
+    combat_targets tg = {NULL, NULL, 0, NULL};
     /* Straight up at 60 m/s: still climbing or falling well past the old
      * 4 s limit, and back on the ground in about 10 s. */
     c.b[0] = (bullet){dv3(0.5, GROUND + 1.0, 0.5), dv3(0.0, 60.0, 0.0), 60.0f, 0, AMMO_BLACK_LEAD};
