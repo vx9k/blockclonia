@@ -3,7 +3,9 @@
  * the batched entry points against single points on both SIMD paths, and
  * that generated columns don't depend on the order they are made in, since
  * the generator memoises batched fields between columns. */
+#include "block.h"
 #include "noise.h"
+#include "os.h"
 #include "test_util.h"
 #include "world.h"
 #include "worldgen.h"
@@ -370,6 +372,159 @@ static void test_lakes_and_chambers(void)
     worldgen_forget();
 }
 
+/* Octaves add detail without widening the field: fbm is normalised, so its
+ * spread falls toward a floor as octaves are added, and eroded2d (which damps
+ * the fine octaves on steep ground) stays flatter and gentler than fbm with
+ * the same octaves. */
+static void test_noise_octaves(void)
+{
+    double prev = 1.0;
+    int falling = 1, gentler = 1, flatter = 1;
+    for (int o = 1; o <= 8; o++) {
+        double f2 = 0.0, e2 = 0.0, fs = 0.0, es = 0.0;
+        for (int i = 0; i < 20000; i++) {
+            double x = i * 0.7311, z = (i % 997) * 1.913;
+            float f = fbm2d(5, x, z, o), e = eroded2d(5, x, z, o);
+            f2 += (double)f * (double)f;
+            e2 += (double)e * (double)e;
+            fs += fabs((double)(fbm2d(5, x + 0.01, z, o) - f));
+            es += fabs((double)(eroded2d(5, x + 0.01, z, o) - e));
+        }
+        double sd = sqrt(f2 / 20000.0);
+        falling &= sd <= prev + 1e-3;
+        flatter &= e2 < f2 * 0.5;
+        gentler &= es < fs * 0.9;
+        prev = sd;
+    }
+    CHECK(falling && flatter && gentler);
+    /* Measured 0.178 with eight octaves: the floor, well above zero. */
+    CHECK(prev > 0.16 && prev < 0.20);
+}
+
+/* worldgen_sample computes one point alone; worldgen_column computes a
+ * whole column in batches. Spawn finding, thermo and the map read the
+ * first; the blocks come from the second; they have to agree. */
+static void test_sample_matches_column(void)
+{
+    long points = 0, ground = 0, wet = 0, water = 0, surface = 0;
+    for (int i = 0; i < 8; i++) {
+        int cx = i * 71 % 900 - 450, cz = i * 113 % 900 - 450;
+        column *c = column_alloc(cx, cz);
+        worldgen_column(1337, c);
+        for (int z = 0; z < CHUNK_W; z++)
+            for (int x = 0; x < CHUNK_W; x++) {
+                worldgen_point p = worldgen_sample(1337, cx * CHUNK_W + x, cz * CHUNK_W + z);
+                uint8_t below = c->blocks[col_index(x, p.height - 1, z)];
+                points++;
+                ground += below != B_AIR && below != B_WATER && below != B_ICE;
+                if (p.level > 0) {
+                    uint8_t w = c->blocks[col_index(x, p.level - 1, z)];
+                    wet++;
+                    water += w == B_WATER || w == B_ICE;
+                    surface += c->blocks[col_index(x, p.level, z)] != B_WATER;
+                }
+            }
+        column_free(c);
+    }
+    CHECK(points == 8 * COL_AREA && ground == points);
+    CHECK(wet > 0 && water == wet && surface == wet);
+    worldgen_forget();
+}
+
+/* The sea-level climate thermo starts from: in a plausible range, and
+ * smooth, so walking a block never changes the air by more than a trace. */
+static void test_sea_temp(void)
+{
+    double lo = 99.0, hi = -99.0, jump = 0.0;
+    for (int i = 0; i < 6000; i++) {
+        int x = i * 7919 % 60000 - 30000, z = i * 6151 % 60000 - 30000;
+        float t = worldgen_sea_temp(1337, x, z);
+        lo = fmin(lo, (double)t);
+        hi = fmax(hi, (double)t);
+        jump = fmax(jump, fabs((double)(worldgen_sea_temp(1337, x + 1, z) - t)));
+        jump = fmax(jump, fabs((double)(worldgen_sea_temp(1337, x, z + 1) - t)));
+    }
+    /* Measured -3.9 to 28.4 C, at most 0.011 K per block. */
+    CHECK(lo < 2.0 && lo > -15.0 && hi > 22.0 && hi < 36.0);
+    CHECK(jump < 0.05);
+}
+
+/* Sixteen columns spread over a few hundred metres, hashed together. */
+static uint64_t patch_hash(uint32_t seed)
+{
+    uint64_t h = 1469598103934665603ull;
+    for (int z = 0; z < 4; z++)
+        for (int x = 0; x < 4; x++) h = (h ^ column_hash(seed, x * 37 - 60, z * 53 - 80)) * 1099511628211ull;
+    return h;
+}
+
+/* Golden terrain for more seeds than test_generators' 1337, on the plain
+ * loops and on AVX2: a world must grow the same on every machine. */
+static void test_golden_paths(void)
+{
+    static const uint64_t GOLD[3] = {0xddcc6b300c04143bull, 0xa258b306358e9e73ull, 0xcf75a14fac28fe44ull};
+    int avx2 = noise_avx2(1);
+    for (int pass = 0; pass < 2; pass++) {
+        (void)noise_avx2(pass);
+        for (uint32_t s = 1; s <= 3; s++) {
+            worldgen_forget();
+            CHECK(patch_hash(s) == GOLD[s - 1]);
+        }
+    }
+    (void)noise_avx2(avx2);
+    worldgen_forget();
+}
+
+#define THREADS 4
+#define PER_THREAD 6
+
+typedef struct {
+    int first;
+    uint64_t hash[PER_THREAD];
+} gen_job;
+
+static void column_of(int i, int *cx, int *cz)
+{
+    /* Neighbours share tree sites across their borders; the far ones fill
+     * the shared site cache with other land. */
+    *cx = i % 2 ? i / 2 : 300 + i * 41;
+    *cz = i % 2 ? -(i / 4) : -200 - i * 23;
+}
+
+static void gen_thread(void *arg)
+{
+    gen_job *j = arg;
+    for (int k = 0; k < PER_THREAD; k++) {
+        int cx = 0, cz = 0;
+        column_of((j->first + k * 5) % (THREADS * PER_THREAD), &cx, &cz);
+        j->hash[k] = column_hash(91, cx, cz);
+    }
+}
+
+/* Workers generate columns side by side, each with its own memo and all
+ * sharing the tree-site cache. What they make matches one thread alone. */
+static void test_threaded_columns(void)
+{
+    gen_job job[THREADS] = {0};
+    os_thread t[THREADS] = {0};
+    worldgen_forget();
+    for (int i = 0; i < THREADS; i++) {
+        job[i].first = i * 7;
+        CHECK(os_thread_start(&t[i], gen_thread, &job[i]) == 0);
+    }
+    for (int i = 0; i < THREADS; i++) os_thread_join(t[i]);
+    worldgen_forget();
+    int same = 1;
+    for (int i = 0; i < THREADS; i++)
+        for (int k = 0; k < PER_THREAD; k++) {
+            int cx = 0, cz = 0;
+            column_of((job[i].first + k * 5) % (THREADS * PER_THREAD), &cx, &cz);
+            same &= column_hash(91, cx, cz) == job[i].hash[k];
+        }
+    CHECK(same);
+    worldgen_forget();
+}
+
 void test_noise_all(void)
 {
     test_noise_gradient();
@@ -381,4 +536,9 @@ void test_noise_all(void)
     test_noise_batches();
     test_column_order();
     test_lakes_and_chambers();
+    test_noise_octaves();
+    test_sample_matches_column();
+    test_sea_temp();
+    test_golden_paths();
+    test_threaded_columns();
 }
