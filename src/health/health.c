@@ -2636,16 +2636,18 @@ void health_step(health *h, const health_env *e, double dt)
     } else {
         h->hr = 0.0f;
     }
+    /* Readings are against the air outside: an emptied, collapsed aorta
+     * sits a few mmHg under it, which a monitor shows as zero. */
     if (fresh) {
-        h->sbp = h->cv.p_ao_max;
-        h->dbp = h->cv.p_ao_min;
-        h->map = h->cv.p_ao_mean;
+        h->sbp = maxf(0.0f, h->cv.p_ao_max);
+        h->dbp = maxf(0.0f, h->cv.p_ao_min);
+        h->map = maxf(0.0f, h->cv.p_ao_mean);
         h->sv = maxf(0.0f, h->cv.edv - h->cv.esv);
         h->co = lag(h->co, h->cv.beat_q_ao * 0.06f, dt, 2.0); /* output is averaged over a few beats */
         q_brain = (double)h->cv.beat_q_bed[CB_BRAIN];
         q_cor = (double)h->cv.beat_q_cor;
     } else {
-        h->map = lag(h->map, h->cv.p[CC_AO], dt, 0.5);
+        h->map = lag(h->map, maxf(0.0f, h->cv.p[CC_AO]), dt, 0.5);
         h->sbp = h->dbp = h->map;
         h->sv = 0.0f;
         h->co = lag(h->co, (float)q_ao * 0.06f, dt, 0.5);

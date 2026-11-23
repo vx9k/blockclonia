@@ -397,6 +397,25 @@ static void test_body_bleed_slows(void)
     mem_free(h);
 }
 
+/* Bled out to an arrest, the monitor reads low and then zero, never a
+ * negative pressure. */
+static void test_body_bleed_out_readout(void)
+{
+    health *h = new_body(4);
+    health_env e = calm_env();
+    live(h, &e, 60.0);
+    health_cut(h, BP_LLEG, 1.0f, 1, 0.0f);
+    health_cut(h, BP_RLEG, 1.0f, 1, 0.0f);
+    float lo = 1e9f;
+    for (int i = 0; i < 15 * 60 * 60 && !h->dead; i++) {
+        health_step(h, &e, TICK);
+        lo = fminf(lo, fminf(h->sbp, fminf(h->dbp, h->map)));
+    }
+    CHECK(h->dead);
+    CHECK(lo >= 0.0f);
+    mem_free(h);
+}
+
 /* Standing while bleeding, a body faints; it comes round lying where it
  * fell and stays down a while instead of getting up into the next faint. */
 static void test_body_faint_stays_down(void)
@@ -811,6 +830,7 @@ void test_circulation_all(void)
     test_body_blood_loss_classes();
     test_body_bleed_slows();
     test_body_faint_stays_down();
+    test_body_bleed_out_readout();
     test_body_hr_max();
     test_body_head_rush();
     test_body_valsalva();
