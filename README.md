@@ -477,6 +477,11 @@ talks to it through a lock-free queue. Output goes through
 or CoreAudio at run time. `--no-sound` skips the audio device
 entirely.
 
+The sounds are being redesigned (#110): sound that travels through
+rock, air and water, echoes in caves, and every effect remade to sound
+like the real thing. The plan is in
+[docs/design/sound.md](docs/design/sound.md).
+
 ## Built for low-end devices
 
 | Technique | Why it matters on weak hardware |
