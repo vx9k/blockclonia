@@ -70,6 +70,53 @@ def added_lines(diff):
     return added
 
 
+# Whitespace matters in C only between two parts of a word (`int a` is not
+# `inta`); everywhere else, layout is free.
+SPACE = re.compile(r'\s+')
+LOOSE_SPACE = re.compile(r'(?<!\w) | (?!\w)')
+
+
+def squeeze(text):
+    """C text without its layout: what clang-format may change."""
+    return LOOSE_SPACE.sub('', SPACE.sub(' ', text))
+
+
+def new_lines(diff):
+    """Like added_lines, without the lines of C files that only change layout:
+    a hunk that only reformats (reindents, joins or splits lines), and lines
+    that only move within their file (includes put in order). Python's
+    indentation is its syntax, so Python lines always count."""
+    hunks, path, current = [], None, None
+    for line in diff.splitlines():
+        if line.startswith('+++ '):
+            path = line[6:] if line.startswith('+++ b/') else None
+            current = None
+        elif line.startswith('--- '):
+            continue
+        elif (hunk := HUNK.match(line)) and path:
+            current = (path, int(hunk[1]), [], [])
+            hunks.append(current)
+        elif current and line[:1] in '+-':
+            current[2 if line[0] == '-' else 3].append(line[1:])
+
+    def reformatted(path, old, new):
+        return path.endswith(C_SUFFIXES) and old and squeeze('\n'.join(old)) == squeeze('\n'.join(new))
+
+    hunks = [hunk for hunk in hunks if not reformatted(hunk[0], hunk[2], hunk[3])]
+    removed = {}
+    for path, _, old, _ in hunks:
+        removed.setdefault(path, []).extend(squeeze(text) for text in old)
+    added = {}
+    for path, start, _, new in hunks:
+        layout = path.endswith(C_SUFFIXES)
+        for number, text in enumerate(new, start):
+            if layout and squeeze(text) in removed[path]:
+                removed[path].remove(squeeze(text))
+                continue
+            added.setdefault(path, []).append(number)
+    return added
+
+
 def count(added, read):
     """(test lines, code lines, untestable lines) among the added lines,
     skipping blank lines and comments; `read(path)` gives a file's new text."""
@@ -117,7 +164,7 @@ def main(argv, cwd=None):
         with open(root / path, encoding='utf-8', errors='replace') as file:
             return file.read()
 
-    tests, code, untestable = count(added_lines(diff), read)
+    tests, code, untestable = count(new_lines(diff), read)
     exempt = f', {untestable} in modules only a window, GPU or audio device runs' if untestable else ''
     print(f'{tests} test lines, {code} code lines{exempt}')
     problems = [p for p in (title_problem(args.title), ratio_problem(tests, code)) if p]

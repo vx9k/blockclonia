@@ -99,6 +99,50 @@ class Counting(unittest.TestCase):
                 '@@ -1,0 +2,3 @@\n+x\n+y\n+z\n@@ -9 +12 @@\n-old\n+new\n@@ -20,2 +23,0 @@\n-gone\n-gone\n'
                 'diff --git a/gone.c b/gone.c\n--- a/gone.c\n+++ /dev/null\n@@ -1 +0,0 @@\n-x\n')
         self.assertEqual(pr_check.added_lines(diff), {'src/a.c': [2, 3, 4, 12]})
+        # Nothing in it is only layout, so new_lines sees the same.
+        self.assertEqual(pr_check.new_lines(diff), {'src/a.c': [2, 3, 4, 12]})
+
+    @staticmethod
+    def one_file(path, *hunks):
+        return f'--- a/{path}\n+++ b/{path}\n' + ''.join(hunks)
+
+    def test_reindenting_or_rewrapping_adds_nothing(self):
+        indent = '@@ -3 +3 @@\n-  int a = 0;\n+    int a = 0;\n'
+        join = '@@ -7,2 +7 @@\n-static int f(int a,\n-           int b) { return a + b; }\n' \
+            '+static int f(int a, int b) { return a + b; }\n'
+        split = '@@ -9 +9,4 @@\n-int g( void ){return 1;}\n+int g(void)\n+{\n+    return 1;\n+}\n'
+        self.assertEqual(pr_check.new_lines(self.one_file('src/a.c', indent, join, split)), {})
+
+    def test_whitespace_between_words_is_code(self):
+        diff = self.one_file('src/a.c', '@@ -3 +3 @@\n-int ab;\n+int a b;\n')
+        self.assertEqual(pr_check.new_lines(diff), {'src/a.c': [3]})
+
+    def test_sorting_includes_adds_nothing(self):
+        diff = self.one_file('src/a.h', '@@ -3 +2,0 @@\n-#include "mem.h"\n', '@@ -5,0 +5 @@\n+#include "mem.h"\n')
+        self.assertEqual(pr_check.new_lines(diff), {})
+
+    def test_a_line_moved_to_another_file_counts(self):
+        diff = self.one_file('src/a.c', '@@ -3 +2,0 @@\n-int a = 0;\n') + \
+            self.one_file('src/b.c', '@@ -1,0 +2 @@\n+int a = 0;\n')
+        self.assertEqual(pr_check.new_lines(diff), {'src/b.c': [2]})
+
+    def test_a_reindented_line_in_a_real_change_does_not_count(self):
+        diff = self.one_file('src/a.c', '@@ -3,2 +3,3 @@\n-if (a)\n-  b();\n+if (a) {\n+    b();\n+    c();\n')
+        self.assertEqual(pr_check.new_lines(diff), {'src/a.c': [3, 5]})
+
+    def test_a_moved_line_cancels_once(self):
+        diff = self.one_file('src/a.c', '@@ -3 +2,0 @@\n-    break;\n', '@@ -8,0 +8,2 @@\n+    break;\n+    break;\n')
+        self.assertEqual(pr_check.new_lines(diff), {'src/a.c': [9]})
+
+    def test_a_reformatted_hunk_cancels_no_moves(self):
+        # The reformatted hunk's removed line is not there for another hunk to match.
+        diff = self.one_file('src/a.c', '@@ -3 +3 @@\n-x( );\n+x();\n', '@@ -8,0 +9 @@\n+x();\n')
+        self.assertEqual(pr_check.new_lines(diff), {'src/a.c': [9]})
+
+    def test_python_layout_is_code(self):
+        diff = self.one_file('tools/a.py', '@@ -3 +3 @@\n-x = 1\n+    x = 1\n', '@@ -6 +5,0 @@\n-import os\n',
+                             '@@ -9,0 +9 @@\n+import os\n')
+        self.assertEqual(pr_check.new_lines(diff), {'tools/a.py': [3, 9]})
 
     def test_count_sorts_lines_and_skips_comments(self):
         files = {
@@ -174,6 +218,13 @@ class EndToEnd(unittest.TestCase):
         self.git('mv', 'src/a.c', 'src/core/a.c')
         self.commit()
         self.assertEqual(self.run_check('refactor: move a'), (0, '0 test lines, 0 code lines\n', ''))
+
+    def test_reformatting_adds_no_code_lines(self):
+        self.write('src/a.c', 'int f(int x)\n{\n  return x;\n}\n')
+        self.base = self.commit()
+        self.write('src/a.c', 'int f(int x) { return x; }\n')
+        self.commit()
+        self.assertEqual(self.run_check('style: format a'), (0, '0 test lines, 0 code lines\n', ''))
 
     def test_code_without_tests_fails_and_says_how_many_are_missing(self):
         self.write('src/a.c', 'int a = 0;\nint b = 1;\n')
