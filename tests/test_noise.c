@@ -525,6 +525,46 @@ static void test_threaded_columns(void)
     worldgen_forget();
 }
 
+/* Each simplex corner picks its gradient from one hash_u32 of the seed and
+ * the cell, so the mix has to be good: flipping any one input bit flips
+ * about half the output bits (otherwise neighbouring cells share gradients
+ * and the terrain shows a grid), and the low bits that choose the gradient
+ * are evenly spread. */
+static void test_hash_mix(void)
+{
+    double worst = 0.0;
+    for (int bit = 0; bit < 32; bit++) {
+        long flips = 0;
+        for (uint32_t i = 0; i < 4000; i++) {
+            uint32_t a = i * 2654435761u + 12345u;
+            uint32_t d = hash_u32(a) ^ hash_u32(a ^ (1u << bit));
+            for (int k = 0; k < 32; k++) flips += (d >> k) & 1u;
+        }
+        double share = (double)flips / (4000.0 * 32.0);
+        worst = fmax(worst, fabs(share - 0.5));
+    }
+    CHECK(worst < 0.05);
+
+    /* The 12 or 16 gradients come from the low 4 bits: count each value over
+     * a block of neighbouring cells, as the noise walks them. */
+    long count[16] = {0};
+    for (int z = -64; z < 64; z++)
+        for (int x = -64; x < 64; x++) count[hash2i(7, x, z) & 15u]++;
+    double chi = 0.0, expect = 128.0 * 128.0 / 16.0;
+    for (int k = 0; k < 16; k++) chi += ((double)count[k] - expect) * ((double)count[k] - expect) / expect;
+    /* 15 degrees of freedom: 37.7 is the 0.1 % tail. */
+    CHECK(chi < 37.7);
+
+    /* Neighbouring cells and neighbouring seeds don't collide. */
+    int same = 0;
+    for (int x = -500; x < 500; x++) {
+        same += hash2i(7, x, 0) == hash2i(7, x + 1, 0);
+        same += hash2i(7, x, 0) == hash2i(7, 0, x) && x != 0;
+        same += hash2i(7, x, 3) == hash2i(8, x, 3);
+    }
+    CHECK(same == 0);
+}
+
 void test_noise_all(void)
 {
     test_noise_gradient();
@@ -541,4 +581,5 @@ void test_noise_all(void)
     test_sea_temp();
     test_golden_paths();
     test_threaded_columns();
+    test_hash_mix();
 }
