@@ -2800,6 +2800,13 @@ health_senses health_get_senses(const health *h)
     v.stumble = 0.5f * fog;
     v.sway = minf(1.0f, v.sway + 0.6f * fog);
     v.blackout = fclamp(h->lapse / 0.3f, 0.0f, 1.0f);
+    /* A retina short of oxygen loses colour first and then the edges of
+     * the view, before the brain itself goes: the grey-out, tunnel vision
+     * and black-out pilots describe under g. Drowsy lids let in less
+     * light. */
+    v.grey = ramp(0.85f - h->brain_o2, 0.0f, 0.2f);
+    v.tunnel = maxf(v.tunnel, ramp(0.75f - h->brain_o2, 0.0f, 0.25f));
+    v.dim = maxf(0.4f * fog, v.blackout);
     return v;
 }
 

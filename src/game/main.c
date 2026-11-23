@@ -2253,6 +2253,9 @@ static render_view build_view(game *g, double now, double dt, double alpha)
         v.pitch += sway * 0.02f * sinf((float)now * 0.71f + 0.5f);
         v.blur = hs.blur;
         v.doubled = hs.doubled;
+        v.grey = hs.grey;
+        v.tunnel = hs.tunnel;
+        v.dim = hs.dim;
     }
     uint8_t eye_block = world_get(&g->w, (int)floor(v.eye.x), (int)floor(v.eye.y), (int)floor(v.eye.z));
     v.underwater = block_fluid(eye_block);

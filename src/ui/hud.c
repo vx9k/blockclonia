@@ -113,13 +113,9 @@ static void effects(ui *u, const health *h)
         ui_text(u, (u->w - ui_text_width(t, 1)) * 0.5f, u->h * 0.45f, 1, ui_rgba(120, 120, 130, 255), t);
         return;
     }
-    /* Failing brain oxygen narrows vision to a tunnel before a faint. */
-    float dim = clamp01((0.85f - h->brain_o2) / 0.35f);
-    if (health_impaired(h)) dim = dim > 0.35f ? dim : 0.35f;
+    /* Grey-out, tunnel vision and dimming are drawn over the world by the
+     * renderer's post pass, under this overlay. */
     health_senses sn = health_get_senses(h);
-    /* An adrenaline rush narrows the world to what is in front. */
-    if (sn.tunnel > dim) dim = 0.7f * sn.tunnel;
-    vignette(u, dim, 0);
     if (sn.jaundice > 0.0f) ui_rect(u, 0, 0, u->w, u->h, ui_rgba(200, 170, 20, (int)(45.0f * sn.jaundice)));
     if (h->hurt_flash > 0.0f) vignette(u, 0.6f * h->hurt_flash, ui_rgba(200, 0, 0, 0));
 }

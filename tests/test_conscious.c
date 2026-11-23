@@ -149,8 +149,43 @@ static void test_cons_lapses(void)
     mem_free(a);
 }
 
+/* A brain short of oxygen loses colour first, then the edges of the view,
+ * the order pilots report under g; a clear one sees normally. */
+static void test_cons_greyout(void)
+{
+    health *h = new_body(1);
+    health_senses s = health_get_senses(h);
+    CHECK(s.grey == 0.0f && s.tunnel == 0.0f && s.dim == 0.0f);
+    h->brain_o2 = 0.75f;
+    s = health_get_senses(h);
+    CHECK(s.grey > 0.3f && s.tunnel < 0.05f);
+    h->brain_o2 = 0.6f;
+    s = health_get_senses(h);
+    CHECK(s.grey > 0.9f && s.tunnel > 0.3f && s.tunnel < 0.9f);
+    h->brain_o2 = 0.45f;
+    s = health_get_senses(h);
+    CHECK(s.tunnel > 0.95f);
+    mem_free(h);
+}
+
+/* Drowsy eyes let in less light, and a blackout is black. */
+static void test_cons_dim(void)
+{
+    health *h = new_body(2);
+    h->level = 0.4f;
+    h->conscious = health_cons_of(h->level);
+    health_senses s = health_get_senses(h);
+    CHECK(s.dim > 0.2f && s.dim < 0.6f);
+    h->lapse = 2.0f;
+    s = health_get_senses(h);
+    CHECK(s.dim == 1.0f && s.blackout == 1.0f);
+    mem_free(h);
+}
+
 void test_conscious_all(void)
 {
+    test_cons_greyout();
+    test_cons_dim();
     test_cons_control();
     test_cons_lapses();
     test_cons_steps();

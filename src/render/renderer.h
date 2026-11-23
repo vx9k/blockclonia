@@ -75,6 +75,9 @@ typedef struct {
      * filtered, under a sharp crosshair and overlay; both 0 draws it
      * straight to the screen. */
     float blur, doubled;
+    /* What a failing brain or a drowsy one takes from the eyes, 0..1
+     * (health_senses): colour, the edges of the view and light. */
+    float grey, tunnel, dim;
     int ui_quads;        /* overlay quads written to renderer_ui_buffer() this frame */
 } render_view;
 

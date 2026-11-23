@@ -411,6 +411,9 @@ typedef struct {
      * hands: s the controls lag, the share of actions that never happen,
      * stumbles a second while moving, and a brief blackout (0..1). */
     float lag, drop, stumble, blackout;
+    /* What the eyes lose (0..1): colour (grey), the edges of the view
+     * (tunnel, above) and light (dim). */
+    float grey, dim;
 } health_senses;
 health_senses health_get_senses(const health *h);
 
