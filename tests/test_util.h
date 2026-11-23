@@ -104,5 +104,6 @@ void test_strata_all(void);
 void test_fluid_all(void);
 void test_liquids_all(void);
 void test_itemmodel_all(void);
+void test_circulation_all(void);
 
 #endif

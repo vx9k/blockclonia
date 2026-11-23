@@ -2279,6 +2279,7 @@ int main(void)
     test_mobmodel_all();
     test_avatar_all();
     test_cardio_all();
+    test_circulation_all();
     printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);
     return g_failed ? 1 : 0;
 }
