@@ -15,7 +15,6 @@
 #define WPRIME 60000.0f      /* J anaerobic reserve above critical power */
 #define J_PER_ML_O2 20.1f
 #define HR_REST 64.0f
-#define HR_MAX 190.0f
 #define MAP_SET 93.0f
 #define O2_VOL 10.0f         /* L: lungs after a breath plus blood and myoglobin stores */
 #define HEAT_CAP (75.0f * 3500.0f)
@@ -304,6 +303,7 @@ void health_init(health *h, uint32_t seed)
     h->base.map_set = MAP_SET;
     h->base.pain_gain = h->base.clot_gain = h->base.metab_gain = 1.0f;
     h->base.heart_size = h->base.art_stiff = h->base.baro_gain = h->base.venous_tone = h->base.symp_noise = 1.0f;
+    h->base.hr_max = 200.0f;
     h->base.blood_per_kg = 70.0f;
     for (int i = 0; i < BP_COUNT; i++) {
         h->part[i].integrity = 1.0f;
@@ -419,6 +419,7 @@ void health_init_varied(health *h, uint32_t seed)
     h->base.symp_noise = 0.5f + 1.0f * frand_s(&s);
     h->base.vary = 1;
     h->vrng = hash32(s) | 1u; /* a stream of its own for the short-term wander */
+    h->base.hr_max = 185.0f + 30.0f * frand_s(&s); /* drawn last: the earlier draws stay as they were */
 
     h->hr = h->base.hr_rest;
     h->co = h->base.hr_rest * 75.0f / 1000.0f;
@@ -2478,7 +2479,7 @@ void health_step(health *h, const health_env *e, double dt)
     if (h->temp < 35.0f) sa *= fclamp(1.0f - (35.0f - h->temp) * 0.08f, 0.3f, 1.0f);
     if (cushing) sa = minf(sa, 50.0f);
     if (h->sao2 < 0.5f) sa *= 0.35f + 0.65f * h->sao2 / 0.5f;
-    sa = minf(sa, HR_MAX * (0.55f + 0.45f * h->organ[ORG_HEART]));
+    sa = minf(sa, h->base.hr_max * (0.55f + 0.45f * h->organ[ORG_HEART]));
 
     /* Ectopic beats a minute: a healthy heart throws a few an hour; an
      * ischaemic, hyperkalaemic, adrenaline-soaked, acidotic, cold or
@@ -2503,7 +2504,7 @@ void health_step(health *h, const health_env *e, double dt)
     /* Sympathetic tone and adrenaline speed relaxation as well as
      * contraction (lusitropy): systole shortens, which is what leaves a
      * racing heart time to fill. */
-    ci.rr = (float)fmin(fmax(beat_rr, 0.25), 2.0) * (1.0f - 0.3f * fminf(1.0f, h->symp + 0.5f * beta));
+    ci.rr = (float)fmin(fmax(beat_rr, 0.19), 2.0) * (1.0f - 0.3f * fminf(1.0f, h->symp + 0.5f * beta));
     ci.atria_on = cond_atria_on(h->rhythm);
     /* PEA: the ventricles fire but barely squeeze. */
     ci.vent_on = h->rhythm == RHYTHM_PEA ? 0.1f : cond_vent_on(h->rhythm);
@@ -3376,6 +3377,7 @@ static const wire_field HEALTH_FIELDS[] = {
     H(base.baro_gain),
     H(base.venous_tone),
     H(base.symp_noise),
+    H(base.hr_max),
     HI(base.vary),
     WIRE_U32(health, vrng),
     H(rr_noise),

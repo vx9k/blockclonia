@@ -603,6 +603,34 @@ static void test_body_variation(void)
     CHECK(inside);
 }
 
+/* How fast a sinus node can go differs between people, about 200 +- 15 a
+ * minute; the reference body sits at the mean. */
+static void test_body_hr_max(void)
+{
+    health *h = mem_alloc(sizeof *h);
+    health_init(h, 1);
+    CHECK(h->base.hr_max == 200.0f);
+    float lo = 1e9f, hi = 0.0f;
+    for (uint32_t seed = 1; seed <= 50; seed++) {
+        health_init_varied(h, seed);
+        lo = fminf(lo, h->base.hr_max);
+        hi = fmaxf(hi, h->base.hr_max);
+    }
+    CHECK(lo >= 185.0f && hi <= 215.0f && hi - lo > 15.0f);
+    /* Sprinting to exhaustion, the rate stops at the body's own limit. */
+    health_init_varied(h, 3);
+    health_settle(h);
+    health_env e = calm_env();
+    e.speed = 6.5;
+    float peak = 0.0f;
+    for (int s = 0; s < 120; s++) {
+        live(h, &e, 1.0);
+        peak = fmaxf(peak, h->hr);
+    }
+    CHECK(peak > h->base.hr_max - 15.0f && peak < h->base.hr_max + 3.0f);
+    mem_free(h);
+}
+
 /* Standing still in the heat: the skin's open vessels pool blood and the
  * pressure falls. The brain's arterioles hold its flow, so it gets no more
  * than in the cool; it takes a warming core to faint from heat. */
@@ -783,6 +811,7 @@ void test_circulation_all(void)
     test_body_blood_loss_classes();
     test_body_bleed_slows();
     test_body_faint_stays_down();
+    test_body_hr_max();
     test_body_head_rush();
     test_body_valsalva();
     test_body_rsa_mayer();

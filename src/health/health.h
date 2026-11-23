@@ -202,6 +202,7 @@ typedef struct {
     float baro_gain;    /* x the baroreflex's gain: 0.7..1.3 */
     float venous_tone;  /* x the veins' unstressed volume: 0.9..1.1 */
     float symp_noise;   /* x the sympathetic nerves' random traffic: 0.5..1.5 */
+    float hr_max;       /* bpm, the sinus node's fastest: 185..215, mean 200 (no aging) */
     int vary;
 } health_baseline;
 

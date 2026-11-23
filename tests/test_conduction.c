@@ -125,6 +125,26 @@ static void test_cond_af(void)
     CHECK(60.0 / mean > 90.0 && 60.0 / mean < 150.0);
 }
 
+/* Fast AF under full sympathetic drive: the ventricles' refractory time
+ * shortens with the rate, so the response runs well past 240 a minute,
+ * but never faster than a beat every 0.19 s (~315 a minute). */
+static void test_cond_af_fast(void)
+{
+    conduction k;
+    cond_init(&k);
+    conduction_input in = sinus_input(220.0f);
+    in.rhythm = RHYTHM_AF;
+    run(&k, &in, 60.0, 13u, &g_log);
+    int over = 0;
+    double rr_min = 1.0;
+    for (int i = 1; i < g_log.n_rr; i++) {
+        over += g_log.rr[i] < 60.0 / 240.0;
+        rr_min = fmin(rr_min, g_log.rr[i]);
+    }
+    CHECK(over > 10);
+    CHECK(rr_min >= 0.19 - 1e-9);
+}
+
 static void test_cond_fast_slow(void)
 {
     conduction k;
@@ -200,6 +220,7 @@ void test_conduction_all(void)
     test_cond_autonomic_av();
     test_cond_avb3();
     test_cond_af();
+    test_cond_af_fast();
     test_cond_fast_slow();
     test_cond_ectopic_rate();
     test_cond_replay();

@@ -6,7 +6,6 @@
 #include <math.h>
 #include <string.h>
 
-#define VENT_REFRACTORY 0.25 /* s, a ventricle can't fire again sooner */
 #define AV_REFRACTORY 0.25   /* s, the AV node after passing a sinus impulse */
 
 static double urand(uint32_t *s)
@@ -45,9 +44,19 @@ float cond_vent_on(int rhythm)
 static int sinus_node_runs(int r) { return r != RHYTHM_AF && r != RHYTHM_ASYSTOLE && r != RHYTHM_VF; }
 static int own_focus(int r) { return r == RHYTHM_VT || r == RHYTHM_PVT || r == RHYTHM_VF; }
 
+/* s a ventricle can't fire again after a beat. Its action potential
+ * shortens with the rate, as the QT interval does (about with the root
+ * of the last interval): 0.3 s at rest, 0.19 s (~315 a minute) at the
+ * fastest, so a fast AF or VT can run near 300. */
+static double vent_refractory(const conduction *k)
+{
+    if (k->prev_vent < 0.0) return 0.25;
+    return fmin(fmax(0.33 * sqrt(k->t_vent - k->prev_vent), 0.19), 0.3);
+}
+
 static int fire_vent(conduction *k, double t, int ectopic, int force)
 {
-    if (!force && k->t_vent >= 0.0 && t < k->t_vent + VENT_REFRACTORY) return 0;
+    if (!force && k->t_vent >= 0.0 && t < k->t_vent + vent_refractory(k)) return 0;
     k->prev_vent = k->t_vent;
     k->t_vent = t;
     k->esc_ref = t;
