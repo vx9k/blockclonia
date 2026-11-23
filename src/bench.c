@@ -59,8 +59,8 @@ int bench_run(uint32_t seed)
             }
         }
     double mesh = os_now() - t0;
-    printf("  gather+mesh: %.3f ms/section, %.0f quads/section avg, %u bytes/vertex\n",
-           mesh * 1000.0 / sections, (double)quads / sections, (unsigned)sizeof(uint32_t));
+    printf("  gather+mesh: %.3f ms/section, %.0f quads/section avg, %u bytes/vertex\n", mesh * 1000.0 / sections,
+           (double)quads / sections, (unsigned)sizeof(uint32_t));
 
     /* Physics: structural check and a collapse. */
     physics ph = {0};
@@ -87,8 +87,8 @@ int bench_run(uint32_t seed)
         steps++;
     }
     double ps = os_now() - t0;
-    printf("  collapse: %d blocks fell, settled in %d steps (%.2f s sim), %.3f ms/step\n", fell, steps,
-           steps * PHYS_DT, ps * 1000.0 / (steps ? steps : 1));
+    printf("  collapse: %d blocks fell, settled in %d steps (%.2f s sim), %.3f ms/step\n", fell, steps, steps * PHYS_DT,
+           ps * 1000.0 / (steps ? steps : 1));
 
     /* Fluids: pour a column of water on a slope. */
     int wy = world_surface_y(&w, 20, 20);

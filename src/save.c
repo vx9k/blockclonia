@@ -27,7 +27,10 @@ static const uint8_t MAGIC[4] = {'M', 'C', 'C', 'L'};
 
 static void put_u32(uint8_t *p, uint32_t v)
 {
-    p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24);
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
 }
 
 static uint32_t get_u32(const uint8_t *p)
@@ -38,7 +41,10 @@ static uint32_t get_u32(const uint8_t *p)
 static uint32_t fnv1a(const uint8_t *p, size_t n)
 {
     uint32_t h = 2166136261U;
-    for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= 16777619U; }
+    for (size_t i = 0; i < n; i++) {
+        h ^= p[i];
+        h *= 16777619U;
+    }
     return h;
 }
 

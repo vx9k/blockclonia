@@ -50,7 +50,9 @@ void menu_open(menu *m, int screen)
 }
 
 static int over(const ctx *c, float x, float y, float w, float h)
-{ return c->in->mx >= x && c->in->mx < x + w && c->in->my >= y && c->in->my < y + h; }
+{
+    return c->in->mx >= x && c->in->mx < x + w && c->in->my >= y && c->in->my < y + h;
+}
 
 /* Entry animation: items slide in from the left, one after another. */
 static float entry(const ctx *c, int i, float *dx)

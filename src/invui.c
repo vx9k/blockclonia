@@ -201,7 +201,9 @@ void invui_hotbar(ui *u, invui *s, const inventory *inv, float dt)
 /* ------------------------------------------------------------ screen */
 
 static int inside(const invui_input *in, float x, float y, float w, float h)
-{ return in->mx >= x && in->mx < x + w && in->my >= y && in->my < y + h; }
+{
+    return in->mx >= x && in->mx < x + w && in->my >= y && in->my < y + h;
+}
 
 static const char *const CAT_NAME[RCAT_COUNT] = {"Basics", "Building", "Smelting & cooking",
                                                  "Tools",  "Weapons",  "Medical"};

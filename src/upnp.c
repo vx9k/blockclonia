@@ -68,8 +68,7 @@ static void run(void *arg)
         finish(u, -1, text);
         return;
     }
-    if (UPNP_GetExternalIPAddress(u->urls.controlURL, u->data.first.servicetype, ext) != UPNPCOMMAND_SUCCESS ||
-        !ext[0])
+    if (UPNP_GetExternalIPAddress(u->urls.controlURL, u->data.first.servicetype, ext) != UPNPCOMMAND_SUCCESS || !ext[0])
         snprintf(ext, sizeof ext, "?");
     snprintf(text, sizeof text, "%s:%s", ext, port);
     log_info("upnp: the router forwards UDP %s to %s; the internet reaches this game at %s", port, lan, text);

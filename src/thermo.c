@@ -463,7 +463,9 @@ static int doused(const world *w, int x, int y, int z)
 }
 
 static double flame_dist(const fire *f, dvec3 p)
-{ return dv3_len(dv3(p.x - ((double)f->x + 0.5), p.y - ((double)f->y + 0.5), p.z - ((double)f->z + 0.5))); }
+{
+    return dv3_len(dv3(p.x - ((double)f->x + 0.5), p.y - ((double)f->y + 0.5), p.z - ((double)f->z + 0.5)));
+}
 
 /* Burns fuel, puts out doused fires and forgets ones that are gone. Block
  * edits are collected and applied after the loop, since they call back into

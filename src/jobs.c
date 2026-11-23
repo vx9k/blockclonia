@@ -38,7 +38,8 @@ static void free_scratch(void)
 static void push(job **head, job **tail, job *j)
 {
     j->next = NULL;
-    if (*tail) (*tail)->next = j; else *head = j;
+    if (*tail) (*tail)->next = j;
+    else *head = j;
     *tail = j;
 }
 

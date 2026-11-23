@@ -8,7 +8,9 @@
 
 #define GPUPOOL_FAIL UINT32_MAX
 
-typedef struct { uint32_t start, len; } gp_range;
+typedef struct {
+    uint32_t start, len;
+} gp_range;
 
 typedef struct {
     gp_range *free;   /* sorted by start, never adjacent (always coalesced) */

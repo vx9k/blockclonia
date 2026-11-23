@@ -1,6 +1,6 @@
 #include "gpupool.h"
-#include "mem.h"
 #include "log.h"
+#include "mem.h"
 
 #include <string.h>
 

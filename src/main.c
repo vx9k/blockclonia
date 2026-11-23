@@ -601,7 +601,8 @@ static void cursor_cb(GLFWwindow *win, double x, double y)
 
 static void scroll_cb(GLFWwindow *win, double dx, double dy)
 {
-    (void)win; (void)dx;
+    (void)win;
+    (void)dx;
     g_in.scroll += dy;
 }
 
@@ -646,7 +647,9 @@ static void char_cb(GLFWwindow *win, unsigned int cp)
 
 static void resize_cb(GLFWwindow *win, int w, int h)
 {
-    (void)win; (void)w; (void)h;
+    (void)win;
+    (void)w;
+    (void)h;
     g_in.resized = 1;
 }
 
@@ -832,7 +835,9 @@ static void find_spawn(uint32_t seed, double *sx, double *sz)
 
 /* Scripted demo: builds a stone tower with a long timber cantilever in
  * front of the player, then knocks out the tower's middle. */
-typedef struct { int bx, by, bz, built; } demo_state;
+typedef struct {
+    int bx, by, bz, built;
+} demo_state;
 
 /* The world has one block-change hook; physics and the heat field both
  * need it. */
@@ -1102,9 +1107,9 @@ static void sound_step_events(game *g)
 
 static void sound_interact_events(game *g, const interact_out *io)
 {
-    static const int MAP[] = {[IE_DIG] = SND_DIG,         [IE_BREAK] = SND_BREAK,   [IE_PLACE] = SND_PLACE,
-                              [IE_FILL] = SND_BUCKET_FILL, [IE_POUR] = SND_BUCKET_POUR, [IE_FEED] = SND_FIRE_FEED,
-                              [IE_DROP] = SND_DROP};
+    static const int MAP[] = {
+        [IE_DIG] = SND_DIG,          [IE_BREAK] = SND_BREAK,    [IE_PLACE] = SND_PLACE, [IE_FILL] = SND_BUCKET_FILL,
+        [IE_POUR] = SND_BUCKET_POUR, [IE_FEED] = SND_FIRE_FEED, [IE_DROP] = SND_DROP};
     for (int i = 0; i < io->ev_count; i++) {
         const interact_event *e = &io->ev[i];
         if (e->kind >= 0 && e->kind <= IE_DROP) sound_play(g->snd, MAP[e->kind], &e->at, e->block, 0.8f);
@@ -2874,8 +2879,7 @@ static void frame_bookkeeping(game *g, double now)
 
 static void game_shutdown(game *g)
 {
-    if (g->settings_dirty && save_settings(g) != 0)
-        log_warn("could not save settings to %s", g->o.config);
+    if (g->settings_dirty && save_settings(g) != 0) log_warn("could not save settings to %s", g->o.config);
     log_info("saving and shutting down");
     discord_destroy(g->dc); /* closing the connection clears the status */
     g->dc = NULL;

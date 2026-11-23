@@ -64,22 +64,22 @@
 
 static const uint32_t SPV_BLOCK_VERT[] =
 #include "block.vert.inc"
-;
+    ;
 static const uint32_t SPV_BLOCK_FRAG[] =
 #include "block.frag.inc"
-;
+    ;
 static const uint32_t SPV_ENTITY_VERT[] =
 #include "entity.vert.inc"
-;
+    ;
 static const uint32_t SPV_ENTITY_FRAG[] =
 #include "entity.frag.inc"
     ;
 static const uint32_t SPV_LINE_VERT[] =
 #include "line.vert.inc"
-;
+    ;
 static const uint32_t SPV_LINE_FRAG[] =
 #include "line.frag.inc"
-;
+    ;
 static const uint32_t SPV_UI_VERT[] =
 #include "ui.vert.inc"
     ;
@@ -418,8 +418,7 @@ struct renderer {
 
 /* ------------------------------------------------------------- utilities */
 
-static uint32_t find_memtype(const renderer *r, uint32_t bits, VkMemoryPropertyFlags need,
-                             VkMemoryPropertyFlags want)
+static uint32_t find_memtype(const renderer *r, uint32_t bits, VkMemoryPropertyFlags need, VkMemoryPropertyFlags want)
 {
     for (int pass = 0; pass < 2; pass++) {
         VkMemoryPropertyFlags flags = pass == 0 ? (need | want) : need;
@@ -443,7 +442,9 @@ static int buffer_try_create(renderer *r, gbuf *b, VkDeviceSize size, VkBufferUs
 {
     memset(b, 0, sizeof *b);
     b->size = size;
-    VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = usage,
+    VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                             .size = size,
+                             .usage = usage,
                              .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
     if (vkCreateBuffer(r->dev, &bi, r->ac, &b->buf) != VK_SUCCESS) {
         b->buf = VK_NULL_HANDLE;
@@ -453,7 +454,8 @@ static int buffer_try_create(renderer *r, gbuf *b, VkDeviceSize size, VkBufferUs
     vkGetBufferMemoryRequirements(r->dev, b->buf, &req);
     uint32_t type = find_memtype(r, req.memoryTypeBits, need, want);
     VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-                               .allocationSize = req.size, .memoryTypeIndex = type};
+                               .allocationSize = req.size,
+                               .memoryTypeIndex = type};
     int ok = vkAllocateMemory(r->dev, &ai, r->ac, &b->mem) == VK_SUCCESS;
     if (!ok) b->mem = VK_NULL_HANDLE;
     ok = ok && vkBindBufferMemory(r->dev, b->buf, b->mem, 0) == VK_SUCCESS;
@@ -465,8 +467,8 @@ static int buffer_try_create(renderer *r, gbuf *b, VkDeviceSize size, VkBufferUs
     return ok;
 }
 
-static void buffer_create(renderer *r, gbuf *b, VkDeviceSize size, VkBufferUsageFlags usage,
-                          VkMemoryPropertyFlags need, VkMemoryPropertyFlags want)
+static void buffer_create(renderer *r, gbuf *b, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags need,
+                          VkMemoryPropertyFlags want)
 {
     if (!buffer_try_create(r, b, size, usage, need, want))
         log_fatal("out of memory creating a %llu KB Vulkan buffer", (unsigned long long)(size >> 10));
@@ -475,7 +477,8 @@ static void buffer_create(renderer *r, gbuf *b, VkDeviceSize size, VkBufferUsage
 static VkCommandBuffer one_shot_begin(renderer *r)
 {
     VkCommandBufferAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-                                      .commandPool = r->cmdpool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                                      .commandPool = r->cmdpool,
+                                      .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
                                       .commandBufferCount = 1};
     VkCommandBuffer cmd = NULL;
     VK_CHECK(vkAllocateCommandBuffers(r->dev, &ai, &cmd));
@@ -555,10 +558,7 @@ static void memory_barrier(const renderer *r, VkCommandBuffer cmd, VkAccessFlags
     vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 1, &b, 0, NULL, 0, NULL);
 }
 
-static float srgb_to_linear(float c)
-{
-    return c <= 0.04045f ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f);
-}
+static float srgb_to_linear(float c) { return c <= 0.04045f ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f); }
 
 /* -------------------------------------------------------- host allocation */
 
@@ -616,7 +616,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_cb(VkDebugUtilsMessageSeverityFlagBi
                                                VkDebugUtilsMessageTypeFlagsEXT type,
                                                const VkDebugUtilsMessengerCallbackDataEXT *data, void *user)
 {
-    (void)type; (void)user;
+    (void)type;
+    (void)user;
     if (sev >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) log_error("vulkan: %s", data->pMessage);
     else if (sev >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) log_warn("vulkan: %s", data->pMessage);
     return VK_FALSE;
@@ -718,16 +719,15 @@ static void create_instance(renderer *r, int validate)
     VK_CHECK(vkCreateInstance(&ci, r->ac, &r->inst));
 
     if (validate) {
-        PFN_vkCreateDebugUtilsMessengerEXT fn =
-            (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(r->inst, "vkCreateDebugUtilsMessengerEXT");
-        VkDebugUtilsMessengerCreateInfoEXT di = {
-            .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-            .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                               VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-            .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                           VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                           VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
-            .pfnUserCallback = debug_cb};
+        PFN_vkCreateDebugUtilsMessengerEXT fn = (PFN_vkCreateDebugUtilsMessengerEXT)
+            vkGetInstanceProcAddr(r->inst, "vkCreateDebugUtilsMessengerEXT");
+        VkDebugUtilsMessengerCreateInfoEXT di = {.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+                                                 .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                                                                    VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+                                                 .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                                                                VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                                                                VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+                                                 .pfnUserCallback = debug_cb};
         if (fn) VK_CHECK(fn(r->inst, &di, r->ac, &r->dbg));
     }
 }
@@ -918,7 +918,10 @@ static void pick_device(renderer *r, const render_opts *o)
         if (!find_queue(r, pds[i], &fam) || !has_device_ext(pds[i], VK_KHR_SWAPCHAIN_EXTENSION_NAME)) continue;
         int score = device_score(p.deviceType);
         if (o->gpu_index >= 0) score = (int)i == o->gpu_index ? 100 : -1;
-        if (score > best_score) { best = (int)i; best_score = score; }
+        if (score > best_score) {
+            best = (int)i;
+            best_score = score;
+        }
     }
     if (best < 0 && too_old == (int)n) log_fatal("no GPU offers Vulkan 1.2: update the GPU driver");
     if (best < 0) log_fatal("no Vulkan 1.2 device can present to this window");
@@ -951,8 +954,10 @@ static void pick_device(renderer *r, const render_opts *o)
 static void create_device(renderer *r)
 {
     float prio = 1.0f;
-    VkDeviceQueueCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = r->qfam,
-                                  .queueCount = 1, .pQueuePriorities = &prio};
+    VkDeviceQueueCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                                  .queueFamilyIndex = r->qfam,
+                                  .queueCount = 1,
+                                  .pQueuePriorities = &prio};
     const char *exts[5] = {0};
     uint32_t n = 0;
     exts[n++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
@@ -1234,7 +1239,7 @@ static void choose_surface_format(renderer *r)
     int best = 0;
     for (uint32_t i = 0; i < n; i++) {
         if (f[i].colorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) continue;
-        int rank = f[i].format == VK_FORMAT_B8G8R8A8_SRGB || f[i].format == VK_FORMAT_R8G8B8A8_SRGB   ? 2
+        int rank = f[i].format == VK_FORMAT_B8G8R8A8_SRGB || f[i].format == VK_FORMAT_R8G8B8A8_SRGB     ? 2
                    : f[i].format == VK_FORMAT_B8G8R8A8_UNORM || f[i].format == VK_FORMAT_R8G8B8A8_UNORM ? 1
                                                                                                         : 0;
         if (rank > best) {
@@ -1279,9 +1284,13 @@ static VkPresentModeKHR choose_present_mode(renderer *r)
 
 static void create_depth(renderer *r)
 {
-    VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
-                            .format = r->depth_fmt, .extent = {r->extent.width, r->extent.height, 1},
-                            .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
+    VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                            .imageType = VK_IMAGE_TYPE_2D,
+                            .format = r->depth_fmt,
+                            .extent = {r->extent.width, r->extent.height, 1},
+                            .mipLevels = 1,
+                            .arrayLayers = 1,
+                            .samples = VK_SAMPLE_COUNT_1_BIT,
                             .tiling = VK_IMAGE_TILING_OPTIMAL,
                             .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
                                      VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
@@ -1291,14 +1300,17 @@ static void create_depth(renderer *r)
     vkGetImageMemoryRequirements(r->dev, r->depth, &req);
     /* Depth is cleared and never stored, so on tile-based GPUs it can live
      * on chip: lazily allocated memory, where offered, is never backed. */
-    VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size,
+    VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                               .allocationSize = req.size,
                                .memoryTypeIndex = find_memtype(r, req.memoryTypeBits,
                                                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                                                                VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT)};
     VK_CHECK(vkAllocateMemory(r->dev, &ai, r->ac, &r->depth_mem));
     VK_CHECK(vkBindImageMemory(r->dev, r->depth, r->depth_mem, 0));
-    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = r->depth,
-                                .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = r->depth_fmt,
+    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                .image = r->depth,
+                                .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                                .format = r->depth_fmt,
                                 .subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1}};
     VK_CHECK(vkCreateImageView(r->dev, &vi, r->ac, &r->depth_view));
 }
@@ -1326,18 +1338,26 @@ static int create_swapchain(renderer *r)
     if (count > MAX_SWAP_IMAGES) count = MAX_SWAP_IMAGES;
 
     VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    r->shot_supported =
-        (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0 && format_is_rgba8(r->swap_fmt);
+    r->shot_supported = (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0 &&
+                        format_is_rgba8(r->swap_fmt);
     r->swap_has_src = r->shot_supported && r->shot_usage;
     if (r->swap_has_src) usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
     VkSwapchainKHR old = r->swap;
-    VkSwapchainCreateInfoKHR si = {
-        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR, .surface = r->surf, .minImageCount = count,
-        .imageFormat = r->swap_fmt, .imageColorSpace = r->swap_cs, .imageExtent = ext,
-        .imageArrayLayers = 1, .imageUsage = usage, .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .preTransform = caps.currentTransform, .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .presentMode = choose_present_mode(r), .clipped = VK_TRUE, .oldSwapchain = old};
+    VkSwapchainCreateInfoKHR si = {.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+                                   .surface = r->surf,
+                                   .minImageCount = count,
+                                   .imageFormat = r->swap_fmt,
+                                   .imageColorSpace = r->swap_cs,
+                                   .imageExtent = ext,
+                                   .imageArrayLayers = 1,
+                                   .imageUsage = usage,
+                                   .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                                   .preTransform = caps.currentTransform,
+                                   .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+                                   .presentMode = choose_present_mode(r),
+                                   .clipped = VK_TRUE,
+                                   .oldSwapchain = old};
     if (!(caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR))
         si.compositeAlpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
     VK_CHECK(vkCreateSwapchainKHR(r->dev, &si, r->ac, &r->swap));
@@ -1350,17 +1370,23 @@ static int create_swapchain(renderer *r)
 
     create_depth(r);
     for (uint32_t i = 0; i < r->image_count; i++) {
-        VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = r->images[i],
-                                    .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = r->swap_fmt,
+        VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                    .image = r->images[i],
+                                    .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                                    .format = r->swap_fmt,
                                     .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
         VK_CHECK(vkCreateImageView(r->dev, &vi, r->ac, &r->views[i]));
         VkImageView att[2] = {r->views[i], r->depth_view};
         VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
         VK_CHECK(vkCreateSemaphore(r->dev, &sci, r->ac, &r->render_done[i]));
         if (!r->pass) continue; /* dynamic rendering: no framebuffers */
-        VkFramebufferCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, .renderPass = r->pass,
-                                      .attachmentCount = 2, .pAttachments = att, .width = ext.width,
-                                      .height = ext.height, .layers = 1};
+        VkFramebufferCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+                                      .renderPass = r->pass,
+                                      .attachmentCount = 2,
+                                      .pAttachments = att,
+                                      .width = ext.width,
+                                      .height = ext.height,
+                                      .layers = 1};
         VK_CHECK(vkCreateFramebuffer(r->dev, &fi, r->ac, &r->fbs[i]));
     }
     return 1;
@@ -1411,8 +1437,10 @@ static VkRenderPass create_render_pass(renderer *r, int scene)
     };
     VkAttachmentReference cref = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
     VkAttachmentReference dref = {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
-    VkSubpassDescription sub = {.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS, .colorAttachmentCount = 1,
-                                .pColorAttachments = &cref, .pDepthStencilAttachment = &dref};
+    VkSubpassDescription sub = {.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                .colorAttachmentCount = 1,
+                                .pColorAttachments = &cref,
+                                .pDepthStencilAttachment = &dref};
     VkSubpassDependency dep[2] = {
         {.srcSubpass = VK_SUBPASS_EXTERNAL,
          .dstSubpass = 0,
@@ -1530,7 +1558,8 @@ static void save_pipeline_cache(renderer *r, const void *loaded, size_t loaded_s
 
 static VkShaderModule make_module(renderer *r, const uint32_t *code, size_t bytes)
 {
-    VkShaderModuleCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = bytes,
+    VkShaderModuleCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                                   .codeSize = bytes,
                                    .pCode = code};
     VkShaderModule m = VK_NULL_HANDLE;
     VK_CHECK(vkCreateShaderModule(r->dev, &ci, r->ac, &m));
@@ -1576,10 +1605,13 @@ static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
     VkPipelineInputAssemblyStateCreateInfo ia = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
                                                  .topology = d->topology};
     VkPipelineViewportStateCreateInfo vp = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-                                            .viewportCount = 1, .scissorCount = 1};
+                                            .viewportCount = 1,
+                                            .scissorCount = 1};
     VkPipelineRasterizationStateCreateInfo rs = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-                                                 .polygonMode = VK_POLYGON_MODE_FILL, .cullMode = d->cull,
-                                                 .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE, .lineWidth = 1.0f};
+                                                 .polygonMode = VK_POLYGON_MODE_FILL,
+                                                 .cullMode = d->cull,
+                                                 .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+                                                 .lineWidth = 1.0f};
     VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
                                                .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
     /* Reversed Z: nearer fragments have greater depth. */
@@ -1607,7 +1639,8 @@ static VkPipeline make_pipeline(renderer *r, const pipe_desc *d)
                                               .pAttachments = &cba};
     VkDynamicState dyn[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dy = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-                                           .dynamicStateCount = 2, .pDynamicStates = dyn};
+                                           .dynamicStateCount = 2,
+                                           .pDynamicStates = dyn};
     /* Dynamic rendering: the attachment formats instead of a render pass
      * (no stencil attachment; the depth format may carry one, unused). */
     VkPipelineRenderingCreateInfo rend = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
@@ -1819,8 +1852,10 @@ static void create_pipelines(renderer *r)
     VK_CHECK(vkCreateDescriptorSetLayout(r->dev, &dl, r->ac, &r->dsl));
     VkPushConstantRange pcr[2] = {{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push_vert)},
                                   {VK_SHADER_STAGE_FRAGMENT_BIT, PUSH_FRAG_OFFSET, sizeof(push_frag)}};
-    VkPipelineLayoutCreateInfo pl = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
-                                     .pSetLayouts = &r->dsl, .pushConstantRangeCount = 2,
+    VkPipelineLayoutCreateInfo pl = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                                     .setLayoutCount = 1,
+                                     .pSetLayouts = &r->dsl,
+                                     .pushConstantRangeCount = 2,
                                      .pPushConstantRanges = pcr};
     VK_CHECK(vkCreatePipelineLayout(r->dev, &pl, r->ac, &r->layout));
     create_shadow_layout(r);
@@ -2317,7 +2352,8 @@ static void create_texture(renderer *r)
     VK_CHECK(vkCreateImage(r->dev, &ii, r->ac, &r->tex));
     VkMemoryRequirements req = {0};
     vkGetImageMemoryRequirements(r->dev, r->tex, &req);
-    VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size,
+    VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                               .allocationSize = req.size,
                                .memoryTypeIndex = find_memtype(r, req.memoryTypeBits,
                                                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0)};
     VK_CHECK(vkAllocateMemory(r->dev, &ai, r->ac, &r->tex_mem));
@@ -2336,15 +2372,20 @@ static void create_texture(renderer *r)
     upload_image(r, r->tex, host, TEX_MIPS, T_COUNT, texels, bytes, regions, TEX_MIPS);
     mem_free(texels);
 
-    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = r->tex,
-                                .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY, .format = fmt,
+    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                .image = r->tex,
+                                .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                                .format = fmt,
                                 .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, TEX_MIPS, 0, T_COUNT}};
     VK_CHECK(vkCreateImageView(r->dev, &vi, r->ac, &r->tex_view));
-    VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, .magFilter = VK_FILTER_NEAREST,
-                              .minFilter = VK_FILTER_NEAREST, .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+    VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                              .magFilter = VK_FILTER_NEAREST,
+                              .minFilter = VK_FILTER_NEAREST,
+                              .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
                               .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
                               .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-                              .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT, .maxLod = (float)TEX_MIPS};
+                              .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                              .maxLod = (float)TEX_MIPS};
     VK_CHECK(vkCreateSampler(r->dev, &si, r->ac, &r->sampler));
     /* Filtered: trilinear between texgen's box-filtered mips (each layer is
      * its own array slice, so nothing bleeds in from a neighbour), plus
@@ -2550,7 +2591,10 @@ static void create_static_buffers(renderer *r)
     for (int f = 0, n = 0; f < 6; f++) {
         int d = f / 2, sgn = (f & 1) ? -1 : 1, u = (d + 1) % 3, w = (d + 2) % 3;
         int order[4] = {0, 1, 2, 3};
-        if (sgn < 0) { order[1] = 3; order[3] = 1; }
+        if (sgn < 0) {
+            order[1] = 3;
+            order[3] = 1;
+        }
         for (int k = 0; k < 4; k++) {
             int p[3] = {0};
             p[d] = sgn > 0;
@@ -2752,7 +2796,8 @@ static void create_frames(renderer *r, uint32_t pool_mb)
     for (int i = 0; i < FRAMES; i++) {
         frame *f = &r->frames[i];
         VkCommandBufferAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-                                          .commandPool = r->cmdpool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                                          .commandPool = r->cmdpool,
+                                          .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
                                           .commandBufferCount = 1};
         VK_CHECK(vkAllocateCommandBuffers(r->dev, &ai, &f->cmd));
         VkSemaphoreCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
@@ -3023,8 +3068,8 @@ void renderer_destroy(renderer *r)
     vkDestroyDevice(r->dev, r->ac);
     vkDestroySurfaceKHR(r->inst, r->surf, r->ac);
     if (r->dbg) {
-        PFN_vkDestroyDebugUtilsMessengerEXT fn =
-            (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(r->inst, "vkDestroyDebugUtilsMessengerEXT");
+        PFN_vkDestroyDebugUtilsMessengerEXT fn = (PFN_vkDestroyDebugUtilsMessengerEXT)
+            vkGetInstanceProcAddr(r->inst, "vkDestroyDebugUtilsMessengerEXT");
         if (fn) fn(r->inst, r->dbg, r->ac);
     }
     vkDestroyInstance(r->inst, r->ac);
@@ -3098,8 +3143,7 @@ int renderer_begin_frame(renderer *r)
     f->lstage_used = 0;
     f->lcopy_count = 0;
 
-    VkResult res = vkAcquireNextImageKHR(r->dev, r->swap, UINT64_MAX, f->image_ready, VK_NULL_HANDLE,
-                                         &r->image_index);
+    VkResult res = vkAcquireNextImageKHR(r->dev, r->swap, UINT64_MAX, f->image_ready, VK_NULL_HANDLE, &r->image_index);
     if (res == VK_ERROR_OUT_OF_DATE_KHR) {
         r->resized = 1;
         recreate_swapchain(r);
@@ -3829,7 +3873,10 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         if (!m->opaque_quads) continue;
         uint32_t faces = r->vis[i].faces;
         for (int g = 0; g < 6;) {
-            if (!(faces >> g & 1)) { g++; continue; }
+            if (!(faces >> g & 1)) {
+                g++;
+                continue;
+            }
             int e = g;
             while (e + 1 < 6 && (faces >> (e + 1) & 1)) e++;
             uint32_t q0 = g ? m->face_end[g - 1] : 0, q1 = m->face_end[e];
@@ -3945,10 +3992,10 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     int nl = 0;
     if (v->has_selection) {
         const float e = 0.002f;
-        static const int E[12][2][3] = {
-            {{0, 0, 0}, {1, 0, 0}}, {{0, 0, 1}, {1, 0, 1}}, {{0, 1, 0}, {1, 1, 0}}, {{0, 1, 1}, {1, 1, 1}},
-            {{0, 0, 0}, {0, 1, 0}}, {{1, 0, 0}, {1, 1, 0}}, {{0, 0, 1}, {0, 1, 1}}, {{1, 0, 1}, {1, 1, 1}},
-            {{0, 0, 0}, {0, 0, 1}}, {{1, 0, 0}, {1, 0, 1}}, {{0, 1, 0}, {0, 1, 1}}, {{1, 1, 0}, {1, 1, 1}}};
+        static const int E[12][2][3] = {{{0, 0, 0}, {1, 0, 0}}, {{0, 0, 1}, {1, 0, 1}}, {{0, 1, 0}, {1, 1, 0}},
+                                        {{0, 1, 1}, {1, 1, 1}}, {{0, 0, 0}, {0, 1, 0}}, {{1, 0, 0}, {1, 1, 0}},
+                                        {{0, 0, 1}, {0, 1, 1}}, {{1, 0, 1}, {1, 1, 1}}, {{0, 0, 0}, {0, 0, 1}},
+                                        {{1, 0, 0}, {1, 0, 1}}, {{0, 1, 0}, {0, 1, 1}}, {{1, 1, 0}, {1, 1, 1}}};
         for (int i = 0; i < 12; i++)
             for (int k = 0; k < 2; k++)
                 for (int a = 0; a < 3; a++) lines[nl++] = E[i][k][a] ? 1.0f + e : -e;
@@ -4093,9 +4140,12 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     submit_frame(r, f);
     st.cpu_ms = (float)((glfwGetTime() - t_start) * 1000.0); /* present can wait for vsync: not counted */
 
-    VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .waitSemaphoreCount = 1,
-                           .pWaitSemaphores = &r->render_done[r->image_index], .swapchainCount = 1,
-                           .pSwapchains = &r->swap, .pImageIndices = &r->image_index};
+    VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+                           .waitSemaphoreCount = 1,
+                           .pWaitSemaphores = &r->render_done[r->image_index],
+                           .swapchainCount = 1,
+                           .pSwapchains = &r->swap,
+                           .pImageIndices = &r->image_index};
     VkResult res = vkQueuePresentKHR(r->queue, &pi);
     if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) r->resized = 1;
     else if (res != VK_SUCCESS) log_fatal("vkQueuePresentKHR failed (%d)", (int)res);

@@ -9,7 +9,9 @@
 #include <stddef.h>
 #include <stdlib.h>
 
-typedef struct { uint8_t r, g, b, a; } rgba;
+typedef struct {
+    uint8_t r, g, b, a;
+} rgba;
 
 static uint8_t clamp8(int v) { return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v)); }
 
@@ -489,7 +491,10 @@ void texgen_build(uint8_t *out)
             for (int x = 0; x < TEX_SIZE; x++) {
                 rgba c = texel(l, x, y);
                 uint8_t *p = dst + (y * TEX_SIZE + x) * 4;
-                p[0] = c.r; p[1] = c.g; p[2] = c.b; p[3] = c.a;
+                p[0] = c.r;
+                p[1] = c.g;
+                p[2] = c.b;
+                p[3] = c.a;
             }
         /* Box-filtered mips keep distant terrain from shimmering. */
         for (int m = 1; m < TEX_MIPS; m++) {

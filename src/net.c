@@ -1042,7 +1042,9 @@ void net_test_add_player(net *n, int player, const char *name, const uint8_t *pk
 }
 
 int net_player_present(const net *n, int player)
-{ return player >= 0 && player < NET_MAX_PLAYERS && n->m[player].present; }
+{
+    return player >= 0 && player < NET_MAX_PLAYERS && n->m[player].present;
+}
 
 const char *net_player_name(const net *n, int player) { return net_player_present(n, player) ? n->m[player].name : ""; }
 
@@ -1053,7 +1055,9 @@ const uint8_t *net_host_key(const net *n)
 }
 
 int net_player_direct(const net *n, int player)
-{ return net_player_present(n, player) && n->m[player].direct && n->m[player].direct->state == LINK_UP; }
+{
+    return net_player_present(n, player) && n->m[player].direct && n->m[player].direct->state == LINK_UP;
+}
 
 const uint8_t *net_player_key(const net *n, int player)
 {

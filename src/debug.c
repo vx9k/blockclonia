@@ -156,8 +156,7 @@ void debug_draw(ui *u, const debug_info *d)
     if (d->gpu_ms > 0.0f)
         line(&rc, C_TEXT, "Render CPU %.2f ms  GPU %.2f ms", (double)d->render_cpu_ms, (double)d->gpu_ms);
     else line(&rc, C_TEXT, "Render CPU %.2f ms", (double)d->render_cpu_ms);
-    if (d->vram_budget_mb)
-        line(&rc, C_TEXT, "VRAM %u / %u MB (budget)", d->vram_used_mb, d->vram_budget_mb);
+    if (d->vram_budget_mb) line(&rc, C_TEXT, "VRAM %u / %u MB (budget)", d->vram_used_mb, d->vram_budget_mb);
     line(&rc, C_TEXT, "Display %dx%d  UI scale %.0f  quads %d", d->width, d->height, (double)u->scale, d->ui_quads);
     gap(&rc);
     if (d->rss || d->commit)

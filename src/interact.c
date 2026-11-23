@@ -20,7 +20,9 @@ static float frand(interact *s)
 }
 
 int interact_box_hits_cell(aabb b, int x, int y, int z)
-{ return b.min.x < x + 1 && b.max.x > x && b.min.y < y + 1 && b.max.y > y && b.min.z < z + 1 && b.max.z > z; }
+{
+    return b.min.x < x + 1 && b.max.x > x && b.min.y < y + 1 && b.max.y > y && b.min.z < z + 1 && b.max.z > z;
+}
 
 static void spill_drops(interact *s, physics *ph, uint8_t block, item_id held, ipos at)
 {

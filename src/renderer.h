@@ -107,8 +107,7 @@ void renderer_bind_world(renderer *r, world *w);
  * should be skipped (minimised window, swapchain rebuilt). Mesh uploads
  * (jobs_poll) must happen between begin and end. */
 int renderer_begin_frame(renderer *r);
-void renderer_end_frame(renderer *r, const world *w, const physics *ph, const render_view *v,
-                        double alpha);
+void renderer_end_frame(renderer *r, const world *w, const physics *ph, const render_view *v, double alpha);
 
 /* The overlay vertex buffer for the current frame (mapped, write-only), valid
  * between a successful renderer_begin_frame() and renderer_end_frame().
