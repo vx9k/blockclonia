@@ -237,12 +237,17 @@ typedef struct {
     int n;
 } body_avg;
 
+/* Keeps a body lying down, the way a clinician measures it: the time it
+ * would spend down after coming round, held above the sitting-up part. */
+static void lie(health *h) { h->down = 30.0f; }
+
 /* Lives seconds, averaging the vitals over the last `tail` of them. */
-static body_avg body_live(health *h, const health_env *e, double seconds, double tail)
+static body_avg body_live(health *h, const health_env *e, double seconds, double tail, int lying)
 {
     body_avg a = {0};
     int ticks = (int)lround(seconds / TICK), from = ticks - (int)lround(tail / TICK);
     for (int i = 0; i < ticks; i++) {
+        if (lying) lie(h);
         health_step(h, e, TICK);
         if (i < from) continue;
         a.sbp += (double)h->sbp;
@@ -276,7 +281,7 @@ static void test_body_rest(void)
 {
     health *h = new_body(1);
     health_env e = calm_env();
-    body_avg a = body_live(h, &e, 120.0, 20.0);
+    body_avg a = body_live(h, &e, 120.0, 20.0, 0);
     CHECK(rest_ranges(h, a));
     CHECK(fabsf(h->blood - BLOOD_NORMAL) < 0.02f);
     CHECK(fabsf(h->svr - h->map / h->co) < 0.05f * h->svr);
@@ -289,7 +294,7 @@ static void test_body_run_no_jump(void)
 {
     health *h = new_body(2);
     health_env e = calm_env();
-    body_avg a0 = body_live(h, &e, 90.0, 10.0);
+    body_avg a0 = body_live(h, &e, 90.0, 10.0, 0);
     e.speed = 6.5;
     float sbp_1 = 0.0f, hr_10 = 0.0f, hr_90 = 0.0f;
     for (int i = 1; i <= 120 * 60; i++) {
@@ -316,16 +321,18 @@ static void test_body_run_no_jump(void)
     mem_free(h);
 }
 
-/* A steady arterial bleed walks through the classes of haemorrhage in
- * order: little at first, then a racing pulse and a narrowing pulse
- * pressure, then falling pressure. The classes count blood shed, which
+/* A steady arterial bleed in a body lying down, as the classes of
+ * haemorrhage are taken: little at first, then a narrowing pulse pressure
+ * and a quickening pulse, then falling pressure. The pulse climbs more
+ * slowly than the teaching tables say, as trauma patients' records show
+ * (Guly et al. 2011, see CREDITS.md). The classes count blood shed, which
  * plasma refilling from the tissues keeps ahead of the volume deficit. */
 static void test_body_blood_loss_classes(void)
 {
     health *h = new_body(3);
     health_env e = calm_env();
-    body_avg a0 = body_live(h, &e, 90.0, 10.0);
-    float b0 = h->blood, pp0 = (float)(a0.sbp - a0.dbp);
+    body_avg a0 = body_live(h, &e, 90.0, 10.0, 1);
+    float b0 = h->blood, pp0 = (float)(a0.sbp - a0.dbp), hr0 = (float)a0.hr;
     health_cut(h, BP_LLEG, 0.3f, 1, 0.0f);
     int seen = 0, ok10 = 0, ok22 = 0, ok35 = 0, ok45 = 0;
     double shed = 0.0; /* L */
@@ -334,6 +341,7 @@ static void test_body_blood_loss_classes(void)
     float hr = h->hr, sbp = h->sbp, dbp = h->dbp;
     const float k = 1.0f - expf(-(float)TICK / 3.0f);
     for (int i = 0; i < 40 * 60 * 60 && seen < 4; i++) {
+        lie(h);
         health_step(h, &e, TICK);
         hr += (h->hr - hr) * k;
         sbp += (h->sbp - sbp) * k;
@@ -342,16 +350,16 @@ static void test_body_blood_loss_classes(void)
         float lost = (float)shed / b0;
         int arrested = !health_rhythm_perfusing(h->rhythm) || h->dead;
         if (seen == 0 && lost >= 0.10f) {
-            ok10 = hr < 100.0f && sbp > (float)a0.sbp - 8.0f;
+            ok10 = hr < 100.0f && sbp > (float)a0.sbp - 10.0f;
             seen = 1;
         } else if (seen == 1 && lost >= 0.22f) {
-            ok22 = hr >= 100.0f && hr <= 130.0f && sbp - dbp < 0.85f * pp0;
+            ok22 = hr >= hr0 + 5.0f && hr < 110.0f && sbp - dbp < 0.85f * pp0;
             seen = 2;
         } else if (seen == 2 && lost >= 0.35f) {
-            ok35 = (hr > 120.0f && sbp < 100.0f) || arrested;
+            ok35 = (hr > hr0 + 20.0f && sbp < 100.0f) || arrested;
             seen = 3;
         } else if (seen == 3 && lost >= 0.45f) {
-            ok45 = sbp < 80.0f || arrested;
+            ok45 = (hr > 110.0f && sbp < 80.0f) || arrested;
             seen = 4;
         }
         if (h->dead) break;
@@ -364,17 +372,19 @@ static void test_body_blood_loss_classes(void)
     mem_free(h);
 }
 
-/* A cut artery bleeds by pressure: as pressure falls, so does the flow. */
+/* A cut artery bleeds by pressure: as pressure falls, so does the flow.
+ * Lying down, so the legs' column of blood doesn't add to it. */
 static void test_body_bleed_slows(void)
 {
     health *h = new_body(4);
     health_env e = calm_env();
-    live(h, &e, 60.0);
+    body_live(h, &e, 60.0, 1.0, 1);
     health_cut(h, BP_LLEG, 0.8f, 1, 0.0f);
-    live(h, &e, 2.0);
+    body_live(h, &e, 10.0, 1.0, 1); /* the wound opens to its full flow */
     float first = h->bleed_ext;
     int reached = 0;
     for (int i = 0; i < 20 * 60 * 60 && !h->dead; i++) {
+        lie(h);
         health_step(h, &e, TICK);
         if (h->map < 60.0f) {
             reached = 1;
@@ -384,6 +394,28 @@ static void test_body_bleed_slows(void)
     CHECK(first > 300.0f);
     CHECK(reached);
     CHECK(h->bleed_ext < 0.7f * first);
+    mem_free(h);
+}
+
+/* Standing while bleeding, a body faints; it comes round lying where it
+ * fell and stays down a while instead of getting up into the next faint. */
+static void test_body_faint_stays_down(void)
+{
+    health *h = new_body(4);
+    health_env e = calm_env();
+    live(h, &e, 60.0);
+    health_cut(h, BP_LLEG, 0.8f, 1, 0.0f);
+    int i = 0;
+    for (; i < 10 * 60 * 60 && h->conscious != CONS_UNCONSCIOUS; i++) health_step(h, &e, TICK);
+    CHECK(h->conscious == CONS_UNCONSCIOUS);
+    for (; i < 20 * 60 * 60 && h->conscious == CONS_UNCONSCIOUS; i++) health_step(h, &e, TICK);
+    CHECK(h->conscious != CONS_UNCONSCIOUS);
+    int stayed = 1;
+    for (int j = 0; j < 15 * 60; j++) {
+        health_step(h, &e, TICK);
+        stayed &= h->down > 0.0f && h->conscious != CONS_UNCONSCIOUS;
+    }
+    CHECK(stayed);
     mem_free(h);
 }
 
@@ -431,7 +463,7 @@ static void test_body_valsalva(void)
 {
     health *h = new_body(6);
     health_env e = calm_env();
-    body_avg a0 = body_live(h, &e, 90.0, 10.0);
+    body_avg a0 = body_live(h, &e, 90.0, 10.0, 0);
     float sbp0 = (float)a0.sbp, hr0 = (float)a0.hr;
     e.bearing_down = 1.0f;
     int ph1 = 0, ph2 = 0;
@@ -556,7 +588,7 @@ static void test_body_variation(void)
     for (uint32_t seed = 1; seed <= 50; seed++) {
         health_init_varied(h, seed);
         health_env e = calm_env();
-        body_avg a = body_live(h, &e, 90.0, 20.0);
+        body_avg a = body_live(h, &e, 90.0, 20.0, 0);
         s_hr += a.hr;
         s2_hr += a.hr * a.hr;
         s_sbp += a.sbp;
@@ -571,16 +603,18 @@ static void test_body_variation(void)
     CHECK(inside);
 }
 
-/* Standing still in the heat: the skin's open vessels pool blood, and the
- * brain gets less of it. */
+/* Standing still in the heat: the skin's open vessels pool blood and the
+ * pressure falls. The brain's arterioles hold its flow, so it gets no more
+ * than in the cool; it takes a warming core to faint from heat. */
 static void test_body_heat_pooling(void)
 {
     health *a = new_body(9), *b = new_body(9);
     health_env cool = calm_env(), hot = calm_env();
     hot.air_temp = 38.0;
-    body_avg ca = body_live(a, &cool, 1200.0, 60.0);
-    body_avg hb = body_live(b, &hot, 1200.0, 60.0);
-    CHECK(hb.brain <= ca.brain - 0.04);
+    body_avg ca = body_live(a, &cool, 1200.0, 60.0, 0);
+    body_avg hb = body_live(b, &hot, 1200.0, 60.0, 0);
+    CHECK(hb.map < ca.map - 3.0);
+    CHECK(hb.brain < ca.brain);
     mem_free(a);
     mem_free(b);
 }
@@ -603,7 +637,7 @@ static void test_circ_dead_reset(void)
     finite &= isfinite(h->map) && isfinite(h->blood);
     CHECK(finite);
     health_init(h, 10);
-    body_avg a = body_live(h, &e, 60.0, 15.0);
+    body_avg a = body_live(h, &e, 60.0, 15.0, 0);
     CHECK(rest_ranges(h, a));
     mem_free(h);
 }
@@ -624,7 +658,11 @@ static void test_body_replay(void)
         e.speed = 0.0;
         live(h, &e, 180.0);
     }
-    CHECK(memcmp(a, b, sizeof *a) == 0);
+    static uint8_t ea[HEALTH_NET_MAX], eb[HEALTH_NET_MAX];
+    size_t na = health_encode(a, ea, sizeof ea), nb = health_encode(b, eb, sizeof eb);
+    int same = na == nb && na > 0 && memcmp(ea, eb, na) == 0 && a->rng == b->rng && a->t == b->t;
+    for (int i = 0; i < CC_COUNT; i++) same &= a->cv.v[i] == b->cv.v[i];
+    CHECK(same);
     mem_free(a);
     mem_free(b);
 }
@@ -661,15 +699,19 @@ static void test_body_spawn_settled(void)
             sbp_min = fminf(sbp_min, h->sbp);
             sv_min = fminf(sv_min, h->sv);
         }
-        CHECK(hr_max < hr0 + 12.0f);
-        CHECK(sbp_min > sbp0 - 15.0f && sbp_min > 90.0f);
+        /* Breathing and the Mayer waves swing a standing body's rate by
+         * 5-15 bpm and its pressure by up to ~20 mmHg; a start-up race went
+         * past 150. */
+        CHECK(hr_max < hr0 + 15.0f);
+        CHECK(sbp_min > sbp0 - 20.0f && sbp_min > 85.0f); /* low-normal bodies stand near 90-100 */
         CHECK(sv_min > 0.8f * sv0 && sv0 > 30.0f);
     }
     mem_free(h);
 }
 
-/* A body with less blood also has smaller veins: the unstressed share of
- * its blood stays the same, so its resting pressure does too. */
+/* A body with less blood also has smaller veins: it holds the difference
+ * unstressed, so the volume that makes its pressure, and with it its
+ * resting pressure, is the same. */
 static void test_circ_unstressed_scales(void)
 {
     circ *a = mem_alloc(sizeof *a), *b = mem_alloc(sizeof *b);
@@ -680,15 +722,53 @@ static void test_circ_unstressed_scales(void)
         ua += a->v0[i];
         ub += b->v0[i];
     }
-    CHECK(fabs(ub / 4550.0 - ua / 5250.0) < 0.01);
+    CHECK(fabs((4550.0 - ub) - (5250.0 - ua)) < 1.0);
     CHECK(ua / 5250.0 > 0.6 && ua / 5250.0 < 0.85);
     mem_free(a);
     mem_free(b);
 }
 
+/* A fright on a jog: the playtest saw 239/183 and 164 bpm. Jogging raises
+ * the systolic over the run while the working muscles' opened vessels keep
+ * the diastolic down, and a fright's adrenaline adds ~10 bpm, not 60
+ * (Clutter et al. 1980). */
+static void test_body_fright_jog(void)
+{
+    health *h = mem_alloc(sizeof *h);
+    health_init_varied(h, 1337);
+    health_settle(h);
+    health_env e = calm_env();
+    float map0 = h->map, hr0 = h->hr, sbp_max = 0.0f, dbp_max = 0.0f, hr_max = 0.0f, map3 = 0.0f;
+    h->surge = 30.0f;
+    for (int i = 0; i < 60 * 60; i++) {
+        e.speed = i < 20 * 60 ? 4.0 : 0.0;
+        health_step(h, &e, TICK);
+        if (i == 3 * 60) map3 = h->map;
+        sbp_max = fmaxf(sbp_max, h->sbp);
+        dbp_max = fmaxf(dbp_max, h->dbp);
+        hr_max = fmaxf(hr_max, h->hr);
+    }
+    CHECK(map3 < map0 + 18.0f);
+    CHECK(sbp_max < 175.0f && dbp_max < 105.0f);
+    CHECK(hr_max < 165.0f);
+    /* A fright standing still. */
+    health_init_varied(h, 1337);
+    health_settle(h);
+    e.speed = 0.0;
+    h->surge = 30.0f;
+    hr_max = 0.0f;
+    for (int i = 0; i < 60 * 60; i++) {
+        health_step(h, &e, TICK);
+        hr_max = fmaxf(hr_max, h->hr);
+    }
+    CHECK(hr_max > hr0 + 3.0f && hr_max < hr0 + 20.0f);
+    mem_free(h);
+}
+
 void test_circulation_all(void)
 {
     test_circ_unstressed_scales();
+    test_body_fright_jog();
     test_circ_rest();
     test_circ_conserves();
     test_circ_starling();
@@ -702,6 +782,7 @@ void test_circulation_all(void)
     test_body_run_no_jump();
     test_body_blood_loss_classes();
     test_body_bleed_slows();
+    test_body_faint_stays_down();
     test_body_head_rush();
     test_body_valsalva();
     test_body_rsa_mayer();

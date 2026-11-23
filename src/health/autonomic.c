@@ -36,7 +36,7 @@
 #define G_R 0.6f
 #define D_R 2.0f
 #define T_R 6.0f
-#define G_V0 (-0.2f)
+#define G_V0 (-0.12f)
 #define D_V0 5.0f
 #define T_V0 20.0f
 #define G_TS (-0.2f)
@@ -122,9 +122,12 @@ void auto_step(autonomic *a, const autonomic_input *in, double dt, uint32_t *vrn
      * runs over a minute or more, slowly at first (squared below). */
     a->vagal_off = lagf(a->vagal_off, in->effort, dt, in->effort > a->vagal_off ? 2.0f : 40.0f);
     a->ex_drive = lagf(a->ex_drive, in->effort, dt, in->effort > a->ex_drive ? 40.0f : 15.0f);
-    /* Working muscle's own metabolites open its vessels within half a
-     * minute and wash out over minutes after it stops (the hyperaemia
-     * behind the pressure dip after exercise). */
+    /* Working muscle's vessels open in two phases: within the first
+     * contractions (rapid onset vasodilation, ~40% of the rise), then by
+     * its own metabolites over half a minute, which wash out over minutes
+     * after it stops (the hyperaemia behind the pressure dip after
+     * exercise). */
+    a->metab_fast = lagf(a->metab_fast, in->effort, dt, 2.0f);
     a->metab = lagf(a->metab, in->effort, dt, in->effort > a->metab ? 30.0f : 120.0f);
     a->metabo = lagf(a->metabo, in->muscle_o2_debt, dt, 60.0f);
     /* Central command resets the reflex while working, and the reset eases
@@ -191,6 +194,7 @@ void auto_step(autonomic *a, const autonomic_input *in, double dt, uint32_t *vrn
     out->r_bed[CB_BRAIN] = (1.0f + 0.2f * a->eff_r) * a->autoreg;
     /* Working muscle opens its vessels and overrides the nerves that would
      * close them. */
-    out->r_bed[CB_LEGS] = (1.0f + a->eff_r * (1.0f - a->metab)) / (1.0f + 12.0f * a->metab);
+    float m = fmaxf(a->metab, 0.25f * a->metab_fast + 0.75f * a->metab);
+    out->r_bed[CB_LEGS] = (1.0f + a->eff_r * (1.0f - m)) / (1.0f + 20.0f * m);
     out->symp = fminf(fmaxf((a->f_s - FES_MIN) / 30.0f, 0.0f), 1.0f);
 }

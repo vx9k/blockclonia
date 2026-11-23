@@ -35,8 +35,11 @@
 /* Rhythms and the circulating catecholamines. */
 #define ADR_HALF_S 150.0f    /* s, plasma half-life of adrenaline (2-3 min) */
 #define ADR_BETA_EC50 0.5f   /* ng/mL: heart rate and contractility respond to low levels */
-#define ADR_ALPHA_EC50 2.0f  /* ng/mL: vasoconstriction needs higher ones, pressor doses */
-#define SURGE_NG_S 0.02f     /* ng/mL/s released in a surge: holds ~4 ng/mL, a phaeochromocytoma crisis */
+#define ADR_ALPHA_EC50 5.0f  /* ng/mL: vasoconstriction only at pressor levels (Clutter et al. 1980) */
+#define SURGE_NG_S 0.02f     /* ng/mL/s released in a surge: a 30 s fright reaches ~0.5 ng/mL */
+#define DOWN_S 25.0f         /* s a body that came round stays down */
+#define SIT_S 5.0f           /* of which it spends the last sitting up */
+#define CRISIS_NG_S 0.05f    /* ng/mL/s from a phaeochromocytoma: holds ~11 ng/mL */
 #define FEAR_NG_S 0.006f     /* ng/mL/s at full fear: holds ~1.3 ng/mL, the range of acute terror */
 
 /* Drugs. Oral morphine: 10 mg absorbed over about half an hour, a 3 h
@@ -801,6 +804,7 @@ static int treat_drug(health *h, inventory *inv, int what, char *msg, size_t msg
         h->naloxone = NALOXONE_H;
         if (was > 5.0f) {
             h->surge = maxf(h->surge, 15.0f);
+            h->surge_ng = maxf(h->surge_ng, SURGE_NG_S);
             health_log(h, "Naloxone: the opioid lets go");
             snprintf(msg, msg_size, "Naloxone: breathing returns. It wears off in an hour; morphine may not");
         } else {
@@ -1378,6 +1382,15 @@ static void account_blood(health *h, float lost_ml, float gh, float dehyd, float
     h->water -= lost * 0.8f;
     float vol = circ_volume(&h->cv);
     h->plasma_deficit = maxf(0.0f, h->base.blood_per_kg * 75.0f - vol);
+    /* Past what the nerves alone can hold, about a sixth of the blood,
+     * vasopressin and renin's angiotensin II pour out over a minute or
+     * two and carry the vessels' tone through a third lost (Schadt and
+     * Ludbrook 1991, see CREDITS.md); they linger for many minutes. A
+     * pressure back up at the baroreceptors shuts their release off. */
+    float want = maxf(ramp(h->plasma_deficit / (h->base.blood_per_kg * 75.0f), 0.04f, 0.25f) *
+                          (1.0f - ramp(h->map, 95.0f, 120.0f)),
+                      1.0f - ramp(h->map, 50.0f, 80.0f));
+    h->pressor = lag(h->pressor, want, (double)dt, want > h->pressor ? 60.0 : 900.0);
     if (h->plasma_deficit > 0.0f && dehyd < 0.15f) {
         float refill = minf(h->plasma_deficit * (1.0f - expf(-gh / 8.0f)), REFILL_MAX_ML_S * dt);
         circ_add(&h->cv, CC_IVC, refill);
@@ -1829,6 +1842,7 @@ static void step_parts(health *h, const health_env *e, double dt, float gh, int 
      * (stress-induced analgesia). */
     if (awake && pain - h->pain_ref > 3.0f && h->surge < 5.0f) {
         h->surge = minf(60.0f, 10.0f + 5.0f * (pain - h->pain_ref));
+        h->surge_ng = SURGE_NG_S;
         health_log(h, "Adrenaline rush");
         /* In some, the rush overshoots into the opposite reflex: the vagus
          * takes over within seconds and the rush is cut short. */
@@ -1851,6 +1865,7 @@ static void step_parts(health *h, const health_env *e, double dt, float gh, int 
     if (h->fear - h->fear_ref > 0.3f && h->surge < 5.0f) {
         /* Sized by what was seen, not by how far the feeling has caught up. */
         h->surge = minf(30.0f, 10.0f + 25.0f * (threat - h->fear_ref));
+        h->surge_ng = SURGE_NG_S;
         health_log(h, "Adrenaline rush: something is hunting you");
     }
     /* One startle per fright: while a rush lasts, the fear still climbing
@@ -2031,10 +2046,11 @@ static void step_strain(health *h, float ex, float fdt)
     float load = over + under + fast;
     if (load > 0.0f) h->strain = minf(h->strain + load * fdt / 60.0f, 30.0f);
     else if (h->strain > 0.0f) h->strain *= expf(-fdt / 450.0f);
-    /* Hypertensive intracerebral haemorrhage: small brain arteries give
-     * way under a systolic far above their autoregulation range, more
-     * likely the longer the crisis has gone on. */
-    float stroke = 5e-5f * ramp(h->sbp, 200.0f, 260.0f) * minf(h->strain, 10.0f);
+    /* Hypertensive intracerebral haemorrhage: above a mean pressure of
+     * ~140-150 the brain's arterioles can no longer hold back the pressure
+     * (the upper limit of autoregulation), and its small arteries give way,
+     * more likely the longer the crisis has gone on. */
+    float stroke = 3e-4f * ramp(h->map, 140.0f, 190.0f) * minf(h->strain, 10.0f);
     if (stroke > 0.0f && frand(h) < stroke * fdt) {
         h->ich_rate += 1.0f + 3.0f * frand(h);
         health_log(h, "Stroke: bleeding in the brain");
@@ -2107,12 +2123,12 @@ static void step_catechol(health *h, double dt)
 {
     if (h->surge > 0.0f) {
         h->surge = maxf(0.0f, h->surge - (float)dt);
-        h->catechol += SURGE_NG_S * (float)dt;
+        h->catechol += (h->surge_ng > 0.0f ? h->surge_ng : SURGE_NG_S) * (float)dt;
     }
     h->catechol += FEAR_NG_S * h->fear * (float)dt;
     /* Heavy sympathetic traffic also drives the adrenal medulla: hard
      * exercise and shock raise plasma adrenaline to 1-2 ng/mL. */
-    h->catechol += 0.015f * maxf(0.0f, h->symp - 0.45f) * (float)dt;
+    h->catechol += 0.06f * maxf(0.0f, h->symp - 0.42f) * (float)dt;
     h->catechol *= (float)exp(-dt * 0.6931472 / (double)ADR_HALF_S);
     /* A rush is paid for afterwards: the longer it ran high, the longer the
      * shaky, tired spell once it wears off. */
@@ -2154,6 +2170,149 @@ static void step_drugs(health *h, float fdt, float gh, int awake)
     h->lung_water += 0.12f;
     h->organ[ORG_LUNGS] = maxf(0.0f, h->organ[ORG_LUNGS] - 0.08f);
     health_log(h, "Vomited while unconscious and breathed it in");
+}
+
+/* Breathing and the blood gases: the rate the brainstem asks for, what
+ * reaches the alveoli, and the oxygen and CO2 that leaves in the blood. */
+static void step_breathing(health *h, const health_env *e, int arrest, int awake, float vo2_frac, float hb, double dt)
+{
+    const float fdt = (float)dt;
+    float lung_eff = h->organ[ORG_LUNGS] * (1.0f - h->pneumothorax) * (1.0f - fclamp(h->lung_water / 1.5f, 0.0f, 0.9f));
+    int drive_ok = h->organ[ORG_BRAIN] > 0.08f && !(arrest && h->arrest_time > 20.0f);
+    /* A weight on the chest (or, less, on the belly, splinting the
+     * diaphragm) stops the ribs rising: traumatic asphyxia past ~250 kg. */
+    float vent = 1.0f - ramp(h->part[BP_CHEST].crush_load + 0.5f * h->part[BP_ABDOMEN].crush_load, 30.0f, 250.0f);
+    int can_air = e->airway == AIRWAY_AIR && vent > 0.08f;
+    /* Tissues extract less as the store runs dry and the brain shuts down. */
+    h->o2_store = maxf(0.0f, h->o2_store - h->vo2 * fclamp(h->pao2 / 25.0f, 0.3f, 1.0f) / 60.0f * fdt);
+    const float dep = health_resp_depression(h), rr_floor = 4.0f * (1.0f - dep);
+    if (can_air && drive_ok) {
+        h->breathing = 1;
+        float rr_need = 12.0f + 26.0f * vo2_frac;
+        /* Pain and distress add fast, shallow breaths: they raise the rate
+         * far more than they clear CO2. */
+        float shallow = minf(0.5f * h->pain, 6.0f) + 18.0f * h->pneumothorax + 10.0f * h->lung_water;
+        float rr_t = rr_need + 1.2f * maxf(0.0f, h->paco2 - 40.0f) + 60.0f * maxf(0.0f, 0.93f - h->sao2) + shallow +
+                     (h->lactate > 4.0f ? 0.9f * (h->lactate - 4.0f) : 0.0f) + 2.0f * maxf(0.0f, h->temp - 37.5f);
+        if (!awake) rr_t = minf(rr_t, 24.0f);
+        if (h->organ[ORG_BRAIN] < 0.3f) rr_t *= h->organ[ORG_BRAIN] / 0.3f;
+        /* Opioids and alcohol damp the brainstem's answer to CO2 and to low
+         * oxygen alike: the rate falls whatever the blood gases say. Past
+         * ~80 mmHg CO2 itself sedates the brainstem (CO2 narcosis), so a
+         * depressed drive spirals down instead of being rescued. */
+        rr_t *= (1.0f - dep) * (1.0f - (dep > 0.0f ? 0.8f * ramp(h->paco2, 80.0f, 110.0f) : 0.0f));
+        if (h->base.vary) {
+            h->rr_noise = wander(&h->vrng, h->rr_noise, dt, 6.0, 1.0f); /* breaths/min, breath-to-breath jitter */
+            rr_t += h->rr_noise;
+        }
+        h->rr = lag(h->rr, fclamp(rr_t, rr_floor, 55.0f), dt, 4.0);
+        float pao2_target = maxf(0.0f, 0.21f * 713.0f - h->paco2 / 0.8f);
+        float store_t = O2_VOL * pao2_target / 713.0f;
+        h->o2_store = lag(h->o2_store, store_t, dt, 6.0 * 14.0 / (double)maxf(h->rr * vent, 1.0f));
+        float alveolar = maxf(h->rr - 0.6f * minf(shallow, maxf(h->rr - rr_need, 0.0f)), maxf(rr_floor, 0.5f)) * vent;
+        h->paco2 = lag(h->paco2, 40.0f * rr_need / alveolar, dt, 20.0);
+        h->apnea_time = 0.0f;
+        h->gasp_timer = 0.0f;
+    } else {
+        h->breathing = 0;
+        h->rr = lag(h->rr, 0.0f, dt, 1.0);
+        h->apnea_time += fdt;
+        h->paco2 += 0.13f * powf(maxf(h->vo2, 0.1f) / 0.254f, 0.6f) * fdt;
+        /* Holding breath ends at the breaking point: an involuntary gasp. */
+        int breakpoint = h->paco2 > 52.0f || h->sao2 < 0.65f || !awake;
+        if (e->airway == AIRWAY_WATER && drive_ok && breakpoint) {
+            h->gasp_timer -= fdt;
+            if (h->gasp_timer <= 0.0f) {
+                h->gasp_timer = 3.0f;
+                h->lung_water += 0.06f;
+                h->organ[ORG_LUNGS] = maxf(0.0f, h->organ[ORG_LUNGS] - 0.03f);
+                if (h->lung_water < 0.07f) health_log(h, "Inhaled water!");
+            }
+        }
+    }
+    h->paco2 = fclamp(h->paco2, 15.0f, 150.0f);
+    h->pao2 = h->o2_store / O2_VOL * 713.0f;
+    float shunt = 0.02f + 0.6f * (1.0f - lung_eff);
+    float delivery = h->co * 13.4f * hb * h->sao2;                /* mL O2/min */
+    float svo2 = delivery > 1.0f ? fclamp(h->sao2 * (1.0f - h->vo2 * 1000.0f / delivery), 0.05f, 0.95f) : 0.1f;
+    h->sao2 = fclamp((1.0f - shunt) * severinghaus(h->pao2) + shunt * svo2, 0.0f, 1.0f);
+    h->spo2_shown = lag(h->spo2_shown, h->sao2, dt, 5.0);
+    if (h->base.vary) {
+        h->spo2_noise = wander(&h->vrng, h->spo2_noise, dt, 8.0, 0.005f); /* pulse-ox wander, +-0.5% */
+        h->spo2_shown = fclamp(h->spo2_shown + h->spo2_noise, 0.0f, 1.0f);
+    }
+    h->etco2 = h->breathing ? maxf(0.0f, h->paco2 - 3.0f - 25.0f * maxf(0.0f, 1.0f - h->co / 4.0f)) : 0.0f;
+}
+
+/* The brain's oxygen, its injuries, and how awake that leaves the body. */
+static void step_brain(health *h, float cao2_rel, float dehyd, int arrest, double dt)
+{
+    const float fdt = (float)dt;
+    /* The brain bed's flow already carries its CO2 and oxygen reactivity
+     * (brain_want above) and the pressure behind it. */
+    h->brain_o2 = lag(h->brain_o2, h->brain_flow * cao2_rel, dt, 8.0);
+    if (h->brain_o2 < 0.3f) h->organ[ORG_BRAIN] -= (0.3f - h->brain_o2) / 0.3f * fdt / 300.0f;
+    if (h->icp > 40.0f) h->organ[ORG_BRAIN] -= fdt / 120.0f;
+    if (h->temp > 41.0f) h->organ[ORG_BRAIN] -= (h->temp - 41.0f) * fdt / 600.0f;
+    h->organ[ORG_BRAIN] = maxf(0.0f, h->organ[ORG_BRAIN]);
+    h->concussion = maxf(0.0f, h->concussion - fdt);
+    h->confusion = maxf(0.0f, h->confusion - fdt);
+
+    /* The brain extracts more oxygen as delivery falls, so function holds
+     * until delivery is roughly halved: confusion near 55%, fainting
+     * below about 40%. Extra flow cannot make up for very low arterial
+     * oxygen, though: oxygen has to diffuse into the tissue, and acute
+     * hypoxaemia blacks people out near SaO2 50% whatever the flow. */
+    float bo = h->brain_o2;
+    const float sed = health_sedation(h);
+    int cons = CONS_ALERT;
+    if (bo < 0.55f || h->sao2 < 0.7f || h->blood < 0.7f * BLOOD_NORMAL || h->confusion > 0.0f || h->temp < 33.0f ||
+        h->temp > 40.0f || h->sepsis > 0.7f || h->organ[ORG_BRAIN] < 0.6f || dehyd > 0.1f || h->fat < 2000.0f ||
+        sed > 0.45f)
+        cons = CONS_CONFUSED;
+    int out = h->conscious == CONS_UNCONSCIOUS; /* hysteresis */
+    if (sed > (out ? 0.8f : 0.85f)) cons = CONS_UNCONSCIOUS;
+    if (bo < (out ? 0.45f : 0.4f) || h->sao2 < (out ? 0.55f : 0.5f) || h->concussion > 0.0f || h->temp < 30.0f ||
+        h->temp > 41.5f || h->organ[ORG_BRAIN] < 0.3f || h->icp > 35.0f || h->sepsis > 0.92f || arrest)
+        cons = CONS_UNCONSCIOUS;
+    if (cons == CONS_UNCONSCIOUS && h->conscious != CONS_UNCONSCIOUS) health_log(h, "Lost consciousness");
+    /* Someone who fainted comes round lying where they fell and stays
+     * down a while: lying is what brought the blood back to the brain,
+     * and getting up at once would only drop them again. */
+    if (cons == CONS_UNCONSCIOUS) h->down = DOWN_S;
+    else h->down = maxf(0.0f, h->down - fdt);
+    h->conscious = cons;
+}
+
+/* Organs failing under low pressure, dehydration and sepsis (real time). */
+static void organ_stress(health *h, float dehyd, float fdt)
+{
+    if (h->map < 60.0f) h->organ[ORG_KIDNEYS] -= (60.0f - h->map) / 60.0f * fdt / 1800.0f;
+    if (dehyd > 0.08f) h->organ[ORG_KIDNEYS] -= (dehyd - 0.08f) * fdt / 600.0f;
+    if (h->sepsis > 0.5f) {
+        h->organ[ORG_KIDNEYS] -= (h->sepsis - 0.5f) * fdt / 900.0f;
+        h->organ[ORG_LIVER] -= (h->sepsis - 0.5f) * fdt / 1500.0f;
+    }
+    if (h->map < 50.0f) {
+        h->organ[ORG_LIVER] -= (50.0f - h->map) / 50.0f * fdt / 2400.0f;
+        h->organ[ORG_GUT] -= (50.0f - h->map) / 50.0f * fdt / 1800.0f;
+    }
+    for (int i = 0; i < ORG_COUNT; i++) h->organ[i] = fclamp(h->organ[i], 0.0f, 1.0f);
+}
+
+/* Organs mending on the survival clock. */
+static void organ_recover(health *h, float dehyd, float gh)
+{
+    if (h->brain_o2 > 0.8f) h->organ[ORG_BRAIN] += 0.0005f * gh;
+    if (h->ischemia < 0.5f) h->organ[ORG_HEART] += 0.001f * gh;
+    h->organ[ORG_LUNGS] += 0.01f * gh;
+    h->lung_water = maxf(0.0f, h->lung_water - 0.04f * gh);
+    if (h->sepsis < 0.3f) h->organ[ORG_LIVER] += 0.004f * gh;
+    if (h->map > 65.0f && dehyd < 0.05f) h->organ[ORG_KIDNEYS] += 0.003f * gh;
+    h->organ[ORG_GUT] += 0.005f * gh;
+    for (int i = 0; i < ORG_COUNT; i++) h->organ[i] = fclamp(h->organ[i], 0.0f, 1.0f);
+    h->pneumothorax = maxf(0.0f, h->pneumothorax - (h->pneumothorax < 0.3f ? 0.01f : 0.005f) * gh);
+    h->ich = maxf(0.0f, h->ich - 0.2f * gh);
 }
 
 void health_step(health *h, const health_env *e, double dt)
@@ -2270,8 +2429,10 @@ void health_step(health *h, const health_env *e, double dt)
     const float ex = fclamp(0.35f * minf(p / vo2max_w, 1.0f) + 0.65f * vo2_frac, 0.0f, 1.0f);
     /* Out cold or swimming, the body lies flat; crouching brings the head
      * nearer the heart and folds the legs up. */
-    const int lying = !awake || swimming;
-    const int crouched = e->crouched && !lying;
+    /* Coming round, a body lies a while, then sits up before it stands. */
+    const int lying = !awake || swimming || h->down > SIT_S;
+    const int sitting = !lying && h->down > 0.0f;
+    const int crouched = (e->crouched || sitting) && !lying;
     /* What the brain's vessels aim for: more flow with CO2 and with low
      * oxygen, and thinner blood flows faster. */
     const float brain_want = fclamp(1.0f + 0.025f * (h->paco2 - 40.0f), 0.6f, 1.6f) *
@@ -2309,9 +2470,11 @@ void health_step(health *h, const health_env *e, double dt)
      * heart can't reach its full rate. */
     /* Fever: about 8.5 bpm per degree, 0.12 of a resting rate (Karjalainen
      * and Viitasalo 1986, CREDITS.md). Sepsis's cytokines speed the node
-     * beyond what the fever explains (the SIRS heart rate). */
+     * beyond what the fever explains (the SIRS heart rate). Adrenaline at
+     * a fright's 0.5 ng/mL adds ~10 bpm, ~20 at exercise's 1.5 (Clutter et
+     * al. 1980, CREDITS.md). */
     float sa = ao.sa_rate * (1.0f + 0.12f * maxf(0.0f, h->temp - 37.0f)) * (1.0f + 0.15f * h->sepsis) *
-               (1.0f + 1.0f * beta);
+               (1.0f + 0.6f * h->catechol / (h->catechol + 1.5f));
     if (h->temp < 35.0f) sa *= fclamp(1.0f - (35.0f - h->temp) * 0.08f, 0.3f, 1.0f);
     if (cushing) sa = minf(sa, 50.0f);
     if (h->sao2 < 0.5f) sa *= 0.35f + 0.65f * h->sao2 / 0.5f;
@@ -2353,21 +2516,25 @@ void health_step(health *h, const health_env *e, double dt)
     if (h->rhythm == RHYTHM_VT) emax *= 0.55f;
     else if (h->rhythm == RHYTHM_PVT) emax *= 0.15f;
     ci.emax_l = ci.emax_r = emax;
-    /* Resistance: the nerves; adrenaline (alpha tightens, beta opens the
-     * muscles' vessels); sepsis and long shock slacken it; a hot skin
-     * opens its vessels (against its resting state, vaso 0.2). */
-    float r_scale = (1.0f + 1.5f * alpha) * (1.0f - 0.2f * beta * (1.0f - alpha)) * (1.0f - 0.5f * h->sepsis) /
-                    (1.0f + 0.15f * h->shock_debt * h->shock_debt) * (cushing ? 1.3f : 1.0f);
+    /* Resistance: the nerves; adrenaline (alpha tightens at pressor
+     * levels, beta-2 opens vessels, mostly the muscles', so a fright's
+     * diastolic pressure falls); sepsis and long shock slacken it; a hot
+     * skin opens its vessels (against its resting state, vaso 0.2). */
+    float r_scale = (1.0f + 1.5f * alpha) * (1.0f - 0.1f * beta * (1.0f - alpha)) * (1.0f - 0.5f * h->sepsis) /
+                    (1.0f + 0.15f * h->shock_debt * h->shock_debt) * (cushing ? 1.3f : 1.0f) *
+                    (1.0f + 0.3f * h->pressor);
     float skin = (1.0f + 1.5f * 0.2f) / (1.0f + 1.5f * h->vaso);
     for (int b = 0; b < CB_COUNT; b++) ci.r_bed[b] = ao.r_bed[b] * (b == CB_BRAIN ? 1.0f / brain_want : r_scale);
-    ci.r_bed[CB_UPPER] *= skin;
-    ci.r_bed[CB_LEGS] *= skin;
+    float beta2 = 1.0f - 0.35f * beta * (1.0f - alpha);
+    ci.r_bed[CB_UPPER] *= skin * beta2;
+    ci.r_bed[CB_LEGS] *= skin * beta2;
     /* The veins: tone from the nerves and this body's own, slackened by
-     * sepsis and warm skin, tightened by adrenaline. Hard exercise also
-     * squeezes the gut's veins empty, moving most of a litre toward the
+     * sepsis and warm skin (fully open, the skin's veins hold ~340 mL more,
+     * the central volume heat stress costs), tightened by adrenaline. Hard exercise also
+     * squeezes the gut's veins empty, moving about a litre toward the
      * heart. */
     ci.v0_scale = ao.v0_scale * h->base.venous_tone * (1.0f + 0.12f * h->sepsis) * (1.0f - 0.07f * alpha) *
-                  (1.0f + 0.09f * (h->vaso - 0.2f)) * (1.0f - 0.15f * ex);
+                  (1.0f + 0.12f * (h->vaso - 0.2f)) * (1.0f - 0.2f * ex);
     /* Standing, the head sits 30 cm above the heart and the legs' veins
      * 60 cm below it. */
     if (!lying) {
@@ -2383,7 +2550,7 @@ void health_step(health *h, const health_env *e, double dt)
         float cadence = 0.9f + 0.25f * (float)e->speed;
         ci.leg_squeeze = 60.0f * maxf(0.0f, sinf(6.2831853f * cadence * (float)fmod(h->t, 1000.0)));
     }
-    if (crouched) {
+    if (crouched && !sitting) {
         ci.leg_squeeze += 25.0f;
         ci.r_bed[CB_LEGS] *= 2.5f;
     }
@@ -2438,6 +2605,16 @@ void health_step(health *h, const health_env *e, double dt)
         q_ao /= dt;
         q_brain /= dt;
         q_cor /= dt;
+    }
+    /* The wounds' rates above were priced at the pressures the step
+     * started from; what reads out is what the circuit actually lost,
+     * shared out in those proportions. */
+    float read = h->bleed_ext + h->bleed_int;
+    if (read > 0.0f && dt > 0.0) {
+        float k = (float)((double)lost / dt * 60.0) / read;
+        h->bleed_ext *= k;
+        h->bleed_int *= k;
+        for (int i = 0; i < h->wound_count; i++) h->wounds[i].bleed *= k;
     }
     account_blood(h, lost, gh, dehyd, (float)dt);
 
@@ -2494,11 +2671,15 @@ void health_step(health *h, const health_env *e, double dt)
         float vf = (h->ischemia > 3.0f ? 0.1f * (h->ischemia - 3.0f) : 0.0f) + (h->temp < 28.0f ? 0.05f : 0.0f) +
                    (h->organ[ORG_KIDNEYS] < 0.05f ? 0.01f : 0.0f) + 0.01f * maxf(0.0f, h->potassium - 7.5f);
         step_strain(h, ex, fdt);
+        /* The heart muscle feeds on the pressure it makes: some seconds
+         * with next to none starve it, and an empty heart's firing stops
+         * making a pulse. A faint's brief dip doesn't. */
+        h->empty_t = h->map < 18.0f && h->co < 0.3f ? h->empty_t + fdt : 0.0f;
         if (frand(h) < vf * fdt) stop_heart(h, RHYTHM_VF, e->airway);
         else if (h->hr < 20.0f) stop_heart(h, RHYTHM_ASYSTOLE, e->airway);
         /* An empty or obstructed heart still firing: the arrest of
          * exsanguination and tension pneumothorax. */
-        else if (h->map < 18.0f && h->co < 0.3f) stop_heart(h, RHYTHM_PEA, e->airway);
+        else if (h->empty_t > 10.0f) stop_heart(h, RHYTHM_PEA, e->airway);
         else step_arrhythmia(h, e->airway, fdt, beta);
     } else {
         h->arrest_time += fdt;
@@ -2511,132 +2692,17 @@ void health_step(health *h, const health_env *e, double dt)
         }
     }
 
-    /* ---- breathing */
-    float lung_eff = h->organ[ORG_LUNGS] * (1.0f - h->pneumothorax) * (1.0f - fclamp(h->lung_water / 1.5f, 0.0f, 0.9f));
-    int drive_ok = h->organ[ORG_BRAIN] > 0.08f && !(arrest && h->arrest_time > 20.0f);
-    /* A weight on the chest (or, less, on the belly, splinting the
-     * diaphragm) stops the ribs rising: traumatic asphyxia past ~250 kg. */
-    float vent = 1.0f - ramp(h->part[BP_CHEST].crush_load + 0.5f * h->part[BP_ABDOMEN].crush_load, 30.0f, 250.0f);
-    int can_air = e->airway == AIRWAY_AIR && vent > 0.08f;
-    /* Tissues extract less as the store runs dry and the brain shuts down. */
-    h->o2_store = maxf(0.0f, h->o2_store - h->vo2 * fclamp(h->pao2 / 25.0f, 0.3f, 1.0f) / 60.0f * fdt);
-    const float dep = health_resp_depression(h), rr_floor = 4.0f * (1.0f - dep);
-    if (can_air && drive_ok) {
-        h->breathing = 1;
-        float rr_need = 12.0f + 26.0f * vo2_frac;
-        /* Pain and distress add fast, shallow breaths: they raise the rate
-         * far more than they clear CO2. */
-        float shallow = minf(0.5f * h->pain, 6.0f) + 18.0f * h->pneumothorax + 10.0f * h->lung_water;
-        float rr_t = rr_need + 1.2f * maxf(0.0f, h->paco2 - 40.0f) + 60.0f * maxf(0.0f, 0.93f - h->sao2) + shallow +
-                     (h->lactate > 4.0f ? 0.9f * (h->lactate - 4.0f) : 0.0f) + 2.0f * maxf(0.0f, h->temp - 37.5f);
-        if (!awake) rr_t = minf(rr_t, 24.0f);
-        if (h->organ[ORG_BRAIN] < 0.3f) rr_t *= h->organ[ORG_BRAIN] / 0.3f;
-        /* Opioids and alcohol damp the brainstem's answer to CO2 and to low
-         * oxygen alike: the rate falls whatever the blood gases say. Past
-         * ~80 mmHg CO2 itself sedates the brainstem (CO2 narcosis), so a
-         * depressed drive spirals down instead of being rescued. */
-        rr_t *= (1.0f - dep) * (1.0f - (dep > 0.0f ? 0.8f * ramp(h->paco2, 80.0f, 110.0f) : 0.0f));
-        if (h->base.vary) {
-            h->rr_noise = wander(&h->vrng, h->rr_noise, dt, 6.0, 1.0f); /* breaths/min, breath-to-breath jitter */
-            rr_t += h->rr_noise;
-        }
-        h->rr = lag(h->rr, fclamp(rr_t, rr_floor, 55.0f), dt, 4.0);
-        float pao2_target = maxf(0.0f, 0.21f * 713.0f - h->paco2 / 0.8f);
-        float store_t = O2_VOL * pao2_target / 713.0f;
-        h->o2_store = lag(h->o2_store, store_t, dt, 6.0 * 14.0 / (double)maxf(h->rr * vent, 1.0f));
-        float alveolar = maxf(h->rr - 0.6f * minf(shallow, maxf(h->rr - rr_need, 0.0f)), maxf(rr_floor, 0.5f)) * vent;
-        h->paco2 = lag(h->paco2, 40.0f * rr_need / alveolar, dt, 20.0);
-        h->apnea_time = 0.0f;
-        h->gasp_timer = 0.0f;
-    } else {
-        h->breathing = 0;
-        h->rr = lag(h->rr, 0.0f, dt, 1.0);
-        h->apnea_time += fdt;
-        h->paco2 += 0.13f * powf(maxf(h->vo2, 0.1f) / 0.254f, 0.6f) * fdt;
-        /* Holding breath ends at the breaking point: an involuntary gasp. */
-        int breakpoint = h->paco2 > 52.0f || h->sao2 < 0.65f || !awake;
-        if (e->airway == AIRWAY_WATER && drive_ok && breakpoint) {
-            h->gasp_timer -= fdt;
-            if (h->gasp_timer <= 0.0f) {
-                h->gasp_timer = 3.0f;
-                h->lung_water += 0.06f;
-                h->organ[ORG_LUNGS] = maxf(0.0f, h->organ[ORG_LUNGS] - 0.03f);
-                if (h->lung_water < 0.07f) health_log(h, "Inhaled water!");
-            }
-        }
-    }
-    h->paco2 = fclamp(h->paco2, 15.0f, 150.0f);
-    h->pao2 = h->o2_store / O2_VOL * 713.0f;
-    float shunt = 0.02f + 0.6f * (1.0f - lung_eff);
-    float delivery = h->co * 13.4f * hb * h->sao2;                /* mL O2/min */
-    float svo2 = delivery > 1.0f ? fclamp(h->sao2 * (1.0f - h->vo2 * 1000.0f / delivery), 0.05f, 0.95f) : 0.1f;
-    h->sao2 = fclamp((1.0f - shunt) * severinghaus(h->pao2) + shunt * svo2, 0.0f, 1.0f);
-    h->spo2_shown = lag(h->spo2_shown, h->sao2, dt, 5.0);
-    if (h->base.vary) {
-        h->spo2_noise = wander(&h->vrng, h->spo2_noise, dt, 8.0, 0.005f); /* pulse-ox wander, +-0.5% */
-        h->spo2_shown = fclamp(h->spo2_shown + h->spo2_noise, 0.0f, 1.0f);
-    }
-    h->etco2 = h->breathing ? maxf(0.0f, h->paco2 - 3.0f - 25.0f * maxf(0.0f, 1.0f - h->co / 4.0f)) : 0.0f;
+    step_breathing(h, e, arrest, awake, vo2_frac, hb, dt);
 
-    /* ---- brain */
-    /* The brain bed's flow already carries its CO2 and oxygen reactivity
-     * (brain_want above) and the pressure behind it. */
-    h->brain_o2 = lag(h->brain_o2, h->brain_flow * cao2_rel, dt, 8.0);
-    if (h->brain_o2 < 0.3f) h->organ[ORG_BRAIN] -= (0.3f - h->brain_o2) / 0.3f * fdt / 300.0f;
-    if (h->icp > 40.0f) h->organ[ORG_BRAIN] -= fdt / 120.0f;
-    if (h->temp > 41.0f) h->organ[ORG_BRAIN] -= (h->temp - 41.0f) * fdt / 600.0f;
-    h->organ[ORG_BRAIN] = maxf(0.0f, h->organ[ORG_BRAIN]);
-    h->concussion = maxf(0.0f, h->concussion - fdt);
-    h->confusion = maxf(0.0f, h->confusion - fdt);
+    step_brain(h, cao2_rel, dehyd, arrest, dt);
 
-    /* The brain extracts more oxygen as delivery falls, so function holds
-     * until delivery is roughly halved: confusion near 55%, fainting
-     * below about 40%. Extra flow cannot make up for very low arterial
-     * oxygen, though: oxygen has to diffuse into the tissue, and acute
-     * hypoxaemia blacks people out near SaO2 50% whatever the flow. */
-    float bo = h->brain_o2;
-    const float sed = health_sedation(h);
-    int cons = CONS_ALERT;
-    if (bo < 0.55f || h->sao2 < 0.7f || h->blood < 0.7f * BLOOD_NORMAL || h->confusion > 0.0f || h->temp < 33.0f ||
-        h->temp > 40.0f || h->sepsis > 0.7f || h->organ[ORG_BRAIN] < 0.6f || dehyd > 0.1f || h->fat < 2000.0f ||
-        sed > 0.45f)
-        cons = CONS_CONFUSED;
-    int out = h->conscious == CONS_UNCONSCIOUS; /* hysteresis */
-    if (sed > (out ? 0.8f : 0.85f)) cons = CONS_UNCONSCIOUS;
-    if (bo < (out ? 0.45f : 0.4f) || h->sao2 < (out ? 0.55f : 0.5f) || h->concussion > 0.0f || h->temp < 30.0f ||
-        h->temp > 41.5f || h->organ[ORG_BRAIN] < 0.3f || h->icp > 35.0f || h->sepsis > 0.92f || arrest)
-        cons = CONS_UNCONSCIOUS;
-    if (cons == CONS_UNCONSCIOUS && h->conscious != CONS_UNCONSCIOUS) health_log(h, "Lost consciousness");
-    h->conscious = cons;
-
-    /* ---- organs under stress (real time) */
-    if (h->map < 60.0f) h->organ[ORG_KIDNEYS] -= (60.0f - h->map) / 60.0f * fdt / 1800.0f;
-    if (dehyd > 0.08f) h->organ[ORG_KIDNEYS] -= (dehyd - 0.08f) * fdt / 600.0f;
-    if (h->sepsis > 0.5f) {
-        h->organ[ORG_KIDNEYS] -= (h->sepsis - 0.5f) * fdt / 900.0f;
-        h->organ[ORG_LIVER] -= (h->sepsis - 0.5f) * fdt / 1500.0f;
-    }
-    if (h->map < 50.0f) {
-        h->organ[ORG_LIVER] -= (50.0f - h->map) / 50.0f * fdt / 2400.0f;
-        h->organ[ORG_GUT] -= (50.0f - h->map) / 50.0f * fdt / 1800.0f;
-    }
-    for (int i = 0; i < ORG_COUNT; i++) h->organ[i] = fclamp(h->organ[i], 0.0f, 1.0f);
+    organ_stress(h, dehyd, fdt);
 
     /* ---- slow processes on the survival clock: infection and healing */
     step_wounds(h, e, gh, dehyd);
     step_parts(h, e, dt, gh, awake);
 
-    /* Recovery. */
-    if (h->brain_o2 > 0.8f) h->organ[ORG_BRAIN] += 0.0005f * gh;
-    if (h->ischemia < 0.5f) h->organ[ORG_HEART] += 0.001f * gh;
-    h->organ[ORG_LUNGS] += 0.01f * gh;
-    h->lung_water = maxf(0.0f, h->lung_water - 0.04f * gh);
-    if (h->sepsis < 0.3f) h->organ[ORG_LIVER] += 0.004f * gh;
-    if (h->map > 65.0f && dehyd < 0.05f) h->organ[ORG_KIDNEYS] += 0.003f * gh;
-    h->organ[ORG_GUT] += 0.005f * gh;
-    for (int i = 0; i < ORG_COUNT; i++) h->organ[i] = fclamp(h->organ[i], 0.0f, 1.0f);
-    h->pneumothorax = maxf(0.0f, h->pneumothorax - (h->pneumothorax < 0.3f ? 0.01f : 0.005f) * gh);
-    h->ich = maxf(0.0f, h->ich - 0.2f * gh);
+    organ_recover(h, dehyd, gh);
 
     /* ---- death */
     /* VF under defibrillator pads is worth waiting for until the brain dies. */
@@ -2851,7 +2917,8 @@ void health_injure(health *h, int kind, int part)
     case 26: set_rhythm(h, RHYTHM_AVB3); break;
     case 27: /* crisis: a catecholamine surge, as from a phaeochromocytoma */
         h->surge = maxf(h->surge, 600.0f);
-        h->catechol = maxf(h->catechol, SURGE_NG_S * ADR_HALF_S / 0.6931472f); /* the surge's plateau */
+        h->surge_ng = CRISIS_NG_S;
+        h->catechol = maxf(h->catechol, CRISIS_NG_S * ADR_HALF_S / 0.6931472f); /* the surge's plateau */
         health_log(h, "Debug: catecholamine surge");
         break;
     case 28: /* strain: the dose of about ten minutes of crisis */
@@ -3214,6 +3281,7 @@ static const wire_field HEALTH_FIELDS[] = {
     H(strain),
     H(catechol),
     H(surge),
+    H(surge_ng),
     WIRE_I32R(health, rhythm, 0, RHYTHM_COUNT - 1),
     H(arrest_time),
     HI(last_beat_pvc),
@@ -3249,6 +3317,7 @@ static const wire_field HEALTH_FIELDS[] = {
     H(shock_debt),
     H(temp),
     H(vaso),
+    H(pressor),
     H(sweat_w),
     H(sweat_acc),
     H(wet),
@@ -3282,6 +3351,8 @@ static const wire_field HEALTH_FIELDS[] = {
     H(vagal),
     H(faint_drive),
     H(blood_seen),
+    H(down),
+    H(empty_t),
     H(fear),
     H(fear_ref),
     H(dark),

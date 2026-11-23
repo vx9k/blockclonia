@@ -36,8 +36,10 @@ float cond_atria_on(int rhythm)
 
 float cond_vent_on(int rhythm)
 {
-    if (rhythm == RHYTHM_VF) return 0.05f;
-    return rhythm == RHYTHM_ASYSTOLE ? 0.0f : 1.0f;
+    /* Fibrillating muscle only quivers, out of step, and moves no blood:
+     * even a weak squeeze fired hundreds of times a minute would pump once
+     * the pressure has fallen to the veins'. */
+    return (rhythm == RHYTHM_VF || rhythm == RHYTHM_ASYSTOLE) ? 0.0f : 1.0f;
 }
 
 static int sinus_node_runs(int r) { return r != RHYTHM_AF && r != RHYTHM_ASYSTOLE && r != RHYTHM_VF; }

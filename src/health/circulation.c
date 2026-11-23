@@ -113,11 +113,12 @@ static void derive(const circ *c, const circ_input *in, const double *v, double 
     double sq = sqrt(rr);
     double fa = activation(c, t, in->t_atria, in->t_atria_prev, T_ATRIA * sq) * (double)in->atria_on;
     double fv = activation(c, t, in->t_vent, in->t_vent_prev, T_VENT * sq);
-    double scale[4] = {(double)in->emax_r, (double)in->emax_r, (double)in->emax_l, (double)in->emax_l};
+    const double scale[4] = {(double)in->emax_r, (double)in->emax_r, (double)in->emax_l, (double)in->emax_l};
     double vent_on = (double)in->vent_on;
+    double drained[CC_COUNT] = {0};
 
     double v_heart = v[CC_RA] + v[CC_RV] + v[CC_LA] + v[CC_LV];
-    double peri = fmax(0.0, 0.4 * (exp((v_heart - 500.0) / 80.0) - 1.0));
+    double peri = fmax(0.0, 0.4 * expm1((v_heart - 500.0) / 80.0));
     static const int CHAMBER[4] = {CC_RA, CC_RV, CC_LA, CC_LV};
     for (int k = 0; k < 4; k++) {
         double f = (k == CH_RA || k == CH_LA) ? fa : fv * vent_on;
@@ -173,6 +174,12 @@ static void derive(const circ *c, const circ_input *in, const double *v, double 
         double down = b == CB_BRAIN ? fmax(p[vein], 0.0) : p[vein];
         double q_in = fmax(0.0, p[art] - col - down) / (c->r_bed0[b] * (double)in->r_bed[b]);
         double q_out = (p[vein] + col - p[out]) / c->r_ven[b];
+        /* Those collapsed neck veins also stop the column siphoning the
+         * brain's veins below zero: past the collapse it drains as if
+         * into open air. Without this, standing emptied the head and the
+         * clamp on an empty compartment conjured the overdraft back,
+         * which kept a bleeding body's volume up. */
+        if (b == CB_BRAIN) q_out = (p[vein] - fmax(p[out] - col, 0.0)) / c->r_ven[b];
         /* Leg veins have valves: blood can't fall back down them. */
         if (b == CB_LEGS) q_out = fmax(0.0, q_out);
         MOVE(art, vein, q_in);
@@ -181,7 +188,7 @@ static void derive(const circ *c, const circ_input *in, const double *v, double 
         if (b == CB_UPPER) fo->q_finger = q_in;
         double d_art = (double)in->drain_art[b] * fmax(0.0, p[art] - col);
         dv[art] -= d_art;
-        fo->lost += d_art;
+        drained[art] += d_art;
     }
     MOVE(CC_IVC, CC_RA, (p[CC_IVC] - p[CC_RA]) / R_IVC_RA);
     MOVE(CC_SVC, CC_RA, (p[CC_SVC] - p[CC_RA]) / R_SVC_RA);
@@ -190,11 +197,16 @@ static void derive(const circ *c, const circ_input *in, const double *v, double 
     for (int i = 0; i < CC_COUNT; i++) {
         double d = (double)in->drain[i] * fmax(0.0, p[i]);
         dv[i] -= d;
-        fo->lost += d;
+        drained[i] += d;
     }
-    /* An empty compartment has nothing to give. */
-    for (int i = 0; i < CC_COUNT; i++)
+    /* An empty compartment has nothing to give, to a wound either: a
+     * standing body's leg artery still has the column's head of pressure
+     * once it is empty, and counting that as lost bled blood that wasn't
+     * there. */
+    for (int i = 0; i < CC_COUNT; i++) {
         if (v[i] <= 0.0 && dv[i] < 0.0) dv[i] = 0.0;
+        else fo->lost += drained[i];
+    }
 }
 
 static void beat_reset(circ *c, double t)
@@ -274,13 +286,21 @@ void circ_step(circ *c, const circ_input *in, double t0, double dt)
         /* Heun's method: an Euler guess, then the average of both slopes. */
         for (int i = 0; i < CC_COUNT; i++) vt[i] = fmax(0.0, c->v[i] + CIRC_H * k1[i]);
         derive(c, in, vt, t + CIRC_H, p2, k2, &f2);
-        for (int i = 0; i < CC_COUNT; i++) c->v[i] = fmax(0.0, c->v[i] + 0.5 * CIRC_H * (k1[i] + k2[i]));
+        /* A step that drains a near-empty compartment past zero must not
+         * conjure the overdraft back: what a wound counted as lost from
+         * it never left, so the count gives it back. */
+        double step_lost = 0.5 * CIRC_H * (f1.lost + f2.lost), over = 0.0;
+        for (int i = 0; i < CC_COUNT; i++) {
+            double nv = c->v[i] + 0.5 * CIRC_H * (k1[i] + k2[i]);
+            if (nv < 0.0) over -= nv;
+            c->v[i] = fmax(0.0, nv);
+        }
 
         for (int b = 0; b < CB_COUNT; b++) sum_bed[b] += f1.q_bed[b];
         sum_cor += f1.q_cor;
         sum_ao += f1.q_aov;
         sum_fin += f1.q_finger;
-        lost += 0.5 * CIRC_H * (f1.lost + f2.lost);
+        lost += fmax(0.0, step_lost - over);
         c->steps++;
         n++;
     }
@@ -314,24 +334,28 @@ void circ_init(circ *c, float blood_ml, float heart_size, float art_stiff)
         c->c[CHAMBER[k]] = hs / EMIN[k];
     }
     /* Vessels: compliance (mL/mmHg) and unstressed volume (mL). The
-     * systemic veins hold ~2900 mL unstressed, most of it in the gut. */
+     * systemic veins hold ~2900 mL unstressed, most of it in the gut; the
+     * brain holds only ~70 mL of blood in all, most of it venous. */
     static const struct {
         int i;
         double c, v0, vmax;
     } V[] = {
         {CC_PA, 3.4, 160.0, 0.0},          {CC_PV, 9.0, 430.0, 0.0},    {CC_AO, 0.25, 500.0, 0.0},
-        {CC_AA, 1.5, 200.0, 0.0},          {CC_BRAIN, 3.0, 120.0, 0.0}, {CC_UPPER, 8.0, 550.0, 0.0},
-        {CC_SPLANCH, 55.0, 1300.0, 700.0}, {CC_RENAL, 8.0, 150.0, 0.0}, {CC_LEGS, 19.0, 300.0, 350.0},
+        {CC_AA, 1.5, 200.0, 0.0},          {CC_BRAIN, 3.0, 50.0, 0.0},  {CC_UPPER, 8.0, 550.0, 0.0},
+        {CC_SPLANCH, 55.0, 1370.0, 700.0}, {CC_RENAL, 8.0, 150.0, 0.0}, {CC_LEGS, 19.0, 300.0, 350.0},
         {CC_IVC, 2.0, 100.0, 0.0},         {CC_SVC, 15.0, 200.0, 0.0},
     };
-    /* Vessels hold about the same share of a body's blood unstressed
-     * whatever its volume (vascular capacity grows with blood volume), so a
-     * body with less blood is not left short of the volume that makes
-     * pressure. The table is for 5250 mL. */
+    /* Vascular capacity grows with blood volume, and the veins' tone sets
+     * itself to what a body has: a body with more or less blood than the
+     * table's 5250 mL holds the difference unstressed, so every body
+     * starts with the same volume making pressure and rests alike. */
+    double v0_sum = 0.0;
+    for (size_t k = 0; k < sizeof V / sizeof V[0]; k++) v0_sum += V[k].v0;
+    double dv = blood_ml > 1000.0f ? (double)blood_ml - 5250.0 : 0.0;
     double vs = blood_ml > 1000.0f ? (double)blood_ml / 5250.0 : 1.0;
     for (size_t k = 0; k < sizeof V / sizeof V[0]; k++) {
         c->c[V[k].i] = V[k].c;
-        c->v0[V[k].i] = V[k].v0 * vs;
+        c->v0[V[k].i] = V[k].v0 * (1.0 + dv / v0_sum);
         c->vmax[V[k].i] = V[k].vmax * vs;
     }
     c->c[CC_AO] /= as;

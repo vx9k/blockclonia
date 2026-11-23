@@ -18,12 +18,14 @@ void test_body_risks_all(void)
     /* Adrenaline on a healthy heart: the rate climbs and the hands shake. */
     health *h = new_body(21);
     live(h, &e, 10.0);
-    float hr0 = h->hr;
+    float hr0 = h->hr, sbp0 = h->sbp;
     CHECK(!health_treat(h, &inv, BP_CHEST, TREAT_ADRENALINE, 0, msg, sizeof msg)); /* none carried */
     inv_add(&inv, I_ADRENALINE, 2);
     CHECK(health_treat(h, &inv, BP_CHEST, TREAT_ADRENALINE, 0, msg, sizeof msg) && inv_count(&inv, I_ADRENALINE) == 1);
     live(h, &e, 30.0);
-    CHECK(h->hr > hr0 + 10.0f && health_get_senses(h).tremor > 0.3f);
+    /* ~1.5 ng/mL: the systolic climbs while the baroreflex holds the rate
+     * to a few bpm up (Clutter et al. 1980, see CREDITS.md). */
+    CHECK(h->sbp > sbp0 + 10.0f && h->hr >= hr0 && health_get_senses(h).tremor > 0.3f);
     mem_free(h);
 
     /* The override shocks only with the pads on, and does so on a beating

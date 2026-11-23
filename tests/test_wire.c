@@ -128,7 +128,7 @@ static void test_health(void)
     /* An out-of-range rhythm (offset: the six organs, then wound_count). */
     uint8_t *bad = mem_alloc(HEALTH_NET_MAX);
     memcpy(bad, buf, n);
-    size_t rhythm_at = 6 * 4 + 4 + 9 * 4 + 12 * 4;
+    size_t rhythm_at = 6 * 4 + 4 + 9 * 4 + 13 * 4;
     CHECK(bad[rhythm_at] == (uint8_t)a->rhythm);
     bad[rhythm_at] = RHYTHM_COUNT;
     CHECK(health_decode(c, bad, n) == -1);

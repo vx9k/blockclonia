@@ -1800,9 +1800,10 @@ static void frame_menus(game *g, double dt)
     else if (!g_in.panel && g->panel_was_open && !g_in.inv_open && !g->in_menu) set_captured(g->win, 1);
     g->panel_was_open = g_in.panel;
     if (g->hl.dead) g_in.inv_open = 0;
-    /* The panel, death and unconsciousness freeze the player's input. */
+    /* The panel, death and unconsciousness freeze the player's input, and
+     * so does coming round on the ground after a faint. */
     g->frozen = g->in_menu || g_in.panel || g_in.inv_open || g_in.chat_open || g->hl.dead ||
-                g->hl.conscious == CONS_UNCONSCIOUS;
+                g->hl.conscious == CONS_UNCONSCIOUS || g->hl.down > 0.0f;
     if (g->frozen) g_in.mouse_dx = g_in.mouse_dy = 0;
 }
 

@@ -33,6 +33,7 @@ typedef struct {
     float vagal_off;         /* 0..1 the vagus withdrawn by effort: in seconds, back over a minute */
     float ex_drive;          /* exercise sympathetic drive 0..1: slow */
     float metab;             /* the legs' metabolic dilation 0..1 */
+    float metab_fast;        /* 0..1 their rapid dilation at the first contractions */
     float metabo;            /* muscle metaboreflex 0..1 */
     float noise;             /* band-limited sympathetic fluctuation, spikes/s */
     float autoreg;           /* x the brain's resistance, its own regulation */

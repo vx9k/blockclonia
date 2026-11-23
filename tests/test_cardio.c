@@ -51,30 +51,56 @@ static void test_calm_and_exercise(void)
  * pressure is back to normal. Two identical bodies replay exactly. */
 static void test_crisis(void)
 {
-    /* A seed whose rolls keep this crisis in sinus rhythm: about one body
-     * in thirty goes into AF within these four minutes. */
-    health *a = new_body(22), *b = new_body(22);
+    health *a = new_body(20), *b = new_body(20);
     health_env e = calm_env();
     health *ab[2] = {a, b};
     for (int k = 0; k < 2; k++) {
         live(ab[k], &e, 5.0);
         health_injure(ab[k], health_debug_find("crisis"), -1);
     }
+    float hr_rest = a->hr;
     live(a, &e, 30.0);
-    CHECK(a->sbp > 180.0f && a->dbp > 110.0f && a->hr > 100.0f);
+    /* The baroreflex brakes the heart against the pressure, so the rate
+     * stays only a little up, as in many such crises. */
+    CHECK(a->sbp > 180.0f && a->dbp > 110.0f && a->hr > hr_rest);
     CHECK(a->part[BP_HEAD].pain > 0.5f && has_alert(a, "Hypertensive crisis"));
     live(a, &e, 150.0);
     live(b, &e, 180.0);
     CHECK(a->rng == b->rng && a->strain == b->strain && a->rhythm == b->rhythm && a->map == b->map);
-    CHECK(a->strain > 2.5f && a->rhythm == RHYTHM_SINUS);
-    /* The surge ends: adrenaline clears in minutes, and with the pressure
-     * back to normal the strain wears off. */
-    float peak = a->strain;
-    a->surge = 0.0f;
-    live(a, &e, 900.0);
-    CHECK(!a->dead && a->catechol < 0.1f && a->sbp < 150.0f && a->strain < peak * 0.5f);
+    CHECK(a->strain > 2.5f);
     mem_free(a);
     mem_free(b);
+
+    /* Untreated for three minutes, a severe crisis sends some hearts into
+     * AF or VF; most hold their rhythm. Once the surge ends the strain
+     * still climbs a while, and about one strained heart in three slips
+     * into VT or VF before it eases. Those that hold recover: the
+     * adrenaline clears from a crisis's ~11 ng/mL within twenty minutes,
+     * and with the pressure back to normal the strain wears off. */
+    int sinus = 0, tried = 0, held = 0, recovered = 1;
+    for (uint32_t seed = 21; seed <= 36; seed++) {
+        health *h = new_body(seed);
+        live(h, &e, 5.0);
+        health_injure(h, health_debug_find("crisis"), -1);
+        live(h, &e, 180.0);
+        if (h->rhythm == RHYTHM_SINUS) {
+            sinus++;
+            if (tried < 6) {
+                float peak = h->strain;
+                CHECK(peak > 2.5f);
+                h->surge = 0.0f;
+                live(h, &e, 1200.0);
+                tried++;
+                if (h->rhythm == RHYTHM_SINUS) {
+                    held++;
+                    recovered &= !h->dead && h->catechol < 0.1f && h->sbp < 150.0f && h->strain < peak * 0.5f;
+                }
+            }
+        }
+        mem_free(h);
+    }
+    CHECK(held >= 2 && recovered);
+    CHECK(sinus >= 8 && sinus <= 15);
 }
 
 /* A strained heart is irritable: among bodies left with ten minutes of
@@ -107,7 +133,7 @@ static void test_hypotension_strain(void)
     float before = h->strain;
     live(h, &e, 30.0);
     CHECK(h->strain > before + 0.1f || !health_rhythm_perfusing(h->rhythm));
-    CHECK(has_alert(h, "low blood pressure") || h->conscious == CONS_UNCONSCIOUS);
+    CHECK(has_alert(h, "low blood pressure") || h->conscious == CONS_UNCONSCIOUS || h->down > 0.0f);
     mem_free(h);
 }
 
@@ -160,7 +186,7 @@ static void test_rhythm_mechanics(void)
     health *block = new_body(42);
     live(block, &e, 20.0);
     health_injure(block, health_debug_find("heart-block"), -1);
-    live(block, &e, 10.0);
+    live(block, &e, 20.0); /* the long diastoles fill each beat fuller over ~15 s */
     CHECK(block->rhythm == RHYTHM_AVB3);
     CHECK(fabsf(block->hr - 36.0f) < 4.0f && block->sbp - block->dbp > 45.0f && block->co < co_sinus);
     CHECK(rr_variation(block, &e, 10.0) < 0.05f);

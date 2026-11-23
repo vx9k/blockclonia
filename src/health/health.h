@@ -246,6 +246,7 @@ typedef struct health {
     float strain;                     /* myocardial strain dose from pressure out of range, ~crisis-minutes */
     float catechol;                   /* ng/mL of circulating adrenaline above the resting level */
     float surge;                      /* s left of an endogenous catecholamine surge */
+    float surge_ng; /* ng/mL/s it releases */
     int rhythm;
     float arrest_time;                /* s without circulation */
     int last_beat_pvc;                /* the last beat was an ectopic one */
@@ -272,6 +273,7 @@ typedef struct health {
     float shock_debt;                 /* minutes of starved tissue: past ~3, shock turns irreversible */
     float temp;                       /* core, degrees C */
     float vaso; /* 0 vasoconstricted .. 1 dilated skin */
+    float pressor; /* 0..1, vasopressin and angiotensin II released by a falling volume */
     float sweat_w; /* W of sweat being evaporated */
     float sweat_acc; /* L of sweat not yet taken from body water */
     float wet; /* 0..1 clothing soaked */
@@ -313,6 +315,8 @@ typedef struct health {
     float vagal; /* 0..1 strength of the reflex now */
     float faint_drive; /* s left of what set it off */
     float blood_seen; /* mL/min of bleeding the eyes have got used to */
+    float down; /* s a body that came round stays lying before it can get up */
+    float empty_t; /* s the heart has been firing with nothing to pump */
     /* Fear of a hunting predator: fight-or-flight without a wound. */
     float fear; /* 0..1 felt now */
     float fear_ref; /* slow reference a sudden fright is measured against */
