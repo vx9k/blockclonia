@@ -2281,6 +2281,7 @@ int main(void)
     test_cardio_all();
     test_circulation_all();
     test_conduction_all();
+    test_autonomic_all();
     printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);
     return g_failed ? 1 : 0;
 }
