@@ -94,7 +94,7 @@ function(mc_pgo core game)
   # the same inlining but about 100 M more instructions in
   # mesh_section_counts, whose hand-tuned loops the profile only makes
   # worse. Compiled without it, meshing is as fast as without PGO.
-  set_source_files_properties(src/mesher.c DIRECTORY ${CMAKE_SOURCE_DIR}
+  set_source_files_properties(src/render/mesher.c DIRECTORY ${CMAKE_SOURCE_DIR}
     PROPERTIES COMPILE_OPTIONS -fno-profile-instr-use)
   # PRIVATE: the unit tests link the core but keep their own flags.
   foreach(_t IN ITEMS ${core} ${game})

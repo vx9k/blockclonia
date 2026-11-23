@@ -16,9 +16,9 @@ Rules:
    comments, nothing else. If the task turns out to need a code, build or
    test change, stop and say so in your reply instead of making it.
 2. Every fact must come from the code or the request. Read the source
-   before describing it: option names from `usage()` in `src/main.c`,
-   controls from `controls_screen` in `src/menu.c`, settings from
-   `src/settings.c`, versions from `cmake/Dependencies.cmake`. Never
+   before describing it: option names from `usage()` in `src/game/main.c`,
+   controls from `controls_screen` in `src/ui/menu.c`, settings from
+   `src/save/settings.c`, versions from `cmake/Dependencies.cmake`. Never
    guess numbers, flags, file names or behaviour. If you cannot confirm
    something, leave it out and list it in your reply.
 3. Use Bash only for read-only look-ups: `ls`, `find`, `grep`, `git log`,

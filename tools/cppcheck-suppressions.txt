@@ -3,13 +3,13 @@
 # absolute paths, others paths relative to the working directory.
 # Right shift of a negative int is implementation-defined (not undefined);
 # world.h pins the behaviour with a _Static_assert.
-shiftNegativeLHS:*src/world.h
+shiftNegativeLHS:*src/world/world.h
 # miniaudio.h and mimalloc.h come from the dependency include paths, which
 # cppcheck does not search the same way; with a fetched mimalloc 3.x it also
 # reports that header's inline mi_*_csize functions against whichever test
 # file happens to be built next to it (test_sound.c, test_health_debug.c).
 # The compilers' -Wunused-function (with -Werror) still covers those files.
-missingInclude:*src/audio_device.c
+missingInclude:*src/audio/audio_device.c
 unusedFunction:*tests/test_sound.c
 # Same artifact, landing on whichever test TU cppcheck's whole-program
 # unusedFunction analysis happens to attribute mimalloc's inline

@@ -39,7 +39,7 @@ Checks: >
 
 # Headers under src/ are checked when a .c file includes them; system, Vulkan,
 # GLFW and generated shader headers are not.
-HeaderFilterRegex: '.*/(src|tests)/[^/]*\.h$'
+HeaderFilterRegex: '.*/(src/[a-z]+|tests)/[^/]*\.h$'
 FormatStyle: file
 WarningsAsErrors: ''
 

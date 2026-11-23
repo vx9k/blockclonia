@@ -121,71 +121,71 @@ target_compile_options(mc_warnings INTERFACE ${MC_WARNINGS})
 # Everything that does not touch Vulkan or a window: the tests and the
 # fuzzer link this alone.
 set(MC_CORE_SOURCES
-  src/bench.c
-  src/block.c
-  src/bloom.c
-  src/camera.c
-  src/debug.c
-  src/discord.c
-  src/fx.c
-  src/gpucaps.c
-  src/gpupool.c
-  src/health.c
-  src/hud.c
-  src/thoughts.c
-  src/interact.c
-  src/inventory.c
-  src/invui.c
-  src/item.c
-  src/mob.c
-  src/mobskin.c
-  src/combat.c
-  src/atmos.c
-  src/ballistics.c
-  src/jobs.c
-  src/light.c
-  src/lightfx.c
-  src/lamps.c
-  src/shadow.c
-  src/log.c
-  src/mem.c
-  src/menu.c
-  src/mesher.c
-  src/net.c
-  src/mp.c
-  src/netcrypto.c
-  src/netkeys.c
-  src/noise.c
-  src/os.c
-  src/paths.c
-  src/fluid.c
-  src/physics.c
-  src/png.c
-  src/recoil.c
-  src/gamemode.c
-  src/save.c
-  src/save_db.c
-  src/settings.c
-  src/sky.c
-  src/sound.c
-  src/sound_synth.c
-  src/survival.c
-  src/sysinfo.c
-  src/texgen.c
-  src/treetex.c
-  src/trees.c
-  src/thermo.c
-  src/torch_model.c
-  src/itemmodel.c
-  src/ui.c
-  src/upnp.c
-  src/viewmodel.c
-  src/avatar.c
-  src/world.c
-  src/worldgen.c
-  src/wire.c
-  src/worlds.c
-  src/backups.c
+  src/core/bench.c
+  src/world/block.c
+  src/render/bloom.c
+  src/game/camera.c
+  src/ui/debug.c
+  src/net/discord.c
+  src/render/fx.c
+  src/render/gpucaps.c
+  src/render/gpupool.c
+  src/health/health.c
+  src/ui/hud.c
+  src/health/thoughts.c
+  src/game/interact.c
+  src/game/inventory.c
+  src/ui/invui.c
+  src/game/item.c
+  src/game/mob.c
+  src/render/mobskin.c
+  src/game/combat.c
+  src/sim/atmos.c
+  src/sim/ballistics.c
+  src/core/jobs.c
+  src/world/light.c
+  src/render/lightfx.c
+  src/render/lamps.c
+  src/render/shadow.c
+  src/core/log.c
+  src/core/mem.c
+  src/ui/menu.c
+  src/render/mesher.c
+  src/net/net.c
+  src/net/mp.c
+  src/net/netcrypto.c
+  src/net/netkeys.c
+  src/core/noise.c
+  src/core/os.c
+  src/core/paths.c
+  src/sim/fluid.c
+  src/sim/physics.c
+  src/core/png.c
+  src/game/recoil.c
+  src/game/gamemode.c
+  src/save/save.c
+  src/save/save_db.c
+  src/save/settings.c
+  src/render/sky.c
+  src/audio/sound.c
+  src/audio/sound_synth.c
+  src/health/survival.c
+  src/core/sysinfo.c
+  src/render/texgen.c
+  src/render/treetex.c
+  src/world/trees.c
+  src/sim/thermo.c
+  src/render/torch_model.c
+  src/render/itemmodel.c
+  src/ui/ui.c
+  src/net/upnp.c
+  src/render/viewmodel.c
+  src/render/avatar.c
+  src/world/world.c
+  src/world/worldgen.c
+  src/net/wire.c
+  src/save/worlds.c
+  src/save/backups.c
 )
 
 # ASan cannot see mi_* allocations, and the static mimalloc's malloc
@@ -198,7 +198,10 @@ endif()
 
 function(mc_add_core name)
   add_library(${name} STATIC ${MC_CORE_SOURCES})
-  target_include_directories(${name} PUBLIC src)
+  # Headers sit beside their sources, one folder per subsystem; includes name
+  # the header alone ("world.h"), so every folder is on the path.
+  target_include_directories(${name} PUBLIC src/core src/world src/sim src/health src/render src/audio src/ui src/net
+                                            src/save src/game)
   target_link_libraries(${name} PUBLIC Threads::Threads mc::sqlite mc::sodium mc::enet mc::upnp mc::zlibng PRIVATE mc_warnings)
   if(MC_MEM_LIBC)
     target_compile_definitions(${name} PUBLIC MC_MEM_LIBC)
@@ -221,10 +224,10 @@ endif()
 # ---------------------------------------------------------------- game
 if(MC_BUILD_GAME)
   if(MC_SOUND_ENABLED)
-    add_executable(blockclonia src/main.c src/renderer.c src/audio_device.c)
+    add_executable(blockclonia src/game/main.c src/render/renderer.c src/audio/audio_device.c)
     target_link_libraries(blockclonia PRIVATE mc::miniaudio)
   else()
-    add_executable(blockclonia src/main.c src/renderer.c src/audio_null.c)
+    add_executable(blockclonia src/game/main.c src/render/renderer.c src/audio/audio_null.c)
   endif()
   target_link_libraries(blockclonia PRIVATE mccore Vulkan::Vulkan mc::glfw mc_warnings)
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

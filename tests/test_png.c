@@ -1,8 +1,8 @@
 /* The PNG encoder, checked by decoding what it writes: every chunk and its
  * CRC, the header, the zlib stream inflated by zlib-ng and the PNG filters
  * undone, back to the pixels that went in. */
-#include "../src/mem.h"
-#include "../src/png.h"
+#include "../src/core/mem.h"
+#include "../src/core/png.h"
 #include "test_util.h"
 
 #include <string.h>

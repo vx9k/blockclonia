@@ -52,7 +52,7 @@ that delegating helps, or when you ask it to.
   {
     "subagent_type": "deep-reasoning",
     "description": "Audit save decoder bounds",
-    "prompt": "Review src/save.c's column decoder for out-of-bounds reads on malformed files..."
+    "prompt": "Review src/save/save.c's column decoder for out-of-bounds reads on malformed files..."
   }
   ```
 
