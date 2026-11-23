@@ -77,8 +77,11 @@ static void test_crisis(void)
     mem_free(a);
     mem_free(b);
 
-    /* Untreated for three minutes, a severe crisis sends some hearts into
-     * AF or VF; most hold their rhythm. Once the surge ends the strain
+    /* Untreated for three minutes, a severe crisis sends about one heart
+     * in sixteen into AF or VF; most hold their rhythm. Sixteen bodies
+     * are too few to count on seeing one go (and the count differs where
+     * the compiler fuses multiply-adds), so only the majority is checked
+     * here; test_strain_risk checks that strained hearts do slip. Once the surge ends the strain
      * still climbs a while, and about one strained heart in three slips
      * into VT or VF before it eases. Those that hold recover: the
      * adrenaline clears from a crisis's ~11 ng/mL within twenty minutes,
@@ -106,7 +109,7 @@ static void test_crisis(void)
         mem_free(h);
     }
     CHECK(held >= 2 && recovered);
-    CHECK(sinus >= 8 && sinus <= 15);
+    CHECK(sinus >= 8);
 }
 
 /* A strained heart is irritable: among bodies left with ten minutes of
