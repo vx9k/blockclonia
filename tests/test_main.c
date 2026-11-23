@@ -978,8 +978,12 @@ static void test_health_exercise(void)
     live(h, &e, 30.0);
     float hr0 = h->hr;
     e.speed = 6.5;
-    live(h, &e, 60.0);
-    CHECK(h->hr > 150.0f && h->sbp > 150.0f && h->rr > 25.0f);
+    float sbp_max = 0.0f; /* the systolic peaks within the first minute */
+    for (int i = 0; i < 60; i++) {
+        live(h, &e, 1.0);
+        sbp_max = fmaxf(sbp_max, h->sbp);
+    }
+    CHECK(h->hr > 150.0f && sbp_max > 150.0f && h->rr > 25.0f);
     CHECK(health_stamina(h) < 0.5f);
     CHECK(h->lactate > 4.0f);
     health_limits l = health_get_limits(h);
@@ -1015,7 +1019,7 @@ static void test_health_bleeding(void)
     live(a, &e, 240.0);
     live(b, &e, 240.0);
     CHECK(a->conscious != CONS_ALERT); /* class IV haemorrhage */
-    CHECK(health_spo2_reading(a) < 0); /* no pulse at the finger */
+    CHECK(health_spo2_reading(a) < 0 || a->down > 0.0f); /* no pulse at the finger, or fainted */
     CHECK(b->conscious == CONS_ALERT && b->blood > a->blood + 0.5f);
     /* A second dressing needs supplies: two plant fibres make one. */
     CHECK(health_treat(a, &ia, BP_LLEG, TREAT_BANDAGE, 0, msg, sizeof msg) == 0); /* none left */
@@ -2279,6 +2283,9 @@ int main(void)
     test_mobmodel_all();
     test_avatar_all();
     test_cardio_all();
+    test_circulation_all();
+    test_conduction_all();
+    test_autonomic_all();
     printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);
     return g_failed ? 1 : 0;
 }

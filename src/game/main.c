@@ -1406,6 +1406,7 @@ static void open_world(game *g, const char *dir, int backdrop)
              jobs_worker_count(g->js));
 
     health_init_varied(&g->hl, g->seed ^ 0x9E3779B9u);
+    health_settle(&g->hl);
     if (o->hurt && !backdrop) apply_hurt(&g->hl, o->hurt);
 
     fx_init(g->fx, g->seed);
@@ -1799,9 +1800,10 @@ static void frame_menus(game *g, double dt)
     else if (!g_in.panel && g->panel_was_open && !g_in.inv_open && !g->in_menu) set_captured(g->win, 1);
     g->panel_was_open = g_in.panel;
     if (g->hl.dead) g_in.inv_open = 0;
-    /* The panel, death and unconsciousness freeze the player's input. */
+    /* The panel, death and unconsciousness freeze the player's input, and
+     * so does coming round on the ground after a faint. */
     g->frozen = g->in_menu || g_in.panel || g_in.inv_open || g_in.chat_open || g->hl.dead ||
-                g->hl.conscious == CONS_UNCONSCIOUS;
+                g->hl.conscious == CONS_UNCONSCIOUS || g->hl.down > 0.0f;
     if (g->frozen) g_in.mouse_dx = g_in.mouse_dy = 0;
 }
 
@@ -2091,6 +2093,7 @@ static void frame_interact(game *g, double dt)
             }
             gamemode_apply(pl, gamemode_after_death(pl->mode));
             health_init_varied(&g->hl, g->seed ^ (uint32_t)g->frame * 2654435761u);
+            health_settle(&g->hl);
             inv_starting_kit(&g->inv);
             g->hs.alert_count = 0;
             g_in.panel = 0;
@@ -2585,6 +2588,10 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     g->mn.can_open = !g->backdrop && !g->mp && !g->client;
     g->mn.can_switch = !g->backdrop && !g->client && g->rules.cheats && !g->rules.hardcore;
     g->mn.mode_now = mode_name(g->pl.mode);
+    if (g->mn.screen == SCREEN_DEBUG_HEALTH) {
+        for (int t = 0; t < HDBG_TARGET_COUNT; t++) g->mn.debug_sev[t] = (uint8_t)health_debug_severity(&g->hl, t);
+        health_debug_describe(&g->hl, g->mn.debug_target, g->mn.debug_status, sizeof g->mn.debug_status);
+    }
     menu_action act = menu_frame(&g->mn, u, &mi, &g->st);
     switch (act) {
     case MENU_RESUME:
@@ -2655,6 +2662,7 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     case MENU_DEBUG_INJURE: health_injure(&g->hl, g->mn.debug_kind, g->mn.debug_part); break;
     case MENU_DEBUG_RESET:
         health_init_varied(&g->hl, g->seed ^ (uint32_t)g->frame * 2654435761u);
+        health_settle(&g->hl);
         log_info("debug menu: health reset");
         break;
     default: break;
