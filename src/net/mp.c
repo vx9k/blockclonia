@@ -353,6 +353,7 @@ static void host_join(mp *m, int id)
                  (key ? (uint32_t)key[0] << 24 | (uint32_t)key[1] << 16 : 0u);
         r->hl = mem_alloc(sizeof *r->hl);
         health_init_varied(r->hl, r->rng);
+        health_settle(r->hl);
         inv_init(&r->inv);
         have_was = load_saved(m, key, &was, &r->inv);
         if (!have_was) inv_starting_kit(&r->inv);
@@ -472,6 +473,7 @@ static void host_op(mp *m, remote *r, wire_r *rd)
             gamemode_apply(&r->pl, gamemode_after_death(r->pl.mode));
             r->rng = r->rng * 1664525u + 1013904223u;
             health_init_varied(r->hl, r->rng);
+            health_settle(r->hl);
             inv_starting_kit(&r->inv);
         }
         break;

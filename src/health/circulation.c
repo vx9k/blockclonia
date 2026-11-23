@@ -324,10 +324,15 @@ void circ_init(circ *c, float blood_ml, float heart_size, float art_stiff)
         {CC_SPLANCH, 55.0, 1300.0, 700.0}, {CC_RENAL, 8.0, 150.0, 0.0}, {CC_LEGS, 19.0, 300.0, 350.0},
         {CC_IVC, 2.0, 100.0, 0.0},         {CC_SVC, 15.0, 200.0, 0.0},
     };
+    /* Vessels hold about the same share of a body's blood unstressed
+     * whatever its volume (vascular capacity grows with blood volume), so a
+     * body with less blood is not left short of the volume that makes
+     * pressure. The table is for 5250 mL. */
+    double vs = blood_ml > 1000.0f ? (double)blood_ml / 5250.0 : 1.0;
     for (size_t k = 0; k < sizeof V / sizeof V[0]; k++) {
         c->c[V[k].i] = V[k].c;
-        c->v0[V[k].i] = V[k].v0;
-        c->vmax[V[k].i] = V[k].vmax;
+        c->v0[V[k].i] = V[k].v0 * vs;
+        c->vmax[V[k].i] = V[k].vmax * vs;
     }
     c->c[CC_AO] /= as;
     c->c[CC_AA] /= as;

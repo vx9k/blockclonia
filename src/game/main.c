@@ -1406,6 +1406,7 @@ static void open_world(game *g, const char *dir, int backdrop)
              jobs_worker_count(g->js));
 
     health_init_varied(&g->hl, g->seed ^ 0x9E3779B9u);
+    health_settle(&g->hl);
     if (o->hurt && !backdrop) apply_hurt(&g->hl, o->hurt);
 
     fx_init(g->fx, g->seed);
@@ -2091,6 +2092,7 @@ static void frame_interact(game *g, double dt)
             }
             gamemode_apply(pl, gamemode_after_death(pl->mode));
             health_init_varied(&g->hl, g->seed ^ (uint32_t)g->frame * 2654435761u);
+            health_settle(&g->hl);
             inv_starting_kit(&g->inv);
             g->hs.alert_count = 0;
             g_in.panel = 0;
@@ -2659,6 +2661,7 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     case MENU_DEBUG_INJURE: health_injure(&g->hl, g->mn.debug_kind, g->mn.debug_part); break;
     case MENU_DEBUG_RESET:
         health_init_varied(&g->hl, g->seed ^ (uint32_t)g->frame * 2654435761u);
+        health_settle(&g->hl);
         log_info("debug menu: health reset");
         break;
     default: break;

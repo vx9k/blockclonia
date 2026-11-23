@@ -357,6 +357,44 @@ void health_init(health *h, uint32_t seed)
     start_circulation(h);
 }
 
+/* Nobody is born mid-collapse: the circuit starts from resting lying-down
+ * volumes, and standing up from them drains the chest into the legs and
+ * sets the reflex racing. Settle a copy standing still for half a minute
+ * and keep its blood, reflex state and readings, so the first frame
+ * already shows a body at rest. Its clocks and logs are thrown away. */
+void health_settle(health *h)
+{
+    health *t = mem_alloc(sizeof *t);
+    memcpy(t, h, sizeof *t);
+    health_env e = {0};
+    e.on_ground = 1;
+    e.airway = AIRWAY_AIR;
+    e.water_temp = e.air_temp = e.contact_temp = 20.0;
+    /* Stop as the atria fire, the start of a beat, and start this body's
+     * sinus node at that same instant so the copied volumes fit the beat. */
+    double fired = -1.0;
+    for (int i = 0; i < 40 * 60; i++) {
+        health_step(t, &e, 1.0 / 60.0);
+        if (i >= 30 * 60 && fired >= 0.0 && t->cond.t_atria != fired) break;
+        fired = t->cond.t_atria;
+    }
+    h->cond.sa_phase = 1.0f;
+    /* The whole circuit, last beat's readings included, on this body's clock. */
+    long long steps = h->cv.steps;
+    h->cv = t->cv;
+    h->cv.steps = steps;
+    h->cv.beat_t = -1.0;
+    h->ans = t->ans;
+    h->hr = t->hr;
+    h->sv = t->sv;
+    h->co = t->co;
+    h->svr = t->svr;
+    h->map = t->map;
+    h->sbp = t->sbp;
+    h->dbp = t->dbp;
+    mem_free(t);
+}
+
 void health_init_varied(health *h, uint32_t seed)
 {
     health_init(h, seed);

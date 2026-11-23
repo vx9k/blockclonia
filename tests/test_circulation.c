@@ -643,8 +643,52 @@ static void test_body_vrng_seeded(void)
     mem_free(b);
 }
 
+/* A body is born settled: standing still from the first frame, its heart
+ * beats at once and the reflex does not chase a start-up pressure drop
+ * (the playtest saw 150+ bpm at spawn). */
+static void test_body_spawn_settled(void)
+{
+    health *h = mem_alloc(sizeof *h);
+    for (uint32_t seed = 1; seed <= 4; seed++) {
+        health_init_varied(h, seed);
+        health_settle(h);
+        health_env e = calm_env();
+        float hr0 = h->hr, sbp0 = h->sbp, sv0 = h->sv, hr_max = 0.0f, sbp_min = 1e9f, sv_min = 1e9f;
+        for (int i = 0; i < 20 * 60; i++) {
+            health_step(h, &e, TICK);
+            if (i < 60) continue; /* the first beat's numbers */
+            hr_max = fmaxf(hr_max, h->hr);
+            sbp_min = fminf(sbp_min, h->sbp);
+            sv_min = fminf(sv_min, h->sv);
+        }
+        CHECK(hr_max < hr0 + 12.0f);
+        CHECK(sbp_min > sbp0 - 15.0f && sbp_min > 90.0f);
+        CHECK(sv_min > 0.8f * sv0 && sv0 > 30.0f);
+    }
+    mem_free(h);
+}
+
+/* A body with less blood also has smaller veins: the unstressed share of
+ * its blood stays the same, so its resting pressure does too. */
+static void test_circ_unstressed_scales(void)
+{
+    circ *a = mem_alloc(sizeof *a), *b = mem_alloc(sizeof *b);
+    circ_init(a, 5250.0f, 1.0f, 1.0f);
+    circ_init(b, 4550.0f, 1.0f, 1.0f);
+    double ua = 0.0, ub = 0.0;
+    for (int i = CC_PA; i < CC_COUNT; i++) {
+        ua += a->v0[i];
+        ub += b->v0[i];
+    }
+    CHECK(fabs(ub / 4550.0 - ua / 5250.0) < 0.01);
+    CHECK(ua / 5250.0 > 0.6 && ua / 5250.0 < 0.85);
+    mem_free(a);
+    mem_free(b);
+}
+
 void test_circulation_all(void)
 {
+    test_circ_unstressed_scales();
     test_circ_rest();
     test_circ_conserves();
     test_circ_starling();
@@ -654,6 +698,7 @@ void test_circulation_all(void)
     test_circ_beat_means();
     test_circ_af_kick();
     test_body_rest();
+    test_body_spawn_settled();
     test_body_run_no_jump();
     test_body_blood_loss_classes();
     test_body_bleed_slows();

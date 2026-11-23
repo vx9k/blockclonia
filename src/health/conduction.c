@@ -26,6 +26,7 @@ void cond_init(conduction *k)
     k->pending_av = k->pending_ect = k->esc_ref = -1.0;
     k->next_af = k->next_own = -1.0;
     k->rhythm = -1;
+    k->sa_phase = 0.98f;
 }
 
 float cond_atria_on(int rhythm)

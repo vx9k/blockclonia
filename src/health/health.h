@@ -376,6 +376,11 @@ void health_init_varied(health *h, uint32_t seed);
 /* Advances the body by dt seconds of real time. */
 void health_step(health *h, const health_env *e, double dt);
 
+/* Brings a new body to a settled rest standing still (30 s simulated on a
+ * copy), so a spawn does not start with a start-up transient. Costs
+ * ~75 ms; the game calls it once per spawn, tests only when they want it. */
+void health_settle(health *h);
+
 /* Scales and filters movement input by what the body can do. */
 typedef struct {
     float move_scale;     /* multiply requested speed */
