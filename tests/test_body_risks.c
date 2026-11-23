@@ -57,7 +57,9 @@ void test_body_risks_all(void)
 
     /* A sudden bad injury sets off a rush that dulls the pain, and a crash
      * follows once it wears off. */
-    h = new_body(25);
+    /* Seed 26: on seed 25 the rush tips into a pain faint (one break in
+     * five does), which cuts it short and leaves nothing to crash from. */
+    h = new_body(26);
     live(h, &e, 5.0);
     health_break_bone(h, BP_LLEG, 0);
     live(h, &e, 2.0);

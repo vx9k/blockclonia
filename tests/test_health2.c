@@ -626,7 +626,7 @@ static void test_variance_emergent(void)
 }
 
 /* Short-term variability wanders both ways around the baseline and stays
- * bounded; a neutral body (health_init) shows none of it. */
+ * bounded; a neutral body (health_init) shows none of its randomness. */
 static void test_variance_shortterm(void)
 {
     health *h = varied_body(99);
@@ -644,19 +644,26 @@ static void test_variance_shortterm(void)
     CHECK(hi - lo < 15.0f);           /* bounded: no runaway wander */
     CHECK(lo > h->base.hr_rest - 30.0f && hi < h->base.hr_rest + 60.0f);
 
-    health *ref = new_body(99);
+    /* A neutral body still breathes, and breathing swings the pulsing
+     * heart's rate a few beats (sinus arrhythmia), but none of it is
+     * random: two neutral bodies seeded differently beat identically. */
+    health *ref = new_body(99), *ref2 = new_body(12345);
     live(ref, &e, 30.0);
-    float rhr0 = ref->hr, ref_lo = rhr0, ref_hi = rhr0;
+    live(ref2, &e, 30.0);
+    float ref_lo = ref->hr, ref_hi = ref->hr;
+    int same = 1;
     for (int i = 0; i < 600; i++) {
         health_step(ref, &e, 1.0 / 60.0);
+        health_step(ref2, &e, 1.0 / 60.0);
         ref_lo = fminf(ref_lo, ref->hr);
         ref_hi = fmaxf(ref_hi, ref->hr);
+        same &= ref->hr == ref2->hr;
     }
-    /* Settled, it only drifts by the lag's residual convergence, nowhere
-     * near the varied body's beat-to-beat wander. */
-    CHECK(ref_hi - ref_lo < 0.05f);
+    CHECK(same);
+    CHECK(ref_hi - ref_lo > 0.5f && ref_hi - ref_lo < 6.0f);
     mem_free(h);
     mem_free(ref);
+    mem_free(ref2);
 }
 
 /* Blurred and double vision: strongest just after a knock to the head,

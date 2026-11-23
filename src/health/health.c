@@ -1298,8 +1298,10 @@ static void step_bleeding(health *h, const health_env *e, double dt, float gh, c
         ext += w->bleed;
     }
     /* A fresh rush of blood is what sets off the blood-injury faint; blood
-     * that has been running a while no longer does. */
-    if (h->conscious != CONS_UNCONSCIOUS && ext > h->blood_seen + 30.0f) {
+     * that has been running a while no longer does. A cut artery's flow
+     * builds over several beats; only a bleed at least doubling what the
+     * eyes have already seen is a new sight, so one rush is one chance. */
+    if (h->conscious != CONS_UNCONSCIOUS && ext > 2.0f * h->blood_seen + 30.0f) {
         if (frand(h) < 0.15f && start_faint(h)) health_log(h, "The sight of the blood makes you woozy");
         h->blood_seen = ext;
     }
@@ -1325,8 +1327,13 @@ static void step_bleeding(health *h, const health_env *e, double dt, float gh, c
 
 /* Blood the circuit lost to wounds takes its red cells and water with it;
  * plasma refills from the tissues over hours (Starling forces), on the
- * survival clock, which dilutes the red cells that are left. */
-static void account_blood(health *h, float lost_ml, float gh, float dehyd)
+ * survival clock, which dilutes the red cells that are left. The
+ * capillaries can only move so much fluid, though: a few hundred mL in
+ * the first hour, about 0.25 mL/kg/min at the most, in real time. Without
+ * that cap the survival clock's 72x speed-up refilled 250 mL/min and an
+ * open artery never emptied the body. */
+#define REFILL_MAX_ML_S (0.25f * 75.0f / 60.0f)
+static void account_blood(health *h, float lost_ml, float gh, float dehyd, float dt)
 {
     float lost = lost_ml / 1000.0f;
     h->rbc -= lost * hct(h);
@@ -1334,7 +1341,7 @@ static void account_blood(health *h, float lost_ml, float gh, float dehyd)
     float vol = circ_volume(&h->cv);
     h->plasma_deficit = maxf(0.0f, h->base.blood_per_kg * 75.0f - vol);
     if (h->plasma_deficit > 0.0f && dehyd < 0.15f) {
-        float refill = h->plasma_deficit * (1.0f - expf(-gh / 8.0f));
+        float refill = minf(h->plasma_deficit * (1.0f - expf(-gh / 8.0f)), REFILL_MAX_ML_S * dt);
         circ_add(&h->cv, CC_IVC, refill);
         h->water -= refill * 0.0002f; /* the interstitium pays (L), which shows up as thirst */
     }
@@ -2262,7 +2269,11 @@ void health_step(health *h, const health_env *e, double dt)
     /* The sinus node: cold slows it, fever and adrenaline speed it, a
      * crushed brainstem (Cushing) and deep hypoxia brake it, and a damaged
      * heart can't reach its full rate. */
-    float sa = ao.sa_rate * (1.0f + 0.08f * maxf(0.0f, h->temp - 37.0f)) * (1.0f + 1.0f * beta);
+    /* Fever: about 8.5 bpm per degree, 0.12 of a resting rate (Karjalainen
+     * and Viitasalo 1986, CREDITS.md). Sepsis's cytokines speed the node
+     * beyond what the fever explains (the SIRS heart rate). */
+    float sa = ao.sa_rate * (1.0f + 0.12f * maxf(0.0f, h->temp - 37.0f)) * (1.0f + 0.15f * h->sepsis) *
+               (1.0f + 1.0f * beta);
     if (h->temp < 35.0f) sa *= fclamp(1.0f - (35.0f - h->temp) * 0.08f, 0.3f, 1.0f);
     if (cushing) sa = minf(sa, 50.0f);
     if (h->sao2 < 0.5f) sa *= 0.35f + 0.65f * h->sao2 / 0.5f;
@@ -2390,7 +2401,7 @@ void health_step(health *h, const health_env *e, double dt)
         q_brain /= dt;
         q_cor /= dt;
     }
-    account_blood(h, lost, gh, dehyd);
+    account_blood(h, lost, gh, dehyd, (float)dt);
 
     /* The vitals, from the last completed beat; with no beat for a while
      * (or none that pumps), from the circuit as it is now. */
