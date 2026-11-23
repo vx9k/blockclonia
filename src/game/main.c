@@ -953,6 +953,7 @@ typedef struct {
     int cfg_vsync;            /* vsync as the settings file has it (--no-vsync is not saved) */
     int cfg_keep;             /* the settings file could not be used: never written over */
     uint32_t seed;
+    int fps_frames; /* here, beside seed, it fills what would be padding */
     sys_info sys;
     sys_budget plan;          /* budgets for this machine (sysinfo.h) */
     GLFWwindow *win;
@@ -986,7 +987,6 @@ typedef struct {
     hud_state hs;
     fx_state *fx;
     blood_state *blood;
-    double blood_beat_r; /* the heartbeat the blood last spurted with (health's last_r) */
     interact ia;
     invui iu;
     entity_instance *ents;
@@ -1018,7 +1018,6 @@ typedef struct {
     int frame;
     int inv_was_open, panel_was_open;
     double title_t, save_t;
-    int fps_frames;
     float *gpu_samples;       /* --frames: GPU frame times over the run's second half, ms */
     int gpu_sample_count;
     int last_step;            /* stride half-cycles, for footsteps */
@@ -1350,7 +1349,7 @@ static void restart_blood(game *g)
     if (!g->blood) return;
     blood_free(g->blood);
     blood_init(g->blood, g->plan.blood_stains, g->seed);
-    g->blood_beat_r = g->hl.last_r;
+    g->blood->beat_r = g->hl.last_r;
 }
 
 /* This frame's blood from the player's wounds, spurting with the
@@ -1361,7 +1360,7 @@ static void bleed(game *g, double dt)
     blood_source src[BLOOD_SOURCES] = {0};
     const player *pl = &g->pl;
     int n = mode_hands(pl->mode) ? blood_from_health(&g->hl, pl->pos, pl->yaw, src) : 0;
-    int beat = blood_beat(&g->blood_beat_r, g->hl.last_r);
+    int beat = blood_beat(&g->blood->beat_r, g->hl.last_r);
     blood_bleed(g->blood, src, n, beat, g->hl.sbp, g->hl.hr, g->hl.sao2, pl->vel, (float)dt);
     blood_step(g->blood, &g->w, (float)dt);
 }

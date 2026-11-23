@@ -57,6 +57,7 @@ typedef struct {
     blood_stain *stain; /* a ring of max_stains (sys_plan's blood_stains) */
     int max_stains, next;
     float owed[BLOOD_SOURCES]; /* mL bled but not yet out as drops */
+    double beat_r;             /* the heartbeat last spurted with (health's last_r), for blood_beat */
     uint32_t rng;
 } blood_state;
 

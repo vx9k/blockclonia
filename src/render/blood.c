@@ -163,7 +163,7 @@ static int fly(blood_state *b, const world *w, blood_drop *d, float h)
     dvec3 p0 = d->pos, p1 = dv3(p0.x + d->vel.x * (double)h, p0.y + d->vel.y * (double)h, p0.z + d->vel.z * (double)h);
     d->pos = p1;
     if (p1.y < 0.0) return 0;
-    int c1[3] = {cell(p1.x), cell(p1.y), cell(p1.z)};
+    const int c1[3] = {cell(p1.x), cell(p1.y), cell(p1.z)};
     uint8_t id = world_get(w, c1[0], c1[1], c1[2]);
     if (block_fluid(id)) return 0; /* gone into water (or lava) */
     if (!block_solid(id)) return 1;
@@ -227,7 +227,7 @@ uint32_t blood_colour(int shade, float age)
      * oxidises to methaemoglobin and the stain browns. */
     float a = clampf((float)shade / 255.0f, 0.0f, 1.0f);
     float d = isfinite(age) ? clampf(age / BLOOD_STAIN_S, 0.0f, 1.0f) : 1.0f;
-    float wet[3] = {95.0f + 95.0f * a, 8.0f + 7.0f * a, 12.0f + 8.0f * a};
+    const float wet[3] = {95.0f + 95.0f * a, 8.0f + 7.0f * a, 12.0f + 8.0f * a};
     const float dry[3] = {85.0f, 35.0f, 25.0f};
     uint32_t c = 0;
     for (int i = 0; i < 3; i++) c = c << 8 | (uint32_t)lroundf(clampf(wet[i] + (dry[i] - wet[i]) * d, 0.0f, 255.0f));
@@ -332,10 +332,10 @@ void blood_spot(int part, int salt, dvec3 feet, float yaw, dvec3 *at, dvec3 *out
     const float right[3] = {cy, 0.0f, sy}, fwd[3] = {sy, 0.0f, -cy};
     int k = salt < 0 ? -salt : salt;
     float dr = 0.03f * (float)(k % 3 - 1), du = 0.05f * (float)((k * 3) % 5 - 2);
-    float l[3] = {sp[0] + dr, sp[1] + du, sp[2]};
+    const float l[3] = {sp[0] + dr, sp[1] + du, sp[2]};
     *at = dv3(feet.x + (double)(right[0] * l[0] + fwd[0] * l[2]), feet.y + (double)l[1],
               feet.z + (double)(right[2] * l[0] + fwd[2] * l[2]));
-    float o[3] = {right[0] * sp[3] + fwd[0] * sp[5], sp[4], right[2] * sp[3] + fwd[2] * sp[5]};
+    const float o[3] = {right[0] * sp[3] + fwd[0] * sp[5], sp[4], right[2] * sp[3] + fwd[2] * sp[5]};
     float ol = sqrtf(o[0] * o[0] + o[1] * o[1] + o[2] * o[2]);
     *out = dv3((double)(o[0] / ol), (double)(o[1] / ol), (double)(o[2] / ol));
 }

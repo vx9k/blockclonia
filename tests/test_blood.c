@@ -56,9 +56,9 @@ static void bleed_for(blood_state *b, const world *w, blood_source s, float p_sy
             beat_t -= 60.0f / hr;
             beat = 1;
         }
-        blood_source live = s;
-        if (i >= steps) live.ml_min = 0.0f;
-        blood_bleed(b, &live, 1, beat, p_sys, hr, 0.98f, dv3(0, 0, 0), dt);
+        blood_source now = s;
+        if (i >= steps) now.ml_min = 0.0f;
+        blood_bleed(b, &now, 1, beat, p_sys, hr, 0.98f, dv3(0, 0, 0), dt);
         blood_step(b, w, dt);
     }
 }
