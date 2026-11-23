@@ -2322,6 +2322,13 @@ static void step_brain(health *h, float cao2_rel, float dehyd, int arrest, doubl
     if (cons < CONS_DROWSY) h->lapse = 0.0f;
     else if (h->lapse <= 0.0f && frand(h) < 0.08f * (1.0f - ramp(h->level, 0.3f, 0.6f)) * fdt)
         h->lapse = 1.0f + 2.0f * frand(h);
+    /* Below the reach of the world the eyes still open on it now and then
+     * for a moment, as a stuporous patient's do: more often for one that
+     * answers to a voice than to pain alone, never past reach. */
+    if (cons >= CONS_DROWSY || cons == CONS_UNCONSCIOUS) h->glimpse = 0.0f;
+    else if (h->glimpse <= 0.0f && frand(h) < (cons == CONS_VOICE ? 0.12f : 0.04f) * fdt)
+        h->glimpse = 0.4f + 0.8f * frand(h);
+    else h->glimpse = maxf(0.0f, h->glimpse - fdt); /* closed for a step at least before the next */
     if (cons < CONS_DROWSY && health_awake(h)) health_log(h, "Lost consciousness");
     /* Someone who fainted comes round lying where they fell and stays
      * down a while: lying is what brought the blood back to the brain,
@@ -2807,6 +2814,15 @@ health_senses health_get_senses(const health *h)
     v.grey = ramp(0.85f - h->brain_o2, 0.0f, 0.2f);
     v.tunnel = maxf(v.tunnel, ramp(0.75f - h->brain_o2, 0.0f, 0.25f));
     v.dim = maxf(0.4f * fog, v.blackout);
+    if (!health_awake(h)) {
+        /* Black, but for the glimpses: a dim, grey, blurred slit of the
+         * world that closes again over its last fifth of a second. */
+        const float open = fclamp(h->glimpse / 0.2f, 0.0f, 1.0f);
+        v.dim = 1.0f - 0.6f * open;
+        v.grey = maxf(v.grey, 0.7f);
+        v.blur = maxf(v.blur, 0.8f);
+        v.tunnel = maxf(v.tunnel, 0.5f);
+    }
     return v;
 }
 
@@ -3419,6 +3435,7 @@ static const wire_field HEALTH_FIELDS[] = {
     H(down),
     H(level),
     H(lapse),
+    H(glimpse),
     H(empty_t),
     H(fear),
     H(fear_ref),
