@@ -61,6 +61,7 @@ class Check(unittest.TestCase):
 
     def test_a_moved_file_is_not_checked_as_new(self):
         # git clang-format would check all of src/core/a.c and flag the old line.
+        self.git('config', 'diff.renames', 'false')
         (self.dir / 'src/core').mkdir()
         self.git('mv', 'src/a.c', 'src/core/a.c')
         self.assertEqual(self.check(), (0, 'clean\n'))
