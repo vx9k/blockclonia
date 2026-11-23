@@ -46,6 +46,9 @@
 #ifndef MC_HEALTH_H
 #define MC_HEALTH_H
 
+#include "autonomic.h"
+#include "circulation.h"
+#include "conduction.h"
 #include "inventory.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -80,7 +83,9 @@ typedef enum {
     RHYTHM_COUNT
 } rhythm_kind;
 typedef enum { AIRWAY_AIR, AIRWAY_WATER, AIRWAY_BLOCKED } airway_state;
-typedef enum { CONS_UNCONSCIOUS, CONS_CONFUSED, CONS_ALERT } consciousness;
+/* From worst to best, so steps compare in order. The bottom three keep
+ * the eyes shut and the body out of the player's hands (health_awake). */
+typedef enum { CONS_UNCONSCIOUS, CONS_PAIN, CONS_VOICE, CONS_DROWSY, CONS_CONFUSED, CONS_ALERT } consciousness;
 typedef enum { WOUND_CUT, WOUND_OPEN_FRACTURE, WOUND_ABRASION, WOUND_BURN, WOUND_FROSTBITE } wound_kind;
 typedef enum { DISLOC_NONE, DISLOC_SHOULDER, DISLOC_ELBOW } dislocation_kind;
 typedef enum { FROST_NONE, FROST_NIP, FROST_SUPERFICIAL, FROST_DEEP } frostbite_stage;
@@ -193,6 +198,13 @@ typedef struct {
     float clot_gain;  /* x clotting speed: 0.75..1.35 */
     float metab_gain; /* x BMR, VO2max and critical power: 0.92..1.1 */
     float cold_bias;  /* degrees C added to the shiver threshold: -0.4..0.4 */
+    float heart_size;   /* x the heart's chamber volumes: 0.85..1.15 */
+    float art_stiff;    /* x the arteries' stiffness: 0.75..1.25 */
+    float blood_per_kg; /* mL of blood per kg: 65..75, mean 70 */
+    float baro_gain;    /* x the baroreflex's gain: 0.7..1.3 */
+    float venous_tone;  /* x the veins' unstressed volume: 0.9..1.1 */
+    float symp_noise;   /* x the sympathetic nerves' random traffic: 0.5..1.5 */
+    float hr_max;       /* bpm, the sinus node's fastest: 185..215, mean 200 (no aging) */
     int vary;
 } health_baseline;
 
@@ -214,6 +226,7 @@ typedef struct {
     int crouched;         /* crouching (sneak): the head nearer the heart */
     float fear;           /* 0..1: a predator hunting the body nearby (mobs_fear) */
     float dark;           /* 0..1: how dark it is around the eyes (lightfx_dark) */
+    float bearing_down;   /* 0..1 straining against a closed throat (Valsalva) */
 } health_env;
 
 typedef struct health {
@@ -236,14 +249,15 @@ typedef struct health {
     float strain;                     /* myocardial strain dose from pressure out of range, ~crisis-minutes */
     float catechol;                   /* ng/mL of circulating adrenaline above the resting level */
     float surge;                      /* s left of an endogenous catecholamine surge */
-    float rr_k;                       /* this beat's R-R interval against the mean (AF is irregular) */
+    float surge_ng; /* ng/mL/s it releases */
     int rhythm;
     float arrest_time;                /* s without circulation */
-    float beat_phase;
-    int pvc_pending, last_beat_pvc;
-    double last_r, prev_r, next_r;    /* beat times, s */
-    float beat_pp, beat_dbp;          /* pulse pressure and diastolic of the last beat */
+    int last_beat_pvc; /* the last beat was an ectopic one */
+    double last_r, prev_r, next_r; /* s, ventricular activations: last, before it, expected next */
     defib_state defib;
+    /* The simulated heart and vessels, its timing and its nerves. */
+    float brain_flow; /* the brain's blood flow over its resting flow */
+    float plasma_deficit; /* mL the circulating volume is short of this body's normal */
 
     /* Respiration. */
     float rr, breath_phase;
@@ -262,6 +276,7 @@ typedef struct health {
     float shock_debt;                 /* minutes of starved tissue: past ~3, shock turns irreversible */
     float temp;                       /* core, degrees C */
     float vaso; /* 0 vasoconstricted .. 1 dilated skin */
+    float pressor; /* 0..1, vasopressin and angiotensin II released by a falling volume */
     float sweat_w; /* W of sweat being evaporated */
     float sweat_acc; /* L of sweat not yet taken from body water */
     float wet; /* 0..1 clothing soaked */
@@ -303,12 +318,17 @@ typedef struct health {
     float vagal; /* 0..1 strength of the reflex now */
     float faint_drive; /* s left of what set it off */
     float blood_seen; /* mL/min of bleeding the eyes have got used to */
+    float down; /* s a body that came round stays lying before it can get up */
+    float empty_t; /* s the heart has been firing with nothing to pump */
     /* Fear of a hunting predator: fight-or-flight without a wound. */
     float fear; /* 0..1 felt now */
     float fear_ref; /* slow reference a sudden fright is measured against */
     float dark; /* 0..1 how dark it is to the eyes, which take a while to adjust */
     float sepsis;                     /* 0..1 */
-    int conscious;                    /* consciousness */
+    int conscious; /* consciousness, the step the level is on */
+    float level; /* 0..1 how awake: 1 alert, 0 unresponsive */
+    float lapse; /* s left of a drowsy body's brief blackout */
+    float glimpse; /* s left of an unresponsive body's eyes opening on the world */
 
     int dead, cause;
     float hurt_flash;                 /* 0..1, for the screen */
@@ -317,7 +337,7 @@ typedef struct health {
 
     health_baseline base; /* this body's constitution */
     uint32_t vrng; /* short-term variability, its own stream so it never shifts an injury */
-    float hr_noise, map_noise, rr_noise, spo2_noise; /* wandering state for `base.vary` */
+    float rr_noise, spo2_noise; /* wandering state for `base.vary` */
 
     /* Monitor traces, ring buffers written at HEALTH_WAVE_HZ. */
     float ecg[HEALTH_WAVE_LEN];       /* mV */
@@ -330,6 +350,14 @@ typedef struct health {
     /* Recent events for the HUD. */
     char log[HEALTH_LOG][72];
     float log_age[HEALTH_LOG];
+
+    /* The simulated heart and vessels (circulation.c, conduction.c,
+     * autonomic.c). Only the server steps them; clients get the vitals
+     * and traces above, so none of this goes over the network. */
+    circ cv;
+    conduction cond;
+    autonomic ans;
+    double atria_prev; /* s, the atria's activation before cond.t_atria */
 } health;
 
 /* The whole body as bytes for a multiplayer client, whose HUD, limits and
@@ -358,6 +386,11 @@ void health_init_varied(health *h, uint32_t seed);
 /* Advances the body by dt seconds of real time. */
 void health_step(health *h, const health_env *e, double dt);
 
+/* Brings a new body to a settled rest standing still (30 s simulated on a
+ * copy), so a spawn does not start with a start-up transient. Costs
+ * ~75 ms; the game calls it once per spawn, tests only when they want it. */
+void health_settle(health *h);
+
 /* Scales and filters movement input by what the body can do. */
 typedef struct {
     float move_scale;     /* multiply requested speed */
@@ -375,6 +408,13 @@ health_limits health_get_limits(const health *h);
  * drinking). */
 typedef struct {
     float tremor, sway, tunnel, jaundice, blur, doubled;
+    /* A clouded mind (consciousness below alert) slows and fumbles the
+     * hands: s the controls lag, the share of actions that never happen,
+     * stumbles a second while moving, and a brief blackout (0..1). */
+    float lag, drop, stumble, blackout;
+    /* What the eyes lose (0..1): colour (grey), the edges of the view
+     * (tunnel, above) and light (dim). */
+    float grey, dim;
 } health_senses;
 health_senses health_get_senses(const health *h);
 
@@ -431,6 +471,14 @@ void health_arrest(health *h, int rhythm);
  * the brainstem. */
 float health_resp_depression(const health *h);
 float health_sedation(const health *h);
+/* The consciousness step a level falls on. */
+int health_cons_of(float level);
+/* Eyes open and in control: drowsy or better. */
+int health_awake(const health *h);
+/* Awake but not clear: confused or drowsy. */
+int health_impaired(const health *h);
+/* "Alert", "Confused", "Drowsy", "Voice only", "Pain only", "Unresponsive". */
+const char *health_cons_name(int cons);
 
 /* 1 for rhythms that pump blood (sinus, AF, VT, heart block). */
 int health_rhythm_perfusing(int rhythm);
@@ -460,10 +508,38 @@ typedef struct {
     const char *label;                   /* shown in the debug menu */
     health_debug_part_kind part_kind;
     uint8_t default_part;                /* body_part_id */
+    int8_t organ; /* organ_id it is listed under, or -1 */
 } health_debug_kind;
 
 extern const health_debug_kind HEALTH_DEBUG_KINDS[];
-#define HEALTH_DEBUG_COUNT 33
+#define HEALTH_DEBUG_COUNT 38
+
+/* The debug menu's targets: the seven body parts, then the six organs,
+ * then the whole body. Each entry is listed under every target it fits:
+ * local injuries under the parts they can happen to, organ conditions
+ * under their organ, the rest under the whole body. */
+#define HDBG_TARGET_ORGAN ((int)BP_COUNT)
+#define HDBG_TARGET_BODY ((int)BP_COUNT + (int)ORG_COUNT)
+#define HDBG_TARGET_COUNT (HDBG_TARGET_BODY + 1)
+
+/* The target's name ("Left arm", "Kidneys", "Whole body"); "" out of range. */
+const char *health_debug_target_name(int target);
+
+/* 1 if HEALTH_DEBUG_KINDS[kind] belongs on the target's page. */
+int health_debug_fits(int kind, int target);
+
+/* The body part a target hands health_injure: itself for a body part, -1
+ * (the entry's own default) for an organ or the whole body. */
+int health_debug_target_part(int target);
+
+/* One line on the target's state for the debug menu: a part's wounds,
+ * bones, burns and pain; an organ's function; the whole body's vitals.
+ * Always terminated; empty for an unknown target. */
+void health_debug_describe(const health *h, int target, char *buf, size_t n);
+
+/* How badly the target is hurt, for shading the menu's figure: 0 fine,
+ * 1 minor, 2 serious, 3 life- or limb-threatening. */
+int health_debug_severity(const health *h, int target);
 
 /* Looks a --hurt token up in HEALTH_DEBUG_KINDS; returns -1 if there is
  * no such name. */

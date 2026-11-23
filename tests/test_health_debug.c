@@ -107,7 +107,12 @@ static void test_each_kind_persists(void)
         else if (!strcmp(k->name, "drunk")) ok = h->bac > 1.5f && h->conscious != CONS_ALERT;
         else if (!strcmp(k->name, "overdose")) ok = h->opioid > 30.0f && h->rr < 10.0f;
         else if (!strcmp(k->name, "faint")) ok = h->vagal > 0.5f && h->hr < 60.0f;
-        else if (!strcmp(k->name, "brain-damage")) ok = h->organ[ORG_BRAIN] < 0.5f && h->conscious == CONS_CONFUSED;
+        else if (!strcmp(k->name, "brain-damage")) ok = h->organ[ORG_BRAIN] < 0.5f && health_impaired(h);
+        else if (!strcmp(k->name, "heart-damage")) ok = h->organ[ORG_HEART] < 0.6f;
+        else if (!strcmp(k->name, "lung-damage")) ok = h->organ[ORG_LUNGS] < 0.6f;
+        else if (!strcmp(k->name, "liver-failure")) ok = h->organ[ORG_LIVER] < 0.4f;
+        else if (!strcmp(k->name, "kidney-failure")) ok = h->organ[ORG_KIDNEYS] < 0.3f;
+        else if (!strcmp(k->name, "gut-damage")) ok = h->organ[ORG_GUT] < 0.5f;
         else ok = 0; /* an entry was added without teaching this test about it */
         CHECK(ok);
         mem_free(h);
@@ -181,10 +186,10 @@ static int health_equal(const health *a, const health *b)
            a->bleed_ext == b->bleed_ext && a->bleed_int == b->bleed_int && a->hr == b->hr && a->sv == b->sv &&
            a->co == b->co && a->svr == b->svr && a->map == b->map && a->sbp == b->sbp && a->dbp == b->dbp &&
            a->symp == b->symp && a->ischemia == b->ischemia && a->strain == b->strain && a->catechol == b->catechol &&
-           a->surge == b->surge && a->rr_k == b->rr_k && a->rhythm == b->rhythm && a->arrest_time == b->arrest_time &&
-           a->beat_phase == b->beat_phase && a->pvc_pending == b->pvc_pending && a->last_beat_pvc == b->last_beat_pvc &&
-           a->last_r == b->last_r && a->prev_r == b->prev_r && a->next_r == b->next_r && a->beat_pp == b->beat_pp &&
-           a->beat_dbp == b->beat_dbp && a->rr == b->rr && a->breath_phase == b->breath_phase &&
+           a->surge == b->surge && a->rhythm == b->rhythm && a->arrest_time == b->arrest_time &&
+           a->brain_flow == b->brain_flow && a->plasma_deficit == b->plasma_deficit &&
+           a->last_beat_pvc == b->last_beat_pvc && a->last_r == b->last_r && a->prev_r == b->prev_r &&
+           a->next_r == b->next_r && a->rr == b->rr && a->breath_phase == b->breath_phase &&
            a->breathing == b->breathing && a->o2_store == b->o2_store && a->pao2 == b->pao2 && a->sao2 == b->sao2 &&
            a->spo2_shown == b->spo2_shown && a->paco2 == b->paco2 && a->etco2 == b->etco2 &&
            a->lung_water == b->lung_water && a->pneumothorax == b->pneumothorax && a->apnea_time == b->apnea_time &&
@@ -219,6 +224,95 @@ static void test_replay(void)
     mem_free(b);
 }
 
+/* The menu's targets: each entry is listed under the body parts, organs or
+ * whole body it fits, and nowhere else. */
+static void test_targets(void)
+{
+    CHECK(HDBG_TARGET_COUNT == (int)BP_COUNT + (int)ORG_COUNT + 1);
+    for (int t = 0; t < HDBG_TARGET_COUNT; t++) {
+        const char *name = health_debug_target_name(t);
+        CHECK(name && name[0]);
+        int listed = 0;
+        for (int i = 0; i < HEALTH_DEBUG_COUNT; i++) listed += health_debug_fits(i, t);
+        CHECK(listed > 0 && listed <= 16); /* no empty page, and the menu fits the longest */
+    }
+    CHECK(health_debug_target_name(-1)[0] == '\0' && health_debug_target_name(HDBG_TARGET_COUNT)[0] == '\0');
+    for (int i = 0; i < HEALTH_DEBUG_COUNT; i++) {
+        int places = 0;
+        for (int t = 0; t < HDBG_TARGET_COUNT; t++) places += health_debug_fits(i, t);
+        CHECK(places > 0); /* every entry reachable */
+    }
+    const int cut = health_debug_find("bleed"), disloc = health_debug_find("dislocation");
+    const int conc = health_debug_find("concussion"), vf = health_debug_find("vfib");
+    const int kid = health_debug_find("kidney-failure"), hypo = health_debug_find("hypothermia");
+    for (int p = 0; p < BP_COUNT; p++) CHECK(health_debug_fits(cut, p));
+    CHECK(!health_debug_fits(cut, HDBG_TARGET_ORGAN + ORG_HEART) && !health_debug_fits(cut, HDBG_TARGET_BODY));
+    CHECK(health_debug_fits(disloc, BP_LARM) && health_debug_fits(disloc, BP_RARM) &&
+          !health_debug_fits(disloc, BP_LLEG));
+    CHECK(health_debug_fits(conc, BP_HEAD) && health_debug_fits(conc, HDBG_TARGET_ORGAN + ORG_BRAIN));
+    CHECK(!health_debug_fits(conc, BP_CHEST));
+    CHECK(health_debug_fits(vf, HDBG_TARGET_ORGAN + ORG_HEART) && !health_debug_fits(vf, BP_CHEST));
+    CHECK(health_debug_fits(kid, HDBG_TARGET_ORGAN + ORG_KIDNEYS) && !health_debug_fits(kid, HDBG_TARGET_BODY));
+    CHECK(health_debug_fits(hypo, HDBG_TARGET_BODY) && !health_debug_fits(hypo, BP_HEAD));
+    CHECK(!health_debug_fits(-1, 0) && !health_debug_fits(cut, -1) && !health_debug_fits(cut, HDBG_TARGET_COUNT));
+    /* The part a target hands to health_injure: itself for a body part,
+     * none (-1, the entry's default) for organs and the whole body. */
+    CHECK(health_debug_target_part(BP_RLEG) == BP_RLEG);
+    CHECK(health_debug_target_part(HDBG_TARGET_ORGAN + ORG_LUNGS) == -1);
+    CHECK(health_debug_target_part(HDBG_TARGET_BODY) == -1);
+}
+
+/* The status line beside the figure says what is wrong with the target. */
+static void test_describe(void)
+{
+    health *h = new_body(7);
+    char buf[160] = {0};
+    health_debug_describe(h, BP_LLEG, buf, sizeof buf);
+    CHECK(strstr(buf, "intact") != NULL);
+    health_injure(h, health_debug_find("artery"), BP_LLEG);
+    health_injure(h, health_debug_find("fracture"), BP_LLEG);
+    health_debug_describe(h, BP_LLEG, buf, sizeof buf);
+    CHECK(strstr(buf, "bleeding") != NULL && strstr(buf, "fracture") != NULL);
+    health_debug_describe(h, BP_RLEG, buf, sizeof buf);
+    CHECK(strstr(buf, "bleeding") == NULL);
+    health_injure(h, health_debug_find("kidney-failure"), -1);
+    health_debug_describe(h, HDBG_TARGET_ORGAN + ORG_KIDNEYS, buf, sizeof buf);
+    CHECK(strstr(buf, "function") != NULL && strstr(buf, "%") != NULL);
+    health_debug_describe(h, HDBG_TARGET_BODY, buf, sizeof buf);
+    CHECK(strstr(buf, "BP") != NULL && strstr(buf, "HR") != NULL);
+    char tiny[4] = {0};
+    health_debug_describe(h, BP_LLEG, tiny, sizeof tiny); /* truncates, stays terminated */
+    CHECK(strlen(tiny) < sizeof tiny);
+    health_injure(h, health_debug_find("concussion"), -1);
+    health_debug_describe(h, BP_HEAD, buf, sizeof buf);
+    CHECK(strstr(buf, "bruised") != NULL); /* the figure shades it, so the line must say why */
+    health_debug_describe(h, -5, buf, sizeof buf);
+    CHECK(buf[0] == '\0');
+    mem_free(h);
+}
+
+/* The figure's shading: an untouched body is clear everywhere, and each
+ * injury lights up the target it was put on, worse injuries brighter. */
+static void test_severity(void)
+{
+    health *h = new_body(9);
+    for (int t = 0; t < HDBG_TARGET_COUNT; t++) CHECK(health_debug_severity(h, t) == 0);
+    CHECK(health_debug_severity(h, -1) == 0 && health_debug_severity(h, HDBG_TARGET_COUNT) == 0);
+    health_injure(h, health_debug_find("pain"), BP_RARM);
+    CHECK(health_debug_severity(h, BP_RARM) == 1);
+    health_injure(h, health_debug_find("fracture"), BP_LARM);
+    CHECK(health_debug_severity(h, BP_LARM) == 2);
+    health_injure(h, health_debug_find("artery"), BP_RLEG);
+    CHECK(health_debug_severity(h, BP_RLEG) == 3);
+    CHECK(health_debug_severity(h, BP_HEAD) == 0);
+    health_injure(h, health_debug_find("liver-failure"), -1);
+    CHECK(health_debug_severity(h, HDBG_TARGET_ORGAN + ORG_LIVER) == 3);
+    CHECK(health_debug_severity(h, HDBG_TARGET_ORGAN + ORG_LUNGS) == 0);
+    health_injure(h, health_debug_find("vfib"), -1);
+    CHECK(health_debug_severity(h, HDBG_TARGET_BODY) == 3);
+    mem_free(h);
+}
+
 void test_health_debug_all(void)
 {
     test_table_well_formed();
@@ -226,4 +320,7 @@ void test_health_debug_all(void)
     test_each_kind_persists();
     test_wound_cap();
     test_replay();
+    test_targets();
+    test_describe();
+    test_severity();
 }

@@ -131,6 +131,9 @@ set(MC_CORE_SOURCES
   src/render/gpucaps.c
   src/render/gpupool.c
   src/health/health.c
+  src/health/circulation.c
+  src/health/conduction.c
+  src/health/autonomic.c
   src/ui/hud.c
   src/health/thoughts.c
   src/game/interact.c
@@ -162,6 +165,7 @@ set(MC_CORE_SOURCES
   src/sim/physics.c
   src/core/png.c
   src/game/recoil.c
+  src/game/impair.c
   src/game/gamemode.c
   src/save/save.c
   src/save/save_db.c
@@ -264,8 +268,8 @@ if(MC_BUILD_TESTS)
   add_executable(mc_tests tests/test_main.c tests/test_util.c tests/test_thermo.c tests/test_health2.c
                           tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_audition.c tests/test_gpucaps.c tests/test_light.c tests/test_itemmodel.c
                           tests/test_lightfx.c tests/test_bloom.c
-                          tests/test_health_debug.c tests/test_thoughts.c tests/test_drugs.c tests/test_faint.c tests/test_fear.c tests/test_dark.c tests/test_lamps.c tests/test_shadow.c tests/test_mobmodel.c tests/test_avatar.c tests/test_defib.c tests/test_paths.c
-                          tests/test_save_db.c tests/test_worlds.c tests/test_backups.c tests/test_hud.c tests/test_cardio.c
+                          tests/test_health_debug.c tests/test_thoughts.c tests/test_drugs.c tests/test_faint.c tests/test_fear.c tests/test_conscious.c tests/test_impair.c tests/test_dark.c tests/test_lamps.c tests/test_shadow.c tests/test_mobmodel.c tests/test_avatar.c tests/test_defib.c tests/test_paths.c
+                          tests/test_save_db.c tests/test_worlds.c tests/test_backups.c tests/test_hud.c tests/test_cardio.c tests/test_circulation.c tests/test_conduction.c tests/test_autonomic.c
                           tests/test_discord.c tests/test_netcrypto.c tests/test_wire.c tests/test_net.c tests/test_mp.c
                           tests/test_worldgen.c tests/test_noise.c tests/test_trees.c tests/test_treetex.c tests/test_edge.c tests/test_tools.c tests/test_materials.c
                           tests/test_strata.c tests/test_fluid.c tests/test_liquids.c
@@ -274,12 +278,16 @@ if(MC_BUILD_TESTS)
                           tests/test_body_risks.c tests/test_png.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)
-  # Under qemu user emulation (cross builds) the suite runs several times
-  # slower than on the hardware.
+  # Under qemu user emulation (cross builds) and the sanitizers the suite
+  # runs several times slower than a plain build. A plain build takes 70 to
+  # 90 s on GitHub's shared macOS runners and over 120 s on a slow one, so
+  # it gets room to grow.
   if(CMAKE_CROSSCOMPILING_EMULATOR)
     set(_mc_unit_timeout 600)
+  elseif(MC_SANITIZE)
+    set(_mc_unit_timeout 360)
   else()
-    set(_mc_unit_timeout 120)
+    set(_mc_unit_timeout 300)
   endif()
   set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT ${_mc_unit_timeout})
 

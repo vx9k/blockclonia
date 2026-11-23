@@ -71,7 +71,8 @@ typedef struct {
     int playable;
 } menu_world;
 
-#define MENU_MAX_ITEMS 40
+#define MENU_MAX_ITEMS 64
+#define MENU_DEBUG_TARGETS 16 /* >= HDBG_TARGET_COUNT */
 #define SETTINGS_TABS 4 /* the debug health screen lists every HEALTH_DEBUG_KINDS entry */
 
 typedef struct {
@@ -95,6 +96,12 @@ typedef struct {
      * only hands back which of HEALTH_DEBUG_KINDS was clicked. */
     int debug_part;
     int debug_kind;
+    /* The figure's selection (health.h's HDBG targets: parts, organs,
+     * whole body), each target's severity 0..3 and a line on the
+     * selected one's state, both filled by main.c every frame. */
+    int debug_target;
+    uint8_t debug_sev[MENU_DEBUG_TARGETS];
+    char debug_status[160];
     /* World screens: the list main.c fills on MENU_WORLDS, the selected
      * row, the first row shown, the text being typed and a line saying
      * what went wrong last. */

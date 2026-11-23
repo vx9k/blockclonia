@@ -95,6 +95,8 @@ void test_thoughts_all(void);
 void test_drugs_all(void);
 void test_faint_all(void);
 void test_fear_all(void);
+void test_conscious_all(void);
+void test_impair_all(void);
 void test_dark_all(void);
 void test_lamps_all(void);
 void test_shadow_all(void);
@@ -105,5 +107,8 @@ void test_strata_all(void);
 void test_fluid_all(void);
 void test_liquids_all(void);
 void test_itemmodel_all(void);
+void test_circulation_all(void);
+void test_conduction_all(void);
+void test_autonomic_all(void);
 
 #endif

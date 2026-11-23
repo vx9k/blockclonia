@@ -29,13 +29,13 @@ static void test_faint_standing(void)
         live(h, &e, 1.0);
         low_hr = h->hr < low_hr ? h->hr : low_hr;
         low_map = h->map < low_map ? h->map : low_map;
-        if (h->conscious == CONS_UNCONSCIOUS) out_at = s;
+        if (!health_awake(h)) out_at = s;
     }
     CHECK(out_at >= 8 && out_at <= 22);
     CHECK(low_hr < 45.0f && low_map < 40.0f);
     CHECK(logged(h, "Lost consciousness"));
     live(h, &e, 15.0);
-    CHECK(h->conscious != CONS_UNCONSCIOUS && h->map > 75.0f && h->vagal < 0.3f);
+    CHECK(health_awake(h) && h->map > 75.0f && h->vagal < 0.3f);
     live(h, &e, 30.0);
     CHECK(h->vagal < 0.05f && h->faint_drive == 0.0f && !h->dead);
     mem_free(h);
@@ -51,7 +51,7 @@ static void test_faint_crouched(void)
     float low_map = 1e3f;
     for (int s = 0; s < 40; s++) {
         live(h, &e, 1.0);
-        CHECK(h->conscious != CONS_UNCONSCIOUS);
+        CHECK(health_awake(h));
         low_map = h->map < low_map ? h->map : low_map;
     }
     CHECK(low_map > 60.0f && low_map < 85.0f);

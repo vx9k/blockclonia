@@ -443,40 +443,100 @@ static void controls_screen(ctx *c)
     if (button(c, x + w - 8 - 90, y + h - 8 - ROW_H, 90, "Back")) menu_open(m, m->back_to);
 }
 
-/* Trigger any injury the body model supports, on a chosen part, plus a
- * heal/reset: for testing bleeding, fractures, burns and the rest without
- * having to get hurt first. Opened straight from gameplay (K, with the F3
+/* Trigger any injury the body model supports, plus a heal/reset: for
+ * testing bleeding, fractures, burns, organ failure and the rest without
+ * having to get hurt first. The left side is the body: a figure whose
+ * parts are clicked to pick them, tinted by how badly each is hurt, with
+ * the organs and the whole body below it. The right side lists only what
+ * fits the picked target. Opened straight from gameplay (K, with the F3
  * overlay up), so it has no back_to to return to: Back and Esc both just
- * resume. Doesn't touch health.h's health struct: it only hands the
- * caller an index into HEALTH_DEBUG_KINDS through m->debug_kind. */
-/* The part selector, every entry, Heal and Back each hold a hover slot. */
-_Static_assert(HEALTH_DEBUG_COUNT + 3 <= MENU_MAX_ITEMS, "raise MENU_MAX_ITEMS for the debug health screen");
+ * resume. Doesn't touch health.h's health struct: main.c fills the
+ * severities and the status line, and MENU_DEBUG_INJURE hands back an
+ * index into HEALTH_DEBUG_KINDS through m->debug_kind. */
+_Static_assert(HDBG_TARGET_COUNT <= MENU_DEBUG_TARGETS, "raise MENU_DEBUG_TARGETS");
+/* Every target, the longest page of entries, Heal and Back each hold a
+ * hover slot; 16 is more than any target's page. */
+_Static_assert(HDBG_TARGET_COUNT + 16 + 2 <= MENU_MAX_ITEMS, "raise MENU_MAX_ITEMS for the debug health screen");
+
+static const uint32_t SEV_COL[4] = {PAL_SEV0, PAL_SEV1, PAL_SEV2, PAL_SEV3};
+
+/* One pickable target: a part of the figure (no label) or an organ row. */
+static void debug_target(ctx *c, float x, float y, float w, float h, int target, const char *label)
+{
+    menu *m = c->m;
+    int hot = 0;
+    int i = item(c, x, y, w, h, &hot);
+    float dx = 0.0f, a = entry(c, i, &dx);
+    float hv = hover_of(c, i);
+    int sel = m->debug_target == target;
+    uint32_t sev = SEV_COL[m->debug_sev[target] & 3u];
+    if (label) {
+        cell(c->u, x + dx, y, w, h, sel ? 1.0f : hv, a);
+        ui_rect(c->u, x + dx + 7, y + 6, 6, 6, ui_alpha(sev, a));
+        ui_text(c->u, x + dx + 17, y + 6, 1, ui_alpha(pal_mix(C_TEXT, C_HEAD, hv), a), label);
+    } else {
+        /* A limb is its severity colour, dim when fine so a hurt part
+         * stands out at a glance. */
+        float lit = m->debug_sev[target] ? 0.85f : 0.35f;
+        ui_rect(c->u, x + dx, y, w, h, ui_alpha(pal_mix(C_BACK, sev, lit + 0.15f * hv), a));
+        ui_frame(c->u, x + dx, y, w, h, 1, ui_alpha(sel ? C_HEAD : pal_mix(C_BORDER, C_ECG, hv), a));
+    }
+    if (sel && label) ui_frame(c->u, x + dx, y, w, h, 1, ui_alpha(C_HEAD, a));
+    if ((hot && c->in->click) || c->activate == i) {
+        m->debug_target = target;
+        m->debug_part = health_debug_target_part(target);
+        c->m->clicked = 1;
+    }
+}
 
 static void debug_health_screen(ctx *c)
 {
     ui *u = c->u;
     menu *m = c->m;
     ui_rect(u, 0, 0, u->w, u->h, ui_rgba(0, 0, 0, (int)(150.0f * ease_out_cubic(m->age / 0.25f))));
+    if (m->debug_target < 0 || m->debug_target >= HDBG_TARGET_COUNT) m->debug_target = 0;
     float x = 0.0f, y = 0.0f;
-    /* Three columns keep every entry on a 640x360 screen. */
-    const int cols = 3, rows = (HEALTH_DEBUG_COUNT + cols - 1) / cols;
-    const float w = 620, h = 44 + (float)rows * ROW_H + 6 + ROW_H + 8;
+    const float w = 620, h = 304;
     panel(u, m->age, w, h, &x, &y, "DEBUG: HEALTH");
-    static const char *const PARTS[BP_COUNT] = {"Head",      "Chest",    "Abdomen",  "Left arm",
-                                                "Right arm", "Left leg", "Right leg"};
-    float rx = x + 8, rw = w - 16, ry = y + 22;
-    cycle(c, rx, ry, rw, "Part (for entries that need one)", &m->debug_part, PARTS, BP_COUNT);
-    ry += 22;
-    const float bw = (rw - 6.0f * (float)(cols - 1)) / (float)cols;
+
+    /* The figure, facing the viewer: the body's left is on screen right. */
+    const float lw = 150, cx = x + 8 + lw * 0.5f, fy = y + 24;
+    static const struct {
+        float x, y, w, h;
+    } FIG[BP_COUNT] = {
+        [BP_HEAD] = {-12, 0, 24, 24},   [BP_CHEST] = {-22, 27, 44, 40}, [BP_ABDOMEN] = {-22, 70, 44, 30},
+        [BP_LARM] = {25, 27, 14, 66},   [BP_RARM] = {-39, 27, 14, 66},  [BP_LLEG] = {2, 103, 19, 70},
+        [BP_RLEG] = {-21, 103, 19, 70},
+    };
+    for (int p = 0; p < BP_COUNT; p++) debug_target(c, cx + FIG[p].x, fy + FIG[p].y, FIG[p].w, FIG[p].h, p, NULL);
+    ui_text(u, x + 8, fy + 178, 1, C_DIM, "ORGANS");
+    const float ow = (lw - 4) * 0.5f;
+    for (int o = 0; o < ORG_COUNT; o++) {
+        const int col = o % 2, row = o / 2; /* two to a row */
+        debug_target(c, x + 8 + (float)col * (ow + 4), fy + 190 + (float)row * ROW_H, ow, ROW_H, HDBG_TARGET_ORGAN + o,
+                     health_debug_target_name(HDBG_TARGET_ORGAN + o));
+    }
+    debug_target(c, x + 8, fy + 190 + 3 * ROW_H + 4, lw, ROW_H, HDBG_TARGET_BODY,
+                 health_debug_target_name(HDBG_TARGET_BODY));
+
+    /* What is wrong with the target, then what can be done to it. */
+    const float rx = x + 8 + lw + 12, rw = w - (rx - x) - 8;
+    ui_rect(u, rx - 6, y + 20, 1, h - 26, C_BORDER);
+    ui_text(u, rx, y + 22, 1, SEV_COL[m->debug_sev[m->debug_target] & 3u], health_debug_target_name(m->debug_target));
+    ui_text(u, rx, y + 34, 1, C_TEXT, m->debug_status);
+    const float bw = (rw - 6) * 0.5f;
+    int shown = 0;
     for (int i = 0; i < HEALTH_DEBUG_COUNT; i++) {
-        int row = i / cols; /* integer grid position, not a fraction */
-        float bx = rx + (float)(i % cols) * (bw + 6), by = ry + (float)row * ROW_H;
+        if (!health_debug_fits(i, m->debug_target)) continue;
+        const int col = shown % 2, row = shown / 2; /* two to a row */
+        float bx = rx + (float)col * (bw + 6), by = y + 50 + (float)row * ROW_H;
+        shown++;
         if (button(c, bx, by, bw, HEALTH_DEBUG_KINDS[i].label)) {
             m->debug_kind = i;
             c->action = MENU_DEBUG_INJURE;
         }
     }
-    float by = ry + (float)rows * ROW_H + 6;
+    float by = y + h - 8 - ROW_H;
     if (button(c, rx, by, bw, "Heal (reset to new)")) c->action = MENU_DEBUG_RESET;
     if (button(c, rx + bw + 6, by, bw, "Back")) c->action = MENU_RESUME;
 }

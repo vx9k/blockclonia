@@ -14,6 +14,7 @@
 #include "gamemode.h"
 #include "health.h"
 #include "hud.h"
+#include "impair.h"
 #include "interact.h"
 #include "inventory.h"
 #include "invui.h"
@@ -997,12 +998,14 @@ typedef struct {
     viewmodel vm;
     entity_instance vm_ents[VIEWMODEL_MAX];
     avatar_anim avatars[NET_MAX_PLAYERS]; /* the other players' strides, by player id */
+    avatar_anim self_anim;                /* this player's own, seen looking down */
     figure figs[MAX_FIGURES];             /* --figures */
     int nfigs;
     float eat_anim;           /* 1 at the start of eating, easing to 0 */
     float aim;                /* 0 rifle at the hip .. 1 down its sights */
     float flash;              /* the last muzzle flash's light, 1 when fired, fading */
     recoil rc;                /* the muzzle's climb and the hold bringing it back */
+    impair imp;               /* a clouded mind's lag, fumbles and stumbles */
     world_rules rules;        /* the world's mode and whether it may switch */
     float bolt_t;             /* 0..1 through the cycle after a shot, 1 when done */
     float fog[3];             /* the fog's colour, easing toward the light at the eye */
@@ -1163,7 +1166,9 @@ static void sound_body(game *g, double dt)
 /* Once a frame: the ears, the ambience and the body's own sounds. */
 static void frame_sound(game *g, double dt, const render_view *v)
 {
-    sound_listener(g->snd, v->eye, v->yaw, v->pitch, v->underwater);
+    /* Out cold, the world reaches the ears as through water. */
+    sound_listener(g->snd, v->eye, v->yaw, v->pitch,
+                   v->underwater || (mode_body(g->pl.mode) && !g->hl.dead && !health_awake(&g->hl)));
     int on_title = g->backdrop;
     float wind = wind_level(&g->w, &g->pl, v->eye), water = water_level(&g->w, &g->pl, v->eye);
     sound_ambience(g->snd, wind * (on_title ? 0.6f : 1.0f), water);
@@ -1413,6 +1418,8 @@ static void open_world(game *g, const char *dir, int backdrop)
              jobs_worker_count(g->js));
 
     health_init_varied(&g->hl, g->seed ^ 0x9E3779B9u);
+    impair_init(&g->imp, g->seed);
+    health_settle(&g->hl);
     if (o->hurt && !backdrop) apply_hurt(&g->hl, o->hurt);
 
     fx_init(g->fx, g->seed);
@@ -1806,9 +1813,10 @@ static void frame_menus(game *g, double dt)
     else if (!g_in.panel && g->panel_was_open && !g_in.inv_open && !g->in_menu) set_captured(g->win, 1);
     g->panel_was_open = g_in.panel;
     if (g->hl.dead) g_in.inv_open = 0;
-    /* The panel, death and unconsciousness freeze the player's input. */
-    g->frozen = g->in_menu || g_in.panel || g_in.inv_open || g_in.chat_open || g->hl.dead ||
-                g->hl.conscious == CONS_UNCONSCIOUS;
+    /* The panel, death and unconsciousness freeze the player's input, and
+     * so does coming round on the ground after a faint. */
+    g->frozen = g->in_menu || g_in.panel || g_in.inv_open || g_in.chat_open || g->hl.dead || !health_awake(&g->hl) ||
+                g->hl.down > 0.0f;
     if (g->frozen) g_in.mouse_dx = g_in.mouse_dy = 0;
 }
 
@@ -1825,7 +1833,7 @@ static int held_gun(game *g)
 }
 
 /* Looking, the hotbar and the movement keys. */
-static player_input frame_input(game *g)
+static player_input frame_input(game *g, double now, double dt)
 {
     const settings *st = &g->st;
     player *pl = &g->pl;
@@ -1834,10 +1842,6 @@ static player_input frame_input(game *g)
     const float sens = 0.0022f * (float)st->sensitivity / 100.0f * aim_zoom(g->aim);
     g->look_dx = (float)g_in.mouse_dx * sens;
     g->look_dy = (float)g_in.mouse_dy * sens;
-    pl->yaw += g->look_dx;
-    pl->pitch -= g->look_dy * (st->invert_y ? -1.0f : 1.0f);
-    pl->pitch = clampf(pl->pitch, -1.55f, 1.55f);
-    pl->yaw = fmodf(pl->yaw, (float)(2 * MC_PI));
     g_in.mouse_dx = g_in.mouse_dy = 0;
     if (g_in.scroll != 0) {
         if (g_in.inv_open) {
@@ -1866,6 +1870,26 @@ static player_input frame_input(game *g)
     if (!st->sprint_toggle) g_in.sprint_latch = 0;
     in.sprint = (st->sprint_toggle ? g_in.sprint_latch : g_in.keys[GLFW_KEY_LEFT_CONTROL]) || g_in.sprint_tap;
     if (g->frozen) memset(&in, 0, sizeof in);
+    /* A clouded mind acts on the player's hands late and not always: the
+     * look, the keys and the clicks all pass through it together. */
+    if (mode_body(pl->mode) && !g->in_menu) {
+        const health_senses hs = health_get_senses(&g->hl);
+        impair_frame f = {.move = in,
+                          .look_dx = g->look_dx,
+                          .look_dy = g->look_dy,
+                          .click_break = g_in.click_break,
+                          .click_place = g_in.click_place};
+        f = impair_step(&g->imp, &f, hs.lag, hs.drop, hs.stumble, now, (float)dt);
+        in = f.move;
+        g->look_dx = f.look_dx;
+        g->look_dy = f.look_dy;
+        g_in.click_break = f.click_break > 0;
+        g_in.click_place = f.click_place > 0;
+    }
+    pl->yaw += g->look_dx;
+    pl->pitch -= g->look_dy * (st->invert_y ? -1.0f : 1.0f);
+    pl->pitch = clampf(pl->pitch, -1.55f, 1.55f);
+    pl->yaw = fmodf(pl->yaw, (float)(2 * MC_PI));
     return in;
 }
 
@@ -2098,6 +2122,7 @@ static void frame_interact(game *g, double dt)
             }
             gamemode_apply(pl, gamemode_after_death(pl->mode));
             health_init_varied(&g->hl, g->seed ^ (uint32_t)g->frame * 2654435761u);
+            health_settle(&g->hl);
             inv_starting_kit(&g->inv);
             g->hs.alert_count = 0;
             g_in.panel = 0;
@@ -2162,6 +2187,27 @@ static void add_figures(game *g, dvec3 eye, const lightfx_frame *lf, float dt, i
     }
 }
 
+/* The player's own body, seen from its eyes: the figure the others see,
+ * without the head (the camera is in it) or the arms (the view model draws
+ * them), standing where the player stands. The camera's bob and lean move
+ * the view, not the body. */
+static void add_self(game *g, dvec3 eye, double alpha, const lightfx_frame *lf, float dt, int *n_op, int n_tr)
+{
+    if (RENDER_MAX_ENTS - *n_op - n_tr < AVATAR_BOXES) return;
+    const player *pl = &g->pl;
+    dvec3 ip = dv3_lerp(pl->prev_pos, pl->pos, alpha);
+    avatar_anim_update(&g->self_anim, ip.x, ip.z, pl->sneaking, pl->flying, dt);
+    memmove(g->ents + *n_op + AVATAR_BOXES, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
+    const float at[3] = {(float)(ip.x - eye.x), 0.0f, (float)(ip.z - eye.z)};
+    float rgb[3] = {1.0f, 1.0f, 1.0f};
+    float lit = figure_light(g, lf, eye, dv3(ip.x, ip.y + 1.0, ip.z), rgb);
+    int k = avatar_build_self(&g->self_anim, at, (float)(ip.y - eye.y), pl->yaw, pl->pitch, lit, g->ents + *n_op,
+                              AVATAR_BOXES);
+    memmove(g->ents + *n_op + k, g->ents + *n_op + AVATAR_BOXES, sizeof g->ents[0] * (size_t)n_tr);
+    entity_shine(g->ents + *n_op, k, rgb);
+    *n_op += k;
+}
+
 /* Creatures as figures among the opaque entities: the ones simulated here,
  * or on a client the ones the host last sent. */
 static void add_mobs(game *g, dvec3 eye, double alpha, const lightfx_frame *lf, double now, int *n_op, int n_tr)
@@ -2198,6 +2244,8 @@ static void add_tracers(game *g, dvec3 eye, double alpha, int *n_op, int n_tr)
     memcpy(g->ents + *n_op, t, sizeof t[0] * (size_t)k);
     *n_op += k;
 }
+
+_Static_assert(VIEWMODEL_MAX <= RENDER_MAX_VIEW_MODEL, "the renderer draws every part of the view model");
 
 /* Camera, sky, entities and the first-person arm for the renderer. */
 static render_view build_view(game *g, double now, double dt, double alpha)
@@ -2238,6 +2286,9 @@ static render_view build_view(game *g, double now, double dt, double alpha)
         v.pitch += sway * 0.02f * sinf((float)now * 0.71f + 0.5f);
         v.blur = hs.blur;
         v.doubled = hs.doubled;
+        v.grey = hs.grey;
+        v.tunnel = hs.tunnel;
+        v.dim = hs.dim;
     }
     uint8_t eye_block = world_get(&g->w, (int)floor(v.eye.x), (int)floor(v.eye.y), (int)floor(v.eye.z));
     v.underwater = block_fluid(eye_block);
@@ -2303,6 +2354,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     if (g->mp) add_players(g, v.eye, alpha, now, &v.lfx, (float)dt, &n_op, n_tr);
     if (!on_title) {
         add_figures(g, v.eye, &v.lfx, (float)dt, &n_op, n_tr);
+        if (mode_hands(g->pl.mode) && !g->hl.dead) add_self(g, v.eye, alpha, &v.lfx, (float)dt, &n_op, n_tr);
         add_mobs(g, v.eye, alpha, &v.lfx, now, &n_op, n_tr);
         add_tracers(g, v.eye, alpha, &n_op, n_tr);
     }
@@ -2592,6 +2644,10 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     g->mn.can_open = !g->backdrop && !g->mp && !g->client;
     g->mn.can_switch = !g->backdrop && !g->client && g->rules.cheats && !g->rules.hardcore;
     g->mn.mode_now = mode_name(g->pl.mode);
+    if (g->mn.screen == SCREEN_DEBUG_HEALTH) {
+        for (int t = 0; t < HDBG_TARGET_COUNT; t++) g->mn.debug_sev[t] = (uint8_t)health_debug_severity(&g->hl, t);
+        health_debug_describe(&g->hl, g->mn.debug_target, g->mn.debug_status, sizeof g->mn.debug_status);
+    }
     menu_action act = menu_frame(&g->mn, u, &mi, &g->st);
     switch (act) {
     case MENU_RESUME:
@@ -2662,6 +2718,7 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     case MENU_DEBUG_INJURE: health_injure(&g->hl, g->mn.debug_kind, g->mn.debug_part); break;
     case MENU_DEBUG_RESET:
         health_init_varied(&g->hl, g->seed ^ (uint32_t)g->frame * 2654435761u);
+        health_settle(&g->hl);
         log_info("debug menu: health reset");
         break;
     default: break;
@@ -2983,7 +3040,7 @@ int main(int argc, char **argv)
             g_in.chat[0] = '\0';
         }
         frame_menus(g, dt);
-        player_input in = frame_input(g);
+        player_input in = frame_input(g, now, dt);
         frame_simulate(g, &in, dt);
         frame_interact(g, dt);
         if (g->o.demo) demo_step(&g->w, &g->ph, g->fx, &g->pl, &g->demo, g->frame);

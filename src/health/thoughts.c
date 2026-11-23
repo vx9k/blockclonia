@@ -308,7 +308,7 @@ static int level_inside(const health *h, int f)
         return l;
     }
     case FEEL_DAZED: {
-        int l = h->conscious == CONS_CONFUSED || h->confusion > 0.0f ? 2 : 0;
+        int l = health_impaired(h) || h->confusion > 0.0f ? 2 : 0;
         return maxi(l, grade(1.0f - h->organ[ORG_BRAIN], 0.2f, 0.45f, 0.7f));
     }
     case FEEL_THIRST: return grade(1.0f - health_hydration(h), 0.5f, 0.65f, 0.85f);
@@ -328,7 +328,7 @@ static int level_inside(const health *h, int f)
 
 int thoughts_level(const health *h, int f)
 {
-    if (h->dead || h->conscious == CONS_UNCONSCIOUS || f < 0 || f >= FEEL_COUNT) return 0;
+    if (h->dead || !health_awake(h) || f < 0 || f >= FEEL_COUNT) return 0;
     return maxi(maxi(level_body(h, f), level_heat(h, f)), level_inside(h, f));
 }
 
@@ -360,7 +360,7 @@ static int say(thoughts *t, const health *h, int f, int level)
     }
     out[o] = '\0';
     /* A muddled mind trails off. */
-    if (l->voice == VOICE_INNER && h->conscious == CONS_CONFUSED && o > 0 && out[o - 1] == '.' && o + 3 < THOUGHT_LEN)
+    if (l->voice == VOICE_INNER && health_impaired(h) && o > 0 && out[o - 1] == '.' && o + 3 < THOUGHT_LEN)
         memcpy(out + o, "..", 3);
 
     size_t len = strlen(out);
@@ -404,7 +404,7 @@ int thoughts_step(thoughts *t, const health *h, float dt)
     for (int f = 0; f < FEEL_COUNT; f++) t->since[f] += dt;
     float jump = h->hurt_flash - t->flash;
     t->flash = h->hurt_flash;
-    if (h->dead || h->conscious == CONS_UNCONSCIOUS) {
+    if (h->dead || !health_awake(h)) {
         go_quiet(t);
         return 0;
     }

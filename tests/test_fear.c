@@ -77,6 +77,39 @@ static void test_fear_rush(void)
     mem_free(calm);
 }
 
+/* Hunted for three minutes on a cold night, standing or jogging: fear
+ * raises the pulse and the pressure some tens of mmHg, as a defence
+ * reaction does, but never into a hypertensive emergency (the playtest's
+ * 239/183 jogging with a rush). */
+static void test_fear_pressure(void)
+{
+    float sbp_still = 0.0f, dbp_still = 0.0f, sbp_jog = 0.0f, dbp_jog = 0.0f, rise = 0.0f;
+    for (uint32_t seed = 4; seed <= 9; seed++) {
+        for (int jog = 0; jog <= 1; jog++) {
+            health *h = new_body(seed);
+            health_env e = calm_env();
+            e.air_temp = e.contact_temp = 8.0;
+            live(h, &e, 30.0);
+            const float hr0 = h->hr;
+            e.fear = 1.0f;
+            e.speed = jog ? 3.0 : 0.0;
+            float s_max = 0.0f, d_max = 0.0f;
+            for (int s = 0; s < 180; s++) {
+                live(h, &e, 1.0);
+                s_max = fmaxf(s_max, h->sbp);
+                d_max = fmaxf(d_max, h->dbp);
+            }
+            if (!jog) rise += (h->hr - hr0) / 6.0f;
+            *(jog ? &sbp_jog : &sbp_still) = fmaxf(jog ? sbp_jog : sbp_still, s_max);
+            *(jog ? &dbp_jog : &dbp_still) = fmaxf(jog ? dbp_jog : dbp_still, d_max);
+            mem_free(h);
+        }
+    }
+    CHECK(sbp_still < 180.0f && dbp_still < 125.0f);
+    CHECK(sbp_jog < 215.0f && dbp_jog < 110.0f);
+    CHECK(rise > 15.0f); /* still a fright: the pulse climbs */
+}
+
 /* One startle per fright: a hunt that goes on does not keep restarting
  * the surge, it only keeps the steady release going. */
 static void test_fear_once(void)
@@ -122,7 +155,7 @@ static void test_fear_unconscious(void)
     health_env e = calm_env();
     h->concussion = 120.0f;
     live(h, &e, 1.0);
-    CHECK(h->conscious == CONS_UNCONSCIOUS);
+    CHECK(!health_awake(h));
     e.fear = 1.0f;
     live(h, &e, 30.0);
     CHECK(h->fear == 0.0f && h->catechol < 0.1f);
@@ -168,6 +201,7 @@ void test_fear_all(void)
     test_fear_mobs();
     test_fear_rush();
     test_fear_once();
+    test_fear_pressure();
     test_fear_fades();
     test_fear_unconscious();
     test_fear_feel();
