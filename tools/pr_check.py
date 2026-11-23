@@ -18,7 +18,7 @@ HUNK = re.compile(r'@@ -\S+ \+(\d+)(?:,(\d+))? @@')
 # The modules AGENTS.md keeps out of the headless build: only a window, a GPU
 # or an audio device runs them, so no unit test can reach their lines, and
 # they count for neither side. The shaders run only on the GPU.
-UNTESTABLE = {'src/main.c', 'src/renderer.c', 'src/audio_device.c'}
+UNTESTABLE = {'src/game/main.c', 'src/render/renderer.c', 'src/audio/audio_device.c'}
 C_SUFFIXES = ('.c', '.h')
 
 

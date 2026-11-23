@@ -2,7 +2,7 @@
 // with SHADOWS defined for the sun's shadow map (shadow.h).
 #include "push_vert.glsl"
 
-// One packed uint per vertex; layout documented in src/mesher.h.
+// One packed uint per vertex; layout documented in src/render/mesher.h.
 layout(location = 0) in uint v_data;
 // Section min corner relative to the camera, one per draw (firstInstance).
 layout(location = 1) in vec3 i_origin;

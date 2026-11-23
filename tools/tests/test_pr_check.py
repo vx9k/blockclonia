@@ -57,8 +57,8 @@ class Title(unittest.TestCase):
 
 class Kind(unittest.TestCase):
     def test_sources_and_headers_are_code(self):
-        self.assertEqual(pr_check.kind('src/physics.c'), 'code')
-        self.assertEqual(pr_check.kind('src/physics.h'), 'code')
+        self.assertEqual(pr_check.kind('src/sim/physics.c'), 'code')
+        self.assertEqual(pr_check.kind('src/sim/physics.h'), 'code')
 
     def test_test_files_and_fuzz_targets_are_tests(self):
         self.assertEqual(pr_check.kind('tests/test_thermo.c'), 'test')
@@ -70,7 +70,7 @@ class Kind(unittest.TestCase):
         self.assertEqual(pr_check.kind('tools/tests/test_release.py'), 'test')
 
     def test_window_gpu_and_audio_modules_count_for_neither_side(self):
-        for path in ['src/main.c', 'src/renderer.c', 'src/audio_device.c', 'shaders/block.frag',
+        for path in ['src/game/main.c', 'src/render/renderer.c', 'src/audio/audio_device.c', 'shaders/block.frag',
                      'shaders/push_vert.glsl']:
             self.assertIsNone(pr_check.kind(path), path)
 
@@ -148,10 +148,10 @@ class Counting(unittest.TestCase):
         files = {
             'src/a.c': '// comment\nint a = 0;\n\nint b = 0;\n',
             'tests/test_a.c': 'CHECK(a == 0);\n/* c */\n',
-            'src/renderer.c': 'vkCmdDraw(cb, 3, 1, 0, 0);\n',
+            'src/render/renderer.c': 'vkCmdDraw(cb, 3, 1, 0, 0);\n',
             'README.md': 'words\n',
         }
-        added = {'src/a.c': [1, 2, 3, 4], 'tests/test_a.c': [1, 2], 'src/renderer.c': [1], 'README.md': [1]}
+        added = {'src/a.c': [1, 2, 3, 4], 'tests/test_a.c': [1, 2], 'src/render/renderer.c': [1], 'README.md': [1]}
         self.assertEqual(pr_check.count(added, files.__getitem__), (1, 2, 1))
 
     def test_lines_past_the_end_are_ignored(self):
@@ -234,7 +234,7 @@ class EndToEnd(unittest.TestCase):
         self.assertIn('add 1 more lines of tests', err)
 
     def test_renderer_lines_are_reported_but_not_required_to_have_tests(self):
-        self.write('src/renderer.c', 'void draw(void) {}\n')
+        self.write('src/render/renderer.c', 'void draw(void) {}\n')
         self.commit()
         status, out, _ = self.run_check('feat(renderer): draw')
         self.assertEqual(status, 0)

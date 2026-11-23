@@ -696,7 +696,7 @@ finds its own copy.
 
 ## Memory allocation
 
-Game code allocates through `src/mem.h`, which wraps mimalloc's `mi_*` API
+Game code allocates through `src/core/mem.h`, which wraps mimalloc's `mi_*` API
 and aborts cleanly on out-of-memory. mimalloc is linked first, so on Linux
 its shared library also overrides `malloc` for GLFW, the Vulkan loader, the
 GPU driver and miniaudio (`LD_DEBUG=bindings` confirms they bind to
@@ -705,7 +705,7 @@ available with `MC_VK_ALLOC=1` for platforms without the override. They
 are off by default because some drivers (Mesa lavapipe) free memory they
 did not allocate through the callbacks.
 
-The game sizes itself to the machine at start-up (`src/sysinfo.c`) and
+The game sizes itself to the machine at start-up (`src/core/sysinfo.c`) and
 logs what it found: cores, RAM and the memory available, and the CPU's
 cache sizes (from `/proc` and `/sys` on Linux, `sysctl` on macOS). From
 those it picks the number of worker threads (every core but the main
@@ -766,31 +766,24 @@ The unit tests (about 2400 checks, no window or GPU needed) cover:
 ## Layout
 
 ```
-src/main.c        entry point, input, the frame loop and glue
-src/renderer.c    Vulkan renderer      src/gpucaps.c   which Vulkan features to use
-src/world.c       column streaming, block access, job scheduling
-src/worldgen.c    terrain generation   src/noise.c     simplex noise
-src/mesher.c      greedy mesher with AO
-src/texgen.c      procedural textures  src/block.c     block materials
-src/physics.c     player, bodies, items, structure, water, raycast
-src/thermo.c      day clock, air temperature, heat field, fire, melting
-src/health.c      the body: circulation, breathing, injuries, treatment
-src/survival.c    turns physics and heat into injuries, limits movement
-src/interact.c    breaking, placing, buckets, dropping
-src/mob.c         boars and wolves     src/combat.c    blows and bullets
-src/inventory.c   slots, stacks, crafting      src/item.c   items and drops
-src/sound.c       mixer and voices     src/sound_synth.c   the synthesized bank
-src/audio_device.c  miniaudio output   (audio_null.c for silent builds)
-src/menu.c        title, pause, settings, controls screens
-src/hud.c         HUD, H panel, monitor            src/invui.c   hotbar and inventory screen
-src/debug.c       F3 overlay           src/ui.c        2D overlay batch and font
-src/camera.c      camera motion        src/viewmodel.c the first-person arm
-src/fx.c          debris, splashes and the entity list      src/anim.h   easing helpers
-src/settings.c    the settings file    src/save.c      column codec, file access
-src/save_db.c     world.db (SQLite)   src/discord.c   Discord status over its local IPC socket
-src/jobs.c        thread pool          src/gpupool.c   vertex pool allocator
-src/mem.c         mimalloc wrappers    src/log.c       logging, save-on-fatal hook
-src/bench.c       --bench
+src/              one folder per subsystem, each header beside its source
+  core/           memory (mimalloc wrappers), OS layer, logging, thread pool,
+                  machine sizing, paths, PNG, simplex noise, --bench
+  world/          column streaming and block access, terrain generation,
+                  trees, block materials, light propagation
+  sim/            physics (player, bodies, items, structure, water), fluid,
+                  heat and fire, the air, external ballistics
+  health/         the body (circulation, breathing, injuries, treatment),
+                  survival glue, the inner voice
+  render/         Vulkan renderer and feature choice, greedy mesher, vertex
+                  pool, sky, shadows, bloom, procedural textures, models
+  audio/          mixer and voices, the synthesized bank, miniaudio output
+  ui/             2D batch and font, HUD, menus, inventory screen, F3 overlay
+  net/            multiplayer, encryption, message encoding, UPnP, Discord
+  save/           world.db, column codec and file access, settings, backups,
+                  the worlds list
+  game/           main (the frame loop), hands, game modes, camera,
+                  inventory and items, combat, recoil, creatures
 shaders/          GLSL, compiled to SPIR-V and embedded at build time
 tests/            unit tests and the save-file fuzzers
 cmake/            dependencies, shaders, warnings, packaging, toolchain

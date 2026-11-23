@@ -54,6 +54,11 @@ The compiler enforces most of these: `cmake/warnings.cmake` turns on
 clang 21 (Ubuntu 26.04), clang 22 (Alpine 3.24) and macOS's Apple clang.
 `.clang-tidy` and `cppcheck` run in `tools/lint.sh`.
 
+- **Where code goes**: `src/<subsystem>/` (`core`, `world`, `sim`,
+  `health`, `render`, `audio`, `ui`, `net`, `save`, `game`), each header
+  beside its `.c`. Includes name the header alone (`#include "world.h"`):
+  every folder is on the include path in `CMakeLists.txt`, so a new folder
+  goes there too, and file names stay unique across folders.
 - **C11, no extensions.** No VLAs. Stack frames stay under 256 KB
   (threads get `OS_THREAD_STACK`, 8 MB, on every OS, and frames are
   probed with `-fstack-clash-protection`). Scratch buffers that fit go on
@@ -67,7 +72,7 @@ clang 21 (Ubuntu 26.04), clang 22 (Alpine 3.24) and macOS's Apple clang.
   uninitialised only where zeroing it measurably slows a hot path and it
   is fully written before any read, with a comment saying so (the
   mesher's per-section buffers). `va_list` is never initialised.
-- **Allocate through `src/mem.h` only** (`mem_alloc`, `mem_calloc`,
+- **Allocate through `src/core/mem.h` only** (`mem_alloc`, `mem_calloc`,
   `mem_realloc`, `mem_free`, `mem_array_size` for `n * size`). Never call
   `malloc`/`free`/`mi_*` directly. Allocation failure aborts, so callers
   do not check for NULL.
