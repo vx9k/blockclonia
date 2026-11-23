@@ -71,6 +71,15 @@ void sound_listener(sound *s, dvec3 pos, float yaw, float pitch, int underwater)
  * NULL (UI, the body's own sounds). material is a block id or 0. */
 void sound_play(sound *s, int id, const dvec3 *pos, uint8_t material, float intensity);
 
+/* One exact take for the listening tool (audition.h) and the tests:
+ * material is a synth_material class (not a block id), variant
+ * 0..SYNTH_VARIANTS-1, at its own pitch rather than a random one. Plays
+ * nothing for a take that has no clip of its own. */
+void sound_play_take(sound *s, int id, const dvec3 *pos, int material, int variant, float intensity);
+/* That take's length in synth samples, 0 if it has no clip of its own
+ * (sound_play would fall back to another material or variant). */
+uint32_t sound_take_len(const sound *s, int id, int material, int variant);
+
 /* Continuous ambience, set every frame (0 silences): wind strength 0..1,
  * nearby water 0..1. Burning campfires as positions (crackle loops). */
 void sound_ambience(sound *s, float wind, float water);

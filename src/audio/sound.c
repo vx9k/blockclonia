@@ -201,6 +201,34 @@ void sound_play(sound *s, int id, const dvec3 *pos, uint8_t material, float inte
     post(s, &c);
 }
 
+void sound_play_take(sound *s, int id, const dvec3 *pos, int material, int variant, float intensity)
+{
+    if (!sound_take_len(s, id, material, variant) || !(intensity > 0.0f)) return;
+    cmd c = {0};
+    memset(&c, 0, sizeof c);
+    c.type = CMD_PLAY;
+    c.id = (uint8_t)id;
+    c.material = (uint8_t)material;
+    c.variant = (uint8_t)variant;
+    c.a = intensity > 2.0f ? 2.0f : intensity;
+    c.b = 1.0f;
+    if (pos) {
+        c.positional = 1;
+        c.x = pos->x;
+        c.y = pos->y;
+        c.z = pos->z;
+    }
+    post(s, &c);
+}
+
+uint32_t sound_take_len(const sound *s, int id, int material, int variant)
+{
+    if (id < 0 || id >= SND_COUNT || material < 0 || material >= MAT_COUNT || variant < 0 ||
+        variant >= SYNTH_VARIANTS)
+        return 0;
+    return s->bank.clip[id][material][variant].len;
+}
+
 void sound_ambience(sound *s, float wind, float water)
 {
     s->wind = wind;
