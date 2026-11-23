@@ -12,7 +12,9 @@
 #include "entity.h"
 #include "item.h"
 
-#define VIEWMODEL_MAX 20 /* both forearms and hands, and an item model (itemmodel.h) */
+#define VIEWMODEL_ARM_PARTS 5 /* forearm, wrist, palm, fingers, thumb */
+#define VIEWMODEL_PALM 2      /* the palm among an arm's parts: the hand's centre */
+#define VIEWMODEL_MAX 26      /* both arms and an item model (itemmodel.h) */
 
 typedef struct {
     item_id held_id;      /* item in hand, 0 for the bare hand */
@@ -42,8 +44,8 @@ typedef struct {
 void viewmodel_init(viewmodel *vm);
 
 /* The hands an item takes: 2 for picks, axes, shovels and the rifle, else
- * 1. The view model's instances are each hand's forearm and fist (right
- * hand first), then the item. */
+ * 1. The view model's instances are each arm's VIEWMODEL_ARM_PARTS (right
+ * arm first), then the item. */
 int viewmodel_hands(item_id id);
 
 /* Advances the animation and writes up to max instances; returns how many. */

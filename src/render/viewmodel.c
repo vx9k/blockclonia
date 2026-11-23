@@ -30,13 +30,20 @@ static const float PIVOT[3] = {0.46f, -0.38f, -0.28f};
 #define REST_PITCH 0.14f        /* rad, up */
 
 /* Parts along the arm's own axes (-z runs from the shoulder to the hand). */
-/* The arm is bare (the base layer is a singlet) and as thick as the
- * figure's: a forearm 8.5 cm across and a fist 9 cm. */
-#define FOREARM_LEN 0.5f
+/* The arm is bare (the base layer is a singlet) and shaped like the
+ * figure's: a forearm 8.5 cm across that tapers to a 6 cm wrist, a flat
+ * palm, the fingers curled under its front and the thumb along its inner
+ * side. A box hand as thick as the forearm read as a slab. */
 #define FOREARM_W 0.085f
-#define HAND_LEN 0.12f
-#define HAND_W 0.09f
-#define HAND_Z (-(FOREARM_LEN + HAND_LEN * 0.5f - 0.005f)) /* overlaps the wrist by 5 mm */
+#define FOREARM_H 0.075f
+#define WRIST_W 0.064f
+#define WRIST_H 0.05f
+#define WRIST_SHARE 0.4f /* of the arm between the elbow (or the pivot) and the palm */
+#define PALM_W 0.088f
+#define PALM_H 0.034f
+#define PALM_LEN 0.1f
+#define PALM_BACK 0.05f /* the heel of the hand, behind the palm's centre */
+#define HAND_Z (-0.555f) /* the palm's centre */
 #define BLOCK_SIZE 0.18f
 #define PALM_SIZE 0.14f /* m: what an item in the palm is scaled to, within limits */
 #define TOOL_HELD 0.5f  /* a tool's model in the hand, of its real size */
@@ -221,6 +228,11 @@ static void ik_elbow(const float shoulder[3], const float p[3], const float pole
     for (int i = 0; i < 3; i++) elbow[i] = s[i] + u[i] * l1 * ca + w[i] * l1 * sa;
 }
 
+static void vadd(float out[3], const float a[3], const float b[3])
+{
+    for (int i = 0; i < 3; i++) out[i] = a[i] + b[i];
+}
+
 static entity_instance cube(const float pos[3], quat rot, float sx, float sy, float sz, uint32_t tex, float light)
 {
     entity_instance e = {0};
@@ -234,8 +246,36 @@ static entity_instance cube(const float pos[3], quat rot, float sx, float sy, fl
     return e;
 }
 
-/* An arm reaching the grip at p: the forearm from the elbow to the wrist
- * and the fist round the grip, along the same line. */
+/* An arm with its palm centred at p, turned by r (its -z running down the
+ * arm to the fingers) and reaching back a distance back to the elbow or
+ * the pivot: the forearm, the wrist it tapers to, the palm, the fingers
+ * and the thumb (side 0 is the right hand, its thumb toward -x). Writes
+ * VIEWMODEL_ARM_PARTS instances. */
+static int arm_chain(entity_instance *out, int side, const float p[3], quat r, float back, float light)
+{
+    float sx = side ? -1.0f : 1.0f;
+    float span = fmaxf(back - PALM_BACK, 0.02f), wl = WRIST_SHARE * span;
+    float fl = span - wl + 0.005f; /* overlaps the wrist by 5 mm */
+    const struct {
+        float at[3], size[3], yaw;
+    } parts[VIEWMODEL_ARM_PARTS] = {
+        {{0.0f, 0.0f, back - 0.5f * fl}, {FOREARM_W, FOREARM_H, fl}, 0.0f},
+        {{0.0f, 0.0f, PALM_BACK + 0.5f * wl}, {WRIST_W, WRIST_H, wl}, 0.0f},
+        {{0.0f, 0.0f, PALM_BACK - 0.5f * PALM_LEN}, {PALM_W, PALM_H, PALM_LEN}, 0.0f},
+        {{0.0f, -0.02f, -0.05f}, {0.084f, 0.048f, 0.04f}, 0.0f},                 /* curled round the grip */
+        {{-sx * 0.047f, -0.012f, -0.012f}, {0.024f, 0.024f, 0.06f}, sx * 0.5f}, /* angled in, ahead */
+    };
+    for (int i = 0; i < VIEWMODEL_ARM_PARTS; i++) {
+        float at[3] = {0};
+        quat_apply(r, parts[i].at, at);
+        vadd(at, at, p);
+        quat q = quat_norm(quat_mul(r, quat_axis(0.0f, 1.0f, 0.0f, parts[i].yaw)));
+        out[i] = cube(at, q, parts[i].size[0], parts[i].size[1], parts[i].size[2], same_tex(T_SKIN), light);
+    }
+    return VIEWMODEL_ARM_PARTS;
+}
+
+/* An arm reaching the grip at p from its elbow, the palm round the grip. */
 static int reach(entity_instance *out, int side, const float p[3], float light)
 {
     /* Elbows drop and flare out, the right one more for a rifle's wrist. */
@@ -244,21 +284,10 @@ static int reach(entity_instance *out, int side, const float p[3], float light)
     ik_elbow(SHOULDER[side], p, POLE[side], e);
     for (int i = 0; i < 3; i++) dir[i] -= e[i];
     float len = vnorm(dir);
-    float fore = fmaxf(len - HAND_LEN * 0.5f, 0.01f);
-    float mid[3] = {0};
-    for (int i = 0; i < 3; i++) mid[i] = e[i] + dir[i] * fore * 0.5f;
-    quat r = quat_from_fwd(dir);
-    out[0] = cube(mid, r, FOREARM_W, FOREARM_W, fore, same_tex(T_SKIN), light);
-    out[1] = cube(p, r, HAND_W, HAND_W, HAND_LEN, same_tex(T_SKIN), light);
-    return 2;
+    return arm_chain(out, side, p, quat_from_fwd(dir), len, light);
 }
 
 static quat inst_rot(const entity_instance *e) { return (quat){e->rot[0], e->rot[1], e->rot[2], e->rot[3]}; }
-
-static void vadd(float out[3], const float a[3], const float b[3])
-{
-    for (int i = 0; i < 3; i++) out[i] = a[i] + b[i];
-}
 
 /* One cube of the chain: centre = lag * (base + arm * local), orientation
  * lag * arm * own. */
@@ -576,13 +605,13 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
         return k;
     }
 
-    entity_instance parts[VIEWMODEL_MAX] = {0};
+    entity_instance parts[VIEWMODEL_MAX] = {0}, limb[VIEWMODEL_ARM_PARTS] = {0};
     int n = 0;
-    const float forearm_at[3] = {0.0f, 0.0f, -FOREARM_LEN * 0.5f};
     const float hand_at[3] = {0.0f, 0.0f, HAND_Z};
-    parts[n++] = part(lag, base, arm, forearm_at, quat_identity(), FOREARM_W, FOREARM_W, FOREARM_LEN, same_tex(T_SKIN),
-                      light);
-    parts[n++] = part(lag, base, arm, hand_at, quat_identity(), HAND_W, HAND_W, HAND_LEN, same_tex(T_SKIN), light);
+    arm_chain(limb, 0, hand_at, quat_identity(), -HAND_Z, light);
+    for (int i = 0; i < VIEWMODEL_ARM_PARTS; i++)
+        parts[n++] = part(lag, base, arm, limb[i].pos, inst_rot(&limb[i]), limb[i].scale[0], limb[i].scale[1],
+                          limb[i].scale[2], limb[i].tex, light);
 
     item_id id = vm->shown_id;
     quat flick = quat_axis(1.0f, 0.0f, 0.0f, -0.6f * a); /* the wrist leads the swing */
@@ -655,7 +684,7 @@ int viewmodel_build(viewmodel *vm, const viewmodel_input *in, entity_instance *o
      * eased toward SCREEN_SOFT + SCREEN_GIVE (under the 35 degree edge) by
      * turning everything up about the eye. */
     float low = -1.0f;
-    for (int i = 1; i < n; i++) low = fmaxf(low, atan2f(-parts[i].pos[1], -parts[i].pos[2]));
+    for (int i = VIEWMODEL_PALM; i < n; i++) low = fmaxf(low, atan2f(-parts[i].pos[1], -parts[i].pos[2]));
     float lift = 0.0f;
     if (low > SCREEN_SOFT) lift = low - SCREEN_SOFT - SCREEN_GIVE * (1.0f - expf(-(low - SCREEN_SOFT) / SCREEN_GIVE));
     /* Equip comes last, since it must leave the frame: the arm drops

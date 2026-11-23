@@ -41,7 +41,7 @@ typedef struct {
 } render_opts;
 
 #define RENDER_MAX_ENTS 2048
-#define RENDER_MAX_VIEW_MODEL 24 /* the arm and a held item model */
+#define RENDER_MAX_VIEW_MODEL 26 /* both arms and a held item model (VIEWMODEL_MAX) */
 
 typedef struct {
     dvec3 eye;
