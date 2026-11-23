@@ -144,6 +144,10 @@ typedef struct {
     copy_list copies[MAX_POOL_BLOCKS]; /* staging -> pool copies, per pool block */
     gbuf dyn;                     /* per-frame section origins, body instances, lines */
     gbuf ui;                      /* overlay quads, written in place by the game */
+    /* Its own timestamp pool (QUERIES), NULL without GPUCAP_TIMESTAMPS:
+     * validation counts a pool in use while any frame that wrote it is in
+     * flight, so a pool shared by the slots couldn't be reset (#117). */
+    VkQueryPool queries;
     int timed;                    /* its last submission wrote both timestamps */
     int bloom_timed;              /* ... and the two around bloom */
     int shadow_timed;             /* ... and the two around the shadow map */
@@ -381,10 +385,9 @@ struct renderer {
     visible *vis;
     int vis_cap;
     render_stats stats;
-    /* GPU frame time: a start and an end timestamp per frame slot, read
-     * once the slot's frame has finished and reset from the CPU (1.2's
-     * vkResetQueryPool). NULL handles without GPUCAP_TIMESTAMPS. */
-    VkQueryPool queries;
+    /* GPU frame time: timestamps in each frame slot's pool, read once the
+     * slot's frame has finished and reset from the CPU (1.2's
+     * vkResetQueryPool). NULL without GPUCAP_TIMESTAMPS. */
     PFN_vkResetQueryPool reset_queries;
     float gpu_ms;
     /* GPUCAP_BUDGET: vkGetPhysicalDeviceMemoryProperties2 (1.1, loaded),
@@ -2732,25 +2735,26 @@ static void create_queries(renderer *r)
     if (!(r->caps.enabled & GPUCAP_TIMESTAMPS)) return;
     VkQueryPoolCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
                                 .queryType = VK_QUERY_TYPE_TIMESTAMP,
-                                .queryCount = FRAMES * QUERIES};
-    VK_CHECK(vkCreateQueryPool(r->dev, &qi, r->ac, &r->queries));
+                                .queryCount = QUERIES};
     /* 1.2 core, so loaded rather than linked. */
     r->reset_queries = (PFN_vkResetQueryPool)vkGetDeviceProcAddr(r->dev, "vkResetQueryPool");
     if (!r->reset_queries) log_fatal("the Vulkan driver has no vkResetQueryPool");
-    r->reset_queries(r->dev, r->queries, 0, FRAMES * QUERIES);
+    for (int i = 0; i < FRAMES; i++) {
+        VK_CHECK(vkCreateQueryPool(r->dev, &qi, r->ac, &r->frames[i].queries));
+        r->reset_queries(r->dev, r->frames[i].queries, 0, QUERIES);
+    }
 }
 
 /* Called once the slot's frame has finished, so the results are there. */
 static void read_gpu_time(renderer *r, frame *f)
 {
-    uint32_t q = (uint32_t)(f - r->frames) * QUERIES;
     if (f->timed) {
         /* Each pair on its own: a pair the frame skipped was never written. */
         float ms[3] = {-1.0f, -1.0f, -1.0f};
         const int written[3] = {1, f->bloom_timed, f->shadow_timed};
         for (uint32_t k = 0; k < 3; k++) {
             uint64_t t[2] = {0};
-            if (written[k] && vkGetQueryPoolResults(r->dev, r->queries, q + 2 * k, 2, sizeof t, t, sizeof t[0],
+            if (written[k] && vkGetQueryPoolResults(r->dev, f->queries, 2 * k, 2, sizeof t, t, sizeof t[0],
                                                     VK_QUERY_RESULT_64_BIT) == VK_SUCCESS)
                 ms[k] = (float)((double)((t[1] - t[0]) & r->caps.timestamp_mask) * r->caps.timestamp_ms_per_tick);
         }
@@ -2762,7 +2766,7 @@ static void read_gpu_time(renderer *r, frame *f)
             bloom_auto_add_within(&r->shadow_auto, ms[2], SHADOW_BUDGET_MS))
             log_info("sun shadows (auto): %.3f ms a frame, %s", (double)r->shadow_auto.median,
                      r->shadow_auto.on ? "kept on" : "turned off (over 0.5 ms)");
-        r->reset_queries(r->dev, r->queries, q, QUERIES);
+        r->reset_queries(r->dev, f->queries, 0, QUERIES);
     }
     f->timed = 0;
     f->bloom_timed = 0;
@@ -3057,7 +3061,7 @@ void renderer_destroy(renderer *r)
     vkDestroyPipelineLayout(r->dev, r->layout, r->ac);
     vkDestroyDescriptorSetLayout(r->dev, r->dsl, r->ac);
     vkDestroyCommandPool(r->dev, r->cmdpool, r->ac);
-    vkDestroyQueryPool(r->dev, r->queries, r->ac);
+    for (int i = 0; i < FRAMES; i++) vkDestroyQueryPool(r->dev, r->frames[i].queries, r->ac);
     vkDestroySemaphore(r->dev, r->timeline, r->ac);
     destroy_swap_resources(r);
     vkDestroySwapchainKHR(r->dev, r->swap, r->ac);
@@ -3136,7 +3140,7 @@ int renderer_begin_frame(renderer *r)
 
     frame *f = &r->frames[r->frame_index];
     wait_frame(r, f);
-    if (r->queries) read_gpu_time(r, f);
+    if (f->queries) read_gpu_time(r, f);
     release_frees(r);
     f->staging_used = 0;
     for (int b = 0; b < MAX_POOL_BLOCKS; b++) f->copies[b].count = 0;
@@ -3464,15 +3468,15 @@ static int draw_sky(const renderer *r, VkCommandBuffer cmd, const render_view *v
 
 /* The sun's shadow map for this frame, before the scene, timed for Auto.
  * Returns 1 if it was drawn and the terrain should sample it. */
-static int shadow_frame(renderer *r, terrain_pass *tp, frame *f, const world *w, const render_view *v, uint32_t query)
+static int shadow_frame(renderer *r, terrain_pass *tp, frame *f, const world *w, const render_view *v)
 {
-    if (!r->sh_layout || !bloom_active(r->shadow_mode, &r->shadow_auto, r->queries != VK_NULL_HANDLE) ||
+    if (!r->sh_layout || !bloom_active(r->shadow_mode, &r->shadow_auto, f->queries != VK_NULL_HANDLE) ||
         !shadow_aim(r->shadow_dir, v->lfx.sun))
         return 0;
-    if (r->queries) vkCmdWriteTimestamp(tp->cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, r->queries, query + 4);
+    if (f->queries) vkCmdWriteTimestamp(tp->cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, f->queries, 4);
     draw_shadow(r, tp, w, v);
-    if (r->queries) {
-        vkCmdWriteTimestamp(tp->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, r->queries, query + 5);
+    if (f->queries) {
+        vkCmdWriteTimestamp(tp->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, f->queries, 5);
         f->shadow_timed = 1;
     }
     return 1;
@@ -3698,12 +3702,12 @@ static int split_view_model(entity_instance *out, const entity_instance *in, int
 /* Ends the scene pass, runs bloom if it is on and filters the scene onto
  * the swapchain image in a new pass, which is left open for the overlay. */
 static void draw_post(renderer *r, VkCommandBuffer cmd, frame *f, const render_view *v, const VkClearValue clears[2],
-                      int bloom, uint32_t query, render_stats *st)
+                      int bloom, render_stats *st)
 {
     /* Bloom's cost, for Auto: everything between the world and the
      * frame on screen that drawing straight to it would not do. */
-    int timed = bloom && r->queries;
-    if (timed) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, r->queries, query + 2);
+    int timed = bloom && f->queries;
+    if (timed) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, f->queries, 2);
     end_pass(r, cmd, 1);
     if (bloom) {
         draw_bloom(r, cmd);
@@ -3726,7 +3730,7 @@ static void draw_post(renderer *r, VkCommandBuffer cmd, frame *f, const render_v
     vkCmdDraw(cmd, 3, 1, 0, 0);
     st->draw_calls++;
     if (timed) {
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, r->queries, query + 3);
+        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, f->queries, 3);
         f->bloom_timed = 1;
     }
 }
@@ -3775,8 +3779,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     VK_CHECK(vkBeginCommandBuffer(cmd, &bi));
-    uint32_t query = (uint32_t)r->frame_index * QUERIES;
-    if (r->queries) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, r->queries, query);
+    if (f->queries) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, f->queries, 0);
 
     int copied = 0;
     for (int b = 0; b < r->pool_blocks; b++) {
@@ -3834,7 +3837,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     if (v->underwater) memcpy(clears[0].color.float32, pf.color, 3 * sizeof(float));
     /* Bloom draws the world through the scene image, whose alpha marks the
      * glow: the sky starts with none. Auto measures it with timestamps. */
-    int bloom = r->scene_ok && bloom_active(r->bloom_mode, &r->bloom_auto, r->queries != VK_NULL_HANDLE);
+    int bloom = r->scene_ok && bloom_active(r->bloom_mode, &r->bloom_auto, f->queries != VK_NULL_HANDLE);
     int post = (v->blur > 0.01f || v->doubled > 0.01f || bloom) && scene_ready(r, cmd);
     bloom = bloom && post;
     clears[0].color.float32[3] = bloom ? 0.0f : 1.0f;
@@ -3849,7 +3852,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     VkDeviceSize zero = 0;
     terrain_pass tp = {.cmd = cmd, .r = r, .f = f, .bound = -1, .st = &st};
     vkCmdBindIndexBuffer(cmd, r->index.buf, 0, VK_INDEX_TYPE_UINT16);
-    int shadows = shadow_frame(r, &tp, f, w, v, query);
+    int shadows = shadow_frame(r, &tp, f, w, v);
     begin_pass(r, cmd, clears, post);
     VkViewport viewport = {0, 0, (float)r->extent.width, (float)r->extent.height, 0.0f, 1.0f};
     VkRect2D scissor = {{0, 0}, r->extent};
@@ -4074,7 +4077,7 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
      * carry over into the new pass. The defocus scales with the height so
      * it looks the same at any resolution; the two images drift slowly
      * apart and together as the eyes try to fuse them. */
-    if (post) draw_post(r, cmd, f, v, clears, bloom, query, &st);
+    if (post) draw_post(r, cmd, f, v, clears, bloom, &st);
     if (!v->hide_crosshair) {
         push_vert cp = {0};
         memset(&cp, 0, sizeof cp);
@@ -4130,8 +4133,8 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
         r->shot_pending = 0;
     }
 
-    if (r->queries) {
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, r->queries, query + 1);
+    if (f->queries) {
+        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, f->queries, 1);
         f->timed = 1;
     }
     VK_CHECK(vkEndCommandBuffer(cmd));
