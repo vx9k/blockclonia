@@ -1976,6 +1976,10 @@ static void step_defib(health *h, const health_env *e, float fdt)
  * bad luck aside the heart recovers. */
 static void step_strain(health *h, float ex, float fdt)
 {
+    /* The pressure rises with the will to move, before oxygen uptake
+     * catches up, and stays up for minutes after effort while the muscles'
+     * metabolites wash out; that is normal too. */
+    ex = maxf(ex, maxf(h->ans.command, h->ans.metab));
     float over = fclamp((h->map - h->base.map_set - 30.0f * ex - 20.0f) / 40.0f, 0.0f, 2.0f);
     float under = fclamp((45.0f - h->dbp) / 20.0f, 0.0f, 2.0f);
     float fast = h->rhythm != RHYTHM_SINUS ? fclamp((h->hr - 130.0f) / 60.0f, 0.0f, 1.5f) : 0.0f;
