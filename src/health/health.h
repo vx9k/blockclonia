@@ -478,10 +478,38 @@ typedef struct {
     const char *label;                   /* shown in the debug menu */
     health_debug_part_kind part_kind;
     uint8_t default_part;                /* body_part_id */
+    int8_t organ; /* organ_id it is listed under, or -1 */
 } health_debug_kind;
 
 extern const health_debug_kind HEALTH_DEBUG_KINDS[];
-#define HEALTH_DEBUG_COUNT 33
+#define HEALTH_DEBUG_COUNT 38
+
+/* The debug menu's targets: the seven body parts, then the six organs,
+ * then the whole body. Each entry is listed under every target it fits:
+ * local injuries under the parts they can happen to, organ conditions
+ * under their organ, the rest under the whole body. */
+#define HDBG_TARGET_ORGAN ((int)BP_COUNT)
+#define HDBG_TARGET_BODY ((int)BP_COUNT + (int)ORG_COUNT)
+#define HDBG_TARGET_COUNT (HDBG_TARGET_BODY + 1)
+
+/* The target's name ("Left arm", "Kidneys", "Whole body"); "" out of range. */
+const char *health_debug_target_name(int target);
+
+/* 1 if HEALTH_DEBUG_KINDS[kind] belongs on the target's page. */
+int health_debug_fits(int kind, int target);
+
+/* The body part a target hands health_injure: itself for a body part, -1
+ * (the entry's own default) for an organ or the whole body. */
+int health_debug_target_part(int target);
+
+/* One line on the target's state for the debug menu: a part's wounds,
+ * bones, burns and pain; an organ's function; the whole body's vitals.
+ * Always terminated; empty for an unknown target. */
+void health_debug_describe(const health *h, int target, char *buf, size_t n);
+
+/* How badly the target is hurt, for shading the menu's figure: 0 fine,
+ * 1 minor, 2 serious, 3 life- or limb-threatening. */
+int health_debug_severity(const health *h, int target);
 
 /* Looks a --hurt token up in HEALTH_DEBUG_KINDS; returns -1 if there is
  * no such name. */

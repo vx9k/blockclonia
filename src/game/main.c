@@ -2585,6 +2585,10 @@ static void run_menu(game *g, ui *u, float mx, float my, double dt)
     g->mn.can_open = !g->backdrop && !g->mp && !g->client;
     g->mn.can_switch = !g->backdrop && !g->client && g->rules.cheats && !g->rules.hardcore;
     g->mn.mode_now = mode_name(g->pl.mode);
+    if (g->mn.screen == SCREEN_DEBUG_HEALTH) {
+        for (int t = 0; t < HDBG_TARGET_COUNT; t++) g->mn.debug_sev[t] = (uint8_t)health_debug_severity(&g->hl, t);
+        health_debug_describe(&g->hl, g->mn.debug_target, g->mn.debug_status, sizeof g->mn.debug_status);
+    }
     menu_action act = menu_frame(&g->mn, u, &mi, &g->st);
     switch (act) {
     case MENU_RESUME:

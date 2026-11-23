@@ -2689,39 +2689,44 @@ health_limits health_get_limits(const health *h)
  * Everything after "infection" is new, for the debug menu and for --hurt
  * to reach conditions that had no direct trigger before. */
 const health_debug_kind HEALTH_DEBUG_KINDS[HEALTH_DEBUG_COUNT] = {
-    {"bleed", "Bleeding (venous cut)", HDBG_ANY, BP_LLEG},
-    {"artery", "Arterial bleed", HDBG_ANY, BP_LLEG},
-    {"fracture", "Closed fracture", HDBG_ANY, BP_RARM},
-    {"open-fracture", "Open fracture", HDBG_ANY, BP_RLEG},
-    {"concussion", "Concussion", HDBG_HEAD, BP_HEAD},
-    {"burn", "Burn (2nd degree)", HDBG_ANY, BP_LARM},
-    {"dislocation", "Dislocated shoulder", HDBG_ARM, BP_RARM},
-    {"abrasion", "Abrasion (road rash)", HDBG_ANY, BP_LLEG},
-    {"crush", "Crush injury", HDBG_ANY, BP_LLEG},
-    {"infection", "Infected wound", HDBG_ANY, BP_LARM},
-    {"burn1", "Burn (1st degree)", HDBG_ANY, BP_LARM},
-    {"burn3", "Burn (3rd degree)", HDBG_ANY, BP_LARM},
-    {"frostnip", "Frostnip", HDBG_ANY, BP_LARM},
-    {"frostbite", "Frostbite (superficial)", HDBG_ANY, BP_LARM},
-    {"deep-frostbite", "Frostbite (deep, frozen)", HDBG_ANY, BP_LARM},
-    {"hypothermia", "Hypothermia (core 33" DEG "C)", HDBG_SYSTEMIC, BP_HEAD},
-    {"hyperthermia", "Hyperthermia (core 40.5" DEG "C)", HDBG_SYSTEMIC, BP_HEAD},
-    {"pain", "Severe local pain", HDBG_ANY, BP_ABDOMEN},
-    {"shock", "Hypovolemic shock", HDBG_SYSTEMIC, BP_HEAD},
-    {"sepsis", "Sepsis", HDBG_SYSTEMIC, BP_HEAD},
-    {"vfib", "Cardiac arrest (V-fib)", HDBG_SYSTEMIC, BP_HEAD},
-    {"asystole", "Cardiac arrest (asystole)", HDBG_SYSTEMIC, BP_HEAD},
-    {"afib", "Atrial fibrillation", HDBG_SYSTEMIC, BP_HEAD},
-    {"vtach", "Ventricular tachycardia", HDBG_SYSTEMIC, BP_HEAD},
-    {"pvt", "Cardiac arrest (pulseless VT)", HDBG_SYSTEMIC, BP_HEAD},
-    {"pea", "Cardiac arrest (PEA)", HDBG_SYSTEMIC, BP_HEAD},
-    {"heart-block", "Complete heart block", HDBG_SYSTEMIC, BP_HEAD},
-    {"crisis", "Hypertensive crisis (10 min)", HDBG_SYSTEMIC, BP_HEAD},
-    {"strain", "Strained heart (long crisis)", HDBG_SYSTEMIC, BP_HEAD},
-    {"drunk", "Drunk (2 g/L)", HDBG_SYSTEMIC, BP_HEAD},
-    {"overdose", "Opioid overdose (60 mg)", HDBG_SYSTEMIC, BP_HEAD},
-    {"faint", "Vasovagal faint", HDBG_SYSTEMIC, BP_HEAD},
-    {"brain-damage", "Brain damage (hypoxic)", HDBG_SYSTEMIC, BP_HEAD},
+    {"bleed", "Bleeding (venous cut)", HDBG_ANY, BP_LLEG, -1},
+    {"artery", "Arterial bleed", HDBG_ANY, BP_LLEG, -1},
+    {"fracture", "Closed fracture", HDBG_ANY, BP_RARM, -1},
+    {"open-fracture", "Open fracture", HDBG_ANY, BP_RLEG, -1},
+    {"concussion", "Concussion", HDBG_HEAD, BP_HEAD, ORG_BRAIN},
+    {"burn", "Burn (2nd degree)", HDBG_ANY, BP_LARM, -1},
+    {"dislocation", "Dislocated shoulder", HDBG_ARM, BP_RARM, -1},
+    {"abrasion", "Abrasion (road rash)", HDBG_ANY, BP_LLEG, -1},
+    {"crush", "Crush injury", HDBG_ANY, BP_LLEG, -1},
+    {"infection", "Infected wound", HDBG_ANY, BP_LARM, -1},
+    {"burn1", "Burn (1st degree)", HDBG_ANY, BP_LARM, -1},
+    {"burn3", "Burn (3rd degree)", HDBG_ANY, BP_LARM, -1},
+    {"frostnip", "Frostnip", HDBG_ANY, BP_LARM, -1},
+    {"frostbite", "Frostbite (superficial)", HDBG_ANY, BP_LARM, -1},
+    {"deep-frostbite", "Frostbite (deep, frozen)", HDBG_ANY, BP_LARM, -1},
+    {"hypothermia", "Hypothermia (core 33" DEG "C)", HDBG_SYSTEMIC, BP_HEAD, -1},
+    {"hyperthermia", "Hyperthermia (core 40.5" DEG "C)", HDBG_SYSTEMIC, BP_HEAD, -1},
+    {"pain", "Severe local pain", HDBG_ANY, BP_ABDOMEN, -1},
+    {"shock", "Hypovolemic shock", HDBG_SYSTEMIC, BP_HEAD, -1},
+    {"sepsis", "Sepsis", HDBG_SYSTEMIC, BP_HEAD, -1},
+    {"vfib", "Cardiac arrest (V-fib)", HDBG_SYSTEMIC, BP_HEAD, ORG_HEART},
+    {"asystole", "Cardiac arrest (asystole)", HDBG_SYSTEMIC, BP_HEAD, ORG_HEART},
+    {"afib", "Atrial fibrillation", HDBG_SYSTEMIC, BP_HEAD, ORG_HEART},
+    {"vtach", "Ventricular tachycardia", HDBG_SYSTEMIC, BP_HEAD, ORG_HEART},
+    {"pvt", "Cardiac arrest (pulseless VT)", HDBG_SYSTEMIC, BP_HEAD, ORG_HEART},
+    {"pea", "Cardiac arrest (PEA)", HDBG_SYSTEMIC, BP_HEAD, ORG_HEART},
+    {"heart-block", "Complete heart block", HDBG_SYSTEMIC, BP_HEAD, ORG_HEART},
+    {"crisis", "Hypertensive crisis (10 min)", HDBG_SYSTEMIC, BP_HEAD, ORG_HEART},
+    {"strain", "Strained heart (long crisis)", HDBG_SYSTEMIC, BP_HEAD, ORG_HEART},
+    {"drunk", "Drunk (2 g/L)", HDBG_SYSTEMIC, BP_HEAD, -1},
+    {"overdose", "Opioid overdose (60 mg)", HDBG_SYSTEMIC, BP_HEAD, -1},
+    {"faint", "Vasovagal faint", HDBG_SYSTEMIC, BP_HEAD, -1},
+    {"brain-damage", "Brain damage (hypoxic)", HDBG_SYSTEMIC, BP_HEAD, ORG_BRAIN},
+    {"heart-damage", "Damaged heart muscle", HDBG_SYSTEMIC, BP_CHEST, ORG_HEART},
+    {"lung-damage", "Damaged lungs", HDBG_SYSTEMIC, BP_CHEST, ORG_LUNGS},
+    {"liver-failure", "Failing liver", HDBG_SYSTEMIC, BP_ABDOMEN, ORG_LIVER},
+    {"kidney-failure", "Failing kidneys", HDBG_SYSTEMIC, BP_ABDOMEN, ORG_KIDNEYS},
+    {"gut-damage", "Damaged gut", HDBG_SYSTEMIC, BP_ABDOMEN, ORG_GUT},
 };
 
 int health_debug_find(const char *name)
@@ -2820,8 +2825,109 @@ void health_injure(health *h, int kind, int part)
         h->organ[ORG_BRAIN] = minf(h->organ[ORG_BRAIN], 0.35f);
         health_log(h, "Debug: brain damage");
         break;
+    case 33: /* heart-damage: what a large infarct leaves */
+    case 34: /* lung-damage: contusion or smoke */
+    case 35: /* liver-failure */
+    case 36: /* kidney-failure */
+    case 37: /* gut-damage: ischaemic bowel */
+    {
+        static const float LEFT[5] = {0.45f, 0.45f, 0.25f, 0.15f, 0.35f};
+        const health_debug_kind *dk = &HEALTH_DEBUG_KINDS[kind];
+        h->organ[dk->organ] = minf(h->organ[dk->organ], LEFT[kind - 33]);
+        health_log(h, "Debug: %s", dk->label);
+        break;
+    }
     default: break;
     }
+}
+
+static const char *const DEBUG_TARGETS[HDBG_TARGET_COUNT] = {"Head",      "Chest",     "Abdomen",   "Left arm",
+                                                             "Right arm", "Left leg",  "Right leg", "Brain",
+                                                             "Heart",     "Lungs",     "Liver",     "Kidneys",
+                                                             "Gut",       "Whole body"};
+
+const char *health_debug_target_name(int target)
+{
+    return target >= 0 && target < HDBG_TARGET_COUNT ? DEBUG_TARGETS[target] : "";
+}
+
+int health_debug_fits(int kind, int target)
+{
+    if (kind < 0 || kind >= HEALTH_DEBUG_COUNT || target < 0 || target >= HDBG_TARGET_COUNT) return 0;
+    const health_debug_kind *k = &HEALTH_DEBUG_KINDS[kind];
+    if (target < BP_COUNT) {
+        if (k->part_kind == HDBG_ANY) return 1;
+        if (k->part_kind == HDBG_ARM) return is_arm(target);
+        return k->part_kind == HDBG_HEAD && target == BP_HEAD;
+    }
+    if (target < HDBG_TARGET_BODY) return k->organ == target - HDBG_TARGET_ORGAN;
+    return k->part_kind == HDBG_SYSTEMIC && k->organ < 0;
+}
+
+int health_debug_target_part(int target) { return target >= 0 && target < BP_COUNT ? target : -1; }
+
+static void cat(char *buf, size_t n, size_t *len, const char *fmt, ...)
+#if defined(__GNUC__)
+    __attribute__((format(printf, 4, 5)))
+#endif
+    ;
+
+void health_debug_describe(const health *h, int target, char *buf, size_t n)
+{
+    if (!buf || n == 0) return;
+    buf[0] = '\0';
+    size_t len = 0;
+    if (target < 0 || target >= HDBG_TARGET_COUNT) return;
+    if (target == HDBG_TARGET_BODY) {
+        cat(buf, n, &len, "HR %.0f  BP %.0f/%.0f  SpO2 %d%%  core %.1f" DEG "C  blood %.2f L", (double)h->hr,
+            (double)h->sbp, (double)h->dbp, health_spo2_reading(h), (double)h->temp, (double)h->blood);
+        return;
+    }
+    if (target >= HDBG_TARGET_ORGAN) {
+        cat(buf, n, &len, "%s: function %.0f%%", DEBUG_TARGETS[target],
+            100.0 * (double)h->organ[target - HDBG_TARGET_ORGAN]);
+        return;
+    }
+    const body_part *bp = &h->part[target];
+    float bleed = bp->internal;
+    for (int i = 0; i < h->wound_count; i++)
+        if (h->wounds[i].part == target) bleed += h->wounds[i].bleed;
+    if (bleed > 0.5f) cat(buf, n, &len, "bleeding %.0f mL/min  ", (double)bleed);
+    if (bp->fracture != FX_NONE) cat(buf, n, &len, "%s fracture  ", bp->fracture == FX_OPEN ? "open" : "closed");
+    if (bp->dislocated != DISLOC_NONE) cat(buf, n, &len, "dislocated  ");
+    if (bp->integrity < 0.9f) cat(buf, n, &len, "bruised (%.0f%%)  ", 100.0 * (double)bp->integrity);
+    if (bp->burn > 0) cat(buf, n, &len, "burn (degree %d)  ", (int)bp->burn);
+    if (bp->frost != FROST_NONE) cat(buf, n, &len, "frostbite  ");
+    if (bp->crush > 0.05f) cat(buf, n, &len, "crushed  ");
+    if (maxf(bp->pain, bp->pain_spike) > 1.0f)
+        cat(buf, n, &len, "pain %.0f/10", (double)maxf(bp->pain, bp->pain_spike));
+    if (len == 0) cat(buf, n, &len, "intact");
+}
+
+int health_debug_severity(const health *h, int target)
+{
+    if (target < 0 || target >= HDBG_TARGET_COUNT) return 0;
+    if (target == HDBG_TARGET_BODY) {
+        if (!health_rhythm_perfusing(h->rhythm) || h->blood < BLOOD_NORMAL * 0.7f) return 3;
+        if (h->blood < BLOOD_NORMAL * 0.85f || h->temp < 35.0f || h->temp > 39.0f || h->sepsis > 0.3f) return 2;
+        return h->sepsis > 0.05f || h->bac > 0.5f || h->opioid > 10.0f || h->rhythm != RHYTHM_SINUS ? 1 : 0;
+    }
+    if (target >= HDBG_TARGET_ORGAN) {
+        float f = h->organ[target - HDBG_TARGET_ORGAN];
+        return f < 0.3f ? 3 : f < 0.6f ? 2 : f < 0.9f ? 1 : 0;
+    }
+    const body_part *bp = &h->part[target];
+    float bleed = bp->internal;
+    for (int i = 0; i < h->wound_count; i++)
+        if (h->wounds[i].part == target) bleed += h->wounds[i].bleed;
+    /* An arterial bleed empties the body in minutes; deep frostbite and
+     * an open fracture cost the limb. */
+    if (bleed > 50.0f || bp->fracture == FX_OPEN || bp->burn >= 3 || bp->frost == FROST_DEEP || bp->crush > 0.3f)
+        return 3;
+    if (bleed > 5.0f || bp->fracture != FX_NONE || bp->dislocated != DISLOC_NONE || bp->burn >= 2 ||
+        bp->frost != FROST_NONE || bp->crush > 0.05f)
+        return 2;
+    return bleed > 0.5f || bp->burn > 0 || maxf(bp->pain, bp->pain_spike) > 1.0f || bp->integrity < 0.9f ? 1 : 0;
 }
 
 /* ------------------------------------------------------------- display */
@@ -2840,12 +2946,6 @@ float health_hunger(const health *h)
 }
 
 float health_stamina(const health *h) { return h->wbal / WPRIME; }
-
-static void cat(char *buf, size_t n, size_t *len, const char *fmt, ...)
-#if defined(__GNUC__)
-    __attribute__((format(printf, 4, 5)))
-#endif
-    ;
 
 static void cat(char *buf, size_t n, size_t *len, const char *fmt, ...)
 {
