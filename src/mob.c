@@ -27,9 +27,9 @@ static const mob_rule RULES[MOB_KINDS] = {
 #define HUNT_RANGE 20.0  /* m a wolf notices a player from */
 #define BITE_RANGE 1.3   /* m between bodies' centres */
 #define NIGHT (THERMO_NIGHT_LIGHT + 0.207f * (1.0f - THERMO_NIGHT_LIGHT)) /* daylight below this is night for wolves */
-#define CHARGE 8.0       /* m from its prey a stalking wolf breaks into a run */
-#define CALM 45.0f       /* s after a world opens before the first wolf */
-#define LOOK_RANGE 8.0   /* m a creature glances at a player from */
+#define CHARGE 8.0 /* m from its prey a stalking wolf breaks into a run */
+#define CALM 45.0f /* s after a world opens before the first wolf */
+#define LOOK_RANGE 8.0 /* m a creature glances at a player from */
 #define LIT_FULL 0.5f /* light level a body is in plain view at */
 #define FIRE_FEAR 0.45f /* firelight (mob_sense.fire) a wolf will not hunt into */
 #define FIRE_KEEP 6.0 /* m a wolf keeps from prey standing in firelight */
@@ -386,13 +386,13 @@ typedef struct {
 
 typedef struct {
     shape_box body, shoulders;
-    float neck[3];                 /* the head's pivot */
-    shape_box head, snout, ear;    /* at: from the neck; the ear is mirrored to the other side */
-    float rump[3], droop;          /* the tail's pivot, and how far it hangs (rad) */
-    shape_box tail;                /* at: from the rump */
-    float hip[3];                  /* front left hip; the others mirror it */
-    shape_box upper, lower;        /* at: unused, they hang from the hip and the knee */
-    float shift;                   /* texels the figure moves back to centre it on its feet */
+    float neck[3]; /* the head's pivot */
+    shape_box head, snout, ear; /* at: from the neck; the ear is mirrored to the other side */
+    float rump[3], droop; /* the tail's pivot, and how far it hangs (rad) */
+    shape_box tail; /* at: from the rump */
+    float hip[3]; /* front left hip; the others mirror it */
+    shape_box upper, lower; /* at: unused, they hang from the hip and the knee */
+    float shift; /* texels the figure moves back to centre it on its feet */
 } shape;
 
 /* A grey wolf: ~0.75 m at the shoulder, ~1.3 m nose to rump. */

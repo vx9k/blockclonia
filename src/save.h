@@ -8,9 +8,9 @@
 #ifndef MC_SAVE_H
 #define MC_SAVE_H
 
+#include "world.h"
 #include <stddef.h>
 #include <stdint.h>
-#include "world.h"
 
 #define SAVE_MAX_FILE (4 * COL_VOL + 64)
 

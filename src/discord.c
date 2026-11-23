@@ -40,7 +40,9 @@ static void put_u32(uint8_t *p, uint32_t v)
 }
 
 static uint32_t get_u32(const uint8_t *p)
-{ return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
+{
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
 
 size_t discord_frame(uint32_t op, const char *json, uint8_t *out, size_t cap)
 {

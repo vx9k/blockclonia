@@ -13,7 +13,9 @@
 static char g_root[256];
 
 static void path_in(char *out, size_t cap, const char *dir, const char *name)
-{ snprintf(out, cap, "%s/%s", dir, name); }
+{
+    snprintf(out, cap, "%s/%s", dir, name);
+}
 
 static void write_text(const char *path, const char *text)
 {

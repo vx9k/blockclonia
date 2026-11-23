@@ -7,9 +7,15 @@
 
 #define MC_PI 3.14159265358979323846
 
-typedef struct { float x, y, z; } vec3;
-typedef struct { double x, y, z; } dvec3;
-typedef struct { float m[16]; } mat4;
+typedef struct {
+    float x, y, z;
+} vec3;
+typedef struct {
+    double x, y, z;
+} dvec3;
+typedef struct {
+    float m[16];
+} mat4;
 
 static inline vec3 v3(float x, float y, float z) { return (vec3){x, y, z}; }
 static inline vec3 v3_scale(vec3 a, float s) { return v3(a.x * s, a.y * s, a.z * s); }
@@ -81,9 +87,15 @@ static inline mat4 m4_view_rot(float yaw, float pitch)
     vec3 right = v3_norm(v3_cross(fwd, v3(0, 1, 0)));
     vec3 up = v3_cross(right, fwd);
     mat4 r = m4_identity();
-    r.m[0] = right.x; r.m[4] = right.y; r.m[8] = right.z;
-    r.m[1] = up.x;    r.m[5] = up.y;    r.m[9] = up.z;
-    r.m[2] = -fwd.x;  r.m[6] = -fwd.y;  r.m[10] = -fwd.z;
+    r.m[0] = right.x;
+    r.m[4] = right.y;
+    r.m[8] = right.z;
+    r.m[1] = up.x;
+    r.m[5] = up.y;
+    r.m[9] = up.z;
+    r.m[2] = -fwd.x;
+    r.m[6] = -fwd.y;
+    r.m[10] = -fwd.z;
     return r;
 }
 
@@ -117,7 +129,9 @@ static inline vec3 look_dir(float yaw, float pitch)
 /* Frustum as 4 side planes (a,b,c,d): dot(n,p)+d >= 0 is inside. The far
  * plane is at infinity and fog hides the render-distance edge, so near/far
  * planes are not tested. */
-typedef struct { float p[4][4]; } frustum;
+typedef struct {
+    float p[4][4];
+} frustum;
 
 static inline frustum frustum_from(mat4 vp)
 {
@@ -132,7 +146,8 @@ static inline frustum frustum_from(mat4 vp)
     }
     for (int k = 0; k < 4; k++) {
         float l = sqrtf(f.p[k][0] * f.p[k][0] + f.p[k][1] * f.p[k][1] + f.p[k][2] * f.p[k][2]);
-        if (l > 0) for (int i = 0; i < 4; i++) f.p[k][i] /= l;
+        if (l > 0)
+            for (int i = 0; i < 4; i++) f.p[k][i] /= l;
     }
     return f;
 }
@@ -142,8 +157,7 @@ static inline int frustum_box(const frustum *f, vec3 mn, vec3 size)
 {
     for (int k = 0; k < 4; k++) {
         const float *p = f->p[k];
-        vec3 v = v3(mn.x + (p[0] >= 0 ? size.x : 0), mn.y + (p[1] >= 0 ? size.y : 0),
-                    mn.z + (p[2] >= 0 ? size.z : 0));
+        vec3 v = v3(mn.x + (p[0] >= 0 ? size.x : 0), mn.y + (p[1] >= 0 ? size.y : 0), mn.z + (p[2] >= 0 ? size.z : 0));
         if (p[0] * v.x + p[1] * v.y + p[2] * v.z + p[3] < 0) return 0;
     }
     return 1;

@@ -321,7 +321,9 @@ void hud_condition(const health *h, char *buf, size_t n)
 }
 
 static float approach(float cur, float target, float dt, float tau)
-{ return cur + (target - cur) * (1.0f - expf(-dt / tau)); }
+{
+    return cur + (target - cur) * (1.0f - expf(-dt / tau));
+}
 
 void hud_update(hud_state *s, const health *h, float dt)
 {

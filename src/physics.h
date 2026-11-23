@@ -40,7 +40,9 @@
 #define PLAYER_MASS 75.0
 #define PLAYER_DENSITY 985.0
 
-typedef struct { dvec3 min, max; } aabb;
+typedef struct {
+    dvec3 min, max;
+} aabb;
 
 typedef struct {
     dvec3 pos, prev_pos; /* min corner of the cell it occupies */
@@ -210,7 +212,11 @@ int player_decode(player *p, const uint8_t *in, size_t len);
 
 /* Voxel raycast (Amanatides-Woo). Returns 1 on hit, with the block and the
  * empty cell in front of the hit face. */
-typedef struct { int hit; ipos block, before; uint8_t id; } ray_hit;
+typedef struct {
+    int hit;
+    ipos block, before;
+    uint8_t id;
+} ray_hit;
 ray_hit physics_raycast(const world *w, dvec3 o, vec3 dir, double max_dist);
 
 /* Runs a structural check around (x,y,z) immediately. Returns the number of

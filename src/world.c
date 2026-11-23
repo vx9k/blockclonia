@@ -57,10 +57,7 @@ void column_recount(column *c)
     }
 }
 
-static int slot_of(const world *w, int cx, int cz)
-{
-    return (cz & w->grid_mask) * w->grid_w + (cx & w->grid_mask);
-}
+static int slot_of(const world *w, int cx, int cz) { return (cz & w->grid_mask) * w->grid_w + (cx & w->grid_mask); }
 
 static int in_limits(int cx, int cz) { return world_column_inside(cx, cz); }
 
@@ -313,10 +310,7 @@ static int set_block(world *w, int x, int y, int z, uint8_t id, uint8_t meta, in
     return 1;
 }
 
-int world_set(world *w, int x, int y, int z, uint8_t id, uint8_t meta)
-{
-    return set_block(w, x, y, z, id, meta, 0);
-}
+int world_set(world *w, int x, int y, int z, uint8_t id, uint8_t meta) { return set_block(w, x, y, z, id, meta, 0); }
 
 int world_set_player(world *w, int x, int y, int z, uint8_t id, uint8_t meta)
 {
@@ -748,7 +742,10 @@ static void schedule_meshes(world *w, int backlog)
         for (int k = 0; k < 2 * SECTIONS; k++) {
             int sy = w->eye_sy + ((k & 1) ? (k + 1) / 2 : -(k / 2));
             if (sy < 0 || sy >= SECTIONS) continue;
-            if (w->mesh_in_flight >= w->max_mesh_in_flight) { capped = 1; break; }
+            if (w->mesh_in_flight >= w->max_mesh_in_flight) {
+                capped = 1;
+                break;
+            }
             started += schedule_section(w, c, sy, 0);
             if ((started & 7) == 7 && os_now() - t0 > GATHER_BUDGET_S) {
                 capped = 1;

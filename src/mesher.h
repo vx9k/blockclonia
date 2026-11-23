@@ -28,10 +28,7 @@ typedef struct {
     uint8_t meta[MESH_PAD_VOL];
 } mesh_input;
 
-static inline int mesh_pidx(int x, int y, int z)
-{
-    return ((y + 1) * MESH_PAD + (z + 1)) * MESH_PAD + (x + 1);
-}
+static inline int mesh_pidx(int x, int y, int z) { return ((y + 1) * MESH_PAD + (z + 1)) * MESH_PAD + (x + 1); }
 
 /* Builds lookup tables; call once before any worker thread meshes. */
 void mesher_init(void);
@@ -50,7 +47,6 @@ typedef struct {
 /* Writes opaque quads first, then cut-out ones, then translucent ones.
  * `out` must hold MESH_OUT_VERTS vertices. Returns total quad count. */
 uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *mc);
-uint32_t mesh_section(const mesh_input *in, uint32_t *out, uint32_t *opaque_quads,
-                      uint32_t *trans_quads);
+uint32_t mesh_section(const mesh_input *in, uint32_t *out, uint32_t *opaque_quads, uint32_t *trans_quads);
 
 #endif

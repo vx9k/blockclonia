@@ -184,7 +184,9 @@ static void add_thump(float *buf, int n, int at, float f, float amp, float d, rn
 
 /* A very short broadband click: the contact of two hard things. */
 static void add_click(float *buf, int n, int at, float amp, float bright, rng_t *r)
-{ add_noise(buf, n, at, secs(0.006f), amp, 400.0f, 3000.0f + 9000.0f * bright, 0.0002f, 0.0012f, r); }
+{
+    add_noise(buf, n, at, secs(0.006f), amp, 400.0f, 3000.0f + 9000.0f * bright, 0.0002f, 0.0012f, r);
+}
 
 /* ------------------------------------------------------------ finishing */
 
@@ -250,7 +252,9 @@ synth_material synth_material_of(uint8_t block)
 }
 
 int synth_has_materials(int id)
-{ return id == SND_STEP || id == SND_LAND || id == SND_DIG || id == SND_BREAK || id == SND_PLACE || id == SND_THUD; }
+{
+    return id == SND_STEP || id == SND_LAND || id == SND_DIG || id == SND_BREAK || id == SND_PLACE || id == SND_THUD;
+}
 
 int synth_variants(int id)
 {

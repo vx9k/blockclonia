@@ -26,7 +26,9 @@ static void sub_dir(char *out, size_t cap, const char *name)
 }
 
 static void path_in(char *out, size_t cap, const char *dir, const char *name)
-{ snprintf(out, cap, "%s/%s", dir, name); }
+{
+    snprintf(out, cap, "%s/%s", dir, name);
+}
 
 static long file_bytes(const char *path, uint8_t *buf, size_t cap) { return save_read_file(path, buf, cap); }
 

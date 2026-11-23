@@ -6,12 +6,12 @@
 
 /* Face key layout. A zero key means "no face". Faces merge only when their
  * keys are identical, so everything that changes a vertex goes in the key. */
-#define K_PRESENT   (1u << 31)
-#define K_NOMERGE   (1u << 30)
-#define K_TRANS     (1u << 29)
-#define K_TEX(k)    ((k) & 0xFFu)
-#define K_AO(k)     (((k) >> 8) & 0xFFu)
-#define K_DROP(k)   (((k) >> 16) & 0xFu)
+#define K_PRESENT (1u << 31)
+#define K_NOMERGE (1u << 30)
+#define K_TRANS (1u << 29)
+#define K_TEX(k) ((k) & 0xFFu)
+#define K_AO(k) (((k) >> 8) & 0xFFu)
+#define K_DROP(k) (((k) >> 16) & 0xFu)
 /* On the side face of a step down to a lower surface of the same liquid:
  * that surface's drop. */
 #define K_BASE(k) (((k) >> 20) & 0xFu)
@@ -38,13 +38,13 @@ void mesher_init(void)
 
 static inline uint32_t pack_vertex(const int p[3], int face, int ao, int tex, int drop)
 {
-    return (uint32_t)p[0] | (uint32_t)p[1] << 5 | (uint32_t)p[2] << 10 | (uint32_t)face << 15 |
-           (uint32_t)ao << 18 | (uint32_t)tex << 20 | (uint32_t)drop << 28;
+    return (uint32_t)p[0] | (uint32_t)p[1] << 5 | (uint32_t)p[2] << 10 | (uint32_t)face << 15 | (uint32_t)ao << 18 |
+           (uint32_t)tex << 20 | (uint32_t)drop << 28;
 }
 
 /* Index strides in the padded array for axes x, y, z: every neighbour is
  * the base index plus a constant, so nothing is recomputed per lookup. */
-static const int STRIDE[3] = {1, MESH_PAD * MESH_PAD, MESH_PAD};
+static const int STRIDE[3] = {1, MESH_PAD *MESH_PAD, MESH_PAD};
 
 /* Vertex AO from the three blocks around a corner in the layer in front of
  * the face (n is that layer's cell, ou/ov the signed tangent strides). */
@@ -187,7 +187,10 @@ uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *m
             for (int j = 0; j < 16; j++)
                 for (int i = 0; i < 16;) {
                     uint32_t k = mask[j][i];
-                    if (!k) { i++; continue; }
+                    if (!k) {
+                        i++;
+                        continue;
+                    }
                     int w = 1, h = 1;
                     if (!(k & K_NOMERGE)) {
                         while (i + w < 16 && mask[j][i + w] == k) w++;
@@ -205,7 +208,10 @@ uint32_t mesh_section_counts(const mesh_input *in, uint32_t *out, mesh_counts *m
                     static const int CU[4] = {0, 1, 1, 0}, CV[4] = {0, 0, 1, 1};
                     /* Counter-clockwise seen from outside the face. */
                     int order[4] = {0, 1, 2, 3};
-                    if (sgn < 0) { order[1] = 3; order[3] = 1; }
+                    if (sgn < 0) {
+                        order[1] = 3;
+                        order[3] = 1;
+                    }
                     /* Flip the split diagonal so AO interpolates without a
                      * visible crease: rotate the quad by one vertex. */
                     int start = (ao[order[0]] + ao[order[2]] < ao[order[1]] + ao[order[3]]) ? 1 : 0;

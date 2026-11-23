@@ -33,17 +33,18 @@ enum { SWEEP_BODIES = 1 };
 static inline double getc3(dvec3 v, int a) { return a == 0 ? v.x : (a == 1 ? v.y : v.z); }
 static inline void addc3(dvec3 *v, int a, double d)
 {
-    if (a == 0) v->x += d; else if (a == 1) v->y += d; else v->z += d;
+    if (a == 0) v->x += d;
+    else if (a == 1) v->y += d;
+    else v->z += d;
 }
 static inline void setc3(dvec3 *v, int a, double d)
 {
-    if (a == 0) v->x = d; else if (a == 1) v->y = d; else v->z = d;
+    if (a == 0) v->x = d;
+    else if (a == 1) v->y = d;
+    else v->z = d;
 }
 
-static int is_structural(uint8_t id)
-{
-    return id == B_UNLOADED || (id < B_COUNT && (g_blocks[id].flags & BF_SOLID));
-}
+static int is_structural(uint8_t id) { return id == B_UNLOADED || (id < B_COUNT && (g_blocks[id].flags & BF_SOLID)); }
 
 /* A solid lighter than the liquid floats on it, and counts as supported. */
 static int floats_on(uint8_t id, uint8_t liquid)
@@ -71,8 +72,7 @@ static int span_of(uint8_t id)
 
 static int boxes_overlap(aabb a, aabb b)
 {
-    return a.min.x < b.max.x - EPS && a.max.x > b.min.x + EPS &&
-           a.min.y < b.max.y - EPS && a.max.y > b.min.y + EPS &&
+    return a.min.x < b.max.x - EPS && a.max.x > b.min.x + EPS && a.min.y < b.max.y - EPS && a.max.y > b.min.y + EPS &&
            a.min.z < b.max.z - EPS && a.max.z > b.min.z + EPS;
 }
 
@@ -87,8 +87,7 @@ void physics_init(physics *ph, world *w)
     fluid_init(&ph->fl, w);
     ph->st_s = mem_alloc(REGION_CELLS);
     ph->st_id = mem_alloc(REGION_CELLS);
-    for (int i = 0; i <= GROUNDED; i++)
-        ph->st_bucket[i] = mem_alloc(sizeof(int32_t) * REGION_CELLS);
+    for (int i = 0; i <= GROUNDED; i++) ph->st_bucket[i] = mem_alloc(sizeof(int32_t) * REGION_CELLS);
 }
 
 void physics_destroy(physics *ph)
@@ -119,8 +118,7 @@ static double clip_against(aabb box, aabb ob, int axis, double delta)
 {
     for (int a = 0; a < 3; a++) {
         if (a == axis) continue;
-        if (getc3(box.min, a) >= getc3(ob.max, a) - EPS || getc3(box.max, a) <= getc3(ob.min, a) + EPS)
-            return delta;
+        if (getc3(box.min, a) >= getc3(ob.max, a) - EPS || getc3(box.max, a) <= getc3(ob.min, a) + EPS) return delta;
     }
     if (delta > 0) {
         double gap = getc3(ob.min, axis) - getc3(box.max, axis);
@@ -165,7 +163,10 @@ static double sweep(const physics *ph, aabb box, int axis, double delta, int fla
             int a1 = (axis + 1) % 3, a2 = (axis + 2) % 3;
             for (p[a1] = lo[a1]; p[a1] <= hi[a1] && !found; p[a1]++)
                 for (p[a2] = lo[a2]; p[a2] <= hi[a2]; p[a2]++)
-                    if (block_solid(world_get(w, p[0], p[1], p[2]))) { found = 1; break; }
+                    if (block_solid(world_get(w, p[0], p[1], p[2]))) {
+                        found = 1;
+                        break;
+                    }
             if (found) {
                 double lim = delta > 0 ? c - getc3(box.max, axis) : (c + 1) - getc3(box.min, axis);
                 if (delta > 0) delta = lim > 0 ? (lim < delta ? lim : delta) : 0;
@@ -183,8 +184,8 @@ static double sweep(const physics *ph, aabb box, int axis, double delta, int fla
         else addc3(&sw.min, axis, delta);
         for (int i = 0; i < ph->body_count; i++) {
             const body *b = &ph->bodies[i];
-            if (b->pos.x >= sw.max.x || b->pos.x + 1 <= sw.min.x || b->pos.y >= sw.max.y ||
-                b->pos.y + 1 <= sw.min.y || b->pos.z >= sw.max.z || b->pos.z + 1 <= sw.min.z || i == skip_body)
+            if (b->pos.x >= sw.max.x || b->pos.x + 1 <= sw.min.x || b->pos.y >= sw.max.y || b->pos.y + 1 <= sw.min.y ||
+                b->pos.z >= sw.max.z || b->pos.z + 1 <= sw.min.z || i == skip_body)
                 continue;
             aabb ob = {b->pos, dv3(b->pos.x + 1, b->pos.y + 1, b->pos.z + 1)};
             delta = clip_against(box, ob, axis, delta);
@@ -287,8 +288,11 @@ static double ground_friction(const physics *ph, const player *p)
 {
     int y = (int)floor(p->pos.y - 0.05);
     double best = 0.0;
-    const double off[5][2] = {{0, 0}, {-PLAYER_HALF_W, -PLAYER_HALF_W}, {PLAYER_HALF_W, -PLAYER_HALF_W},
-                              {-PLAYER_HALF_W, PLAYER_HALF_W}, {PLAYER_HALF_W, PLAYER_HALF_W}};
+    const double off[5][2] = {{0, 0},
+                              {-PLAYER_HALF_W, -PLAYER_HALF_W},
+                              {PLAYER_HALF_W, -PLAYER_HALF_W},
+                              {-PLAYER_HALF_W, PLAYER_HALF_W},
+                              {PLAYER_HALF_W, PLAYER_HALF_W}};
     for (int i = 0; i < 5; i++) {
         uint8_t id = world_get(ph->w, (int)floor(p->pos.x + off[i][0] * 0.99), y,
                                (int)floor(p->pos.z + off[i][1] * 0.99));
@@ -337,7 +341,8 @@ static void player_move(const physics *ph, player *p, double dt)
     double vy0 = p->vel.y;
     double dy = p->vel.y * dt;
     double my = sweep(ph, box, 1, dy, SWEEP_BODIES, -1);
-    box.min.y += my; box.max.y += my;
+    box.min.y += my;
+    box.max.y += my;
     p->on_ground = dy < 0 && my > dy + EPS;
     p->fall_speed = p->on_ground && !was_ground ? -vy0 : 0.0;
     if (my != dy) p->vel.y = 0;
@@ -347,7 +352,8 @@ static void player_move(const physics *ph, player *p, double dt)
     double dx = p->vel.x * dt;
     double mx = sweep(ph, box, 0, dx, SWEEP_BODIES, -1);
     if (guard) mx = edge_guard(ph, box, 0, mx);
-    box.min.x += mx; box.max.x += mx;
+    box.min.x += mx;
+    box.max.x += mx;
     if (mx != dx) {
         p->hit_wall |= fabs(dx - mx) > 1e-3 && !guard;
         p->vel.x = 0;
@@ -356,7 +362,8 @@ static void player_move(const physics *ph, player *p, double dt)
     double dz = p->vel.z * dt;
     double mz = sweep(ph, box, 2, dz, SWEEP_BODIES, -1);
     if (guard) mz = edge_guard(ph, box, 2, mz);
-    box.min.z += mz; box.max.z += mz;
+    box.min.z += mz;
+    box.max.z += mz;
     if (mz != dz) {
         p->hit_wall |= fabs(dz - mz) > 1e-3 && !guard;
         p->vel.z = 0;
@@ -377,7 +384,11 @@ static void player_step(const physics *ph, player *p, const player_input *in)
     double fx = fwd * sy + side * cy;
     double fz = -fwd * cy + side * sy;
     double len = hypot(fx, fz);
-    if (len > 1.0) { fx /= len; fz /= len; len = 1.0; }
+    if (len > 1.0) {
+        fx /= len;
+        fz /= len;
+        len = 1.0;
+    }
 
     if (p->flying) {
         p->sneaking = 0;
@@ -439,7 +450,10 @@ static void player_step(const physics *ph, player *p, const player_input *in)
     }
     double dvx = fx * target - p->vel.x, dvz = fz * target - p->vel.z;
     double dv = hypot(dvx, dvz), maxdv = amax * dt;
-    if (dv > maxdv) { dvx *= maxdv / dv; dvz *= maxdv / dv; }
+    if (dv > maxdv) {
+        dvx *= maxdv / dv;
+        dvz *= maxdv / dv;
+    }
     if (!p->on_ground && sub <= 0.5 && len < 1e-3) dvx = dvz = 0; /* keep momentum */
     p->vel.x += dvx;
     p->vel.z += dvz;
@@ -843,7 +857,9 @@ void physics_on_column_unload(void *user, const column *c) { physics_settle_bodi
 /* ---------------------------------------------------------------- items */
 
 static double item_density(item_id id)
-{ return item_is_block(id) ? (double)block_get((uint8_t)id)->density : (double)item_get(id)->density; }
+{
+    return item_is_block(id) ? (double)block_get((uint8_t)id)->density : (double)item_get(id)->density;
+}
 
 static double item_restitution(item_id id)
 {
@@ -1060,7 +1076,10 @@ int physics_check_structure(physics *ph, int x, int y, int z)
             for (int i = 0; i < REGION_W; i++) {
                 int idx = RIDX(i, j, k);
                 uint8_t id = ids[idx];
-                if (!is_structural(id)) { s[idx] = -2; continue; }
+                if (!is_structural(id)) {
+                    s[idx] = -2;
+                    continue;
+                }
                 solid++;
                 int wy = y0 + j;
                 /* Cells on the region boundary are assumed supported: we
@@ -1264,10 +1283,22 @@ ray_hit physics_raycast(const world *w, dvec3 o, vec3 dir, double max_dist)
             r.id = id;
             return r;
         }
-        px = x; py = y; pz = z;
-        if (tmx < tmy && tmx < tmz) { x += sx; t = tmx; tmx += tdx; }
-        else if (tmy < tmz) { y += sy; t = tmy; tmy += tdy; }
-        else { z += sz; t = tmz; tmz += tdz; }
+        px = x;
+        py = y;
+        pz = z;
+        if (tmx < tmy && tmx < tmz) {
+            x += sx;
+            t = tmx;
+            tmx += tdx;
+        } else if (tmy < tmz) {
+            y += sy;
+            t = tmy;
+            tmy += tdy;
+        } else {
+            z += sz;
+            t = tmz;
+            tmz += tdz;
+        }
     }
     return r;
 }

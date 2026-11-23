@@ -29,8 +29,7 @@ static void test_table_well_formed(void)
         CHECK(k->part_kind >= HDBG_ANY && k->part_kind <= HDBG_SYSTEMIC);
         if (!k->name) continue; /* already reported above; nothing else here is safe without it */
         CHECK(health_debug_find(k->name) == i);
-        for (int j = i + 1; j < HEALTH_DEBUG_COUNT; j++)
-            CHECK(strcmp(k->name, HEALTH_DEBUG_KINDS[j].name) != 0);
+        for (int j = i + 1; j < HEALTH_DEBUG_COUNT; j++) CHECK(strcmp(k->name, HEALTH_DEBUG_KINDS[j].name) != 0);
     }
     CHECK(health_debug_find("not-a-real-injury") == -1);
 }
@@ -89,23 +88,16 @@ static void test_each_kind_persists(void)
             ok = h->concussion > 0.0f || h->confusion > 0.0f || h->part[BP_HEAD].integrity < 1.0f;
         else if (!strcmp(k->name, "burn") || !strcmp(k->name, "burn1") || !strcmp(k->name, "burn3"))
             ok = h->part[used_part].burn > 0;
-        else if (!strcmp(k->name, "dislocation"))
-            ok = h->part[used_part].dislocated != DISLOC_NONE;
-        else if (!strcmp(k->name, "abrasion"))
-            ok = any_wound(h, used_part, WOUND_ABRASION);
+        else if (!strcmp(k->name, "dislocation")) ok = h->part[used_part].dislocated != DISLOC_NONE;
+        else if (!strcmp(k->name, "abrasion")) ok = any_wound(h, used_part, WOUND_ABRASION);
         else if (!strcmp(k->name, "crush")) ok = h->part[used_part].crush > 0.0f;
         else if (!strcmp(k->name, "frostnip") || !strcmp(k->name, "frostbite") || !strcmp(k->name, "deep-frostbite"))
             ok = h->part[used_part].frost != FROST_NONE;
-        else if (!strcmp(k->name, "hypothermia"))
-            ok = h->temp < 36.0f;
-        else if (!strcmp(k->name, "hyperthermia"))
-            ok = h->temp > 38.0f;
-        else if (!strcmp(k->name, "pain"))
-            ok = h->part[used_part].pain > 1.0f;
-        else if (!strcmp(k->name, "shock"))
-            ok = h->blood < BLOOD_NORMAL * 0.8f;
-        else if (!strcmp(k->name, "sepsis"))
-            ok = h->sepsis > 0.1f;
+        else if (!strcmp(k->name, "hypothermia")) ok = h->temp < 36.0f;
+        else if (!strcmp(k->name, "hyperthermia")) ok = h->temp > 38.0f;
+        else if (!strcmp(k->name, "pain")) ok = h->part[used_part].pain > 1.0f;
+        else if (!strcmp(k->name, "shock")) ok = h->blood < BLOOD_NORMAL * 0.8f;
+        else if (!strcmp(k->name, "sepsis")) ok = h->sepsis > 0.1f;
         else if (!strcmp(k->name, "vfib") || !strcmp(k->name, "asystole") || !strcmp(k->name, "pvt") ||
                  !strcmp(k->name, "pea"))
             ok = !health_rhythm_perfusing(h->rhythm);
@@ -116,8 +108,7 @@ static void test_each_kind_persists(void)
         else if (!strcmp(k->name, "overdose")) ok = h->opioid > 30.0f && h->rr < 10.0f;
         else if (!strcmp(k->name, "faint")) ok = h->vagal > 0.5f && h->hr < 60.0f;
         else if (!strcmp(k->name, "brain-damage")) ok = h->organ[ORG_BRAIN] < 0.5f && h->conscious == CONS_CONFUSED;
-        else
-            ok = 0; /* an entry was added without teaching this test about it */
+        else ok = 0; /* an entry was added without teaching this test about it */
         CHECK(ok);
         mem_free(h);
     }

@@ -9,8 +9,10 @@
 
 static inline uint32_t hash_u32(uint32_t h)
 {
-    h ^= h >> 16; h *= 0x7feb352dU;
-    h ^= h >> 15; h *= 0x846ca68bU;
+    h ^= h >> 16;
+    h *= 0x7feb352dU;
+    h ^= h >> 15;
+    h *= 0x846ca68bU;
     h ^= h >> 16;
     return h;
 }
