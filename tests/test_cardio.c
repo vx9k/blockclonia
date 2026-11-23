@@ -142,7 +142,7 @@ static void test_hypotension_strain(void)
     float before = h->strain;
     live(h, &e, 30.0);
     CHECK(h->strain > before + 0.1f || !health_rhythm_perfusing(h->rhythm));
-    CHECK(has_alert(h, "low blood pressure") || h->conscious == CONS_UNCONSCIOUS || h->down > 0.0f);
+    CHECK(has_alert(h, "low blood pressure") || !health_awake(h) || h->down > 0.0f);
     mem_free(h);
 }
 

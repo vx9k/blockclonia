@@ -199,7 +199,7 @@ static void test_aspiration(void)
     h->stomach_kcal = 400.0f;
     float lungs = h->organ[ORG_LUNGS];
     for (int i = 0; i < 60 && h->lung_water < 0.05f; i++) live(h, &e, 2.0);
-    CHECK(h->conscious == CONS_UNCONSCIOUS);
+    CHECK(!health_awake(h));
     CHECK(h->lung_water >= 0.1f && h->organ[ORG_LUNGS] < lungs);
     mem_free(h);
 }

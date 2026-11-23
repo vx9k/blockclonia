@@ -155,7 +155,7 @@ static void test_fear_unconscious(void)
     health_env e = calm_env();
     h->concussion = 120.0f;
     live(h, &e, 1.0);
-    CHECK(h->conscious == CONS_UNCONSCIOUS);
+    CHECK(!health_awake(h));
     e.fear = 1.0f;
     live(h, &e, 30.0);
     CHECK(h->fear == 0.0f && h->catechol < 0.1f);

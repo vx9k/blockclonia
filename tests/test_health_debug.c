@@ -107,7 +107,7 @@ static void test_each_kind_persists(void)
         else if (!strcmp(k->name, "drunk")) ok = h->bac > 1.5f && h->conscious != CONS_ALERT;
         else if (!strcmp(k->name, "overdose")) ok = h->opioid > 30.0f && h->rr < 10.0f;
         else if (!strcmp(k->name, "faint")) ok = h->vagal > 0.5f && h->hr < 60.0f;
-        else if (!strcmp(k->name, "brain-damage")) ok = h->organ[ORG_BRAIN] < 0.5f && h->conscious == CONS_CONFUSED;
+        else if (!strcmp(k->name, "brain-damage")) ok = h->organ[ORG_BRAIN] < 0.5f && health_impaired(h);
         else if (!strcmp(k->name, "heart-damage")) ok = h->organ[ORG_HEART] < 0.6f;
         else if (!strcmp(k->name, "lung-damage")) ok = h->organ[ORG_LUNGS] < 0.6f;
         else if (!strcmp(k->name, "liver-failure")) ok = h->organ[ORG_LIVER] < 0.4f;

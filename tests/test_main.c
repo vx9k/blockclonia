@@ -1024,7 +1024,7 @@ static void test_health_bleeding(void)
     /* A second dressing needs supplies: two plant fibres make one. */
     CHECK(health_treat(a, &ia, BP_LLEG, TREAT_BANDAGE, 0, msg, sizeof msg) == 0); /* none left */
     inv_add(&ia, I_FIBRE, 2);
-    CHECK(health_treat(a, &ia, BP_LLEG, TREAT_BANDAGE, 0, msg, sizeof msg) == (a->conscious != CONS_UNCONSCIOUS));
+    CHECK(health_treat(a, &ia, BP_LLEG, TREAT_BANDAGE, 0, msg, sizeof msg) == (health_awake(a)));
     CHECK(health_treat(b, &ib, BP_HEAD, TREAT_BANDAGE, 0, msg, sizeof msg) == 0); /* no wound there */
     mem_free(a);
     mem_free(b);
@@ -2277,6 +2277,7 @@ int main(void)
     test_liquids_all();
     test_faint_all();
     test_fear_all();
+    test_conscious_all();
     test_dark_all();
     test_lamps_all();
     test_shadow_all();
