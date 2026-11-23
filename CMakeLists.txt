@@ -276,10 +276,12 @@ if(MC_BUILD_TESTS)
                           tests/test_body_risks.c tests/test_png.c)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)
-  # Under qemu user emulation (cross builds) the suite runs several times
-  # slower than on the hardware.
+  # Under qemu user emulation (cross builds) and the sanitizers the suite
+  # runs several times slower than a plain build.
   if(CMAKE_CROSSCOMPILING_EMULATOR)
     set(_mc_unit_timeout 600)
+  elseif(MC_SANITIZE)
+    set(_mc_unit_timeout 360)
   else()
     set(_mc_unit_timeout 120)
   endif()
