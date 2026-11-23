@@ -565,6 +565,24 @@ static void test_hash_mix(void)
     CHECK(same == 0);
 }
 
+/* K2 and K3 set the input frequency so the mean slope along an axis matches
+ * the old noise's (0.7385 in 2D, 0.5770 in 3D): hills stay as steep and
+ * caves as winding as the thresholds were tuned for. */
+static void test_noise_slope(void)
+{
+    double s2 = 0.0, s3 = 0.0, h = 1e-3;
+    for (int i = 0; i < 20000; i++) {
+        double x = i * 0.7311, z = (i % 997) * 1.913, y = (i % 89) * 0.77;
+        float dx = 0.0f, dz = 0.0f;
+        (void)noise2d_grad(3, x, z, &dx, &dz);
+        s2 += fabs((double)dx);
+        double a = (double)noise3d(3, x, y, z);
+        s3 += fabs((double)noise3d(3, x + h, y, z) - a) / h;
+    }
+    CHECK(s2 / 20000.0 > 0.71 && s2 / 20000.0 < 0.77);
+    CHECK(s3 / 20000.0 > 0.55 && s3 / 20000.0 < 0.61);
+}
+
 void test_noise_all(void)
 {
     test_noise_gradient();
@@ -582,4 +600,5 @@ void test_noise_all(void)
     test_golden_paths();
     test_threaded_columns();
     test_hash_mix();
+    test_noise_slope();
 }
