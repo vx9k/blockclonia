@@ -96,6 +96,11 @@ clang 21 (Ubuntu 26.04), clang 22 (Alpine 3.24) and macOS's Apple clang.
 - **Comments explain why**, in plain sentences: the physics behind a number,
   the hardware reason for a layout, the bug a check prevents. Don't narrate
   what the next line does.
+- **Credit research.** Code that implements a method from a paper or a
+  standard gets a full citation in [`CREDITS.md`](CREDITS.md) (Research:
+  all authors, title, venue, year, link, what was taken, which file uses
+  it) and a short comment at the code pointing there. Add the entry in
+  the pull request that implements the method; papers only read get none.
 - **Formatting** is `.clang-format` (4 spaces, 120 columns), applied by
   the clang-format that `tools/lint.sh` installs from
   `tools/lint-requirements.txt` (CI's version; others format differently):
@@ -156,6 +161,14 @@ clang 21 (Ubuntu 26.04), clang 22 (Alpine 3.24) and macOS's Apple clang.
 - Every sound is synthesized at start-up; the project ships no audio or
   image files. Keep synthesis under ~100 ms total on a desktop CPU
   (`test_sound` has a benchmark).
+- **Today's sounds are placeholders.** The maintainer finds every one of
+  them artificial, and the overhaul in
+  [`docs/design/sound.md`](docs/design/sound.md) (issue #110) replaces
+  them. Don't tune, extend or copy the current recipes in
+  `sound_synth.c`. Make new sounds the way that page describes, in its
+  order. A sound is done when it holds up next to a recording of the
+  real thing and the maintainer has listened to it, not when it plays
+  and the tests pass.
 
 ### Threads
 

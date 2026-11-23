@@ -9,6 +9,14 @@ unless it says otherwise.
 
 ## Now
 
+0. **The sound overhaul** (#110, [docs/design/sound.md](docs/design/sound.md)),
+   first since 2026-11-23: every sound today is a placeholder that sounds
+   artificial. The optimisation series is paused until it is done.
+   - [ ] S0: `--sound-render`, every sound to WAV, dry and in fixed settings
+   - [ ] S1: occlusion, air absorption, propagation delay, under water,
+         reverb from the space around the listener
+   - [ ] S2: sound through openings, a head model, hearing for creatures
+   - [ ] S3: every sound re-synthesized, family by family
 1. **The underground series** (see [World generation](#world-generation)):
    - [x] Each block's material class in the block table (#68)
    - [x] 32-bit item ids (#70)

@@ -17,6 +17,7 @@ pages say why and how. When a plan changes, update both.
 | [farming.md](farming.md) | Crops, kept animals, cooking, preserving, nutrition |
 | [building.md](building.md) | Shapes beyond the cube, doors, chests, beds, mortar |
 | [ballistics.md](ballistics.md) | Ammunition, flight, penetration, wounds, weapons built from parts |
+| [sound.md](sound.md) | The sound overhaul: a listening tool, occlusion, air, reverb, propagation, a head model, then every sound re-synthesized |
 | [ui.md](ui.md) | The "field kit" redesign and its accessibility rules |
 | [multiplayer.md](multiplayer.md) | How sessions work and what is left |
 | [android.md](android.md) | What an Android build needs |

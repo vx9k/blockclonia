@@ -42,6 +42,7 @@
   `general-dev` (Sonnet, medium effort) for everyday development, and
   `deep-reasoning` (Opus, high effort) for the hard and high-stakes
   work: design decisions, cross-module bugs, file formats, the Vulkan
-  Vulkan 1.2 baseline, Vulkan synchronization, mem.h, chunk meshing, rendering
-  pipeline design and anything security-sensitive. Pick the cheapest
+  1.2 baseline, Vulkan synchronization, mem.h, chunk meshing, rendering
+  pipeline design, sound synthesis and audio DSP (the sound overhaul)
+  and anything security-sensitive. Pick the cheapest
   tier that fits, and delegate when the user asks for it.

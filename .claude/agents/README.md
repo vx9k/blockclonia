@@ -13,7 +13,7 @@ rules through `CLAUDE.md`.)
 | `scout` | `claude-haiku-5-5` (Haiku 5.5, pinned) | `low` | Read, Bash | Read-only lookups: where something is defined or used, file summaries, callers, the real error in build or validation output |
 | `docs-writer` | `claude-haiku-5-5` (Haiku 5.5, pinned) | `medium` | Read, Edit, Write, Bash | Prose only: README and docs pages, comments, changelogs, templates, formatting |
 | `general-dev` | `sonnet` (Sonnet) | `medium` | Read, Edit, Write, Bash | Everyday features, contained refactors, reproducible bugs, tests, code review |
-| `deep-reasoning` | `opus` (Opus 5.5) | `high` | Read, Edit, Write, Bash | Architecture, hard cross-module bugs, wide blast radius, security-sensitive changes, Vulkan synchronization, mem.h, chunk meshing, rendering pipeline design |
+| `deep-reasoning` | `opus` (Opus 5.5) | `high` | Read, Edit, Write, Bash | Architecture, hard cross-module bugs, wide blast radius, security-sensitive changes, Vulkan synchronization, mem.h, chunk meshing, rendering pipeline design, sound synthesis and audio DSP |
 
 ## What sends a task to each tier
 
