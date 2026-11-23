@@ -142,7 +142,7 @@ void auto_step(autonomic *a, const autonomic_input *in, double dt, uint32_t *vrn
     float fs = symp_curve(a->f_cs) + cardiopulm(in->p_ra_mean) + 8.0f * in->chemo + 4.0f * in->pain + 6.0f * in->fear +
                10.0f * a->ex_drive + 6.0f * a->metabo + 3.0f * in->diving + a->noise;
     fs *= (1.0f - 0.8f * in->vagal_surge) * (1.0f - a->fail);
-    float fv = vagal_curve(a->f_cs) + 6.0f * in->vagal_surge + 3.0f * in->diving;
+    float fv = vagal_curve(a->f_cs) + 10.0f * in->vagal_surge + 3.0f * in->diving;
     fv *= (in->breath_phase < 0.4f ? 0.6f : 1.0f) * (1.0f - a->vagal_off) * (1.0f - a->vagal_off) * (1.0f - a->fail);
     a->f_s = fmaxf(fs, 0.0f);
     a->f_v = fmaxf(fv, 0.0f);
@@ -177,11 +177,14 @@ void auto_step(autonomic *a, const autonomic_input *in, double dt, uint32_t *vrn
     out->sa_rate = rate + (fminf(rate, 40.0f) - rate) * a->fail;
     out->av_delay = fminf(fmaxf(0.16f + 0.10f * a->eff_ts + 0.15f * a->eff_tv, 0.10f), 0.24f);
     out->emax = fmaxf(1.0f + a->eff_emax, 0.3f);
-    out->v0_scale = fminf(fmaxf(1.0f + a->eff_v0, 0.6f), 1.2f);
+    out->v0_scale = fminf(fmaxf(1.0f + a->eff_v0, 0.6f), 1.2f) + 0.08f * in->vagal_surge;
     /* Silencing the nerves only removes resting tone, about a quarter of
      * the resistance; the gain that tightens the beds after a bleed is far
      * larger than what the reflex can take away. */
     float r = fmaxf(1.0f + a->eff_r, 0.75f);
+    /* A vasovagal surge does more than silence the nerves: muscle vessels
+     * actively open and the veins slacken, the drop that empties the head. */
+    r *= 1.0f - 0.45f * in->vagal_surge;
     for (int b = 0; b < CB_COUNT; b++) out->r_bed[b] = r;
     /* Cerebral vessels barely follow the sympathetic nerves; the brain
      * regulates itself. */

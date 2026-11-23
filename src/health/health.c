@@ -1210,7 +1210,7 @@ static void step_vagal(health *h, const health_env *e, double dt, int awake)
 {
     float vagal_t = 0.0f;
     if (h->faint_drive > 0.0f && awake) vagal_t = e->crouched ? 0.45f : 1.0f;
-    h->vagal = lag(h->vagal, vagal_t, dt, vagal_t > h->vagal ? 6.0 : 5.0);
+    h->vagal = lag(h->vagal, vagal_t, dt, vagal_t > h->vagal ? 4.0 : 5.0);
     h->faint_drive = maxf(0.0f, h->faint_drive - (float)dt);
 }
 

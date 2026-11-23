@@ -167,7 +167,11 @@ static void derive(const circ *c, const circ_input *in, const double *v, double 
     for (int b = 0; b < CB_COUNT; b++) {
         int vein = CC_BRAIN + b, art = BED_ART[b], out = BED_VEIN_OUT[b];
         double col = RHO_G * bed_height(in, b);
-        double q_in = fmax(0.0, p[art] - col - p[vein]) / (c->r_bed0[b] * (double)in->r_bed[b]);
+        /* The skull's pressure (about zero standing) holds the brain's
+         * veins open, and the neck veins collapse above the heart: no
+         * siphon helps the head, so its inflow sees a waterfall. */
+        double down = b == CB_BRAIN ? fmax(p[vein], 0.0) : p[vein];
+        double q_in = fmax(0.0, p[art] - col - down) / (c->r_bed0[b] * (double)in->r_bed[b]);
         double q_out = (p[vein] + col - p[out]) / c->r_ven[b];
         /* Leg veins have valves: blood can't fall back down them. */
         if (b == CB_LEGS) q_out = fmax(0.0, q_out);
