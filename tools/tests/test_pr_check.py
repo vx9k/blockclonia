@@ -167,6 +167,14 @@ class EndToEnd(unittest.TestCase):
         self.commit()
         self.assertEqual(self.run_check('feat(a): add b and c'), (0, '2 test lines, 2 code lines\n', ''))
 
+    def test_a_moved_file_adds_no_code_lines(self):
+        # Even where the user's Git doesn't detect renames on its own.
+        self.git('config', 'diff.renames', 'false')
+        (self.root / 'src/core').mkdir()
+        self.git('mv', 'src/a.c', 'src/core/a.c')
+        self.commit()
+        self.assertEqual(self.run_check('refactor: move a'), (0, '0 test lines, 0 code lines\n', ''))
+
     def test_code_without_tests_fails_and_says_how_many_are_missing(self):
         self.write('src/a.c', 'int a = 0;\nint b = 1;\n')
         self.commit()

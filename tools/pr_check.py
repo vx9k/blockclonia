@@ -109,7 +109,8 @@ def main(argv, cwd=None):
     def git(*a):
         return subprocess.run(['git', *a], cwd=cwd, check=True, capture_output=True, text=True).stdout
 
-    diff = git('diff', '--unified=0', '--no-color', f'{args.base}...HEAD')
+    # A moved file adds no lines, whatever the user's diff.renames says.
+    diff = git('diff', '--find-renames', '--unified=0', '--no-color', f'{args.base}...HEAD')
     root = PurePosixPath(git('rev-parse', '--show-toplevel').strip())
 
     def read(path):
