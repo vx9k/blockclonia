@@ -3,15 +3,35 @@
 # clang-tidy, cppcheck, shader checks, the CI and release tools' tests,
 # clang-format on the working-tree diff.
 # Usage: [MC_FORMAT_BASE=<commit>] tools/lint.sh [build-root]   (default: ./build-lint)
-# Needs: cmake, ninja, clang, lld, llvm, clang-tidy 18, cppcheck 2.13+, glslc,
-#        glslangValidator (optional), clang-format 18, git (for the format step),
-#        python3 3.8+.
+# Needs: cmake, ninja, clang, lld, llvm, run-clang-tidy (from any clang-tidy
+#        package), cppcheck 2.13+, glslc, glslangValidator (optional), git (for
+#        the format step), python3 3.8+ with venv, and network the first time:
+#        clang-format and clang-tidy themselves are installed from
+#        tools/lint-requirements.txt (MC_LINT_SYSTEM_TOOLS=1 uses the system's).
 set -euo pipefail
 src=$(cd "$(dirname "$0")/.." && pwd)
 out=${1:-$src/build-lint}
 jobs=$(nproc 2>/dev/null || echo 4)
 fail=0
 step() { printf '\n== %s\n' "$*"; }
+
+# clang-format and clang-tidy at the versions CI runs: releases format and
+# warn differently (23 folds a long one-line function body that 21 wants on
+# three lines), so a check passed here would fail there. They live in a venv
+# under the build root, installed again when the pins change.
+if [ -z "${MC_LINT_SYSTEM_TOOLS:-}" ]; then
+  req="$src/tools/lint-requirements.txt"
+  tools="$out/lint-tools"
+  if ! cmp -s "$req" "$tools/requirements.txt"; then
+    step "installing the pinned clang-format and clang-tidy"
+    rm -rf "$tools"
+    { python3 -m venv "$tools" &&
+      "$tools/bin/pip" install -q --disable-pip-version-check --only-binary :all: --require-hashes -r "$req" &&
+      cp "$req" "$tools/requirements.txt"; } ||
+      { echo "cannot install them; MC_LINT_SYSTEM_TOOLS=1 runs the system's instead" >&2; exit 1; }
+  fi
+  export PATH="$tools/bin:$PATH"
+fi
 
 step "build (clang, -Werror)"
 cmake -S "$src" -B "$out/clang" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DMC_WERROR=ON >/dev/null
@@ -20,7 +40,9 @@ cmake --build "$out/clang" || fail=1
 
 step "clang-tidy (config: .clang-tidy)"
 tidy_log="$out/clang-tidy.log"
-run-clang-tidy -p "$out/clang" -j "$jobs" -quiet "$src/(src|tests)/.*\\.c\$" >"$tidy_log" 2>&1 || true
+clang-tidy --version | grep -m1 version
+run-clang-tidy -clang-tidy-binary "$(command -v clang-tidy)" -p "$out/clang" -j "$jobs" -quiet \
+  "$src/(src|tests)/.*\\.c\$" >"$tidy_log" 2>&1 || true
 if grep -E 'warning:|error:' "$tidy_log"; then fail=1; else echo "clean"; fi
 
 step "cppcheck"
@@ -53,6 +75,7 @@ python3 -m unittest discover -s "$src/tools/tests" || fail=1
 base=${MC_FORMAT_BASE:-HEAD}   # in CI: the merge base with the main branch
 step "clang-format (lines changed since $base only)"
 if git -C "$src" rev-parse --git-dir >/dev/null 2>&1; then
+  clang-format --version
   diff=$(cd "$src" && git clang-format --diff --extensions c,h "$base" -- src tests 2>/dev/null || true)
   if [ -n "$diff" ] && ! printf '%s' "$diff" | grep -qE '^(no modified files|clang-format did not modify)'; then
     printf '%s\n' "$diff"; fail=1

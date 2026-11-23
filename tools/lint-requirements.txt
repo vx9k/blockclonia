@@ -1,0 +1,17 @@
+# The clang-format and clang-tidy CI's lint job had when this was pinned
+# (Ubuntu 26.04's 21.1.6). tools/lint.sh installs exactly these into a venv,
+# so every machine formats and tidies the same way. Wheels only; the hashes
+# cover glibc and musl Linux on x86_64 and arm64, and macOS.
+clang-format==21.1.6 \
+    --hash=sha256:8a9d82d1d67ffdc491a0a1ce04d7740b6e7ccb1d9b6d2ab90b009040614030e9 \
+    --hash=sha256:20102f69df02282280d5c7dac682987cb82fee9ff89c034c653154019b17a5ef \
+    --hash=sha256:b95ebeb1d177c4d3e00018a26a6e01a4319648bc1fe33e8632d89addbc5faf24 \
+    --hash=sha256:62da4d100f07618f28a943396001fc37d3b0ebaaee59c011b5e8373cd15aaf99 \
+    --hash=sha256:a0cea6afea00448396eaff4e10a569631a4b06582553e3c44c5c040ec83c6b01 \
+    --hash=sha256:74880cb25886c1bb4a95307efeb40f19eba3f1fd86ddee88166814b9ed2600ef
+clang-tidy==21.1.6 \
+    --hash=sha256:685e549e80461afb0f0c420ecfd0427e8bf38b927e989bdfee49dab4a9794cd1 \
+    --hash=sha256:d954cc13d87aa6ba847eac4d26bec019024c54c2968389444eed6d4201ec45e6 \
+    --hash=sha256:3376e988ab33331368bda9a4f541763adfa5906dc529478b9be75565254868f8 \
+    --hash=sha256:372f20267e67f41b758b0c2009e4607f1b53fbee40092e76da3121491d439985 \
+    --hash=sha256:12634548feceb2bce89b65d94550f1b92359ebc19c35cf72b93855cd18845ef9

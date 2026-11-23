@@ -91,7 +91,10 @@ clang 21 (Ubuntu 26.04), clang 22 (Alpine 3.24) and macOS's Apple clang.
 - **Comments explain why**, in plain sentences: the physics behind a number,
   the hardware reason for a layout, the bug a check prevents. Don't narrate
   what the next line does.
-- **Formatting** is `.clang-format` (4 spaces, 120 columns). CI only checks
+- **Formatting** is `.clang-format` (4 spaces, 120 columns), applied by
+  the clang-format that `tools/lint.sh` installs from
+  `tools/lint-requirements.txt` (CI's version; others format differently):
+  run it as `build-lint/lint-tools/bin/clang-format`. CI only checks
   the lines you changed, so don't reformat untouched code.
 
 ## Subsystem rules
