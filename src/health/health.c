@@ -1985,7 +1985,7 @@ static void step_strain(health *h, float ex, float fdt)
     float fast = h->rhythm != RHYTHM_SINUS ? fclamp((h->hr - 130.0f) / 60.0f, 0.0f, 1.5f) : 0.0f;
     float load = over + under + fast;
     if (load > 0.0f) h->strain = minf(h->strain + load * fdt / 60.0f, 30.0f);
-    else if (h->strain > 0.0f) h->strain *= expf(-fdt / 600.0f);
+    else if (h->strain > 0.0f) h->strain *= expf(-fdt / 450.0f);
     /* Hypertensive intracerebral haemorrhage: small brain arteries give
      * way under a systolic far above their autoregulation range, more
      * likely the longer the crisis has gone on. */
@@ -2003,7 +2003,7 @@ static void step_strain(health *h, float ex, float fdt)
  * heart replays exactly as before any of this existed. */
 static void step_arrhythmia(health *h, int airway, float fdt, float beta)
 {
-    float irr = 0.25f * maxf(0.0f, h->strain - 2.0f) + maxf(0.0f, h->ischemia - 1.0f) +
+    float irr = 1.0f * maxf(0.0f, h->strain - 2.0f) + maxf(0.0f, h->ischemia - 1.0f) +
                 beta * beta * (0.5f + 0.1f * h->strain) + 0.5f * maxf(0.0f, h->potassium - 6.0f);
     /* Ischaemia of the AV node, hyperkalaemia and deep cold block conduction. */
     float block = 2e-4f * maxf(0.0f, h->ischemia - 1.0f) + 1e-3f * maxf(0.0f, h->potassium - 7.0f) +
@@ -2404,7 +2404,7 @@ void health_step(health *h, const health_env *e, double dt)
     if (pumping) {
         double rr_now = h->prev_r >= 0.0 ? h->last_r - h->prev_r : 60.0 / (double)sa;
         rr_now = fmax(rr_now, h->t - h->last_r); /* a long pause shows as it happens */
-        h->hr = lag(h->hr, (float)(60.0 / fmax(rr_now, 0.2)), dt, 2.0);
+        h->hr = lag(h->hr, (float)(60.0 / fmax(rr_now, 0.2)), dt, 1.0); /* a monitor averages a few beats */
         h->next_r = h->last_r + rr_now;
     } else {
         h->hr = 0.0f;
