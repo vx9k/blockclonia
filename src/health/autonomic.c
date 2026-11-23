@@ -142,11 +142,17 @@ void auto_step(autonomic *a, const autonomic_input *in, double dt, uint32_t *vrn
     a->noise = a->noise * decay + sd * sqrtf(1.0f - decay * decay) * gauss(vrng);
 
     a->fail = lagf(a->fail, in->brain_ok ? 0.0f : 1.0f, dt, 5.0f);
-    float fs = symp_curve(a->f_cs) + cardiopulm(in->p_ra_mean) + 8.0f * in->chemo + 4.0f * in->pain + 6.0f * in->fear +
+    /* Fear's own push is small: the defence reaction's rise of a few tens
+     * of mmHg comes mostly from the adrenaline it releases, and a bigger
+     * term here outruns the whole baroreflex (300/245 when hunted). */
+    float fs = symp_curve(a->f_cs) + cardiopulm(in->p_ra_mean) + 8.0f * in->chemo + 4.0f * in->pain + 1.0f * in->fear +
                10.0f * a->ex_drive + 6.0f * a->metabo + 3.0f * in->diving + a->noise;
     fs *= (1.0f - 0.8f * in->vagal_surge) * (1.0f - a->fail);
     float fv = vagal_curve(a->f_cs) + 10.0f * in->vagal_surge + 3.0f * in->diving;
-    fv *= (in->breath_phase < 0.4f ? 0.6f : 1.0f) * (1.0f - a->vagal_off) * (1.0f - a->vagal_off) * (1.0f - a->fail);
+    /* Fear's quick pulse is mostly the vagus letting go of the heart:
+     * +20-40 bpm with no squeeze on the vessels. */
+    fv *= (1.0f - 0.5f * in->fear) * (in->breath_phase < 0.4f ? 0.6f : 1.0f) * (1.0f - a->vagal_off) *
+          (1.0f - a->vagal_off) * (1.0f - a->fail);
     a->f_s = fmaxf(fs, 0.0f);
     a->f_v = fmaxf(fv, 0.0f);
     a->hist_s[a->hist_pos] = a->f_s;
