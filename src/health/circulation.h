@@ -73,6 +73,9 @@ typedef struct {
     float edv, esv;              /* mL, left ventricle */
     float p_ao_max, p_ao_min;    /* mmHg */
     float cor_dia_frac;          /* share of coronary flow that came with the aortic valve shut */
+    float beat_len;              /* s from its activation to the next */
+    float p_ao_mean, p_ra_mean;  /* mmHg, mean over the beat */
+    float beat_q_ao, beat_q_cor, beat_q_bed[CB_COUNT]; /* mL/s, mean over the beat */
     float pv_v[CIRC_PV_N], pv_p[CIRC_PV_N];
     int pv_n;
     float wave_ao;               /* mmHg in the aortic root now */
@@ -89,6 +92,8 @@ typedef struct {
     long long steps;             /* sub-steps of absolute time done */
     double beat_t;               /* activation that started the beat being measured, -1 none */
     double b_vmax, b_vmin, b_pmax, b_pmin, b_cor, b_cor_dia;
+    double b_pao, b_pra, b_qao, b_qbed[CB_COUNT];
+    long long b_n;
     float w_v[CIRC_PV_N], w_p[CIRC_PV_N];
     int w_n, w_i;
 } circ;

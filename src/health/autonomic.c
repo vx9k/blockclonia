@@ -30,16 +30,16 @@
  * delay and time constant (Ursino 1998, Table 2). Gains on contractility,
  * resistance and venous volume are relative to his resting values: 0.475
  * of 2.392 mmHg/mL, 0.695 of 2.49 mmHg s/mL, -265 of ~2900 mL. */
-#define G_EMAX 0.199f
+#define G_EMAX 0.3f
 #define D_EMAX 2.0f
 #define T_EMAX 8.0f
-#define G_R 0.279f
+#define G_R 0.6f
 #define D_R 2.0f
 #define T_R 6.0f
-#define G_V0 (-0.0915f)
+#define G_V0 (-0.2f)
 #define D_V0 5.0f
 #define T_V0 20.0f
-#define G_TS (-0.13f)
+#define G_TS (-0.2f)
 #define D_TS 2.0f
 #define T_TS 2.0f
 #define G_TV 0.09f
@@ -117,10 +117,20 @@ void auto_step(autonomic *a, const autonomic_input *in, double dt, uint32_t *vrn
     a->p_cs += (float)(dt / (double)TAU_P) * (p + TAU_Z * dp - a->p_cs);
     /* Exercise resets the reflex upward, so pressure may rise while running. */
     a->command = lagf(a->command, in->effort, dt, 3.0f);
-    a->ex_drive = lagf(a->ex_drive, in->effort, dt, 40.0f);
-    a->metab = lagf(a->metab, in->effort, dt, 30.0f);
+    /* The vagus lets go of the heart within a beat or two of starting to
+     * work, but takes it back slowly: the heart rate's fall after stopping
+     * runs over a minute or more, slowly at first (squared below). */
+    a->vagal_off = lagf(a->vagal_off, in->effort, dt, in->effort > a->vagal_off ? 2.0f : 40.0f);
+    a->ex_drive = lagf(a->ex_drive, in->effort, dt, in->effort > a->ex_drive ? 40.0f : 15.0f);
+    /* Working muscle's own metabolites open its vessels within half a
+     * minute and wash out over minutes after it stops (the hyperaemia
+     * behind the pressure dip after exercise). */
+    a->metab = lagf(a->metab, in->effort, dt, in->effort > a->metab ? 30.0f : 120.0f);
     a->metabo = lagf(a->metabo, in->muscle_o2_debt, dt, 60.0f);
-    a->f_cs = afferent(a->p_cs - 25.0f * a->command);
+    /* Central command resets the reflex while working, and the reset eases
+     * off over a minute after stopping, as the vagus returns; the oxygen-starved
+     * muscles' own afferents (the metaboreflex) hold the reset after. */
+    a->f_cs = afferent(a->p_cs - 25.0f * fmaxf(a->vagal_off, a->metabo));
 
     /* Random sympathetic traffic, an Ornstein-Uhlenbeck process (tau 2 s);
      * the reflex loop's own delay turns it into ~0.1 Hz Mayer waves. */
@@ -130,10 +140,10 @@ void auto_step(autonomic *a, const autonomic_input *in, double dt, uint32_t *vrn
 
     a->fail = lagf(a->fail, in->brain_ok ? 0.0f : 1.0f, dt, 5.0f);
     float fs = symp_curve(a->f_cs) + cardiopulm(in->p_ra_mean) + 8.0f * in->chemo + 4.0f * in->pain + 6.0f * in->fear +
-               18.0f * a->ex_drive + 6.0f * a->metabo + 3.0f * in->diving + a->noise;
+               10.0f * a->ex_drive + 6.0f * a->metabo + 3.0f * in->diving + a->noise;
     fs *= (1.0f - 0.8f * in->vagal_surge) * (1.0f - a->fail);
     float fv = vagal_curve(a->f_cs) + 6.0f * in->vagal_surge + 3.0f * in->diving;
-    fv *= (in->breath_phase < 0.4f ? 0.6f : 1.0f) * (1.0f - a->command) * (1.0f - a->fail);
+    fv *= (in->breath_phase < 0.4f ? 0.6f : 1.0f) * (1.0f - a->vagal_off) * (1.0f - a->vagal_off) * (1.0f - a->fail);
     a->f_s = fmaxf(fs, 0.0f);
     a->f_v = fmaxf(fv, 0.0f);
     a->hist_s[a->hist_pos] = a->f_s;
@@ -154,9 +164,11 @@ void auto_step(autonomic *a, const autonomic_input *in, double dt, uint32_t *vrn
     a->eff_tv = lagf(a->eff_tv, g * G_TV * fv_d, dt, T_TV);
 
     /* The brain's arterioles widen or narrow to hold its flow (tau ~5 s),
-     * within the limits of how far they can go. */
+     * within the limits of how far they can go. The hold is not perfect:
+     * the leak leaves about a fifth of a sustained change in pressure
+     * showing in the flow, as static autoregulation does. */
     float flow = in->brain_flow > 0.0f ? in->brain_flow : 1.0f;
-    a->autoreg *= (float)exp((double)(flow - 1.0f) * dt / 5.0);
+    a->autoreg *= (float)exp(((double)(flow - 1.0f) - 0.2 * log((double)a->autoreg)) * dt / 5.0);
     a->autoreg = fminf(fmaxf(a->autoreg, 0.4f), 2.5f);
 
     float period = fmaxf(a->t0 + a->eff_ts + a->eff_tv, 60.0f / 220.0f);
@@ -166,13 +178,16 @@ void auto_step(autonomic *a, const autonomic_input *in, double dt, uint32_t *vrn
     out->av_delay = fminf(fmaxf(0.16f + 0.10f * a->eff_ts + 0.15f * a->eff_tv, 0.10f), 0.24f);
     out->emax = fmaxf(1.0f + a->eff_emax, 0.3f);
     out->v0_scale = fminf(fmaxf(1.0f + a->eff_v0, 0.6f), 1.2f);
-    float r = fmaxf(1.0f + a->eff_r, 0.3f);
+    /* Silencing the nerves only removes resting tone, about a quarter of
+     * the resistance; the gain that tightens the beds after a bleed is far
+     * larger than what the reflex can take away. */
+    float r = fmaxf(1.0f + a->eff_r, 0.75f);
     for (int b = 0; b < CB_COUNT; b++) out->r_bed[b] = r;
     /* Cerebral vessels barely follow the sympathetic nerves; the brain
      * regulates itself. */
     out->r_bed[CB_BRAIN] = (1.0f + 0.2f * a->eff_r) * a->autoreg;
     /* Working muscle opens its vessels and overrides the nerves that would
      * close them. */
-    out->r_bed[CB_LEGS] = (1.0f + a->eff_r * (1.0f - a->metab)) / (1.0f + 4.0f * a->metab);
+    out->r_bed[CB_LEGS] = (1.0f + a->eff_r * (1.0f - a->metab)) / (1.0f + 12.0f * a->metab);
     out->symp = fminf(fmaxf((a->f_s - FES_MIN) / 30.0f, 0.0f), 1.0f);
 }

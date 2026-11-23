@@ -19,10 +19,13 @@
 #define MAP_SET 93.0f
 #define O2_VOL 10.0f         /* L: lungs after a breath plus blood and myoglobin stores */
 #define HEAT_CAP (75.0f * 3500.0f)
-#define RVR0 1.25f           /* resistance to venous return, mmHg min/L */
-#define SVR0 18.75f          /* systemic vascular resistance at rest */
-#define CSYS 0.2f            /* L/mmHg, systemic compliance */
-#define SV_MAX 207.8f        /* mL; SV = SV_MAX * contractility * (RAP+1)/(RAP+4) */
+#define SVR0 18.75f          /* systemic vascular resistance at rest, mmHg min/L */
+/* Resting flows of the simulated circulation (circulation.c), standing
+ * still: what the brain's, the heart's and a finger's flow are measured
+ * against. */
+#define Q_BRAIN_REST 10.0f   /* mL/s, ~600 mL/min */
+#define Q_COR_REST 3.0f      /* mL/s, ~4% of output */
+#define Q_FINGER_REST 14.0f  /* mL/s into the arms' bed */
 #define ARREST_DEATH_S 60.0f /* arrest called when nothing here can restart the heart (no CPR) */
 #define DEFIB_ANALYSE_S 6.0f /* AEDs take 5-15 s to analyse a rhythm */
 #define DEFIB_CHARGE_S 6.0f  /* and under 10 s to charge */
@@ -35,9 +38,6 @@
 #define ADR_ALPHA_EC50 2.0f  /* ng/mL: vasoconstriction needs higher ones, pressor doses */
 #define SURGE_NG_S 0.02f     /* ng/mL/s released in a surge: holds ~4 ng/mL, a phaeochromocytoma crisis */
 #define FEAR_NG_S 0.006f     /* ng/mL/s at full fear: holds ~1.3 ng/mL, the range of acute terror */
-#define VT_RATE 165.0f       /* bpm, monomorphic VT that still ejects */
-#define PVT_RATE 210.0f      /* bpm: faster VT fills too little to eject; above AED VT cut-offs (~180) */
-#define ESCAPE_RATE 36.0f    /* bpm, ventricular escape below a complete AV block */
 
 /* Drugs. Oral morphine: 10 mg absorbed over about half an hour, a 3 h
  * half-life (longer when the liver fails), analgesia from a few mg, and
@@ -281,13 +281,27 @@ const char *health_death_text(int cause)
 
 /* --------------------------------------------------------------- init */
 
+/* The heart and vessels of this constitution, full and at rest. */
+static void start_circulation(health *h)
+{
+    circ_init(&h->cv, h->base.blood_per_kg * 75.0f, h->base.heart_size, h->base.art_stiff);
+    cond_init(&h->cond);
+    auto_init(&h->ans, h->base.hr_rest);
+    h->blood = circ_volume(&h->cv) / 1000.0f;
+    h->rbc = h->blood * 0.45f;
+}
+
 void health_init(health *h, uint32_t seed)
 {
     memset(h, 0, sizeof *h);
     h->rng = seed ? seed : 0x9E3779B9u;
+    /* The variability stream, never zero (xorshift would stay there). */
+    h->vrng = hash32(h->rng ^ 0xA5A5A5A5u) | 1u;
     h->base.hr_rest = HR_REST;
     h->base.map_set = MAP_SET;
     h->base.pain_gain = h->base.clot_gain = h->base.metab_gain = 1.0f;
+    h->base.heart_size = h->base.art_stiff = h->base.baro_gain = h->base.venous_tone = h->base.symp_noise = 1.0f;
+    h->base.blood_per_kg = 70.0f;
     for (int i = 0; i < BP_COUNT; i++) {
         h->part[i].integrity = 1.0f;
         h->part[i].skin = is_limb(i) ? 31.0f : 33.5f; /* clothed at rest in 20 C air */
@@ -311,11 +325,8 @@ void health_init(health *h, uint32_t seed)
     h->dbp = 80.0f;
     h->symp = 0.15f;
     h->rhythm = RHYTHM_SINUS;
-    h->rr_k = 1.0f;
-    h->next_r = 60.0 / (double)h->base.hr_rest;
-    h->prev_r = -60.0 / (double)h->base.hr_rest;
-    h->beat_pp = 40.0f;
-    h->beat_dbp = 80.0f;
+    h->last_r = h->prev_r = h->next_r = h->atria_prev = -1.0;
+    h->brain_flow = 1.0f;
 
     h->rr = 14.0f;
     h->breathing = 1;
@@ -343,6 +354,7 @@ void health_init(health *h, uint32_t seed)
         h->pleth[i] = 0.0f;
     }
     for (int i = 0; i < HEALTH_LOG; i++) h->log_age[i] = 1e9f;
+    start_circulation(h);
 }
 
 void health_init_varied(health *h, uint32_t seed)
@@ -358,14 +370,19 @@ void health_init_varied(health *h, uint32_t seed)
     h->base.clot_gain = 0.75f + 0.6f * frand_s(&s);
     h->base.metab_gain = 0.92f + 0.18f * frand_s(&s);
     h->base.cold_bias = -0.4f + 0.8f * frand_s(&s);
+    h->base.heart_size = 0.85f + 0.3f * frand_s(&s);
+    h->base.art_stiff = 0.75f + 0.5f * frand_s(&s);
+    h->base.blood_per_kg = 65.0f + 10.0f * frand_s(&s);
+    h->base.baro_gain = 0.7f + 0.6f * frand_s(&s);
+    h->base.venous_tone = 0.9f + 0.2f * frand_s(&s);
+    h->base.symp_noise = 0.5f + 1.0f * frand_s(&s);
     h->base.vary = 1;
-    h->vrng = hash32(s); /* a stream of its own for the short-term wander */
+    h->vrng = hash32(s) | 1u; /* a stream of its own for the short-term wander */
 
     h->hr = h->base.hr_rest;
     h->co = h->base.hr_rest * 75.0f / 1000.0f;
     h->map = h->base.map_set;
-    h->next_r = 60.0 / (double)h->base.hr_rest;
-    h->prev_r = -60.0 / (double)h->base.hr_rest;
+    start_circulation(h);
     h->power = BMR_W * h->base.metab_gain;
     h->vo2 = h->power / J_PER_ML_O2 * 0.06f;
 }
@@ -1050,109 +1067,56 @@ static float gauss(float t, float mu, float sigma)
     return expf(-0.5f * d * d);
 }
 
-/* One heartbeat's ECG (lead II, mV) at time t relative to its R peak.
- * `p` is 0 where no P wave leads the beat (AF's atria only quiver). */
-static float ecg_beat(float t, float rr, int pvc, float st_shift, float p)
+/* The P wave of an atrial activation t s ago (lead II, mV). */
+static float ecg_p(float t) { return t < -0.1f || t > 0.3f ? 0.0f : 0.15f * gauss(t, 0.05f, 0.025f); }
+
+/* The QRS and T wave of a ventricular activation t s ago; rr sets the QT.
+ * A beat that starts in the ventricle itself (ectopic, VT, an escape
+ * below a block) spreads cell to cell: wide and bizarre, its T wave
+ * turned against it. */
+static float ecg_qrst(float t, float rr, int wide, float st_shift)
 {
-    if (t < -0.3f || t > 0.9f) return 0.0f;
-    if (pvc) {
-        /* Ventricular ectopic: no P wave, wide bizarre QRS, discordant T. */
-        return 1.4f * gauss(t, 0.0f, 0.03f) - 0.7f * gauss(t, 0.07f, 0.03f) - 0.45f * gauss(t, 0.3f, 0.06f);
-    }
+    if (t < -0.1f || t > 1.2f) return 0.0f;
+    if (wide) return 1.4f * gauss(t, 0.04f, 0.03f) - 0.7f * gauss(t, 0.11f, 0.03f) - 0.45f * gauss(t, 0.34f, 0.06f);
     float qt = sqrtf(rr);
-    float v = 0.15f * p * gauss(t, -0.16f, 0.025f) - 0.12f * gauss(t, -0.035f, 0.01f) + 1.2f * gauss(t, 0.0f, 0.012f) -
-              0.3f * gauss(t, 0.035f, 0.012f) + 0.33f * gauss(t, 0.25f * qt, 0.045f * qt);
-    if (st_shift != 0.0f && t > 0.05f && t < 0.2f * qt + 0.1f) v += st_shift;
+    float v = -0.12f * gauss(t, 0.005f, 0.01f) + 1.2f * gauss(t, 0.04f, 0.012f) - 0.3f * gauss(t, 0.075f, 0.012f) +
+              0.33f * gauss(t, 0.04f + 0.25f * qt, 0.045f * qt);
+    if (st_shift != 0.0f && t > 0.09f && t < 0.2f * qt + 0.14f) v += st_shift;
     return v;
 }
 
-/* Arterial pulse contour, 0 at the foot and ~1 at the systolic peak. */
-static float pulse_shape(float t, float up)
-{
-    if (t <= 0.0f) return 0.0f;
-    if (t < up) return sinf(1.5707963f * t / up);
-    const float notch = 0.3f;
-    if (t < notch) {
-        float k = (t - up) / (notch - up);
-        return 1.0f - 0.42f * k - 0.06f * k * k;
-    }
-    float d = t - notch;
-    return 0.52f * expf(-d / 0.5f) + 0.06f * gauss(d, 0.04f, 0.02f);
-}
-
-static float pulse_wave(float t, float rr, float up)
-{
-    if (rr < 0.2f) rr = 0.2f;
-    if (t > rr) t = rr;
-    return maxf(0.0f, pulse_shape(t, up) - pulse_shape(rr, up) * (t / rr));
-}
-
-static void write_samples(health *h, const health_env *e, double dt)
+/* Fills the monitor traces for this step. The arterial line and the
+ * finger's pulse are the circulation's own (art_s, pleth_s: ns samples,
+ * taken at the sample times as the circuit reached them); the ECG draws a
+ * complex for each activation the conduction system fired. */
+static void write_samples(health *h, const health_env *e, double dt, const float *art_s, const float *pleth_s, int ns)
 {
     h->wave_acc += (float)(dt * HEALTH_WAVE_HZ);
     const double ds = 1.0 / HEALTH_WAVE_HZ;
-    double t0 = h->t - dt;
+    const double t0 = h->t - dt;
+    const conduction *c = &h->cond;
+    const int r = h->rhythm;
+    const float rr = 60.0f / maxf(h->hr, 30.0f);
+    const float st = h->ischemia > 1.0f ? -0.08f * minf(h->ischemia, 3.0f) : 0.0f;
+    const int wide = r == RHYTHM_VT || r == RHYTHM_PVT || r == RHYTHM_AVB3;
     int k = 0;
     while (h->wave_acc >= 1.0f) {
         h->wave_acc -= 1.0f;
         double ts = t0 + ds * ++k;
         if (ts > h->t) ts = h->t;
         float ecg = 0.0f, art = 0.0f, pleth = 0.0f, capno = 0.0f;
-        const int r = h->rhythm;
-        /* Pulseless VT and PEA still show organised complexes, at a rate
-         * of their own; PEA's slow as the starved myocardium gives out. */
-        float rate = r == RHYTHM_PVT ? PVT_RATE
-                                     : (r == RHYTHM_PEA ? maxf(20.0f, 55.0f - h->arrest_time * 0.15f) : h->hr);
-        float rr = 60.0f / maxf(rate, 1.0f);
-        int organised = !h->dead && (health_rhythm_perfusing(r) || r == RHYTHM_PVT || r == RHYTHM_PEA);
-
-        if (organised) {
-            /* AF: each R-R interval is drawn afresh, irregularly irregular. */
-            float jit = r == RHYTHM_AF ? h->rr_k : 1.0f;
-            h->beat_phase += (float)(ds * (double)rate / 60.0) / jit;
-            int fire = 0, pvc = 0;
-            if (h->pvc_pending && h->beat_phase >= 0.62f) {
-                fire = pvc = 1;
-                h->pvc_pending = 0;
-                h->beat_phase = -0.38f; /* compensatory pause */
-            } else if (h->beat_phase >= 1.0f) {
-                fire = 1;
-                h->beat_phase -= 1.0f;
-            }
-            if (fire) {
-                h->prev_r = h->last_r;
-                h->last_r = ts;
-                h->last_beat_pvc = pvc;
-                h->beat_pp = (h->sbp - h->dbp) * (pvc ? 0.35f : 1.0f);
-                h->beat_dbp = h->dbp;
-                /* Ischaemic, acidotic, cold, hyperkalaemic, strained or
-                 * adrenaline-soaked hearts throw ectopics. */
-                if (r == RHYTHM_SINUS || r == RHYTHM_AF) {
-                    float p = 0.004f + fclamp((h->ischemia - 0.5f) * 0.1f, 0.0f, 0.4f) +
-                              (h->lactate > 10.0f ? 0.05f : 0.0f) + (h->organ[ORG_KIDNEYS] < 0.15f ? 0.06f : 0.0f) +
-                              (h->temp < 32.0f ? 0.05f : 0.0f) + 0.04f * maxf(0.0f, h->potassium - 6.0f) +
-                              minf(0.02f * h->strain, 0.2f) + 0.1f * catechol_beta(h);
-                    if (!pvc && frand(h) < p) h->pvc_pending = 1;
-                }
-                if (r == RHYTHM_AF) h->rr_k = 0.6f + 0.8f * frand(h);
-            }
-            jit = r == RHYTHM_AF ? h->rr_k : 1.0f;
-            h->next_r = ts + (double)((1.0f - h->beat_phase) * rr * jit);
-            /* Ventricular rhythms conduct cell to cell: wide complexes. */
-            int wide = r == RHYTHM_VT || r == RHYTHM_PVT || r == RHYTHM_AVB3;
-            float p = r == RHYTHM_AF || wide ? 0.0f : 1.0f;
-            float st = h->ischemia > 1.0f ? -0.08f * minf(h->ischemia, 3.0f) : 0.0f;
-            ecg = ecg_beat((float)(ts - h->last_r), rr, h->last_beat_pvc || wide, st, p);
-            if (!h->pvc_pending) ecg += ecg_beat((float)(ts - h->next_r), rr, wide, 0.0f, p);
-            float s = (float)ts;
-            /* AF's fibrillatory baseline; in complete block, P waves march
-             * through at the sinus node's own rate, unrelated to the QRS. */
+        const float s = (float)ts;
+        if (!h->dead && r != RHYTHM_VF && r != RHYTHM_ASYSTOLE) {
+            double tv = ts >= c->t_vent ? c->t_vent : c->prev_vent;
+            int ectopic = tv == c->t_vent && c->last_ectopic;
+            if (tv >= 0.0) ecg += ecg_qrst((float)(ts - tv), rr, wide || ectopic, st);
+            double ta = ts >= c->t_atria ? c->t_atria : h->atria_prev;
+            if (ta >= 0.0 && cond_atria_on(r) > 0.0f) ecg += ecg_p((float)(ts - ta));
+            /* AF's fibrillatory baseline. */
             if (r == RHYTHM_AF) ecg += 0.05f * sinf(37.7f * s + 0.8f * sinf(2.3f * s)) + 0.03f * sinf(51.0f * s);
-            else if (r == RHYTHM_AVB3) ecg += 0.15f * gauss(fmodf(s, 0.8f), 0.4f, 0.025f);
         } else if (r == RHYTHM_VF && !h->dead) {
             /* Coarse VF fading to fine VF as the myocardium runs out of energy. */
             float amp = 0.55f * expf(-h->arrest_time / 240.0f) + 0.08f;
-            float s = (float)ts;
             ecg = amp * (0.6f * sinf(25.8f * s + 1.3f * sinf(1.7f * s)) + 0.4f * sinf(33.3f * s + 0.7f) +
                          0.3f * sinf(41.9f * s + 2.0f * sinf(0.9f * s)));
         }
@@ -1160,17 +1124,10 @@ static void write_samples(health *h, const health_env *e, double dt)
         ecg += 0.04f * sinf(6.2831853f * h->breath_phase) +
                (frand(h) - 0.5f) * (0.02f + 0.03f * (float)fclamp((float)e->speed, 0.0f, 8.0f));
 
-        int pulse = health_rhythm_perfusing(h->rhythm) && !h->dead;
-        if (pulse) {
-            float t = (float)(ts - h->last_r) - 0.06f;
-            float beat_rr = (float)(h->last_r - h->prev_r);
-            if (t < 0.0f) t += beat_rr;
-            art = h->beat_dbp + h->beat_pp * pulse_wave(t, maxf(rr, beat_rr), 0.09f);
-            float tp = (float)(ts - h->last_r) - 0.22f;
-            if (tp < 0.0f) tp += beat_rr;
-            /* Vasoconstriction flattens the finger's pulse. */
-            float pi = fclamp(h->beat_pp / 40.0f, 0.0f, 1.5f) * (1.1f - 0.7f * h->symp);
-            pleth = pi * pulse_wave(tp, maxf(rr, beat_rr), 0.15f);
+        if (ns > 0) {
+            int j = k - 1 < ns ? k - 1 : ns - 1;
+            art = art_s[j];
+            pleth = pleth_s[j];
         } else {
             art = h->map;
             pleth = 0.0f;
@@ -1237,43 +1194,16 @@ static void stop_heart(health *h, int rhythm, int airway)
     }
 }
 
-/* A change between rhythms that keep a pulse, or back to sinus. VT and
- * heart block take over the ventricles at once, at their own rates. */
+/* A change between rhythms that keep a pulse, or back to sinus. The
+ * conduction system (conduction.c) takes it from the next event. */
 static void set_rhythm(health *h, int rhythm)
 {
     if (h->rhythm == rhythm || !health_rhythm_perfusing(h->rhythm)) return;
     h->rhythm = rhythm;
-    h->pvc_pending = 0;
-    h->rr_k = 1.0f;
-    if (rhythm == RHYTHM_VT) h->hr = VT_RATE;
-    else if (rhythm == RHYTHM_AVB3) h->hr = ESCAPE_RATE;
     if (rhythm == RHYTHM_SINUS) health_log(h, "The heart is back in sinus rhythm");
     else health_log(h, "%s", RHYTHM_NAMES[rhythm]);
 }
 
-/* Venous return meets the heart's pumping curve: solve for right atrial
- * pressure where HR * SV(RAP) = (Pms - RAP) / Rvr (Guyton). */
-static float solve_output(float hr, float contract, float pms, float rvr, float rap_extra, float *rap_out)
-{
-    if (pms <= rap_extra || hr <= 0.0f || contract <= 0.0f) {
-        *rap_out = maxf(pms, 0.0f);
-        return 0.0f;
-    }
-    float lo = 0.0f, hi = pms;
-    for (int it = 0; it < 24; it++) {
-        float rap = 0.5f * (lo + hi);
-        float pump = hr * SV_MAX * contract * (rap + 1.0f) / (rap + 4.0f) * 0.001f;
-        float ret = (pms - rap - rap_extra) / rvr;
-        if (pump > ret) hi = rap;
-        else lo = rap;
-    }
-    float rap = 0.5f * (lo + hi);
-    *rap_out = rap;
-    return maxf(0.0f, (pms - rap - rap_extra) / rvr);
-}
-
-/* Wounds bleed (less as they clot and when dressed), broken bones and torn
- * organs bleed inside, and plasma and red cells are replaced. */
 /* Crouching keeps the head near the heart and squeezes the leg veins: it
  * eases the reflex. Lying flat (out cold) ends it. */
 static void step_vagal(health *h, const health_env *e, double dt, int awake)
@@ -1282,14 +1212,6 @@ static void step_vagal(health *h, const health_env *e, double dt, int awake)
     if (h->faint_drive > 0.0f && awake) vagal_t = e->crouched ? 0.45f : 1.0f;
     h->vagal = lag(h->vagal, vagal_t, dt, vagal_t > h->vagal ? 6.0 : 5.0);
     h->faint_drive = maxf(0.0f, h->faint_drive - (float)dt);
-}
-
-/* Standing, the brain sits ~25 cm above the heart: ~18 mmHg less to push
- * blood up. Why faints happen on one's feet, and why crouching or falling
- * flat ends them. */
-static float head_height_mmhg(const health_env *e, int awake)
-{
-    return awake && !e->crouched && e->submerged < 0.5 ? 18.0f : 0.0f;
 }
 
 /* Sets off the vasovagal reflex unless it is already running. Returns 1
@@ -1301,13 +1223,48 @@ static int start_faint(health *h)
     return 1;
 }
 
-static void step_bleeding(health *h, const health_env *e, double dt, float gh, float dehyd)
+/* Where each part's wounds open into the circuit: the bed whose artery a
+ * cut artery bleeds from, and the veins a venous cut drains. */
+static int part_bed(int part)
+{
+    if (is_leg(part)) return CB_LEGS;
+    if (part == BP_ABDOMEN) return CB_SPLANCH;
+    return part == BP_CHEST ? -1 : CB_UPPER;
+}
+
+static int part_vein(int part)
+{
+    if (is_leg(part)) return CC_LEGS;
+    if (part == BP_ABDOMEN) return CC_SPLANCH;
+    return part == BP_CHEST ? CC_SVC : CC_UPPER;
+}
+
+/* mmHg a wound's vessel normally holds standing, the posture a wound's
+ * rate (bleed0) is given for: the column of blood below the heart adds
+ * to the legs' and the gut's. Lying down, or raising the limb, lowers
+ * it, and the wound bleeds less. */
+static float vein_ref(int vein)
+{
+    if (vein == CC_LEGS) return 45.0f;
+    if (vein == CC_SPLANCH) return 16.0f;
+    return vein == CC_UPPER ? 6.0f : 4.0f;
+}
+
+static float bed_ref(int bed) { return 93.0f + (bed == CB_LEGS ? 47.0f : bed == CB_SPLANCH ? 16.0f : 0.0f); }
+
+/* Wounds bleed through the circulation: each clots (less when the limb
+ * is used, more when dressed) and becomes an opening of some conductance,
+ * sized so it bleeds bleed0 at the pressure its vessel normally holds
+ * standing. What actually comes out is then the circuit's: it falls as
+ * pressure falls, and a leg bleeds harder standing than raised. Broken
+ * bones and torn organs bleed inside, into the gut's veins. Returns the
+ * conductances in `in`. */
+static void step_bleeding(health *h, const health_env *e, double dt, float gh, circ_input *in)
 {
     const float fdt = (float)dt;
     float coag = sqrtf(h->organ[ORG_LIVER]) *
                  (h->temp < 35.0f ? fclamp(1.0f - (35.0f - h->temp) * 0.15f, 0.3f, 1.0f) : 1.0f) *
                  fclamp(hct(h) / 0.3f, 0.3f, 1.0f) * (1.0f - 0.5f * h->sepsis) * h->base.clot_gain;
-    float pressure = fclamp(h->map / h->base.map_set, 0.0f, 1.5f);
     float ext = 0.0f;
     for (int i = 0; i < h->wound_count; i++) {
         wound *w = &h->wounds[i];
@@ -1322,7 +1279,22 @@ static void step_bleeding(health *h, const health_env *e, double dt, float gh, f
             if (is_leg(w->part) && e->speed > 2.0) w->clot *= 1.0f - 0.02f * fdt * (float)e->speed;
             if (w->part == BP_RARM && e->actions) w->clot *= 0.85f;
         }
-        w->bleed = w->bleed0 * (1.0f - w->clot) * bf * pressure * (1.0f - w->closure);
+        float rate = w->bleed0 * (1.0f - w->clot) * bf * (1.0f - w->closure); /* mL/min at the reference pressure */
+        float g = 0.0f, p = 0.0f; /* mL/s/mmHg, and the pressure driving it out */
+        int bed = part_bed(w->part);
+        if (w->arterial && bed >= 0) {
+            g = rate / 60.0f / bed_ref(bed);
+            in->drain_art[bed] += g;
+            /* The circuit drains the bed's artery at its own height. */
+            float h_bed = bed == CB_LEGS ? in->h_legs : bed == CB_SPLANCH ? in->h_splanch : 0.0f;
+            p = h->cv.p[bed == CB_UPPER ? CC_AO : CC_AA] - 78.0f * h_bed;
+        } else {
+            int vein = w->arterial ? CC_AO : part_vein(w->part);
+            g = rate / 60.0f / (w->arterial ? 93.0f : vein_ref(vein));
+            in->drain[vein] += g;
+            p = h->cv.p[vein];
+        }
+        w->bleed = g * maxf(p, 0.0f) * 60.0f;
         ext += w->bleed;
     }
     /* A fresh rush of blood is what sets off the blood-injury faint; blood
@@ -1340,27 +1312,35 @@ static void step_bleeding(health *h, const health_env *e, double dt, float gh, f
         bp->internal *= (float)exp(-dt * (double)coag / (300.0 + 3.0 * (double)bp->internal));
         if (is_leg(i) && bp->fracture && !bp->splinted && e->speed > 0.5) bp->internal += 0.3f * (float)e->speed * fdt;
         if (bp->internal < 0.05f) bp->internal = 0.0f;
-        internal += bp->internal * pressure;
+        float g = bp->internal / 60.0f / vein_ref(CC_SPLANCH);
+        in->drain[CC_SPLANCH] += g;
+        internal += g * maxf(h->cv.p[CC_SPLANCH], 0.0f) * 60.0f;
     }
     h->bleed_ext = ext;
     h->bleed_int = internal;
-    float lost = (ext + internal) * fdt / 60000.0f;
-    h->rbc -= lost * hct(h);
-    h->blood -= lost;
-    h->water -= lost * 0.8f;
     h->ich += h->ich_rate * fdt / 60.0f;
     h->ich_rate *= (float)exp(-dt / 600.0);
-    if (h->blood < 0.5f) h->blood = 0.5f;
-    if (h->rbc < 0.05f) h->rbc = 0.05f;
-    /* Plasma refills from the interstitium; red cells regrow over weeks. */
-    float deficit = BLOOD_NORMAL - h->blood;
-    if (deficit > 0.0f && dehyd < 0.15f) {
-        /* Transcapillary refill, in real time (time constant ~10 min). */
-        float refill = minf(deficit, deficit * fdt / 600.0f);
-        h->blood += refill;
-        h->water -= refill * 0.2f; /* the interstitium pays, which shows up as thirst */
-    }
     if (h->rbc < BLOOD_NORMAL * 0.45f) h->rbc += 0.02f / 24.0f * gh * h->organ[ORG_KIDNEYS];
+}
+
+/* Blood the circuit lost to wounds takes its red cells and water with it;
+ * plasma refills from the tissues over hours (Starling forces), on the
+ * survival clock, which dilutes the red cells that are left. */
+static void account_blood(health *h, float lost_ml, float gh, float dehyd)
+{
+    float lost = lost_ml / 1000.0f;
+    h->rbc -= lost * hct(h);
+    h->water -= lost * 0.8f;
+    float vol = circ_volume(&h->cv);
+    h->plasma_deficit = maxf(0.0f, h->base.blood_per_kg * 75.0f - vol);
+    if (h->plasma_deficit > 0.0f && dehyd < 0.15f) {
+        float refill = h->plasma_deficit * (1.0f - expf(-gh / 8.0f));
+        circ_add(&h->cv, CC_IVC, refill);
+        h->water -= refill * 0.0002f; /* the interstitium pays (L), which shows up as thirst */
+    }
+    h->blood = circ_volume(&h->cv) / 1000.0f;
+    if (h->rbc < 0.05f) h->rbc = 0.05f;
+    if (h->rbc > h->blood * 0.9f) h->rbc = h->blood * 0.9f;
 }
 
 /* Relative closure speed: burns re-epithelialise from the edges and from
@@ -1905,9 +1885,6 @@ void health_shock(health *h)
         if (u < p) {
             h->rhythm = RHYTHM_SINUS;
             h->hr = HR_REST; /* the sinus node restarts; the baroreflex takes it from there */
-            h->beat_phase = 0.9f;
-            h->pvc_pending = 0;
-            h->rr_k = 1.0f;
             health_log(h, "Shock restored a heartbeat");
         } else if (u < p + asys) {
             h->rhythm = RHYTHM_ASYSTOLE;
@@ -2084,6 +2061,9 @@ static void step_catechol(health *h, double dt)
         h->catechol += SURGE_NG_S * (float)dt;
     }
     h->catechol += FEAR_NG_S * h->fear * (float)dt;
+    /* Heavy sympathetic traffic also drives the adrenal medulla: hard
+     * exercise and shock raise plasma adrenaline to 1-2 ng/mL. */
+    h->catechol += 0.015f * maxf(0.0f, h->symp - 0.45f) * (float)dt;
     h->catechol *= (float)exp(-dt * 0.6931472 / (double)ADR_HALF_S);
     /* A rush is paid for afterwards: the longer it ran high, the longer the
      * shaky, tired spell once it wears off. */
@@ -2127,35 +2107,6 @@ static void step_drugs(health *h, float fdt, float gh, int awake)
     health_log(h, "Vomited while unconscious and breathed it in");
 }
 
-/* The ventricles out of sinus control: AF passes a fast, irregular share
- * of 350-600 atrial impulses a minute through the AV node; VT and a
- * ventricular escape beat at their own rates, which catecholamines push
- * up and the baroreflex barely reaches. */
-static float rhythm_rate(int rhythm, float sinus_rate, float beta)
-{
-    switch (rhythm) {
-    case RHYTHM_AF: return minf(sinus_rate * 1.15f + 15.0f, 180.0f);
-    case RHYTHM_VT: return VT_RATE + 25.0f * beta;
-    case RHYTHM_AVB3: return ESCAPE_RATE + 14.0f * beta;
-    default: return sinus_rate;
-    }
-}
-
-/* How much of its stroke volume the heart keeps in each rhythm. AF loses
- * the atrial kick, 15-25% of filling. VT runs a dyssynchronous ventricle
- * out of step with the atria at a rate that leaves little time to fill; a
- * wide escape beat under complete block has the atria contracting at
- * random against it. */
-static float rhythm_pump(int rhythm)
-{
-    switch (rhythm) {
-    case RHYTHM_AF: return 0.8f;
-    case RHYTHM_VT: return 0.25f;
-    case RHYTHM_AVB3: return 0.7f;
-    default: return 1.0f;
-    }
-}
-
 void health_step(health *h, const health_env *e, double dt)
 {
     h->t += dt;
@@ -2166,7 +2117,9 @@ void health_step(health *h, const health_env *e, double dt)
         h->breathing = 0;
         h->map = lag(h->map, 0.0f, dt, 20.0);
         h->sbp = h->dbp = h->map;
-        write_samples(h, e, dt);
+        h->co = h->sv = 0.0f;
+        h->brain_flow = 0.0f;
+        write_samples(h, e, dt, NULL, NULL, 0);
         return;
     }
     step_defib(h, e, (float)dt);
@@ -2255,93 +2208,226 @@ void health_step(health *h, const health_env *e, double dt)
     step_drugs(h, fdt, gh, awake);
     step_burns(h, gh);
     step_crush(h, gh, dehyd);
-    step_bleeding(h, e, dt, gh, dehyd);
 
-    /* ---- circulation */
+    /* ---- circulation: the nerves, then the heart's timing, then the blood
+     * itself (autonomic.c, conduction.c, circulation.c). */
+    step_vagal(h, e, dt, awake);
+    h->icp = 10.0f + 0.8f * h->ich + 0.012f * h->ich * h->ich;
+    const int cushing = h->icp > 30.0f;
+    const float chemo = fclamp((0.92f - h->sao2) / 0.3f, 0.0f, 1.0f) +
+                        0.6f * fclamp((h->paco2 - 45.0f) / 25.0f, 0.0f, 1.0f);
+    /* Exercise intensity for the heart's strain: central command at once,
+     * the metabolic part following oxygen uptake. */
+    const float ex = fclamp(0.35f * minf(p / vo2max_w, 1.0f) + 0.65f * vo2_frac, 0.0f, 1.0f);
+    /* Out cold or swimming, the body lies flat; crouching brings the head
+     * nearer the heart and folds the legs up. */
+    const int lying = !awake || swimming;
+    const int crouched = e->crouched && !lying;
+    /* What the brain's vessels aim for: more flow with CO2 and with low
+     * oxygen, and thinner blood flows faster. */
+    const float brain_want = fclamp(1.0f + 0.025f * (h->paco2 - 40.0f), 0.6f, 1.6f) *
+                             (1.0f + 0.5f * maxf(0.0f, 0.9f - h->sao2)) *
+                             fclamp(powf(15.0f / maxf(hb, 3.0f), 0.8f), 1.0f, 1.8f);
+
+    autonomic_input ai = {0};
+    /* Each body's baroreceptors hold their own set point. */
+    ai.p_ao_mean = h->cv.p_ao_mean + (MAP_SET - h->base.map_set);
+    ai.p_ra_mean = h->cv.p_ra_mean;
+    /* The carotid sinus sits 25 cm above the heart standing, but the
+     * aortic arch receptors sit at heart level and share the work: the
+     * pressure the reflex holds is about halfway between. */
+    ai.h_neck = lying ? 0.0f : (crouched ? 0.07f : 0.12f);
+    ai.effort = awake ? fclamp((p - bmr) / (vo2max_w - bmr), 0.0f, 1.0f) : 0.0f;
+    ai.muscle_o2_debt = 1.0f - h->wbal / WPRIME;
+    ai.chemo = chemo;
+    ai.pain = h->pain / 10.0f;
+    ai.fear = h->fear;
+    ai.vagal_surge = h->vagal;
+    ai.diving = e->airway == AIRWAY_WATER && awake ? 1.0f : 0.0f;
+    ai.breath_phase = h->breathing ? h->breath_phase : 0.5f;
+    ai.brain_flow = h->brain_flow / brain_want;
+    ai.gain = h->base.baro_gain;
+    ai.noise_amp = h->base.vary ? h->base.symp_noise : 0.0f;
+    ai.brain_ok = h->organ[ORG_BRAIN] >= 0.15f;
+    autonomic_out ao = {0};
+    auto_step(&h->ans, &ai, dt, &h->vrng, &ao);
+    h->symp = ao.symp;
     step_catechol(h, dt);
     const float beta = catechol_beta(h), alpha = catechol_alpha(h);
-    float veff = h->blood * (1.0f - 0.6f * dehyd);
-    /* Exercise drive: central command reacts at once, the metabolic part
-     * follows oxygen uptake. */
-    float ex = fclamp(0.35f * minf(p / vo2max_w, 1.0f) + 0.65f * vo2_frac, 0.0f, 1.0f);
-    float b = fclamp((h->base.map_set + 30.0f * ex - h->map) / 30.0f, -1.0f,
-                     1.0f); /* baroreflex resets upward in exercise */
-    float chemo = fclamp((0.92f - h->sao2) / 0.3f, 0.0f, 1.0f) + 0.6f * fclamp((h->paco2 - 45.0f) / 25.0f, 0.0f, 1.0f);
-    int diving = e->airway == AIRWAY_WATER;
-    h->icp = 10.0f + 0.8f * h->ich + 0.012f * h->ich * h->ich;
-    int cushing = h->icp > 30.0f;
 
-    step_vagal(h, e, dt, awake);
-    float symp_t = 0.15f + 1.0f * maxf(b, 0.0f) + 0.4f * chemo + 0.03f * h->pain + (diving ? 0.2f : 0.0f) +
-                   (cushing ? 0.5f : 0.0f) - 0.45f * maxf(-b, 0.0f) - 1.5f * h->vagal;
-    if (h->organ[ORG_BRAIN] < 0.15f) symp_t = 0.05f; /* autonomic failure */
-    h->symp = lag(h->symp, fclamp(symp_t, 0.0f, 1.0f), dt, 4.0);
+    /* The sinus node: cold slows it, fever and adrenaline speed it, a
+     * crushed brainstem (Cushing) and deep hypoxia brake it, and a damaged
+     * heart can't reach its full rate. */
+    float sa = ao.sa_rate * (1.0f + 0.08f * maxf(0.0f, h->temp - 37.0f)) * (1.0f + 1.0f * beta);
+    if (h->temp < 35.0f) sa *= fclamp(1.0f - (35.0f - h->temp) * 0.08f, 0.3f, 1.0f);
+    if (cushing) sa = minf(sa, 50.0f);
+    if (h->sao2 < 0.5f) sa *= 0.35f + 0.65f * h->sao2 / 0.5f;
+    sa = minf(sa, HR_MAX * (0.55f + 0.45f * h->organ[ORG_HEART]));
 
-    float hr_max = HR_MAX * (0.55f + 0.45f * h->organ[ORG_HEART]);
-    /* Chemoreceptors speed the heart only while the lungs inflate; in
-     * apnoea the same reflex slows it (the diving response). */
-    float drive = 0.95f * ex + 0.85f * maxf(b, 0.0f) + (h->breathing ? 0.5f : -0.2f) * chemo + 0.025f * h->pain +
-                  0.07f * maxf(0.0f, h->temp - 37.0f) + 0.25f * h->sepsis - 0.4f * maxf(-b, 0.0f) +
-                  (h->lactate > 4.0f ? 0.02f * (h->lactate - 4.0f) : 0.0f) + 0.9f * beta - 1.2f * h->vagal;
-    float hr_rest = h->base.hr_rest * (h->temp < 35.0f ? fclamp(1.0f - (35.0f - h->temp) * 0.08f, 0.3f, 1.0f) : 1.0f);
-    /* Above rest the drive spends the heart-rate reserve; below it, vagal
-     * slowing scales the resting rate. */
-    float hr_t = drive >= 0.0f ? hr_rest + (hr_max - hr_rest) * minf(drive, 1.0f)
-                               : hr_rest * (1.0f + 0.8f * maxf(drive, -0.6f));
-    if (diving && awake) hr_t *= 0.85f;                       /* diving reflex */
-    hr_t *= 1.0f - 0.5f * h->vagal;                           /* the vagus brakes the sinus node */
-    if (cushing) hr_t = minf(hr_t, 50.0f);                     /* Cushing reflex */
-    if (h->sao2 < 0.5f) hr_t *= 0.35f + 0.65f * h->sao2 / 0.5f; /* hypoxic bradycardia */
-    if (h->organ[ORG_BRAIN] < 0.15f) hr_t = minf(hr_t, 50.0f);
-    if (h->base.vary && !arrest) {
-        /* Heart rate variability, a few bpm wandering over a few seconds,
-         * plus respiratory sinus arrhythmia: the vagus speeds the heart on
-         * inhalation and slows it on exhalation. */
-        h->hr_noise = wander(&h->vrng, h->hr_noise, dt, 3.0, 3.0f);
-        hr_t += h->hr_noise + 2.5f * sinf(6.2831853f * h->breath_phase);
+    /* Ectopic beats a minute: a healthy heart throws a few an hour; an
+     * ischaemic, hyperkalaemic, adrenaline-soaked, acidotic, cold or
+     * strained one many more. */
+    float irr = 0.05f + 8.0f * maxf(0.0f, h->ischemia - 1.0f) + 2.0f * maxf(0.0f, h->potassium - 5.5f) +
+                1.5f * beta * beta + (h->lactate > 10.0f ? 3.5f : 0.0f) +
+                (h->organ[ORG_KIDNEYS] < 0.15f ? 4.0f : 0.0f) + (h->temp < 32.0f ? 3.5f : 0.0f) +
+                minf(1.4f * h->strain, 14.0f);
+    conduction_input ki = {sa, ao.av_delay, irr, h->rhythm};
+    double ta_old = h->cond.t_atria;
+    /* Ectopic timing is beat-to-beat variability: on its own stream, so a
+     * change in heart rate never reshuffles the rolls for injuries. */
+    cond_step(&h->cond, &ki, h->t - dt, dt, &h->vrng);
+    if (h->cond.t_atria != ta_old) h->atria_prev = ta_old;
+
+    circ_input ci = {0};
+    ci.t_atria = h->cond.t_atria;
+    ci.t_atria_prev = h->atria_prev;
+    ci.t_vent = h->cond.t_vent;
+    ci.t_vent_prev = h->cond.prev_vent;
+    double beat_rr = h->cond.prev_vent >= 0.0 ? h->cond.t_vent - h->cond.prev_vent : 60.0 / (double)sa;
+    /* Sympathetic tone and adrenaline speed relaxation as well as
+     * contraction (lusitropy): systole shortens, which is what leaves a
+     * racing heart time to fill. */
+    ci.rr = (float)fmin(fmax(beat_rr, 0.25), 2.0) * (1.0f - 0.3f * fminf(1.0f, h->symp + 0.5f * beta));
+    ci.atria_on = cond_atria_on(h->rhythm);
+    /* PEA: the ventricles fire but barely squeeze. */
+    ci.vent_on = h->rhythm == RHYTHM_PEA ? 0.1f : cond_vent_on(h->rhythm);
+    /* Contractility: the nerves, adrenaline, and a myocardium that is
+     * damaged, starved, acidotic, strained or poisoned by long shock. VT's
+     * wide beat squeezes out of step; pulseless VT barely at all. */
+    float emax = ao.emax * (1.0f + 1.2f * beta) * h->organ[ORG_HEART] * (h->lactate > 8.0f ? 0.8f : 1.0f) *
+                 (h->sao2 < 0.6f ? 0.3f + 0.7f * h->sao2 / 0.6f : 1.0f) / (1.0f + 0.02f * h->strain) /
+                 (1.0f + 0.25f * h->shock_debt * h->shock_debt);
+    if (h->rhythm == RHYTHM_VT) emax *= 0.55f;
+    else if (h->rhythm == RHYTHM_PVT) emax *= 0.15f;
+    ci.emax_l = ci.emax_r = emax;
+    /* Resistance: the nerves; adrenaline (alpha tightens, beta opens the
+     * muscles' vessels); sepsis and long shock slacken it; a hot skin
+     * opens its vessels (against its resting state, vaso 0.2). */
+    float r_scale = (1.0f + 1.5f * alpha) * (1.0f - 0.2f * beta * (1.0f - alpha)) * (1.0f - 0.5f * h->sepsis) /
+                    (1.0f + 0.15f * h->shock_debt * h->shock_debt) * (cushing ? 1.3f : 1.0f);
+    float skin = (1.0f + 1.5f * 0.2f) / (1.0f + 1.5f * h->vaso);
+    for (int b = 0; b < CB_COUNT; b++) ci.r_bed[b] = ao.r_bed[b] * (b == CB_BRAIN ? 1.0f / brain_want : r_scale);
+    ci.r_bed[CB_UPPER] *= skin;
+    ci.r_bed[CB_LEGS] *= skin;
+    /* The veins: tone from the nerves and this body's own, slackened by
+     * sepsis and warm skin, tightened by adrenaline. Hard exercise also
+     * squeezes the gut's veins empty, moving most of a litre toward the
+     * heart. */
+    ci.v0_scale = ao.v0_scale * h->base.venous_tone * (1.0f + 0.12f * h->sepsis) * (1.0f - 0.07f * alpha) *
+                  (1.0f + 0.09f * (h->vaso - 0.2f)) * (1.0f - 0.15f * ex);
+    /* Standing, the head sits 30 cm above the heart and the legs' veins
+     * 60 cm below it. */
+    if (!lying) {
+        ci.h_head = crouched ? 0.2f : 0.3f;
+        ci.h_legs = crouched ? -0.3f : -0.6f;
+        ci.h_splanch = crouched ? -0.1f : -0.2f;
     }
-    hr_t = rhythm_rate(h->rhythm, hr_t, beta);
-    if (!arrest) h->hr = lag(h->hr, hr_t, dt, hr_t > h->hr ? 2.5 : 4.0);
-
-    float contract = h->organ[ORG_HEART] * (0.85f + 0.35f * minf(1.0f, h->symp + ex)) *
-                     (h->lactate > 8.0f ? 0.8f : 1.0f) * (h->sao2 < 0.6f ? 0.3f + 0.7f * h->sao2 / 0.6f : 1.0f);
-    contract *= h->hr > 160.0f ? maxf(0.4f, 1.0f - (h->hr - 160.0f) / 200.0f) : 1.0f; /* short diastole */
-    contract /= 1.0f + 0.25f * h->shock_debt * h->shock_debt;
-    /* Inotropy; a stunned, strained myocardium; the rhythm. */
-    contract *= (1.0f + 0.35f * beta) / (1.0f + 0.02f * h->strain) * rhythm_pump(h->rhythm);
-    float vu = 4.05f - 1.3f * h->symp + 0.5f * h->sepsis - 0.3f * alpha +
-               1.0f * h->vagal; /* unstressed volume, venoconstriction; blood pooling in the legs */
-    float pms = maxf(0.0f, (veff - vu) / CSYS) * (1.0f + 1.3f * ex); /* muscle pump */
-    float rap = 0.0f, co = 0.0f;
-    if (!arrest) {
-        float rvr = RVR0 * (1.0f - 0.4f * ex);
-        co = solve_output(h->hr, contract, pms, rvr, 12.0f * h->pneumothorax * h->pneumothorax, &rap);
-    } else rap = pms / (1.0f + 0.0f);
-    h->co = co;
-    h->sv = h->hr > 1.0f ? co * 1000.0f / h->hr : 0.0f;
-    h->svr = SVR0 * (0.85f + 0.9f * h->symp) / 0.985f * (1.0f - 0.6f * ex) * (1.0f - 0.5f * h->sepsis) /
-             (1.0f + 0.15f * h->shock_debt * h->shock_debt) * (1.0f + 0.8f * alpha) *
-             (1.0f - 0.2f * beta * (1.0f - alpha));
-    float map_t = co * h->svr + rap;
-    if (h->base.vary && !arrest) {
-        h->map_noise = wander(&h->vrng, h->map_noise, dt, 4.0, 2.0f); /* mmHg, beat-to-beat wander */
-        map_t += h->map_noise;
+    /* Each stride squeezes the calves' veins: the muscle pump. A crouch
+     * folds the legs, squeezing their veins and kinking their arteries;
+     * standing up lets them fill again all at once, which is the dizzy
+     * moment after getting up from a squat. */
+    if (awake && e->on_ground && !swimming && e->speed > 0.5) {
+        float cadence = 0.9f + 0.25f * (float)e->speed;
+        ci.leg_squeeze = 60.0f * maxf(0.0f, sinf(6.2831853f * cadence * (float)fmod(h->t, 1000.0)));
     }
-    h->map = lag(h->map, map_t, dt, 1.0);
-    /* Adrenaline speeds ejection: systolic climbs far more than diastolic. */
-    float pp = arrest ? 0.0f
-                      : h->sv / 1.9f * (1.0f + 0.6f * ex + maxf(0.0f, (h->map - h->base.map_set) / 150.0f)) *
-                            (1.0f + 0.6f * beta);
-    h->sbp = h->map + pp * 2.0f / 3.0f;
-    h->dbp = h->map - pp / 3.0f;
+    if (crouched) {
+        ci.leg_squeeze += 25.0f;
+        ci.r_bed[CB_LEGS] *= 2.5f;
+    }
+    /* Breathing in lowers the pressure around the heart; straining against
+     * a closed throat raises it (and the belly's), and air trapped in the
+     * chest squeezes the heart from outside. */
+    float insp = h->breathing && h->breath_phase < 0.4f ? sinf(3.1415927f * h->breath_phase / 0.4f) : 0.0f;
+    ci.p_thorax = -4.0f - 4.0f * insp + 40.0f * e->bearing_down + 12.0f * h->pneumothorax * h->pneumothorax;
+    ci.p_abdomen = 40.0f * e->bearing_down;
+
+    /* Blood volume changed from outside (a burn's plasma, a debug shock):
+     * every compartment takes its share. */
+    float vol_now = circ_volume(&h->cv);
+    if (vol_now > 1.0f && fabsf(h->blood * 1000.0f - vol_now) > 0.002f) {
+        double k = (double)(h->blood * 1000.0f) / (double)vol_now;
+        for (int i = 0; i < CC_COUNT; i++) h->cv.v[i] *= k;
+    }
+    step_bleeding(h, e, dt, gh, &ci);
+
+    /* Step the circuit to each monitor sample time in turn: it integrates
+     * absolute time in fixed sub-steps, so the split changes nothing, and
+     * the traces get the circuit's real pressure and finger flow. */
+    float art_s[64], pleth_s[64]; /* fully written below before any read, up to ns */
+    int ns = 0;
+    float lost = 0.0f;
+    double tc = h->t - dt, q_ao = 0.0, q_brain = 0.0, q_cor = 0.0;
+    {
+        float acc = h->wave_acc + (float)(dt * HEALTH_WAVE_HZ);
+        int kk = 0;
+        for (;;) {
+            double te = h->t;
+            int sample = acc >= 1.0f;
+            if (sample) {
+                acc -= 1.0f;
+                te = fmin(h->t - dt + ++kk / (double)HEALTH_WAVE_HZ, h->t);
+            }
+            if (te > tc) {
+                circ_step(&h->cv, &ci, tc, te - tc);
+                lost += h->cv.lost;
+                q_ao += (double)h->cv.q_ao * (te - tc);
+                q_brain += (double)h->cv.q_bed[CB_BRAIN] * (te - tc);
+                q_cor += (double)h->cv.q_cor * (te - tc);
+                tc = te;
+            }
+            if (!sample) break;
+            if (ns < 64) {
+                art_s[ns] = h->cv.wave_ao;
+                pleth_s[ns] = maxf(0.0f, h->cv.wave_finger / Q_FINGER_REST - 0.5f);
+                ns++;
+            }
+        }
+        q_ao /= dt;
+        q_brain /= dt;
+        q_cor /= dt;
+    }
+    account_blood(h, lost, gh, dehyd);
+
+    /* The vitals, from the last completed beat; with no beat for a while
+     * (or none that pumps), from the circuit as it is now. */
+    if (h->cond.t_vent >= 0.0 && h->cond.t_vent != h->last_r) {
+        h->prev_r = h->last_r;
+        h->last_r = h->cond.t_vent;
+        h->last_beat_pvc = h->cond.last_ectopic;
+    }
+    const int pumping = health_rhythm_perfusing(h->rhythm);
+    const int fresh = pumping && h->cv.beat_len > 0.0f && h->t - h->last_r < 2.5;
+    if (pumping) {
+        double rr_now = h->prev_r >= 0.0 ? h->last_r - h->prev_r : 60.0 / (double)sa;
+        rr_now = fmax(rr_now, h->t - h->last_r); /* a long pause shows as it happens */
+        h->hr = lag(h->hr, (float)(60.0 / fmax(rr_now, 0.2)), dt, 2.0);
+        h->next_r = h->last_r + rr_now;
+    } else {
+        h->hr = 0.0f;
+    }
+    if (fresh) {
+        h->sbp = h->cv.p_ao_max;
+        h->dbp = h->cv.p_ao_min;
+        h->map = h->cv.p_ao_mean;
+        h->sv = maxf(0.0f, h->cv.edv - h->cv.esv);
+        h->co = lag(h->co, h->cv.beat_q_ao * 0.06f, dt, 2.0); /* output is averaged over a few beats */
+        q_brain = (double)h->cv.beat_q_bed[CB_BRAIN];
+        q_cor = (double)h->cv.beat_q_cor;
+    } else {
+        h->map = lag(h->map, h->cv.p[CC_AO], dt, 0.5);
+        h->sbp = h->dbp = h->map;
+        h->sv = 0.0f;
+        h->co = lag(h->co, (float)q_ao * 0.06f, dt, 0.5);
+    }
+    h->svr = h->map / maxf(h->co, 0.1f);
+    h->brain_flow = (float)q_brain / Q_BRAIN_REST;
 
     /* Myocardial oxygen: rate-pressure product against coronary supply. */
     if (!arrest) {
         /* Catecholamines make the myocardium burn more oxygen than its
          * rate-pressure product accounts for. */
         float demand = h->hr * h->sbp / (h->base.hr_rest * 120.0f) * (1.0f + 0.4f * beta);
-        float diast = fclamp(1.2f - h->hr / 300.0f, 0.3f, 1.0f) / 0.987f;
-        float coronary = fclamp((h->dbp - 5.0f) / 73.0f, 0.0f, 2.0f) * cao2_rel * diast;
+        float coronary = (float)q_cor / Q_COR_REST * cao2_rel; /* the circuit's coronary flow, mostly diastolic */
         float supply = 6.0f * coronary * sqrtf(h->organ[ORG_HEART]) / (1.0f + 0.04f * h->strain);
         float ratio = demand / maxf(supply, 0.01f);
         if (ratio > 1.0f) h->ischemia += (ratio - 1.0f) * 0.08f * fdt;
@@ -2440,11 +2526,9 @@ void health_step(health *h, const health_env *e, double dt)
     h->etco2 = h->breathing ? maxf(0.0f, h->paco2 - 3.0f - 25.0f * maxf(0.0f, 1.0f - h->co / 4.0f)) : 0.0f;
 
     /* ---- brain */
-    float cpp = h->map - h->icp - head_height_mmhg(e, awake);
-    float cbf = cpp >= 55.0f ? 1.0f : maxf(0.0f, cpp / 55.0f);
-    cbf *= fclamp(1.0f + 0.025f * (h->paco2 - 40.0f), 0.6f, 1.6f) * (1.0f + 0.5f * maxf(0.0f, 0.9f - h->sao2));
-    cbf *= fclamp(powf(15.0f / maxf(hb, 3.0f), 0.8f), 1.0f, 1.8f); /* thinner blood flows faster */
-    h->brain_o2 = lag(h->brain_o2, cbf * cao2_rel, dt, 8.0);
+    /* The brain bed's flow already carries its CO2 and oxygen reactivity
+     * (brain_want above) and the pressure behind it. */
+    h->brain_o2 = lag(h->brain_o2, h->brain_flow * cao2_rel, dt, 8.0);
     if (h->brain_o2 < 0.3f) h->organ[ORG_BRAIN] -= (0.3f - h->brain_o2) / 0.3f * fdt / 300.0f;
     if (h->icp > 40.0f) h->organ[ORG_BRAIN] -= fdt / 120.0f;
     if (h->temp > 41.0f) h->organ[ORG_BRAIN] -= (h->temp - 41.0f) * fdt / 600.0f;
@@ -2511,7 +2595,7 @@ void health_step(health *h, const health_env *e, double dt)
     else if (h->temp <= 22.0f) die(h, DEATH_HYPOTHERMIA);
     else if (dehyd >= 0.2f) die(h, DEATH_DEHYDRATION);
 
-    write_samples(h, e, dt);
+    write_samples(h, e, dt, art_s, pleth_s, ns);
 }
 
 /* -------------------------------------------------------------- limits */
@@ -2572,12 +2656,15 @@ health_limits health_get_limits(const health *h)
     if (h->conscious == CONS_CONFUSED) sys *= 0.7f;
     if (h->temp < 34.0f) sys *= 0.7f;
     /* A damaged heart cannot raise its output, a failing liver tires, and
-     * a rush lends strength the crash after it takes back. */
+     * a rush lends strength the crash after it takes back: to a fresh
+     * body, not one whose reserve is already spent (hard exercise raises
+     * adrenaline too). */
     float heart = h->organ[ORG_HEART], beta = catechol_beta(h);
     sys *= 0.5f + 0.5f * heart;
     if (h->organ[ORG_LIVER] < 0.5f) sys *= 0.85f;
     sys *= (1.0f - 0.3f * ramp(h->bac, 0.8f, 3.0f)) * (1.0f - 0.3f * ramp(opioid_free(h), 15.0f, 40.0f));
-    sys *= 1.0f + 0.12f * beta - 0.2f * h->crash * (1.0f - fclamp(beta / 0.4f, 0.0f, 1.0f));
+    sys *= 1.0f + 0.12f * beta * fclamp(2.0f * h->wbal / WPRIME - 1.0f, 0.0f, 1.0f) -
+           0.2f * h->crash * (1.0f - fclamp(beta / 0.4f, 0.0f, 1.0f));
     l.move_scale = mob * sys;
     l.can_jump = leg[0] >= 0.6f && leg[1] >= 0.6f && h->wbal > 1500.0f && l.move_scale > 0.5f;
     l.can_sprint = mob > 0.85f && sys > 0.8f && h->wbal > 0.1f * WPRIME && h->pain < 7.0f && heart > 0.5f;
@@ -2737,7 +2824,7 @@ void health_injure(health *h, int kind, int part)
 
 int health_spo2_reading(const health *h)
 {
-    if (h->dead || !health_rhythm_perfusing(h->rhythm) || h->beat_pp < 10.0f || h->map < 35.0f) return -1;
+    if (h->dead || !health_rhythm_perfusing(h->rhythm) || h->sbp - h->dbp < 10.0f || h->map < 35.0f) return -1;
     return (int)lroundf(fclamp(h->spo2_shown, 0.0f, 1.0f) * 100.0f);
 }
 
@@ -2974,17 +3061,12 @@ static const wire_field HEALTH_FIELDS[] = {
     H(strain),
     H(catechol),
     H(surge),
-    H(rr_k),
     WIRE_I32R(health, rhythm, 0, RHYTHM_COUNT - 1),
     H(arrest_time),
-    H(beat_phase),
-    HI(pvc_pending),
     HI(last_beat_pvc),
     HD(last_r),
     HD(prev_r),
     HD(next_r),
-    H(beat_pp),
-    H(beat_dbp),
     WIRE_I32R(health, defib.phase, DEFIB_OFF, DEFIB_CLEAR),
     WIRE_I32R(health, defib.seen, -1, RHYTHM_COUNT - 1),
     HI(defib.advice),
@@ -2992,6 +3074,8 @@ static const wire_field HEALTH_FIELDS[] = {
     H(defib.timer),
     H(defib.joules),
     H(defib.since_shock),
+    H(brain_flow),
+    H(plasma_deficit),
     H(rr),
     H(breath_phase),
     HI(breathing),
@@ -3062,10 +3146,14 @@ static const wire_field HEALTH_FIELDS[] = {
     H(base.clot_gain),
     H(base.metab_gain),
     H(base.cold_bias),
+    H(base.heart_size),
+    H(base.art_stiff),
+    H(base.blood_per_kg),
+    H(base.baro_gain),
+    H(base.venous_tone),
+    H(base.symp_noise),
     HI(base.vary),
     WIRE_U32(health, vrng),
-    H(hr_noise),
-    H(map_noise),
     H(rr_noise),
     H(spo2_noise),
     WIRE_I32R(health, wave_pos, 0, HEALTH_WAVE_LEN - 1),

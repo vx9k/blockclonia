@@ -29,7 +29,8 @@ typedef struct {
     float eff_emax, eff_r, eff_v0, eff_ts, eff_tv; /* lagged effector changes from rest */
     float ls0, fv0;          /* resting log-sympathetic and vagal levels */
     float t0;                /* s, the heart period with every effector at rest */
-    float command;           /* central command 0..1: fast, withdraws the vagus */
+    float command;           /* central command 0..1: fast, resets the baroreflex upward */
+    float vagal_off;         /* 0..1 the vagus withdrawn by effort: in seconds, back over a minute */
     float ex_drive;          /* exercise sympathetic drive 0..1: slow */
     float metab;             /* the legs' metabolic dilation 0..1 */
     float metabo;            /* muscle metaboreflex 0..1 */

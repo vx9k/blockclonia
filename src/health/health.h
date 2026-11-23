@@ -46,6 +46,9 @@
 #ifndef MC_HEALTH_H
 #define MC_HEALTH_H
 
+#include "autonomic.h"
+#include "circulation.h"
+#include "conduction.h"
 #include "inventory.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -193,6 +196,12 @@ typedef struct {
     float clot_gain;  /* x clotting speed: 0.75..1.35 */
     float metab_gain; /* x BMR, VO2max and critical power: 0.92..1.1 */
     float cold_bias;  /* degrees C added to the shiver threshold: -0.4..0.4 */
+    float heart_size;   /* x the heart's chamber volumes: 0.85..1.15 */
+    float art_stiff;    /* x the arteries' stiffness: 0.75..1.25 */
+    float blood_per_kg; /* mL of blood per kg: 65..75, mean 70 */
+    float baro_gain;    /* x the baroreflex's gain: 0.7..1.3 */
+    float venous_tone;  /* x the veins' unstressed volume: 0.9..1.1 */
+    float symp_noise;   /* x the sympathetic nerves' random traffic: 0.5..1.5 */
     int vary;
 } health_baseline;
 
@@ -214,6 +223,7 @@ typedef struct {
     int crouched;         /* crouching (sneak): the head nearer the heart */
     float fear;           /* 0..1: a predator hunting the body nearby (mobs_fear) */
     float dark;           /* 0..1: how dark it is around the eyes (lightfx_dark) */
+    float bearing_down;   /* 0..1 straining against a closed throat (Valsalva) */
 } health_env;
 
 typedef struct health {
@@ -236,14 +246,14 @@ typedef struct health {
     float strain;                     /* myocardial strain dose from pressure out of range, ~crisis-minutes */
     float catechol;                   /* ng/mL of circulating adrenaline above the resting level */
     float surge;                      /* s left of an endogenous catecholamine surge */
-    float rr_k;                       /* this beat's R-R interval against the mean (AF is irregular) */
     int rhythm;
     float arrest_time;                /* s without circulation */
-    float beat_phase;
-    int pvc_pending, last_beat_pvc;
-    double last_r, prev_r, next_r;    /* beat times, s */
-    float beat_pp, beat_dbp;          /* pulse pressure and diastolic of the last beat */
+    int last_beat_pvc;                /* the last beat was an ectopic one */
+    double last_r, prev_r, next_r;    /* s, ventricular activations: last, before it, expected next */
     defib_state defib;
+    /* The simulated heart and vessels, its timing and its nerves. */
+    float brain_flow;                 /* the brain's blood flow over its resting flow */
+    float plasma_deficit;             /* mL the circulating volume is short of this body's normal */
 
     /* Respiration. */
     float rr, breath_phase;
@@ -317,7 +327,7 @@ typedef struct health {
 
     health_baseline base; /* this body's constitution */
     uint32_t vrng; /* short-term variability, its own stream so it never shifts an injury */
-    float hr_noise, map_noise, rr_noise, spo2_noise; /* wandering state for `base.vary` */
+    float rr_noise, spo2_noise; /* wandering state for `base.vary` */
 
     /* Monitor traces, ring buffers written at HEALTH_WAVE_HZ. */
     float ecg[HEALTH_WAVE_LEN];       /* mV */
@@ -330,6 +340,14 @@ typedef struct health {
     /* Recent events for the HUD. */
     char log[HEALTH_LOG][72];
     float log_age[HEALTH_LOG];
+
+    /* The simulated heart and vessels (circulation.c, conduction.c,
+     * autonomic.c). Only the server steps them; clients get the vitals
+     * and traces above, so none of this goes over the network. */
+    circ cv;
+    conduction cond;
+    autonomic ans;
+    double atria_prev; /* s, the atria's activation before cond.t_atria */
 } health;
 
 /* The whole body as bytes for a multiplayer client, whose HUD, limits and

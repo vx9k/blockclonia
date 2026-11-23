@@ -32,7 +32,7 @@ enum { CH_RA, CH_RV, CH_LA, CH_LV };
 #define R_SL_VALVE 0.006
 #define R_PULM 0.08  /* pulmonary arterioles: PA mean ~15 to PV ~8 at 5 L/min */
 #define R_PV_LA 0.01
-#define R_AO_AA 0.03 /* thoracic to abdominal aorta */
+#define R_AO_AA 0.08 /* the aorta's characteristic impedance, root to the compliant tree */
 #define R_IVC_RA 0.015
 #define R_SVC_RA 0.06
 #define R_COR 20.0   /* coronary bed: ~4 % of output at rest */
@@ -129,7 +129,11 @@ static void derive(const circ *c, const circ_input *in, const double *v, double 
     for (int i = CC_PA; i < CC_COUNT; i++) {
         if (i == CC_LA || i == CC_LV) continue;
         double v0 = c->v0[i];
-        if (i >= CC_BRAIN) v0 *= (double)in->v0_scale;
+        /* The gut's veins are the body's blood reserve: the nerves change
+         * their unstressed volume twice as much as other veins' (Ursino
+         * 1998's splanchnic against extrasplanchnic gains). */
+        if (i == CC_SPLANCH) v0 *= fmax(1.0 + 2.0 * ((double)in->v0_scale - 1.0), 0.6);
+        else if (i >= CC_BRAIN) v0 *= (double)in->v0_scale;
         p[i] = vessel_pressure(c, i, v[i], v0) + outside(in, i);
     }
 
@@ -197,12 +201,22 @@ static void beat_reset(circ *c, double t)
     c->b_pmax = -1e30;
     c->b_pmin = 1e30;
     c->b_cor = c->b_cor_dia = 0.0;
+    c->b_pao = c->b_pra = c->b_qao = 0.0;
+    memset(c->b_qbed, 0, sizeof c->b_qbed);
+    c->b_n = 0;
     c->w_n = c->w_i = 0;
 }
 
 static void beat_finish(circ *c)
 {
-    if (c->b_vmax < c->b_vmin) return;
+    if (c->b_vmax < c->b_vmin || c->b_n == 0) return;
+    double n = (double)c->b_n;
+    c->beat_len = (float)(n * CIRC_H);
+    c->p_ao_mean = (float)(c->b_pao / n);
+    c->p_ra_mean = (float)(c->b_pra / n);
+    c->beat_q_ao = (float)(c->b_qao / n);
+    c->beat_q_cor = (float)(c->b_cor / n);
+    for (int b = 0; b < CB_COUNT; b++) c->beat_q_bed[b] = (float)(c->b_qbed[b] / n);
     c->edv = (float)c->b_vmax;
     c->esv = (float)c->b_vmin;
     c->p_ao_max = (float)c->b_pmax;
@@ -240,6 +254,11 @@ void circ_step(circ *c, const circ_input *in, double t0, double dt)
             c->b_pmax = fmax(c->b_pmax, p1[CC_AO]);
             c->b_pmin = fmin(c->b_pmin, p1[CC_AO]);
             c->b_cor += f1.q_cor;
+            c->b_pao += p1[CC_AO];
+            c->b_pra += p1[CC_RA];
+            c->b_qao += f1.q_aov;
+            for (int b = 0; b < CB_COUNT; b++) c->b_qbed[b] += f1.q_bed[b];
+            c->b_n++;
             if (f1.q_aov <= 0.0) c->b_cor_dia += f1.q_cor;
             if (c->w_i++ % pv_every == 0 && c->w_n < CIRC_PV_N) {
                 c->w_v[c->w_n] = (float)c->v[CC_LV];
@@ -261,12 +280,12 @@ void circ_step(circ *c, const circ_input *in, double t0, double dt)
         c->steps++;
         n++;
     }
+    c->lost = (float)lost;
     if (n == 0) return;
     for (int b = 0; b < CB_COUNT; b++) c->q_bed[b] = (float)(sum_bed[b] / n);
     c->q_cor = (float)(sum_cor / n);
     c->q_ao = (float)(sum_ao / n);
     c->q_finger = (float)(sum_fin / n);
-    c->lost = (float)lost;
     derive(c, in, c->v, (double)c->steps * CIRC_H, p1, k1, &f1);
     for (int i = 0; i < CC_COUNT; i++) c->p[i] = (float)p1[i];
     c->wave_ao = c->p[CC_AO];
@@ -296,8 +315,8 @@ void circ_init(circ *c, float blood_ml, float heart_size, float art_stiff)
         int i;
         double c, v0, vmax;
     } V[] = {
-        {CC_PA, 3.4, 160.0, 0.0},          {CC_PV, 9.0, 430.0, 0.0},    {CC_AO, 1.0, 500.0, 0.0},
-        {CC_AA, 0.5, 200.0, 0.0},          {CC_BRAIN, 3.0, 120.0, 0.0}, {CC_UPPER, 8.0, 550.0, 0.0},
+        {CC_PA, 3.4, 160.0, 0.0},          {CC_PV, 9.0, 430.0, 0.0},    {CC_AO, 0.25, 500.0, 0.0},
+        {CC_AA, 1.5, 200.0, 0.0},          {CC_BRAIN, 3.0, 120.0, 0.0}, {CC_UPPER, 8.0, 550.0, 0.0},
         {CC_SPLANCH, 55.0, 1300.0, 700.0}, {CC_RENAL, 8.0, 150.0, 0.0}, {CC_LEGS, 19.0, 300.0, 350.0},
         {CC_IVC, 2.0, 100.0, 0.0},         {CC_SVC, 15.0, 200.0, 0.0},
     };
@@ -311,7 +330,7 @@ void circ_init(circ *c, float blood_ml, float heart_size, float art_stiff)
     /* Beds (mmHg s/mL): brain ~750, kidneys ~1100, gut ~1300, legs and
      * arms ~800 mL/min each at rest. */
     static const double RB[CB_COUNT] = {6.8, 6.5, 3.9, 4.7, 6.5};
-    static const double RV[CB_COUNT] = {0.3, 0.2, 0.1, 0.1, 0.15};
+    static const double RV[CB_COUNT] = {0.3, 0.2, 0.1, 0.1, 0.06};
     for (int b = 0; b < CB_COUNT; b++) {
         c->r_bed0[b] = RB[b];
         c->r_ven[b] = RV[b];
@@ -333,6 +352,8 @@ void circ_init(circ *c, float blood_ml, float heart_size, float art_stiff)
         if (i != CC_LA && i != CC_LV) c->v[i] = fmax(0.0, c->v[i] + c->c[i] * shift);
     c->beat_t = -1.0;
     for (int i = 0; i < CC_COUNT; i++) c->p[i] = (float)P_REF[i];
+    c->p_ao_mean = 93.0f;
+    c->p_ra_mean = 4.0f;
 }
 
 float circ_volume(const circ *c)
