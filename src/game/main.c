@@ -1158,7 +1158,9 @@ static void sound_body(game *g, double dt)
 /* Once a frame: the ears, the ambience and the body's own sounds. */
 static void frame_sound(game *g, double dt, const render_view *v)
 {
-    sound_listener(g->snd, v->eye, v->yaw, v->pitch, v->underwater);
+    /* Out cold, the world reaches the ears as through water. */
+    sound_listener(g->snd, v->eye, v->yaw, v->pitch,
+                   v->underwater || (mode_body(g->pl.mode) && !g->hl.dead && !health_awake(&g->hl)));
     int on_title = g->backdrop;
     float wind = wind_level(&g->w, &g->pl, v->eye), water = water_level(&g->w, &g->pl, v->eye);
     sound_ambience(g->snd, wind * (on_title ? 0.6f : 1.0f), water);

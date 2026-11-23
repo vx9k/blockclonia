@@ -108,9 +108,10 @@ static void effects(ui *u, const health *h)
 {
     if (h->dead) return;
     if (!health_awake(h)) {
-        ui_rect(u, 0, 0, u->w, u->h, ui_rgba(0, 0, 0, 240));
+        /* The post pass draws the dark and the glimpses through it; only a
+         * faint line says why. */
         const char *t = "You are unconscious";
-        ui_text(u, (u->w - ui_text_width(t, 1)) * 0.5f, u->h * 0.45f, 1, ui_rgba(120, 120, 130, 255), t);
+        ui_text(u, (u->w - ui_text_width(t, 1)) * 0.5f, u->h * 0.8f, 1, ui_rgba(90, 90, 100, 160), t);
         return;
     }
     /* Grey-out, tunnel vision and dimming are drawn over the world by the

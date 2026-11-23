@@ -182,8 +182,68 @@ static void test_cons_dim(void)
     mem_free(h);
 }
 
+/* Holds a body's brain at a level of damage (or, with knocked, out cold
+ * from a blow) for ten minutes after a minute to settle, and
+ * counts the moments its eyes open on the world: their number, whether
+ * each lasted 0.3-1.3 s, and whether what showed was dim, grey and blurred
+ * rather than clear. */
+static void hold(health *h, float brain, int knocked)
+{
+    h->organ[ORG_BRAIN] = brain;
+    if (knocked) h->concussion = 30.0f;
+}
+
+static int count_glimpses(uint32_t seed, float brain, int knocked, int *cons, int *len_ok, int *seen_fogged,
+                          int *dark_between)
+{
+    health *h = new_body(seed);
+    health_env e = calm_env();
+    *len_ok = *seen_fogged = *dark_between = 1;
+    for (int i = 0; i < 60 * 60; i++) {
+        hold(h, brain, knocked);
+        health_step(h, &e, PHYS_DT);
+    }
+    *cons = h->conscious;
+    int n = 0;
+    float was = 0.0f, len = 0.0f;
+    for (int i = 0; i < 600 * 60 && !h->dead; i++) {
+        hold(h, brain, knocked);
+        health_step(h, &e, PHYS_DT);
+        const health_senses s = health_get_senses(h);
+        if (h->glimpse > 0.0f && was <= 0.0f) {
+            n++;
+            len = 0.0f;
+        }
+        if (h->glimpse > 0.0f) {
+            len += (float)PHYS_DT;
+            *seen_fogged &= s.dim < 1.0f && s.dim >= 0.3f && s.grey >= 0.6f && s.blur >= 0.7f && s.tunnel >= 0.4f;
+        } else {
+            if (was > 0.0f) *len_ok &= len >= 0.3f && len <= 1.3f;
+            *dark_between &= s.dim == 1.0f;
+        }
+        was = h->glimpse;
+    }
+    mem_free(h);
+    return n;
+}
+
+/* Out of reach of the world, the eyes still open on it now and then: more
+ * often for a body that answers to a voice than one that answers only to
+ * pain, never for one past reach; between, it is black. */
+static void test_cons_glimpses(void)
+{
+    int cons = 0, len_ok = 0, fogged = 0, dark = 0;
+    const int voice = count_glimpses(5, 0.25f, 0, &cons, &len_ok, &fogged, &dark);
+    CHECK(cons == CONS_VOICE && voice >= 30 && voice <= 130 && len_ok && fogged && dark);
+    const int pain = count_glimpses(5, 0.15f, 0, &cons, &len_ok, &fogged, &dark);
+    CHECK(cons == CONS_PAIN && pain >= 6 && pain < voice && len_ok && fogged && dark);
+    const int none = count_glimpses(5, 1.0f, 1, &cons, &len_ok, &fogged, &dark);
+    CHECK(cons == CONS_UNCONSCIOUS && none == 0 && dark);
+}
+
 void test_conscious_all(void)
 {
+    test_cons_glimpses();
     test_cons_greyout();
     test_cons_dim();
     test_cons_control();

@@ -42,7 +42,7 @@
 #define NET_MAX_PLAYERS 8
 #define NET_NAME_MAX 16
 #define NET_CHAT_MAX 200      /* bytes of UTF-8 per chat line */
-#define NET_PROTOCOL 12       /* bump when peers would disagree: messages, block or item ids, world limits */
+#define NET_PROTOCOL 13       /* bump when peers would disagree: messages, block or item ids, world limits */
 /* The largest game message: a column in the save format with a header. */
 #define NET_MAX_MESSAGE (4 * 16 * 384 * 16 + 1024) /* mp.c checks it against SAVE_MAX_FILE */
 

@@ -328,6 +328,7 @@ typedef struct health {
     int conscious; /* consciousness, the step the level is on */
     float level; /* 0..1 how awake: 1 alert, 0 unresponsive */
     float lapse; /* s left of a drowsy body's brief blackout */
+    float glimpse; /* s left of an unresponsive body's eyes opening on the world */
 
     int dead, cause;
     float hurt_flash;                 /* 0..1, for the screen */
