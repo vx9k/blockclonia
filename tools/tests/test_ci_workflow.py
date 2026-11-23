@@ -372,6 +372,49 @@ class Lint(unittest.TestCase):
                       (ROOT / 'tools/lint.sh').read_text())
         self.assertIn('tools/lint.sh', job(CI, 'lint'))
 
+    def requirements(self):
+        """{package: (version, [sha256, ...])} from tools/lint-requirements.txt."""
+        text = (ROOT / 'tools/lint-requirements.txt').read_text()
+        lines = [line for line in text.splitlines() if not line.startswith('#')]
+        pins = {}
+        for entry in re.split(r'(?<!\\)\n', '\n'.join(lines)):
+            if not entry.strip():
+                continue
+            name, version = re.match(r'([a-z-]+)==([0-9.]+)', entry).groups()
+            pins[name] = (version, re.findall(r'--hash=sha256:([0-9a-f]{64})', entry))
+        return pins
+
+    def test_clang_format_and_clang_tidy_are_pinned_together(self):
+        # One LLVM release for both, so their behaviour moves together, and
+        # nothing else gets installed.
+        pins = self.requirements()
+        self.assertEqual(set(pins), {'clang-format', 'clang-tidy'})
+        self.assertEqual(pins['clang-format'][0], pins['clang-tidy'][0])
+
+    def test_every_pin_is_hash_checked_for_each_platform(self):
+        # glibc and musl Linux on x86_64 and arm64, and macOS on both: five
+        # wheels at least (clang-tidy has no musl arm64 one), all distinct.
+        for name, (_, hashes) in self.requirements().items():
+            self.assertGreaterEqual(len(hashes), 5, name)
+            self.assertEqual(len(hashes), len(set(hashes)), name)
+
+    def test_the_lint_gate_installs_the_pins_and_uses_them(self):
+        script = (ROOT / 'tools/lint.sh').read_text()
+        # Wheels only (no LLVM build from source), checked against the hashes.
+        self.assertIn('--only-binary :all: --require-hashes -r "$req"', script)
+        self.assertIn('req="$src/tools/lint-requirements.txt"', script)
+        self.assertIn('export PATH="$tools/bin:$PATH"', script)
+        # run-clang-tidy comes from the system; it must drive the pinned binary.
+        self.assertIn('-clang-tidy-binary "$(command -v clang-tidy)"', script)
+        # The venv is installed before the first step that needs it.
+        self.assertLess(script.index('export PATH="$tools/bin:$PATH"'), script.index('run-clang-tidy -clang-tidy'))
+        self.assertLess(script.index('export PATH="$tools/bin:$PATH"'), script.index('git clang-format'))
+
+    def test_ci_lint_installs_venv_not_a_second_clang_format(self):
+        lint = job(CI, 'lint')
+        self.assertIn('python3-venv', lint)
+        self.assertNotIn('clang-format', lint.split('tools/lint.sh')[0].split('Install packages', 1)[1])
+
 
 if __name__ == '__main__':
     unittest.main()
