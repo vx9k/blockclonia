@@ -50,8 +50,8 @@ worldgen, the tree pass was ~47 % (point queries in `tree_site_at`).
    - The climate already sits on the slow fields' 8-block grid with a
      memo (#105), so no coarser grid was needed.
    - Per sample: 2D 20.8 → 15.8 ns, 3D 53.8 → 20.2 ns (AVX2 batch on
-     Gracemont). `--bench` worldgen 0.763 → 0.515 ms per column, and
-     0.742 → 0.602 ms over scattered columns. `--bench` now generates
+     Gracemont). `--bench` worldgen 0.772 → 0.514 ms per column, and
+     0.750 → 0.606 ms over scattered columns. `--bench` now generates
      sixteen patches spread over 60 km instead of one 256 m square, so
      one forest no longer decides its number.
 3. **Hybrid incremental lighting.** Ordinary edits use a removal queue
