@@ -463,7 +463,7 @@ static void test_avatar_self(void)
                 /* The same pose others see, moved as one: every box keeps its
                  * turn and is shifted by the same amount. */
                 const float shift[3] = {self[0].pos[0] - all[0].pos[0], self[0].pos[1] - all[0].pos[1],
-                                  self[0].pos[2] - all[0].pos[2]};
+                                        self[0].pos[2] - all[0].pos[2]};
                 float low = 9.0f;
                 for (int i = 0, j = 0; i < AVATAR_BOXES; i++) {
                     if (!self_kept(i)) continue;
