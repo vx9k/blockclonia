@@ -71,13 +71,19 @@ static float zone_at(int z)
 /* Mean air temperature at sea level and rainfall before the land has its
  * say: the zone and a regional field a few km across. The warm zone is
  * also the dry one (a subtropical high), broken by wetter regions. */
-static void climate_at(uint32_t seed, int x, int z, float *temp, float *rain)
+static void climate_of(int z, float ft, float fr, float *temp, float *rain)
 {
     float zone = zone_at(z);
-    float ft = stretch(fbm2d(seed + 201, x / 3000.0, z / 3000.0, 3));
-    float fr = stretch(fbm2d(seed + 211, x / 2200.0, z / 2200.0, 3));
+    ft = stretch(ft);
+    fr = stretch(fr);
     *temp = 12.0f + 11.0f * zone + 6.0f * ft;
     *rain = 0.45f + 0.45f * fr - 0.32f * smooth(0.3f, 1.0f, zone);
+}
+
+static void climate_at(uint32_t seed, int x, int z, float *temp, float *rain)
+{
+    climate_of(z, fbm2d(seed + 201, x / 3000.0, z / 3000.0, 3), fbm2d(seed + 211, x / 2200.0, z / 2200.0, 3), temp,
+               rain);
 }
 
 /* -------------------------------------------------------- the land */
@@ -88,18 +94,39 @@ typedef struct {
     float mask;   /* 0..1: inside a mountain range */
 } shape;
 
-static shape shape_at(uint32_t seed, int x, int z)
+/* The most grid points one batch of slow fields takes. */
+#define SLOW_BATCH 16
+
+/* The shapes at points [0, n), n <= 5 * SLOW_BATCH, in one batch. */
+static void shapes_n(uint32_t seed, int n, const int *x, const int *z, shape *out)
 {
-    shape s = {0};
-    s.ox = 700.0f * fbm2d(seed + 3, x / 1800.0, z / 1800.0, 3);
-    s.oz = 700.0f * fbm2d(seed + 12, x / 1800.0, z / 1800.0, 3);
-    double wx = x + (double)s.ox, wz = z + (double)s.oz;
+    double a[5 * SLOW_BATCH] = {0}, b[5 * SLOW_BATCH] = {0}, wx[5 * SLOW_BATCH] = {0}, wz[5 * SLOW_BATCH] = {0};
+    float v[5 * SLOW_BATCH] = {0};
+    for (int i = 0; i < n; i++) {
+        a[i] = x[i] / 1800.0;
+        b[i] = z[i] / 1800.0;
+    }
+    fbm2d_n(seed + 3, a, b, 3, v, n);
+    for (int i = 0; i < n; i++) out[i].ox = 700.0f * v[i];
+    fbm2d_n(seed + 12, a, b, 3, v, n);
+    for (int i = 0; i < n; i++) {
+        out[i].oz = 700.0f * v[i];
+        wx[i] = x[i] + (double)out[i].ox;
+        wz[i] = z[i] + (double)out[i].oz;
+        a[i] = wx[i] / 5000.0;
+        b[i] = wz[i] / 5000.0;
+    }
     /* Biased towards land: about a third of the world is sea. */
-    s.cont = fbm2d(seed, wx / 5000.0, wz / 5000.0, 4) + 0.26f;
+    fbm2d_n(seed, a, b, 4, v, n);
+    for (int i = 0; i < n; i++) {
+        out[i].cont = v[i] + 0.26f;
+        a[i] = wx[i] / 2600.0;
+        b[i] = wz[i] / 2600.0;
+    }
     /* Ranges rise where a slow field is high, more readily inland. */
-    float range = fbm2d(seed + 43, wx / 2600.0, wz / 2600.0, 3);
-    s.mask = smooth(0.0f, 0.3f, range + s.cont * 0.3f - 0.1f) * smooth(-0.02f, 0.18f, s.cont);
-    return s;
+    fbm2d_n(seed + 43, a, b, 3, v, n);
+    for (int i = 0; i < n; i++)
+        out[i].mask = smooth(0.0f, 0.3f, v[i] + out[i].cont * 0.3f - 0.1f) * smooth(-0.02f, 0.18f, out[i].cont);
 }
 
 /* The ground from the slow fields alone, roughly: enough to tell where
@@ -117,31 +144,62 @@ typedef struct {
     float rain; /* 0..1 */
 } slow;
 
-static slow slow_at(uint32_t seed, int x, int z)
+/* The slow fields at grid points [0, n), n <= SLOW_BATCH, in one batch. */
+static void slows_n(uint32_t seed, int n, const int *x, const int *z, slow *out)
 {
-    slow s = {shape_at(seed, x, z), 0.0f, 0.0f, 0.0f, 0.0f};
-    double wx = x + (double)s.sh.ox, wz = z + (double)s.sh.oz;
-    s.rug = smooth(-0.3f, 0.4f, fbm2d(seed + 23, wx / 1500.0, wz / 1500.0, 2));
-    climate_at(seed, x, z, &s.temp, &s.rain);
-    /* Wetter by the sea; drier in the lee of high ground (the wind blows
-     * towards +x), the more so the lower this spot lies beneath it. */
-    s.rain += 0.15f * (1.0f - smooth(0.0f, 0.3f, s.sh.cont));
-    float upwind = 0.0f;
-    for (int k = 1; k <= 4; k++) {
-        shape u = shape_at(seed, x - 250 * k, z);
-        upwind = fmaxf(upwind, coarse_height(&u));
+    /* Each point and, for the rain shadow, four points upwind of it. */
+    int sx[5 * SLOW_BATCH] = {0}, sz[5 * SLOW_BATCH] = {0};
+    shape sh[5 * SLOW_BATCH] = {{0}};
+    for (int k = 0; k < 5; k++)
+        for (int i = 0; i < n; i++) {
+            sx[k * n + i] = x[i] - 250 * k;
+            sz[k * n + i] = z[i];
+        }
+    shapes_n(seed, 5 * n, sx, sz, sh);
+    double a[SLOW_BATCH] = {0}, b[SLOW_BATCH] = {0};
+    float rug[SLOW_BATCH] = {0}, ft[SLOW_BATCH] = {0}, fr[SLOW_BATCH] = {0}, mesa[SLOW_BATCH] = {0};
+    for (int i = 0; i < n; i++) {
+        a[i] = (x[i] + (double)sh[i].ox) / 1500.0;
+        b[i] = (z[i] + (double)sh[i].oz) / 1500.0;
     }
-    s.rain -= 0.35f * smooth(SEA + 30.0f, SEA + 130.0f, upwind) * smooth(-20.0f, 20.0f, upwind - coarse_height(&s.sh));
-    /* Flat-lying beds erode into mesas only in dry country. */
-    s.mesa = smooth(0.25f, 0.45f, fbm2d(seed + 71, wx / 2000.0, wz / 2000.0, 2)) * (1.0f - smooth(0.25f, 0.4f, s.rain));
-    return s;
+    fbm2d_n(seed + 23, a, b, 2, rug, n);
+    for (int i = 0; i < n; i++) {
+        a[i] = x[i] / 3000.0;
+        b[i] = z[i] / 3000.0;
+    }
+    fbm2d_n(seed + 201, a, b, 3, ft, n);
+    for (int i = 0; i < n; i++) {
+        a[i] = x[i] / 2200.0;
+        b[i] = z[i] / 2200.0;
+    }
+    fbm2d_n(seed + 211, a, b, 3, fr, n);
+    for (int i = 0; i < n; i++) {
+        a[i] = (x[i] + (double)sh[i].ox) / 2000.0;
+        b[i] = (z[i] + (double)sh[i].oz) / 2000.0;
+    }
+    fbm2d_n(seed + 71, a, b, 2, mesa, n);
+    for (int i = 0; i < n; i++) {
+        slow *s = &out[i];
+        *s = (slow){sh[i], smooth(-0.3f, 0.4f, rug[i]), 0.0f, 0.0f, 0.0f};
+        climate_of(z[i], ft[i], fr[i], &s->temp, &s->rain);
+        /* Wetter by the sea; drier in the lee of high ground (the wind
+         * blows towards +x), the more so the lower this spot lies beneath
+         * it. */
+        s->rain += 0.15f * (1.0f - smooth(0.0f, 0.3f, s->sh.cont));
+        float upwind = 0.0f;
+        for (int k = 1; k <= 4; k++) upwind = fmaxf(upwind, coarse_height(&sh[k * n + i]));
+        s->rain -= 0.35f * smooth(SEA + 30.0f, SEA + 130.0f, upwind) *
+                   smooth(-20.0f, 20.0f, upwind - coarse_height(&s->sh));
+        /* Flat-lying beds erode into mesas only in dry country. */
+        s->mesa = smooth(0.25f, 0.45f, mesa[i]) * (1.0f - smooth(0.25f, 0.4f, s->rain));
+    }
 }
 
-/* slow_at is the dearest call in the generator (the rain shadow alone
+/* The slow fields are the dearest part of the generator (the rain shadow alone
  * shapes the land five times), and every point query a column makes for
  * its own blocks, its rivers and the trees rooted around it asks again for
  * the same few grid points. Each thread keeps the latest ones; a hit
- * returns exactly what slow_at would, so nothing depends on which thread
+ * returns exactly what slows_n would, so nothing depends on which thread
  * or column asked first. */
 #define SLOW_MEMO 256
 typedef struct {
@@ -151,11 +209,35 @@ typedef struct {
 } slow_memo;
 static OS_THREAD_LOCAL slow_memo g_slow_memo[SLOW_MEMO];
 
+/* The slow fields at grid points [0, n), n <= SLOW_BATCH: the memo's,
+ * and the rest in one batch. */
+static void slow_nodes(uint32_t seed, int n, const int *x, const int *z, slow *out)
+{
+    int miss[SLOW_BATCH] = {0}, mx[SLOW_BATCH] = {0}, mz[SLOW_BATCH] = {0}, m = 0;
+    for (int i = 0; i < n; i++) {
+        const slow_memo *e = &g_slow_memo[hash2i(seed, x[i], z[i]) & (SLOW_MEMO - 1)];
+        if (e->used && e->seed == seed && e->x == x[i] && e->z == z[i]) {
+            out[i] = e->s;
+            continue;
+        }
+        miss[m] = i;
+        mx[m] = x[i];
+        mz[m++] = z[i];
+    }
+    if (!m) return;
+    slow got[SLOW_BATCH] = {0};
+    slows_n(seed, m, mx, mz, got);
+    for (int k = 0; k < m; k++) {
+        out[miss[k]] = got[k];
+        g_slow_memo[hash2i(seed, mx[k], mz[k]) & (SLOW_MEMO - 1)] = (slow_memo){seed, mx[k], mz[k], 1, got[k]};
+    }
+}
+
 static slow slow_node(uint32_t seed, int x, int z)
 {
-    slow_memo *m = &g_slow_memo[hash2i(seed, x, z) & (SLOW_MEMO - 1)];
-    if (!m->used || m->seed != seed || m->x != x || m->z != z) *m = (slow_memo){seed, x, z, 1, slow_at(seed, x, z)};
-    return m->s;
+    slow s = {{0}, 0.0f, 0.0f, 0.0f, 0.0f};
+    slow_nodes(seed, 1, &x, &z, &s);
+    return s;
 }
 
 /* Bilinear between the four grid points around a block: a at (x0, z0), b
@@ -177,9 +259,10 @@ static slow slow_mix(const slow *a, const slow *b, const slow *c, const slow *d,
 static slow slow_point(uint32_t seed, int x, int z)
 {
     int x0 = (int)(floor(x / (double)SLOW) * SLOW), z0 = (int)(floor(z / (double)SLOW) * SLOW);
-    slow a = slow_node(seed, x0, z0), b = slow_node(seed, x0 + SLOW, z0);
-    slow c = slow_node(seed, x0, z0 + SLOW), d = slow_node(seed, x0 + SLOW, z0 + SLOW);
-    return slow_mix(&a, &b, &c, &d, (float)(x - x0) / SLOW, (float)(z - z0) / SLOW);
+    const int nx[4] = {x0, x0 + SLOW, x0, x0 + SLOW}, nz[4] = {z0, z0, z0 + SLOW, z0 + SLOW};
+    slow c[4] = {0};
+    slow_nodes(seed, 4, nx, nz, c);
+    return slow_mix(&c[0], &c[1], &c[2], &c[3], (float)(x - x0) / SLOW, (float)(z - z0) / SLOW);
 }
 
 /* Desert: hot, dry, lowland away from the ranges. */
@@ -189,22 +272,73 @@ static float desert_of(const slow *s)
     return smooth(16.0f, 21.0f, s->temp) * (1.0f - smooth(0.12f, 0.24f, s->rain)) * coast * (1.0f - s->sh.mask);
 }
 
-/* Ground height at a block, in metres (blocks), before caves. fine gets
- * the finest relief field, -1..1, which also patches the soil. */
-static float land_at(uint32_t seed, int x, int z, const slow *s, float *fine)
+/* The noise land_at reads at a block. Only the fields its slow fields
+ * call for are filled (the rest stay 0): the coast's relief, a range's
+ * and a desert's dunes. */
+typedef struct {
+    float coast, hills, fine; /* coast > 0 */
+    float relief, crest;      /* inside a range */
+    float dune;               /* in a desert */
+} land_noise;
+
+/* The largest batch: a column and its one-block rim. */
+#define BATCH_MAX ((CHUNK_W + 2) * (CHUNK_W + 2))
+
+/* Points [0, n) at (x, z) with slow fields s, batched field by field over
+ * the points that need each one. One point at a time gives exactly the
+ * same values, since the batched noise does. */
+static void land_noises(uint32_t seed, int n, const int *x, const int *z, const slow *s, land_noise *out)
 {
-    double wx = x + (double)s->sh.ox, wz = z + (double)s->sh.oz;
+    double wx[BATCH_MAX] = {0}, wz[BATCH_MAX] = {0}, a[BATCH_MAX] = {0}, b[BATCH_MAX] = {0};
+    float v[BATCH_MAX] = {0};
+    int at[BATCH_MAX] = {0}, m = 0;
+    memset(out, 0, (size_t)n * sizeof *out);
+#define GATHER(cond)                             \
+    for (int i = (m = 0); i < n; i++)            \
+        if (cond) {                              \
+            at[m] = i;                           \
+            wx[m] = x[i] + (double)s[i].sh.ox;   \
+            wz[m++] = z[i] + (double)s[i].sh.oz; \
+        }
+#define FIELD(f, call, sx, sz)    \
+    for (int k = 0; k < m; k++) { \
+        a[k] = wx[k] / (sx);      \
+        b[k] = wz[k] / (sz);      \
+    }                             \
+    (call);                       \
+    for (int k = 0; k < m; k++) out[at[k]].f = v[k];
+    GATHER(smooth(-0.02f, 0.18f, s[i].sh.cont) > 0.0f)
+    FIELD(coast, fbm2d_n(seed + 17, a, b, 4, v, m), 300.0, 300.0)
+    FIELD(hills, eroded2d_n(seed + 61, a, b, 5, v, m), 350.0, 350.0)
+    FIELD(fine, fbm2d_n(seed + 67, a, b, 3, v, m), 55.0, 55.0)
+    GATHER(s[i].sh.mask > 0.0f)
+    FIELD(relief, eroded2d_n(seed + 51, a, b, 7, v, m), 600.0, 600.0)
+    FIELD(crest, noise2d_n(seed + 53, a, b, v, m), 380.0, 380.0)
+    /* Dunes: long crests across the wind, wavering along their length. */
+    GATHER(desert_of(&s[i]) > 0.0f)
+    FIELD(dune, noise2d_n(seed + 83, a, b, v, m), 200.0, 200.0)
+    for (int k = 0; k < m; k++) wx[k] += 30.0 * (double)out[at[k]].dune;
+    FIELD(dune, noise2d_n(seed + 81, a, b, v, m), 70.0, 260.0)
+#undef GATHER
+#undef FIELD
+}
+
+/* Ground height at a block, in metres (blocks), before caves, from its
+ * slow fields and noise. fine gets the finest relief field, -1..1, which
+ * also patches the soil. */
+static float land_of(const slow *s, const land_noise *ln, float *fine)
+{
     float coast = smooth(-0.02f, 0.18f, s->sh.cont), deep = smooth(0.0f, 0.25f, -s->sh.cont);
     float mask = s->sh.mask, rug = s->rug, desert = desert_of(s);
     float h = SEA - 14.0f + 26.0f * coast - 18.0f * deep;
     *fine = 0.0f;
     if (coast > 0.0f) {
-        h += 6.0f * coast * fbm2d(seed + 17, wx / 300.0, wz / 300.0, 4);
+        h += 6.0f * coast * ln->coast;
         /* Hills, fewer inside the ranges (which bring their own) and in
          * deserts (which have dunes instead). */
-        float hills = 0.5f + 0.5f * eroded2d(seed + 61, wx / 350.0, wz / 350.0, 5);
+        float hills = 0.5f + 0.5f * ln->hills;
         h += coast * (1.0f - 0.7f * mask) * (1.0f - 0.7f * desert) * hills * (8.0f + 30.0f * rug);
-        *fine = fbm2d(seed + 67, wx / 55.0, wz / 55.0, 3);
+        *fine = ln->fine;
         h += coast * *fine * (1.5f + 3.5f * rug);
     }
     if (mask > 0.0f) {
@@ -212,14 +346,12 @@ static float land_at(uint32_t seed, int x, int z, const slow *s, float *fine)
          * peaks, and crests sharpened where the eroded field rounds them.
          * Its octaves damp each other down to about +-0.3 (1st to 99th
          * percentile), so it is stretched to fill 0..1. */
-        float rel = sat(0.5f + 1.5f * eroded2d(seed + 51, wx / 600.0, wz / 600.0, 7));
-        float crest = 1.0f - fabsf(noise2d(seed + 53, wx / 380.0, wz / 380.0));
+        float rel = sat(0.5f + 1.5f * ln->relief);
+        float crest = 1.0f - fabsf(ln->crest);
         h += mask * (28.0f + rel * rel * sqrtf(rel) * 230.0f + crest * crest * crest * 45.0f * rel);
     }
     if (desert > 0.0f) {
-        /* Dunes: long crests across the wind, wavering along their length. */
-        double dx = wx + 30.0 * (double)noise2d(seed + 83, wx / 200.0, wz / 200.0);
-        float dune = 1.0f - fabsf(noise2d(seed + 81, dx / 70.0, wz / 260.0));
+        float dune = 1.0f - fabsf(ln->dune);
         h += desert * dune * dune * 9.0f;
     }
     if (s->mesa > 0.0f && h > SEA + 10.0f) {
@@ -234,6 +366,14 @@ static float land_at(uint32_t seed, int x, int z, const slow *s, float *fine)
         h = KNEE + (TOP - KNEE) * d / (d + (TOP - KNEE));
     }
     return h;
+}
+
+/* land_of at one block. */
+static float land_at(uint32_t seed, int x, int z, const slow *s, float *fine)
+{
+    land_noise ln = {0};
+    land_noises(seed, 1, &x, &z, s, &ln);
+    return land_of(s, &ln, fine);
 }
 
 static int height_of(float h) { return clampi((int)h, 4, WORLD_H - 12); }
@@ -263,14 +403,33 @@ typedef struct {
     biome b;
 } local;
 
-static local local_at(uint32_t seed, int x, int z, const slow *s, int height)
+/* The field that wobbles biome edges and the local climate. */
+static float jitter_at(uint32_t seed, int x, int z) { return fbm2d(seed + 401, x / 45.0, z / 45.0, 2); }
+
+/* jitter_at over the column whose first block is (bx, bz), in one batch. */
+static void local_jitter(uint32_t seed, int bx, int bz, float *jit)
 {
-    float jit = fbm2d(seed + 401, x / 45.0, z / 45.0, 2);
+    double a[COL_AREA] = {0}, b[COL_AREA] = {0};
+    for (int i = 0; i < COL_AREA; i++) {
+        int row = i / CHUNK_W;
+        a[i] = (bx + i % CHUNK_W) / 45.0;
+        b[i] = (bz + row) / 45.0;
+    }
+    fbm2d_n(seed + 401, a, b, 2, jit, COL_AREA);
+}
+
+static local local_of(const slow *s, int height, float jit)
+{
     local l = {0};
     l.temp = s->temp - (float)CLIMATE_LAPSE * fmaxf(0.0f, (float)height - SEA) + 1.5f * jit;
     l.rain = sat(s->rain + 0.07f * jit);
     l.b = biome_at(height, s, l.temp, l.rain, jit);
     return l;
+}
+
+static local local_at(uint32_t seed, int x, int z, const slow *s, int height)
+{
+    return local_of(s, height, jitter_at(seed, x, z));
 }
 
 /* ------------------------------------------------------------ rivers */
@@ -298,17 +457,48 @@ typedef struct {
     float dist, lake;
 } wet_field;
 
+/* The fields at points [0, n), in one batch. */
+static void wet_fields(uint32_t seed, int n, const int *x, const int *z, wet_field *out)
+{
+    double a[BATCH_MAX] = {0}, b[BATCH_MAX] = {0}, wx[BATCH_MAX] = {0}, wz[BATCH_MAX] = {0};
+    float ox[BATCH_MAX] = {0}, oz[BATCH_MAX] = {0}, v[BATCH_MAX] = {0}, w[BATCH_MAX] = {0};
+    float ax[BATCH_MAX] = {0}, az[BATCH_MAX] = {0}, bx[BATCH_MAX] = {0}, bz[BATCH_MAX] = {0};
+    for (int i = 0; i < n; i++) {
+        a[i] = x[i] / 420.0;
+        b[i] = z[i] / 420.0;
+    }
+    noise2d_n(seed + 503, a, b, ox, n);
+    noise2d_n(seed + 505, a, b, oz, n);
+    for (int i = 0; i < n; i++) {
+        wx[i] = x[i] + 90.0 * (double)ox[i];
+        wz[i] = z[i] + 90.0 * (double)oz[i];
+        a[i] = wx[i] / 900.0;
+        b[i] = wz[i] / 900.0;
+    }
+    noise2d_grad_n(seed + 501, a, b, v, ax, az, n);
+    for (int i = 0; i < n; i++) {
+        a[i] = wx[i] / 300.0;
+        b[i] = wz[i] / 300.0;
+    }
+    noise2d_grad_n(seed + 507, a, b, w, bx, bz, n);
+    for (int i = 0; i < n; i++) {
+        float d = v[i] + 0.35f * w[i];
+        /* Distance from the zero line: the value over its slope per metre
+         * (the slow bend's own slope is left out; it only stretches the
+         * estimate). */
+        float gx = ax[i] / 900.0f + 0.35f * bx[i] / 300.0f, gz = az[i] / 900.0f + 0.35f * bz[i] / 300.0f;
+        out[i].dist = fabsf(d) / fmaxf(sqrtf(gx * gx + gz * gz), 1e-6f);
+        a[i] = x[i] / 220.0;
+        b[i] = z[i] / 220.0;
+    }
+    noise2d_n(seed + 521, a, b, v, n);
+    for (int i = 0; i < n; i++) out[i].lake = v[i];
+}
+
 static wet_field wet_field_at(uint32_t seed, int x, int z)
 {
-    double wx = x + 90.0 * (double)noise2d(seed + 503, x / 420.0, z / 420.0);
-    double wz = z + 90.0 * (double)noise2d(seed + 505, x / 420.0, z / 420.0);
-    float ax = 0.0f, az = 0.0f, bx = 0.0f, bz = 0.0f;
-    float n = noise2d_grad(seed + 501, wx / 900.0, wz / 900.0, &ax, &az) +
-              0.35f * noise2d_grad(seed + 507, wx / 300.0, wz / 300.0, &bx, &bz);
-    /* Distance from the zero line: the value over its slope per metre (the
-     * slow bend's own slope is left out; it only stretches the estimate). */
-    float gx = ax / 900.0f + 0.35f * bx / 300.0f, gz = az / 900.0f + 0.35f * bz / 300.0f;
-    wet_field f = {fabsf(n) / fmaxf(sqrtf(gx * gx + gz * gz), 1e-6f), noise2d(seed + 521, x / 220.0, z / 220.0)};
+    wet_field f = {0.0f, 0.0f};
+    wet_fields(seed, 1, &x, &z, &f);
     return f;
 }
 
@@ -539,6 +729,24 @@ static float cave_xz(float g00, float g10, float g01, float g11, float u, float 
 
 static float cave_y(float lo, float hi, float v) { return lo + v * (hi - lo); }
 
+/* Whether nothing can carve between two grid heights with these values:
+ * every block between blends them, so it lies between them (to a few
+ * ulps, which the margins cover). Most of the ground has no cave, and its
+ * blocks skip the blend and the test. */
+static float cave_least(float lo, float hi)
+{
+    if ((lo <= 0.0f) != (hi <= 0.0f)) return 0.0f;
+    float a = fminf(fabsf(lo), fabsf(hi)) - 1e-4f;
+    return a > 0.0f ? a : 0.0f;
+}
+
+static int cave_quiet(const float *lo, const float *hi)
+{
+    float width = 0.010f + 0.012f * fmaxf(0.0f, fmaxf(lo[2], hi[2])) + 1e-4f;
+    float a = cave_least(lo[0], hi[0]), b = cave_least(lo[1], hi[1]);
+    return a * a + b * b >= width && fmaxf(lo[3], hi[3]) < 0.55f - 1e-4f;
+}
+
 /* What the fields carve at height y under ground h, the block above
  * open or not: a tunnel, or a chamber. */
 static int cave_carves(uint32_t seed, const float *val, int x, int y, int z, int h, int land, int open, int *mouth)
@@ -570,11 +778,20 @@ static void carve_caves(uint32_t seed, column *c, const hm_row *hm, const uint8_
      * zeroing it would cost as much as filling it. */
     float g[CAVE_FIELDS * CAVE_NY * CAVE_NX * CAVE_NX];
 #define G(f, j, k, i) g[(size_t)(f) * plane + ((size_t)(j) * CAVE_NX + (size_t)(k)) * CAVE_NX + (size_t)(i)]
-    for (int f = 0; f < CAVE_FIELDS; f++)
-        for (int j = 0; j < ny && j <= rows_of(f, top); j++)
+    /* Each field's grid in one batch, laid out as G stores it. The
+     * coordinates are written for [0, n) before the batch reads them. */
+    double px[CAVE_NY * CAVE_NX * CAVE_NX], py[CAVE_NY * CAVE_NX * CAVE_NX], pz[CAVE_NY * CAVE_NX * CAVE_NX];
+    for (int f = 0; f < CAVE_FIELDS; f++) {
+        int rows = imin(ny, rows_of(f, top) + 1), n = 0;
+        for (int j = 0; j < rows; j++)
             for (int k = 0; k < CAVE_NX; k++)
-                for (int i = 0; i < CAVE_NX; i++)
-                    G(f, j, k, i) = cave_node(seed, f, bx + i * CAVE_STEP, j * CAVE_STEP, bz + k * CAVE_STEP);
+                for (int i = 0; i < CAVE_NX; i++, n++) {
+                    px[n] = (bx + i * CAVE_STEP) / CAVE_FIELD[f].xz;
+                    py[n] = (j * CAVE_STEP) / CAVE_FIELD[f].y;
+                    pz[n] = (bz + k * CAVE_STEP) / CAVE_FIELD[f].xz;
+                }
+        if (n > 0) noise3d_n(seed + CAVE_FIELD[f].seed, px, py, pz, &G(f, 0, 0, 0), n);
+    }
 
     for (int z = 0; z < CHUNK_W; z++)
         for (int x = 0; x < CHUNK_W; x++) {
@@ -592,9 +809,22 @@ static void carve_caves(uint32_t seed, column *c, const hm_row *hm, const uint8_
                     cv[f][j] = cave_xz(G(f, j, k, i), G(f, j, k, i + 1), G(f, j, k + 1, i), G(f, j, k + 1, i + 1), u,
                                        w);
             uint8_t *col = &c->blocks[col_index(x, 0, z)];
-            int open = 0; /* the block above was carved, or is the sky */
+            int open = 0, at = -1, quiet = 0; /* open: the block above was carved, or is the sky */
             for (int y = h - 1; y >= 3; y--) {
                 int j = y / CAVE_STEP;
+                if (j != at) {
+                    float lo[CAVE_FIELDS] = {0}, hi[CAVE_FIELDS] = {0};
+                    for (int f = 0; f < CAVE_FIELDS; f++) {
+                        lo[f] = cv[f][j];
+                        hi[f] = cv[f][j + 1];
+                    }
+                    quiet = cave_quiet(lo, hi);
+                    at = j;
+                }
+                if (quiet) {
+                    open = 0;
+                    continue;
+                }
                 float v = (float)(y % CAVE_STEP) / CAVE_STEP, val[CAVE_FIELDS] = {0};
                 for (int f = 0; f < CAVE_FIELDS; f++) val[f] = cave_y(cv[f][j], cv[f][j + 1], v);
                 int carve = cave_carves(seed, val, bx + x, y, bz + z, h, land, open, &mouth);
@@ -628,12 +858,23 @@ typedef struct {
     float fold;   /* -1..1: how the beds are bent */
 } geo;
 
-static geo geo_at(uint32_t seed, int x, int z)
+/* The geology at grid points [0, n), n <= SLOW_BATCH, in one batch. */
+static void geos_n(uint32_t seed, int n, const int *x, const int *z, geo *out)
 {
-    geo g = {fbm2d(seed + 501, x / 3200.0, z / 3200.0, 2), 30.0f + 25.0f * fbm2d(seed + 503, x / 2400.0, z / 2400.0, 2),
-             sat(0.5f + 1.2f * fbm2d(seed + 509, x / 2800.0, z / 2800.0, 2)),
-             fbm2d(seed + 507, x / 500.0, z / 500.0, 2)};
-    return g;
+    double a[SLOW_BATCH] = {0}, b[SLOW_BATCH] = {0};
+    float v[4][SLOW_BATCH] = {{0}};
+    static const struct {
+        uint32_t seed;
+        double size;
+    } F[4] = {{501, 3200.0}, {503, 2400.0}, {509, 2800.0}, {507, 500.0}};
+    for (int f = 0; f < 4; f++) {
+        for (int i = 0; i < n; i++) {
+            a[i] = x[i] / F[f].size;
+            b[i] = z[i] / F[f].size;
+        }
+        fbm2d_n(seed + F[f].seed, a, b, 2, v[f], n);
+    }
+    for (int i = 0; i < n; i++) out[i] = (geo){v[0][i], 30.0f + 25.0f * v[1][i], sat(0.5f + 1.2f * v[2][i]), v[3][i]};
 }
 
 /* The rock under one block of ground. */
@@ -1029,30 +1270,48 @@ static uint8_t plant_at(biome b, uint8_t ground, int wet, int shade, uint32_t u,
  * cell of water beside them, at their foot or level with it. */
 static void place_plants(uint32_t seed, column *c, const hm_row *gm, const int *lvl, const local (*loc)[CHUNK_W])
 {
-    int bx = c->cx * CHUNK_W, bz = c->cz * CHUNK_W;
+    int bx = c->cx * CHUNK_W, bz = c->cz * CHUNK_W, n = 0;
+    /* The open cells of soil first, then their patch fields in a batch. */
+    int cell[COL_AREA] = {0};
+    double a[COL_AREA] = {0}, b[COL_AREA] = {0};
+    float patch[COL_AREA] = {0}, pick[COL_AREA] = {0};
     for (int z = 0; z < CHUNK_W; z++)
         for (int x = 0; x < CHUNK_W; x++) {
             int y = gm[z + 1][x + 1];
             if (lvl[z * CHUNK_W + x] || y < 1 || y >= WORLD_H - 1) continue;
             if (c->blocks[col_index(x, y, z)] != B_AIR) continue;
-            uint8_t ground = c->blocks[col_index(x, y - 1, z)];
-            if (!block_solid(ground)) continue;
-            int wet = 0, shade = 0;
-            static const int N4[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-            /* Frozen water grows no reeds. */
-            for (int k = 0; k < 4 && !wet && loc[z][x].temp > 0.0f; k++) {
-                int nx = x + N4[k][0], nz = z + N4[k][1];
-                if (nx < 0 || nx >= CHUNK_W || nz < 0 || nz >= CHUNK_W) continue;
-                wet = c->blocks[col_index(nx, y - 1, nz)] == B_WATER || c->blocks[col_index(nx, y, nz)] == B_WATER;
-            }
-            for (int ly = y + 1; ly < imin(y + 12, WORLD_H) && !shade; ly++)
-                shade = block_leaves(c->blocks[col_index(x, ly, z)]);
-            uint32_t h = hash2i(seed ^ 0x9E3779B9u, bx + x, bz + z);
-            float patch = noise2d(seed + 331, (bx + x) / 24.0, (bz + z) / 24.0);
-            float pick = noise2d(seed + 337, (bx + x) / 90.0, (bz + z) / 90.0);
-            uint8_t p = plant_at(loc[z][x].b, ground, wet, shade, h % 1000u, patch, pick);
-            if (p != B_AIR) c->blocks[col_index(x, y, z)] = p;
+            if (!block_solid(c->blocks[col_index(x, y - 1, z)])) continue;
+            cell[n++] = z * CHUNK_W + x;
         }
+    for (int i = 0; i < n; i++) {
+        int row = cell[i] / CHUNK_W;
+        a[i] = (bx + cell[i] % CHUNK_W) / 24.0;
+        b[i] = (bz + row) / 24.0;
+    }
+    noise2d_n(seed + 331, a, b, patch, n);
+    for (int i = 0; i < n; i++) {
+        int row = cell[i] / CHUNK_W;
+        a[i] = (bx + cell[i] % CHUNK_W) / 90.0;
+        b[i] = (bz + row) / 90.0;
+    }
+    noise2d_n(seed + 337, a, b, pick, n);
+    for (int i = 0; i < n; i++) {
+        int x = cell[i] % CHUNK_W, z = cell[i] / CHUNK_W, y = gm[z + 1][x + 1];
+        uint8_t ground = c->blocks[col_index(x, y - 1, z)];
+        int wet = 0, shade = 0;
+        static const int N4[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        /* Frozen water grows no reeds. */
+        for (int k = 0; k < 4 && !wet && loc[z][x].temp > 0.0f; k++) {
+            int nx = x + N4[k][0], nz = z + N4[k][1];
+            if (nx < 0 || nx >= CHUNK_W || nz < 0 || nz >= CHUNK_W) continue;
+            wet = c->blocks[col_index(nx, y - 1, nz)] == B_WATER || c->blocks[col_index(nx, y, nz)] == B_WATER;
+        }
+        for (int ly = y + 1; ly < imin(y + 12, WORLD_H) && !shade; ly++)
+            shade = block_leaves(c->blocks[col_index(x, ly, z)]);
+        uint32_t h = hash2i(seed ^ 0x9E3779B9u, bx + x, bz + z);
+        uint8_t p = plant_at(loc[z][x].b, ground, wet, shade, h % 1000u, patch[i], pick[i]);
+        if (p != B_AIR) c->blocks[col_index(x, y, z)] = p;
+    }
 }
 
 /* ------------------------------------------------------------ column */
@@ -1295,13 +1554,16 @@ void worldgen_column(uint32_t seed, column *c)
     int bx = c->cx * CHUNK_W, bz = c->cz * CHUNK_W;
     /* Grid points from one SLOW before the column to one after: they cover
      * the column and the ring of neighbours its slopes look at. */
-    slow node[4][4];
-    geo gnode[4][4];
-    for (int k = 0; k < 4; k++)
-        for (int i = 0; i < 4; i++) {
-            node[k][i] = slow_node(seed, bx + (i - 1) * SLOW, bz + (k - 1) * SLOW);
-            gnode[k][i] = geo_at(seed, bx + (i - 1) * SLOW, bz + (k - 1) * SLOW);
-        }
+    slow node[4][4] = {0};
+    geo gnode[4][4] = {{{0}}};
+    int nx[16] = {0}, nz[16] = {0};
+    for (int k = 0; k < 16; k++) {
+        nx[k] = bx + (k % 4 - 1) * SLOW;
+        nz[k] = bz + (k / 4 - 1) * SLOW;
+    }
+    _Static_assert(SLOW_BATCH >= 16, "a column's grid points go in one batch");
+    slow_nodes(seed, 16, nx, nz, &node[0][0]);
+    geos_n(seed, 16, nx, nz, &gnode[0][0]);
 
     int hm[CHUNK_W + 2][CHUNK_W + 2] = {0};
     float rain[CHUNK_W + 2][CHUNK_W + 2] = {{0}};
@@ -1310,21 +1572,37 @@ void worldgen_column(uint32_t seed, column *c)
     strata st[COL_AREA] = {{0}};
     float beds[BED_N] = {0};
     bed_sequence(seed, beds);
+    /* The slow fields at every block of the column and its rim, then the
+     * land's noise for all of them in one batch. */
+    slow sv[BATCH_MAX] = {0};
+    land_noise ln[BATCH_MAX] = {0};
+    int px[BATCH_MAX] = {0}, pz[BATCH_MAX] = {0};
     for (int z = 0; z < CHUNK_W + 2; z++)
         for (int x = 0; x < CHUNK_W + 2; x++) {
             /* Offsets 7..24 from the first grid point; the last falls on
              * the far grid point with u = 1, which lerp makes exact. */
-            int rx = x + SLOW - 1, rz = z + SLOW - 1;
+            int rx = x + SLOW - 1, rz = z + SLOW - 1, p = z * (CHUNK_W + 2) + x;
             int i = rx / SLOW < 2 ? rx / SLOW : 2, k = rz / SLOW < 2 ? rz / SLOW : 2;
-            slow s = slow_mix(&node[k][i], &node[k][i + 1], &node[k + 1][i], &node[k + 1][i + 1],
-                              (float)(rx - i * SLOW) / SLOW, (float)(rz - k * SLOW) / SLOW);
-            int wx = bx + x - 1, wz = bz + z - 1;
+            sv[p] = slow_mix(&node[k][i], &node[k][i + 1], &node[k + 1][i], &node[k + 1][i + 1],
+                             (float)(rx - i * SLOW) / SLOW, (float)(rz - k * SLOW) / SLOW);
+            px[p] = bx + x - 1;
+            pz[p] = bz + z - 1;
+        }
+    land_noises(seed, BATCH_MAX, px, pz, sv, ln);
+    float jit[COL_AREA] = {0};
+    local_jitter(seed, bx, bz, jit);
+    for (int z = 0; z < CHUNK_W + 2; z++)
+        for (int x = 0; x < CHUNK_W + 2; x++) {
+            int rx = x + SLOW - 1, rz = z + SLOW - 1, p = z * (CHUNK_W + 2) + x;
+            int i = rx / SLOW < 2 ? rx / SLOW : 2, k = rz / SLOW < 2 ? rz / SLOW : 2;
+            const slow s = sv[p];
+            int wx = px[p], wz = pz[p];
             float f = 0.0f;
-            hm[z][x] = height_of(land_at(seed, wx, wz, &s, &f));
+            hm[z][x] = height_of(land_of(&s, &ln[p], &f));
             rain[z][x] = s.rain;
             if (x < 1 || x > CHUNK_W || z < 1 || z > CHUNK_W) continue;
             fine[z - 1][x - 1] = f;
-            loc[z - 1][x - 1] = local_at(seed, wx, wz, &s, hm[z][x]);
+            loc[z - 1][x - 1] = local_of(&s, hm[z][x], jit[(z - 1) * CHUNK_W + x - 1]);
             float u = (float)(rx - i * SLOW) / SLOW, w = (float)(rz - k * SLOW) / SLOW;
             const geo *g00 = &gnode[k][i], *g10 = &gnode[k][i + 1], *g01 = &gnode[k + 1][i],
                       *g11 = &gnode[k + 1][i + 1];
@@ -1341,10 +1619,11 @@ void worldgen_column(uint32_t seed, column *c)
     float lat[4][4] = {{0}};
     int lat_done = 0;
     wet raw[CHUNK_W + 2][CHUNK_W + 2] = {{{0}}};
+    wet_field wf[BATCH_MAX] = {{0}};
+    wet_fields(seed, BATCH_MAX, px, pz, wf);
     for (int z = 0; z < CHUNK_W + 2; z++)
         for (int x = 0; x < CHUNK_W + 2; x++) {
-            int wx = bx + x - 1, wz = bz + z - 1;
-            wet_field f = wet_field_at(seed, wx, wz);
+            wet_field f = wf[z * (CHUNK_W + 2) + x];
             float lv = 0.0f;
             if (!wet_far(&f) && hm[z][x] >= SEA_LEVEL) {
                 if (!lat_done) {
@@ -1353,6 +1632,7 @@ void worldgen_column(uint32_t seed, column *c)
                             lat[k][i] = level_corner(seed, bx + (i - 1) * RIVER_GRID, bz + (k - 1) * RIVER_GRID);
                     lat_done = 1;
                 }
+                int wx = bx + x - 1, wz = bz + z - 1;
                 int i = (wx - (bx - RIVER_GRID)) / RIVER_GRID, k = (wz - (bz - RIVER_GRID)) / RIVER_GRID;
                 lv = level_mix(lat[k][i], lat[k][i + 1], lat[k + 1][i], lat[k + 1][i + 1], wx, wz);
             }
