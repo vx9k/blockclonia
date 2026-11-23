@@ -198,6 +198,29 @@ static void test_cond_ectopic_rate(void)
     CHECK(pause);
 }
 
+/* Beats are timed exactly inside a step, not snapped to it: the same
+ * sinus rhythm stepped at 60 Hz and at 144 Hz fires its ventricles at the
+ * same moments, to well under a millisecond, and keeps the PR interval. */
+static void test_cond_beat_timing(void)
+{
+    conduction a, b;
+    cond_init(&a);
+    cond_init(&b);
+    const conduction_input in = sinus_input(73.0f);
+    double t_a[128] = {0}, t_b[128] = {0};
+    int n_a = 0, n_b = 0;
+    uint32_t rng_a = 5u, rng_b = 5u;
+    for (int i = 0; i < 60 * 60; i++)
+        if (cond_step(&a, &in, i / 60.0, 1.0 / 60.0, &rng_a) > 0 && n_a < 128) t_a[n_a++] = a.t_vent;
+    for (int i = 0; i < 60 * 144; i++)
+        if (cond_step(&b, &in, i / 144.0, 1.0 / 144.0, &rng_b) > 0 && n_b < 128) t_b[n_b++] = b.t_vent;
+    double worst = 0.0;
+    for (int i = 0; i < n_a && i < n_b; i++) worst = fmax(worst, fabs(t_a[i] - t_b[i]));
+    CHECK(n_a == n_b && n_a > 60);
+    CHECK(worst < 1e-4);
+    CHECK(fabs(a.t_vent - a.t_atria - 0.16) < 1e-3);
+}
+
 static void test_cond_replay(void)
 {
     conduction a, b;
@@ -223,5 +246,6 @@ void test_conduction_all(void)
     test_cond_af_fast();
     test_cond_fast_slow();
     test_cond_ectopic_rate();
+    test_cond_beat_timing();
     test_cond_replay();
 }
