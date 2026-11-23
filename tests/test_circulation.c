@@ -329,22 +329,29 @@ static void test_body_blood_loss_classes(void)
     health_cut(h, BP_LLEG, 0.3f, 1, 0.0f);
     int seen = 0, ok10 = 0, ok22 = 0, ok35 = 0, ok45 = 0;
     double shed = 0.0; /* L */
+    /* Each beat's pressure rides the ~0.1 Hz Mayer waves, a few mmHg either
+     * way, so the classes read a 3 s average, as a clinician would. */
+    float hr = h->hr, sbp = h->sbp, dbp = h->dbp;
+    const float k = 1.0f - expf(-(float)TICK / 3.0f);
     for (int i = 0; i < 40 * 60 * 60 && seen < 4; i++) {
         health_step(h, &e, TICK);
+        hr += (h->hr - hr) * k;
+        sbp += (h->sbp - sbp) * k;
+        dbp += (h->dbp - dbp) * k;
         shed += (double)h->bleed_ext / 60.0 * TICK / 1000.0;
         float lost = (float)shed / b0;
         int arrested = !health_rhythm_perfusing(h->rhythm) || h->dead;
         if (seen == 0 && lost >= 0.10f) {
-            ok10 = h->hr < 100.0f && h->sbp > (float)a0.sbp - 8.0f;
+            ok10 = hr < 100.0f && sbp > (float)a0.sbp - 8.0f;
             seen = 1;
         } else if (seen == 1 && lost >= 0.22f) {
-            ok22 = h->hr >= 100.0f && h->hr <= 130.0f && h->sbp - h->dbp < 0.85f * pp0;
+            ok22 = hr >= 100.0f && hr <= 130.0f && sbp - dbp < 0.85f * pp0;
             seen = 2;
         } else if (seen == 2 && lost >= 0.35f) {
-            ok35 = (h->hr > 120.0f && h->sbp < 100.0f) || arrested;
+            ok35 = (hr > 120.0f && sbp < 100.0f) || arrested;
             seen = 3;
         } else if (seen == 3 && lost >= 0.45f) {
-            ok45 = h->sbp < 80.0f || arrested;
+            ok45 = sbp < 80.0f || arrested;
             seen = 4;
         }
         if (h->dead) break;
