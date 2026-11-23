@@ -141,7 +141,8 @@ static void test_noise_isotropy(void)
 {
     double ax = 0.0, az = 0.0, ad = 0.0;
     for (int i = 0; i < 40000; i++) {
-        double x = (i % 200) * 3.1, z = (i / 200) * 3.7;
+        int row = i / 200;
+        double x = (i % 200) * 3.1, z = row * 3.7;
         double a = (double)noise2d(9, x, z);
         double bx = (double)noise2d(9, x + 1.0, z) - a, bz = (double)noise2d(9, x, z + 1.0) - a;
         double bd = (double)noise2d(9, x + M_SQRT1_2, z + M_SQRT1_2) - a;
@@ -153,7 +154,8 @@ static void test_noise_isotropy(void)
 
     double sx = 0.0, sy = 0.0, sz = 0.0, sd = 0.0, k = 0.57735026918962576;
     for (int i = 0; i < 40000; i++) {
-        double x = (i % 200) * 3.1, z = (i / 200) * 3.7, y = (i % 37) * 2.3;
+        int row = i / 200;
+        double x = (i % 200) * 3.1, z = row * 3.7, y = (i % 37) * 2.3;
         double a = (double)noise3d(9, x, y, z);
         double bx = (double)noise3d(9, x + 1.0, y, z) - a, by = (double)noise3d(9, x, y + 1.0, z) - a;
         double bz = (double)noise3d(9, x, y, z + 1.0) - a, bd = (double)noise3d(9, x + k, y + k, z + k) - a;
@@ -171,7 +173,8 @@ static void test_noise_seeds(void)
 {
     double ab = 0.0, aa = 0.0, bb = 0.0, shift = 0.0;
     for (int i = 0; i < 40000; i++) {
-        double x = (i % 200) * 3.1, z = (i / 200) * 3.7;
+        int row = i / 200;
+        double x = (i % 200) * 3.1, z = row * 3.7;
         double a = (double)noise2d(9, x, z), b = (double)noise2d(10, x, z);
         double c = (double)noise2d(9, x + 1.0, z);
         ab += a * b;

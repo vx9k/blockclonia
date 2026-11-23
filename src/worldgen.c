@@ -100,12 +100,16 @@ typedef struct {
 /* The shapes at points [0, n), n <= 5 * SLOW_BATCH, in one batch. */
 static void shapes_n(uint32_t seed, int n, const int *x, const int *z, shape *out)
 {
-    double a[5 * SLOW_BATCH] = {0}, b[5 * SLOW_BATCH] = {0}, wx[5 * SLOW_BATCH] = {0}, wz[5 * SLOW_BATCH] = {0};
-    float v[5 * SLOW_BATCH] = {0};
+    /* Left uninitialised: single points come through here with n = 1 to 4,
+     * and zeroing the whole batch made scattered columns 10 % slower. Each
+     * array is written for [0, n) before any read. */
+    double a[5 * SLOW_BATCH], b[5 * SLOW_BATCH], wx[5 * SLOW_BATCH], wz[5 * SLOW_BATCH];
+    float v[5 * SLOW_BATCH];
     for (int i = 0; i < n; i++) {
         a[i] = x[i] / 1800.0;
         b[i] = z[i] / 1800.0;
     }
+    /* cppcheck-suppress uninitvar ; a and b are written above for [0, n) */
     fbm2d_n(seed + 3, a, b, 3, v, n);
     for (int i = 0; i < n; i++) out[i].ox = 700.0f * v[i];
     fbm2d_n(seed + 12, a, b, 3, v, n);
@@ -289,9 +293,11 @@ typedef struct {
  * same values, since the batched noise does. */
 static void land_noises(uint32_t seed, int n, const int *x, const int *z, const slow *s, land_noise *out)
 {
-    double wx[BATCH_MAX] = {0}, wz[BATCH_MAX] = {0}, a[BATCH_MAX] = {0}, b[BATCH_MAX] = {0};
-    float v[BATCH_MAX] = {0};
-    int at[BATCH_MAX] = {0}, m = 0;
+    /* Uninitialised like shapes_n's (n is 1 for a single sample): each is
+     * written for [0, m) before any read. */
+    double wx[BATCH_MAX], wz[BATCH_MAX], a[BATCH_MAX], b[BATCH_MAX];
+    float v[BATCH_MAX];
+    int at[BATCH_MAX], m = 0;
     memset(out, 0, (size_t)n * sizeof *out);
 #define GATHER(cond)                             \
     for (int i = (m = 0); i < n; i++)            \
@@ -308,6 +314,7 @@ static void land_noises(uint32_t seed, int n, const int *x, const int *z, const 
     (call);                       \
     for (int k = 0; k < m; k++) out[at[k]].f = v[k];
     GATHER(smooth(-0.02f, 0.18f, s[i].sh.cont) > 0.0f)
+    /* cppcheck-suppress uninitvar ; FIELD writes a and b for [0, m) first */
     FIELD(coast, fbm2d_n(seed + 17, a, b, 4, v, m), 300.0, 300.0)
     FIELD(hills, eroded2d_n(seed + 61, a, b, 5, v, m), 350.0, 350.0)
     FIELD(fine, fbm2d_n(seed + 67, a, b, 3, v, m), 55.0, 55.0)
@@ -460,13 +467,16 @@ typedef struct {
 /* The fields at points [0, n), in one batch. */
 static void wet_fields(uint32_t seed, int n, const int *x, const int *z, wet_field *out)
 {
-    double a[BATCH_MAX] = {0}, b[BATCH_MAX] = {0}, wx[BATCH_MAX] = {0}, wz[BATCH_MAX] = {0};
-    float ox[BATCH_MAX] = {0}, oz[BATCH_MAX] = {0}, v[BATCH_MAX] = {0}, w[BATCH_MAX] = {0};
-    float ax[BATCH_MAX] = {0}, az[BATCH_MAX] = {0}, bx[BATCH_MAX] = {0}, bz[BATCH_MAX] = {0};
+    /* Uninitialised like shapes_n's (n is 1 for a single sample): each is
+     * written for [0, n) before any read. */
+    double a[BATCH_MAX], b[BATCH_MAX], wx[BATCH_MAX], wz[BATCH_MAX];
+    float ox[BATCH_MAX], oz[BATCH_MAX], v[BATCH_MAX], w[BATCH_MAX];
+    float ax[BATCH_MAX], az[BATCH_MAX], bx[BATCH_MAX], bz[BATCH_MAX];
     for (int i = 0; i < n; i++) {
         a[i] = x[i] / 420.0;
         b[i] = z[i] / 420.0;
     }
+    /* cppcheck-suppress uninitvar ; a and b are written above for [0, n) */
     noise2d_n(seed + 503, a, b, ox, n);
     noise2d_n(seed + 505, a, b, oz, n);
     for (int i = 0; i < n; i++) {
