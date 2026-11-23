@@ -327,6 +327,7 @@ typedef struct health {
     float sepsis;                     /* 0..1 */
     int conscious; /* consciousness, the step the level is on */
     float level; /* 0..1 how awake: 1 alert, 0 unresponsive */
+    float lapse; /* s left of a drowsy body's brief blackout */
 
     int dead, cause;
     float hurt_flash;                 /* 0..1, for the screen */
@@ -406,6 +407,10 @@ health_limits health_get_limits(const health *h);
  * drinking). */
 typedef struct {
     float tremor, sway, tunnel, jaundice, blur, doubled;
+    /* A clouded mind (consciousness below alert) slows and fumbles the
+     * hands: s the controls lag, the share of actions that never happen,
+     * stumbles a second while moving, and a brief blackout (0..1). */
+    float lag, drop, stumble, blackout;
 } health_senses;
 health_senses health_get_senses(const health *h);
 

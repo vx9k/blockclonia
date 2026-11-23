@@ -13,6 +13,7 @@
 #include "gamemode.h"
 #include "health.h"
 #include "hud.h"
+#include "impair.h"
 #include "interact.h"
 #include "inventory.h"
 #include "invui.h"
@@ -996,6 +997,7 @@ typedef struct {
     float aim;                /* 0 rifle at the hip .. 1 down its sights */
     float flash;              /* the last muzzle flash's light, 1 when fired, fading */
     recoil rc;                /* the muzzle's climb and the hold bringing it back */
+    impair imp;               /* a clouded mind's lag, fumbles and stumbles */
     world_rules rules;        /* the world's mode and whether it may switch */
     float bolt_t;             /* 0..1 through the cycle after a shot, 1 when done */
     float fog[3];             /* the fog's colour, easing toward the light at the eye */
@@ -1406,6 +1408,7 @@ static void open_world(game *g, const char *dir, int backdrop)
              jobs_worker_count(g->js));
 
     health_init_varied(&g->hl, g->seed ^ 0x9E3779B9u);
+    impair_init(&g->imp, g->seed);
     health_settle(&g->hl);
     if (o->hurt && !backdrop) apply_hurt(&g->hl, o->hurt);
 
@@ -1820,7 +1823,7 @@ static int held_gun(game *g)
 }
 
 /* Looking, the hotbar and the movement keys. */
-static player_input frame_input(game *g)
+static player_input frame_input(game *g, double now, double dt)
 {
     const settings *st = &g->st;
     player *pl = &g->pl;
@@ -1829,10 +1832,6 @@ static player_input frame_input(game *g)
     const float sens = 0.0022f * (float)st->sensitivity / 100.0f * aim_zoom(g->aim);
     g->look_dx = (float)g_in.mouse_dx * sens;
     g->look_dy = (float)g_in.mouse_dy * sens;
-    pl->yaw += g->look_dx;
-    pl->pitch -= g->look_dy * (st->invert_y ? -1.0f : 1.0f);
-    pl->pitch = clampf(pl->pitch, -1.55f, 1.55f);
-    pl->yaw = fmodf(pl->yaw, (float)(2 * MC_PI));
     g_in.mouse_dx = g_in.mouse_dy = 0;
     if (g_in.scroll != 0) {
         if (g_in.inv_open) {
@@ -1861,6 +1860,26 @@ static player_input frame_input(game *g)
     if (!st->sprint_toggle) g_in.sprint_latch = 0;
     in.sprint = (st->sprint_toggle ? g_in.sprint_latch : g_in.keys[GLFW_KEY_LEFT_CONTROL]) || g_in.sprint_tap;
     if (g->frozen) memset(&in, 0, sizeof in);
+    /* A clouded mind acts on the player's hands late and not always: the
+     * look, the keys and the clicks all pass through it together. */
+    if (mode_body(pl->mode) && !g->in_menu) {
+        const health_senses hs = health_get_senses(&g->hl);
+        impair_frame f = {.move = in,
+                          .look_dx = g->look_dx,
+                          .look_dy = g->look_dy,
+                          .click_break = g_in.click_break,
+                          .click_place = g_in.click_place};
+        f = impair_step(&g->imp, &f, hs.lag, hs.drop, hs.stumble, now, (float)dt);
+        in = f.move;
+        g->look_dx = f.look_dx;
+        g->look_dy = f.look_dy;
+        g_in.click_break = f.click_break > 0;
+        g_in.click_place = f.click_place > 0;
+    }
+    pl->yaw += g->look_dx;
+    pl->pitch -= g->look_dy * (st->invert_y ? -1.0f : 1.0f);
+    pl->pitch = clampf(pl->pitch, -1.55f, 1.55f);
+    pl->yaw = fmodf(pl->yaw, (float)(2 * MC_PI));
     return in;
 }
 
@@ -2982,7 +3001,7 @@ int main(int argc, char **argv)
             g_in.chat[0] = '\0';
         }
         frame_menus(g, dt);
-        player_input in = frame_input(g);
+        player_input in = frame_input(g, now, dt);
         frame_simulate(g, &in, dt);
         frame_interact(g, dt);
         if (g->o.demo) demo_step(&g->w, &g->ph, g->fx, &g->pl, &g->demo, g->frame);

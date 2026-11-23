@@ -19,7 +19,7 @@ static void test_cons_steps(void)
     CHECK(health_cons_of(0.15f) == CONS_PAIN);
     CHECK(health_cons_of(0.0f) == CONS_UNCONSCIOUS);
     int ordered = 1;
-    for (float l = 0.0f; l < 1.0f; l += 0.01f) ordered &= health_cons_of(l) <= health_cons_of(l + 0.01f);
+    for (int i = 0; i < 100; i++) ordered &= health_cons_of(0.01f * (float)i) <= health_cons_of(0.01f * (float)(i + 1));
     CHECK(ordered);
     health *h = new_body(1);
     CHECK(h->level == 1.0f && h->conscious == CONS_ALERT && health_awake(h));
@@ -84,8 +84,75 @@ static void test_cons_choke(void)
     mem_free(h);
 }
 
+/* What each step does to the hands: nothing when alert, then slower,
+ * clumsier and more unsteady the further down the scale. */
+static void test_cons_control(void)
+{
+    health *h = new_body(1);
+    health_senses s = health_get_senses(h);
+    CHECK(s.lag == 0.0f && s.drop == 0.0f && s.stumble == 0.0f && s.blackout == 0.0f);
+    const float sway0 = s.sway;
+    h->level = 0.7f;
+    h->conscious = health_cons_of(h->level);
+    s = health_get_senses(h);
+    CHECK(s.lag > 0.05f && s.lag < 0.2f && s.drop > 0.0f && s.stumble > 0.0f && s.sway > sway0);
+    const float lag_conf = s.lag, drop_conf = s.drop, stumble_conf = s.stumble;
+    h->level = 0.4f;
+    h->conscious = health_cons_of(h->level);
+    s = health_get_senses(h);
+    CHECK(s.lag > 0.25f && s.lag > lag_conf && s.drop > drop_conf && s.stumble > stumble_conf);
+    mem_free(h);
+}
+
+/* Holds a body at 31.5 C for ten minutes, deep enough in the cold to keep
+ * it drowsy, and counts its blackouts. */
+static int count_lapses(health *h, float temp, int *longest_ok, int *control_lost, int *lay_down)
+{
+    health_env e = calm_env();
+    int lapses = 0;
+    float was = 0.0f, len = 0.0f;
+    *longest_ok = 1;
+    *control_lost = 1;
+    *lay_down = 0;
+    for (int i = 0; i < 600 * 60; i++) {
+        h->temp = temp;
+        health_step(h, &e, PHYS_DT);
+        if (h->lapse > 0.0f && was <= 0.0f) {
+            lapses++;
+            len = 0.0f;
+        }
+        if (h->lapse > 0.0f) {
+            len += (float)PHYS_DT;
+            *control_lost &= !health_get_limits(h).has_control;
+            *lay_down |= h->down > 0.0f;
+        } else if (was > 0.0f) {
+            *longest_ok &= len >= 0.9f && len <= 3.1f;
+        }
+        was = h->lapse;
+    }
+    return lapses;
+}
+
+/* A drowsy body drifts off for a second or three now and then, losing
+ * the controls but not falling into the long lie of a faint; an alert one
+ * never does. */
+static void test_cons_lapses(void)
+{
+    health *h = new_body(3);
+    int len_ok = 0, lost = 0, lay = 0;
+    int n = count_lapses(h, 31.5f, &len_ok, &lost, &lay);
+    CHECK(health_awake(h) && h->conscious == CONS_DROWSY);
+    CHECK(n >= 3 && n <= 60 && len_ok && lost && !lay);
+    health *a = new_body(3);
+    CHECK(count_lapses(a, 37.0f, &len_ok, &lost, &lay) == 0);
+    mem_free(h);
+    mem_free(a);
+}
+
 void test_conscious_all(void)
 {
+    test_cons_control();
+    test_cons_lapses();
     test_cons_steps();
     test_cons_hurt_brain();
     test_cons_cold();

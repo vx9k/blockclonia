@@ -2315,6 +2315,13 @@ static void step_brain(health *h, float cao2_rel, float dehyd, int arrest, doubl
     h->level = fclamp(lag(h->level, want, dt, want < h->level ? 1.0 : 4.0), 0.0f, 1.0f);
     if (h->concussion > 0.0f || arrest) h->level = 0.0f;
     int cons = health_cons_of(h->level);
+    /* A drowsy mind drifts off for a second or three now and then (micro-
+     * sleeps, absence-like lapses), more often the deeper it is, and
+     * catches itself without falling into a faint's long lie. */
+    h->lapse = maxf(0.0f, h->lapse - fdt);
+    if (cons < CONS_DROWSY) h->lapse = 0.0f;
+    else if (h->lapse <= 0.0f && frand(h) < 0.08f * (1.0f - ramp(h->level, 0.3f, 0.6f)) * fdt)
+        h->lapse = 1.0f + 2.0f * frand(h);
     if (cons < CONS_DROWSY && health_awake(h)) health_log(h, "Lost consciousness");
     /* Someone who fainted comes round lying where they fell and stays
      * down a while: lying is what brought the blood back to the brain,
@@ -2784,13 +2791,22 @@ health_senses health_get_senses(const health *h)
                         0.5f * ramp(h->bac, 1.0f, 3.0f),
                     0.0f, 1.0f);
     v.doubled = fclamp(0.8f * ramp(h->confusion, 60.0f, 300.0f) + 0.6f * ramp(h->bac, 2.0f, 3.5f), 0.0f, 1.0f);
+    /* Below alert, reactions slow (to about a third of a second when
+     * drowsy), hands miss what they reach for, feet catch, and the body
+     * sways. */
+    const float fog = 1.0f - ramp(h->level, 0.3f, 0.85f);
+    v.lag = 0.35f * fog;
+    v.drop = 0.5f * fog;
+    v.stumble = 0.5f * fog;
+    v.sway = minf(1.0f, v.sway + 0.6f * fog);
+    v.blackout = fclamp(h->lapse / 0.3f, 0.0f, 1.0f);
     return v;
 }
 
 health_limits health_get_limits(const health *h)
 {
     health_limits l = {0.0f, 0, 0, 0, 0};
-    if (h->dead || !health_awake(h)) return l;
+    if (h->dead || !health_awake(h) || h->lapse > 0.0f) return l;
     float leg[2] = {0};
     for (int k = 0; k < 2; k++) {
         const body_part *p = &h->part[BP_LLEG + k];
@@ -3395,6 +3411,7 @@ static const wire_field HEALTH_FIELDS[] = {
     H(blood_seen),
     H(down),
     H(level),
+    H(lapse),
     H(empty_t),
     H(fear),
     H(fear_ref),

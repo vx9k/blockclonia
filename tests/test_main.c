@@ -2278,6 +2278,7 @@ int main(void)
     test_faint_all();
     test_fear_all();
     test_conscious_all();
+    test_impair_all();
     test_dark_all();
     test_lamps_all();
     test_shadow_all();
