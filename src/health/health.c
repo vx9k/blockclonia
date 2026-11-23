@@ -351,6 +351,7 @@ void health_init(health *h, uint32_t seed)
     h->brain_o2 = 1.0f;
     h->icp = 10.0f;
     h->conscious = CONS_ALERT;
+    h->level = 1.0f;
 
     for (int i = 0; i < HEALTH_WAVE_LEN; i++) {
         h->art[i] = 80.0f;
@@ -854,7 +855,7 @@ int health_treat(health *h, inventory *inv, int part, int what, int water_nearby
         snprintf(msg, msg_size, "You are dead");
         return 0;
     }
-    if (h->conscious == CONS_UNCONSCIOUS) {
+    if (!health_awake(h)) {
         snprintf(msg, msg_size, "You are unconscious");
         return 0;
     }
@@ -1220,6 +1221,7 @@ static void die(health *h, int cause)
     h->cause = cause;
     h->rhythm = RHYTHM_ASYSTOLE;
     h->conscious = CONS_UNCONSCIOUS;
+    h->level = 0.0f;
     health_log(h, "%s", health_death_text(cause));
 }
 
@@ -1344,7 +1346,7 @@ static void step_bleeding(health *h, const health_env *e, double dt, float gh, c
      * that has been running a while no longer does. A cut artery's flow
      * builds over several beats; only a bleed at least doubling what the
      * eyes have already seen is a new sight, so one rush is one chance. */
-    if (h->conscious != CONS_UNCONSCIOUS && ext > 2.0f * h->blood_seen + 30.0f) {
+    if (health_awake(h) && ext > 2.0f * h->blood_seen + 30.0f) {
         if (frand(h) < 0.15f && start_faint(h)) health_log(h, "The sight of the blood makes you woozy");
         h->blood_seen = ext;
     }
@@ -2245,6 +2247,37 @@ static void step_breathing(health *h, const health_env *e, int arrest, int awake
     h->etco2 = h->breathing ? maxf(0.0f, h->paco2 - 3.0f - 25.0f * maxf(0.0f, 1.0f - h->co / 4.0f)) : 0.0f;
 }
 
+/* One cause's level, for a quantity whose lower values are worse (negate
+ * one whose higher values are): 1 down to `fine`, 0.85 at `confused` (the
+ * edge of alert), 0.3 at `out` (where the eyes close) and none at all as
+ * far again below. Between them it runs straight. */
+static float cons_low(float x, float fine, float confused, float out)
+{
+    if (x >= fine) return 1.0f;
+    if (x >= confused) return 0.85f + 0.15f * (x - confused) / (fine - confused);
+    if (x >= out) return 0.3f + 0.55f * (x - out) / (confused - out);
+    return maxf(0.0f, 0.3f * (1.0f - (out - x) / (confused - out)));
+}
+
+int health_cons_of(float level)
+{
+    static const float EDGE[CONS_ALERT] = {0.1f, 0.2f, 0.3f, 0.6f, 0.85f}; /* lowest level of each step above */
+    int c = CONS_UNCONSCIOUS;
+    while (c < CONS_ALERT && level >= EDGE[c]) c++;
+    return c;
+}
+
+int health_awake(const health *h) { return h->conscious >= CONS_DROWSY; }
+
+int health_impaired(const health *h) { return h->conscious == CONS_DROWSY || h->conscious == CONS_CONFUSED; }
+
+const char *health_cons_name(int cons)
+{
+    static const char *const NAME[CONS_ALERT + 1] = {"Unresponsive", "Pain only", "Voice only",
+                                                     "Drowsy",       "Confused",  "Alert"};
+    return cons >= 0 && cons <= CONS_ALERT ? NAME[cons] : "?";
+}
+
 /* The brain's oxygen, its injuries, and how awake that leaves the body. */
 static void step_brain(health *h, float cao2_rel, float dehyd, int arrest, double dt)
 {
@@ -2260,27 +2293,40 @@ static void step_brain(health *h, float cao2_rel, float dehyd, int arrest, doubl
     h->confusion = maxf(0.0f, h->confusion - fdt);
 
     /* The brain extracts more oxygen as delivery falls, so function holds
-     * until delivery is roughly halved: confusion near 55%, fainting
-     * below about 40%. Extra flow cannot make up for very low arterial
-     * oxygen, though: oxygen has to diffuse into the tissue, and acute
-     * hypoxaemia blacks people out near SaO2 50% whatever the flow. */
-    float bo = h->brain_o2;
+     * until delivery is roughly halved: confusion near 55%, the eyes
+     * closing below about 40%. Extra flow cannot make up for very low
+     * arterial oxygen, though: oxygen has to diffuse into the tissue, and
+     * acute hypoxaemia blacks people out near SaO2 50% whatever the flow.
+     * Each cause gives its own level and the worst one rules: a clouded
+     * mind is as clear as its worst insult allows. */
     const float sed = health_sedation(h);
-    int cons = CONS_ALERT;
-    if (bo < 0.55f || h->sao2 < 0.7f || h->blood < 0.7f * BLOOD_NORMAL || h->confusion > 0.0f || h->temp < 33.0f ||
-        h->temp > 40.0f || h->sepsis > 0.7f || h->organ[ORG_BRAIN] < 0.6f || dehyd > 0.1f || h->fat < 2000.0f ||
-        sed > 0.45f)
-        cons = CONS_CONFUSED;
-    int out = h->conscious == CONS_UNCONSCIOUS; /* hysteresis */
-    if (sed > (out ? 0.8f : 0.85f)) cons = CONS_UNCONSCIOUS;
-    if (bo < (out ? 0.45f : 0.4f) || h->sao2 < (out ? 0.55f : 0.5f) || h->concussion > 0.0f || h->temp < 30.0f ||
-        h->temp > 41.5f || h->organ[ORG_BRAIN] < 0.3f || h->icp > 35.0f || h->sepsis > 0.92f || arrest)
-        cons = CONS_UNCONSCIOUS;
-    if (cons == CONS_UNCONSCIOUS && h->conscious != CONS_UNCONSCIOUS) health_log(h, "Lost consciousness");
+    float want = minf(cons_low(h->brain_o2, 0.7f, 0.55f, 0.4f), cons_low(h->sao2, 0.85f, 0.7f, 0.5f));
+    want = minf(want, cons_low(h->blood, 0.8f * BLOOD_NORMAL, 0.7f * BLOOD_NORMAL, 0.4f * BLOOD_NORMAL));
+    /* Mild hypothermia (32-35 C) already brings confusion and poor
+     * judgement; consciousness is lost near 30. */
+    want = minf(want, minf(cons_low(h->temp, 35.5f, 34.5f, 30.0f), cons_low(-h->temp, -39.0f, -40.0f, -41.5f)));
+    want = minf(want, minf(cons_low(-h->sepsis, -0.5f, -0.7f, -0.92f), cons_low(-sed, -0.3f, -0.45f, -0.85f)));
+    want = minf(want, minf(cons_low(h->organ[ORG_BRAIN], 1.0f, 0.6f, 0.3f), cons_low(-h->icp, -20.0f, -28.0f, -35.0f)));
+    want = minf(want, minf(cons_low(-dehyd, -0.05f, -0.1f, -0.25f), cons_low(h->fat, 3000.0f, 2000.0f, 500.0f)));
+    if (h->confusion > 0.0f) want = minf(want, 0.75f);
+    /* Consciousness goes within a second or two of the brain's oxygen
+     * failing, and comes back more slowly once it returns; a blow to the
+     * head or a stopped heart switches it off at once. */
+    h->level = fclamp(lag(h->level, want, dt, want < h->level ? 1.0 : 4.0), 0.0f, 1.0f);
+    if (h->concussion > 0.0f || arrest) h->level = 0.0f;
+    int cons = health_cons_of(h->level);
+    /* A drowsy mind drifts off for a second or three now and then (micro-
+     * sleeps, absence-like lapses), more often the deeper it is, and
+     * catches itself without falling into a faint's long lie. */
+    h->lapse = maxf(0.0f, h->lapse - fdt);
+    if (cons < CONS_DROWSY) h->lapse = 0.0f;
+    else if (h->lapse <= 0.0f && frand(h) < 0.08f * (1.0f - ramp(h->level, 0.3f, 0.6f)) * fdt)
+        h->lapse = 1.0f + 2.0f * frand(h);
+    if (cons < CONS_DROWSY && health_awake(h)) health_log(h, "Lost consciousness");
     /* Someone who fainted comes round lying where they fell and stays
      * down a while: lying is what brought the blood back to the brain,
      * and getting up at once would only drop them again. */
-    if (cons == CONS_UNCONSCIOUS) h->down = DOWN_S;
+    if (cons < CONS_DROWSY) h->down = DOWN_S;
     else h->down = maxf(0.0f, h->down - fdt);
     h->conscious = cons;
 }
@@ -2334,7 +2380,7 @@ void health_step(health *h, const health_env *e, double dt)
     step_defib(h, e, (float)dt);
     const float gh = (float)(dt * HEALTH_CLOCK / 3600.0); /* survival-clock hours this step */
     const float fdt = (float)dt;
-    const int awake = h->conscious != CONS_UNCONSCIOUS;
+    const int awake = health_awake(h);
     const float dehyd = dehydration(h);
     const float hb = health_hb(h);
     const float cao2_rel = (hb / 15.0f) * (h->sao2 / 0.975f);
@@ -2745,13 +2791,29 @@ health_senses health_get_senses(const health *h)
                         0.5f * ramp(h->bac, 1.0f, 3.0f),
                     0.0f, 1.0f);
     v.doubled = fclamp(0.8f * ramp(h->confusion, 60.0f, 300.0f) + 0.6f * ramp(h->bac, 2.0f, 3.5f), 0.0f, 1.0f);
+    /* Below alert, reactions slow (to about a third of a second when
+     * drowsy), hands miss what they reach for, feet catch, and the body
+     * sways. */
+    const float fog = 1.0f - ramp(h->level, 0.3f, 0.85f);
+    v.lag = 0.35f * fog;
+    v.drop = 0.5f * fog;
+    v.stumble = 0.5f * fog;
+    v.sway = minf(1.0f, v.sway + 0.6f * fog);
+    v.blackout = fclamp(h->lapse / 0.3f, 0.0f, 1.0f);
+    /* A retina short of oxygen loses colour first and then the edges of
+     * the view, before the brain itself goes: the grey-out, tunnel vision
+     * and black-out pilots describe under g. Drowsy lids let in less
+     * light. */
+    v.grey = ramp(0.85f - h->brain_o2, 0.0f, 0.2f);
+    v.tunnel = maxf(v.tunnel, ramp(0.75f - h->brain_o2, 0.0f, 0.25f));
+    v.dim = maxf(0.4f * fog, v.blackout);
     return v;
 }
 
 health_limits health_get_limits(const health *h)
 {
     health_limits l = {0.0f, 0, 0, 0, 0};
-    if (h->dead || h->conscious == CONS_UNCONSCIOUS) return l;
+    if (h->dead || !health_awake(h) || h->lapse > 0.0f) return l;
     float leg[2] = {0};
     for (int k = 0; k < 2; k++) {
         const body_part *p = &h->part[BP_LLEG + k];
@@ -2775,7 +2837,7 @@ health_limits health_get_limits(const health *h)
     else if (v < 0.8f) sys *= 0.75f;
     if (h->sao2 < 0.85f) sys *= 0.7f;
     if (h->pain > 7.0f) sys *= 0.7f;
-    if (h->conscious == CONS_CONFUSED) sys *= 0.7f;
+    if (health_impaired(h)) sys *= 0.7f;
     if (h->temp < 34.0f) sys *= 0.7f;
     /* A damaged heart cannot raise its output, a failing liver tires, and
      * a rush lends strength the crash after it takes back: to a fresh
@@ -3184,10 +3246,10 @@ int health_organ_status(const health *h, int organ, char *buf, size_t n)
         if (h->icp > 25.0f) {
             s = "raised pressure";
             sev = 3;
-        } else if (h->conscious == CONS_UNCONSCIOUS) {
+        } else if (!health_awake(h)) {
             s = "unresponsive";
             sev = sev > 2 ? sev : 2;
-        } else if (h->conscious == CONS_CONFUSED) {
+        } else if (health_impaired(h)) {
             s = h->concussion > 0 || h->confusion > 0 ? "concussed" : "confused";
             sev = sev > 1 ? sev : 1;
         } else s = f > 0.85f ? "normal" : "damaged";
@@ -3355,6 +3417,8 @@ static const wire_field HEALTH_FIELDS[] = {
     H(faint_drive),
     H(blood_seen),
     H(down),
+    H(level),
+    H(lapse),
     H(empty_t),
     H(fear),
     H(fear_ref),

@@ -425,14 +425,14 @@ static void test_body_faint_stays_down(void)
     live(h, &e, 60.0);
     health_cut(h, BP_LLEG, 0.8f, 1, 0.0f);
     int i = 0;
-    for (; i < 10 * 60 * 60 && h->conscious != CONS_UNCONSCIOUS; i++) health_step(h, &e, TICK);
-    CHECK(h->conscious == CONS_UNCONSCIOUS);
-    for (; i < 20 * 60 * 60 && h->conscious == CONS_UNCONSCIOUS; i++) health_step(h, &e, TICK);
-    CHECK(h->conscious != CONS_UNCONSCIOUS);
+    for (; i < 10 * 60 * 60 && health_awake(h); i++) health_step(h, &e, TICK);
+    CHECK(!health_awake(h));
+    for (; i < 20 * 60 * 60 && !health_awake(h); i++) health_step(h, &e, TICK);
+    CHECK(health_awake(h));
     int stayed = 1;
     for (int j = 0; j < 15 * 60; j++) {
         health_step(h, &e, TICK);
-        stayed &= h->down > 0.0f && h->conscious != CONS_UNCONSCIOUS;
+        stayed &= h->down > 0.0f && health_awake(h);
     }
     CHECK(stayed);
     mem_free(h);

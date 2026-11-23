@@ -83,7 +83,9 @@ typedef enum {
     RHYTHM_COUNT
 } rhythm_kind;
 typedef enum { AIRWAY_AIR, AIRWAY_WATER, AIRWAY_BLOCKED } airway_state;
-typedef enum { CONS_UNCONSCIOUS, CONS_CONFUSED, CONS_ALERT } consciousness;
+/* From worst to best, so steps compare in order. The bottom three keep
+ * the eyes shut and the body out of the player's hands (health_awake). */
+typedef enum { CONS_UNCONSCIOUS, CONS_PAIN, CONS_VOICE, CONS_DROWSY, CONS_CONFUSED, CONS_ALERT } consciousness;
 typedef enum { WOUND_CUT, WOUND_OPEN_FRACTURE, WOUND_ABRASION, WOUND_BURN, WOUND_FROSTBITE } wound_kind;
 typedef enum { DISLOC_NONE, DISLOC_SHOULDER, DISLOC_ELBOW } dislocation_kind;
 typedef enum { FROST_NONE, FROST_NIP, FROST_SUPERFICIAL, FROST_DEEP } frostbite_stage;
@@ -323,7 +325,9 @@ typedef struct health {
     float fear_ref; /* slow reference a sudden fright is measured against */
     float dark; /* 0..1 how dark it is to the eyes, which take a while to adjust */
     float sepsis;                     /* 0..1 */
-    int conscious;                    /* consciousness */
+    int conscious; /* consciousness, the step the level is on */
+    float level; /* 0..1 how awake: 1 alert, 0 unresponsive */
+    float lapse; /* s left of a drowsy body's brief blackout */
 
     int dead, cause;
     float hurt_flash;                 /* 0..1, for the screen */
@@ -403,6 +407,13 @@ health_limits health_get_limits(const health *h);
  * drinking). */
 typedef struct {
     float tremor, sway, tunnel, jaundice, blur, doubled;
+    /* A clouded mind (consciousness below alert) slows and fumbles the
+     * hands: s the controls lag, the share of actions that never happen,
+     * stumbles a second while moving, and a brief blackout (0..1). */
+    float lag, drop, stumble, blackout;
+    /* What the eyes lose (0..1): colour (grey), the edges of the view
+     * (tunnel, above) and light (dim). */
+    float grey, dim;
 } health_senses;
 health_senses health_get_senses(const health *h);
 
@@ -459,6 +470,14 @@ void health_arrest(health *h, int rhythm);
  * the brainstem. */
 float health_resp_depression(const health *h);
 float health_sedation(const health *h);
+/* The consciousness step a level falls on. */
+int health_cons_of(float level);
+/* Eyes open and in control: drowsy or better. */
+int health_awake(const health *h);
+/* Awake but not clear: confused or drowsy. */
+int health_impaired(const health *h);
+/* "Alert", "Confused", "Drowsy", "Voice only", "Pain only", "Unresponsive". */
+const char *health_cons_name(int cons);
 
 /* 1 for rhythms that pump blood (sinus, AF, VT, heart block). */
 int health_rhythm_perfusing(int rhythm);

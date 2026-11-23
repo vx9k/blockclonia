@@ -216,7 +216,7 @@ typedef struct {
     float texel[2];
     float radius, ghost; /* pixels */
     float bloom;         /* how much of the blurred glow is added */
-    float pad[3];
+    float grey, tunnel, dim; /* 0..1: colour lost, the view's edges closed in, light lost */
 } push_post;
 
 typedef struct {
@@ -3723,7 +3723,9 @@ static void draw_post(renderer *r, VkCommandBuffer cmd, frame *f, const render_v
                     clampf(v->blur, 0.0f, 1.0f) * 7.0f * px,
                     clampf(v->doubled, 0.0f, 1.0f) * 40.0f * px * (0.8f + 0.2f * sinf(v->time * 0.9f)),
                     bloom ? BLOOM_STRENGTH : 0.0f,
-                    {0.0f, 0.0f, 0.0f}};
+                    clampf(v->grey, 0.0f, 1.0f),
+                    clampf(v->tunnel, 0.0f, 1.0f),
+                    clampf(v->dim, 0.0f, 1.0f)};
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->p_post);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->post_layout, 0, 1, &r->post_dset, 0, NULL);
     vkCmdPushConstants(cmd, r->post_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pp, &pp);
@@ -3838,7 +3840,9 @@ void renderer_end_frame(renderer *r, const world *w, const physics *ph, const re
     /* Bloom draws the world through the scene image, whose alpha marks the
      * glow: the sky starts with none. Auto measures it with timestamps. */
     int bloom = r->scene_ok && bloom_active(r->bloom_mode, &r->bloom_auto, f->queries != VK_NULL_HANDLE);
-    int post = (v->blur > 0.01f || v->doubled > 0.01f || bloom) && scene_ready(r, cmd);
+    int post = (v->blur > 0.01f || v->doubled > 0.01f || v->grey > 0.01f || v->tunnel > 0.01f || v->dim > 0.01f ||
+                bloom) &&
+               scene_ready(r, cmd);
     bloom = bloom && post;
     clears[0].color.float32[3] = bloom ? 0.0f : 1.0f;
     clears[1].depthStencil = (VkClearDepthStencilValue){0.0f, 0}; /* reversed Z */

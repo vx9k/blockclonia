@@ -107,19 +107,15 @@ static void vignette(ui *u, float strength, uint32_t rgb)
 static void effects(ui *u, const health *h)
 {
     if (h->dead) return;
-    if (h->conscious == CONS_UNCONSCIOUS) {
+    if (!health_awake(h)) {
         ui_rect(u, 0, 0, u->w, u->h, ui_rgba(0, 0, 0, 240));
         const char *t = "You are unconscious";
         ui_text(u, (u->w - ui_text_width(t, 1)) * 0.5f, u->h * 0.45f, 1, ui_rgba(120, 120, 130, 255), t);
         return;
     }
-    /* Failing brain oxygen narrows vision to a tunnel before a faint. */
-    float dim = clamp01((0.85f - h->brain_o2) / 0.35f);
-    if (h->conscious == CONS_CONFUSED) dim = dim > 0.35f ? dim : 0.35f;
+    /* Grey-out, tunnel vision and dimming are drawn over the world by the
+     * renderer's post pass, under this overlay. */
     health_senses sn = health_get_senses(h);
-    /* An adrenaline rush narrows the world to what is in front. */
-    if (sn.tunnel > dim) dim = 0.7f * sn.tunnel;
-    vignette(u, dim, 0);
     if (sn.jaundice > 0.0f) ui_rect(u, 0, 0, u->w, u->h, ui_rgba(200, 170, 20, (int)(45.0f * sn.jaundice)));
     if (h->hurt_flash > 0.0f) vignette(u, 0.6f * h->hurt_flash, ui_rgba(200, 0, 0, 0));
 }
@@ -199,7 +195,7 @@ static void alerts_vital(const health *h, alert_list *l)
     for (int i = 0; i < BP_COUNT; i++) pinned += h->part[i].crush_load;
     if (pinned > 0.0f) add_alert(l, KEY, 3, "Crushed: pinned under %.0f kg", (double)pinned);
     if (bleed >= 5.0f) add_alert(l, KEY, bleed > 30.0f ? 3 : 2, "Bleeding %.0f mL/min", (double)bleed);
-    if (!h->breathing && h->conscious != CONS_UNCONSCIOUS && !arrest)
+    if (!h->breathing && health_awake(h) && !arrest)
         add_alert(l, KEY, h->sao2 < 0.85f || h->lung_water > 0.02f ? 3 : 1, "%s",
                   h->lung_water > 0.02f ? "Drowning" : (pinned > 0.0f ? "Can't breathe" : "Holding breath"));
     if (h->sao2 < 0.9f && !arrest) add_alert(l, KEY, h->sao2 < 0.8f ? 3 : 2, "Low oxygen");
@@ -207,9 +203,9 @@ static void alerts_vital(const health *h, alert_list *l)
      * no longer keeps the head perfused; angina from an ischaemic heart. */
     if (!arrest && (h->sbp >= 180.0f || h->dbp >= 120.0f))
         add_alert(l, KEY, 3, "Hypertensive crisis %.0f/%.0f", (double)h->sbp, (double)h->dbp);
-    else if (!arrest && h->sbp < 90.0f && h->conscious != CONS_UNCONSCIOUS)
+    else if (!arrest && h->sbp < 90.0f && health_awake(h))
         add_alert(l, KEY, h->sbp < 75.0f ? 3 : 2, "Dizzy: low blood pressure");
-    if (!arrest && h->ischemia > 1.0f && h->conscious != CONS_UNCONSCIOUS) add_alert(l, KEY, 3, "Chest pain");
+    if (!arrest && h->ischemia > 1.0f && health_awake(h)) add_alert(l, KEY, 3, "Chest pain");
 }
 
 /* Burns, broken bones, joints, frostbite and crushed muscle. */
@@ -278,13 +274,13 @@ static void alerts_needs(const health *h, alert_list *l)
     else if (inf > 0.3f) add_alert(l, KEY, 2, "Infected wound");
     if (h->pain > 6.0f) add_alert(l, KEY, 2, "Severe pain");
     if (health_stamina(h) < 0.1f) add_alert(l, KEY, 1, "Exhausted");
-    if (h->vagal > 0.15f && h->conscious != CONS_UNCONSCIOUS) add_alert(l, KEY, 2, "Fainting: crouch (Shift)");
+    if (h->vagal > 0.15f && health_awake(h)) add_alert(l, KEY, 2, "Fainting: crouch (Shift)");
     float dep = health_resp_depression(h);
     if (dep > 0.35f) add_alert(l, KEY, 3, "Overdose: breathing %.0f/min", (double)h->rr);
     else if (h->opioid > 3.0f && h->naloxone <= 0.0f) add_alert(l, KEY, 1, "Morphine");
     if (h->bac >= 0.5f)
         add_alert(l, KEY, h->bac > 2.5f ? 3 : (h->bac > 1.2f ? 2 : 1), "Drunk %.1f g/L", (double)h->bac);
-    if (h->conscious == CONS_CONFUSED) add_alert(l, KEY, 2, "Confused");
+    if (health_impaired(h)) add_alert(l, KEY, 2, "Confused");
 }
 #undef KEY
 
@@ -313,7 +309,7 @@ void hud_condition(const health *h, char *buf, size_t n)
      * shock no longer turns around (health.h): alive, but not for long. */
     const char *word = "Healthy";
     if (!health_rhythm_perfusing(h->rhythm) || h->shock_debt >= 3.0f) word = "Dead man walking";
-    else if (sev >= 3 || h->conscious == CONS_UNCONSCIOUS) word = "Almost dead";
+    else if (sev >= 3 || !health_awake(h)) word = "Almost dead";
     else if (sev == 2) word = "Badly hurt";
     else if (sev == 1) word = "Hurt";
     if (sev > 0) snprintf(buf, n, "%s (%s)", word, a[top].text);
@@ -798,8 +794,7 @@ static void panel(ui *u, const health *h, hud_state *s)
 
     ui_text(u, x0 + 8, y0 + 6, 1, C_HEAD, "HEALTH");
     int mins = (int)(h->t / 60.0);
-    const char *cons = h->conscious == CONS_ALERT ? "Alert"
-                                                  : (h->conscious == CONS_CONFUSED ? "Confused" : "Unconscious");
+    const char *cons = health_cons_name(h->conscious);
     snprintf(buf, sizeof buf, "%s   core %.1f" UI_CH_DEGREE "C   air %.0f" UI_CH_DEGREE "C   alive %d:%02d", cons,
              (double)h->temp, (double)h->air_temp, mins / 60, mins % 60);
     ui_text(u, x0 + pw - 8 - ui_text_width(buf, 1), y0 + 6, 1, h->conscious == CONS_ALERT ? C_DIM : SEV[2], buf);
