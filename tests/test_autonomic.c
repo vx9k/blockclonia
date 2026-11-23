@@ -24,7 +24,7 @@ static autonomic_input calm_input(void)
     return in;
 }
 
-static void settle(autonomic *a, autonomic_input *in, double seconds, uint32_t *rng, autonomic_out *o)
+static void settle(autonomic *a, const autonomic_input *in, double seconds, uint32_t *rng, autonomic_out *o)
 {
     for (int i = 0; i < (int)lround(seconds / TICK); i++) auto_step(a, in, TICK, rng, o);
 }
@@ -183,7 +183,12 @@ static void test_auto_replay(void)
     uint32_t ra = 5u, rb = 5u;
     settle(&a, &in, 120.0, &ra, &oa);
     settle(&b, &in, 120.0, &rb, &ob);
-    CHECK(memcmp(&oa, &ob, sizeof oa) == 0 && memcmp(&a, &b, sizeof a) == 0);
+    int same = oa.sa_rate == ob.sa_rate && oa.av_delay == ob.av_delay && oa.emax == ob.emax &&
+               oa.v0_scale == ob.v0_scale && oa.symp == ob.symp && a.f_s == b.f_s && a.f_v == b.f_v &&
+               a.eff_r == b.eff_r && a.eff_v0 == b.eff_v0 && a.noise == b.noise && a.hist_pos == b.hist_pos;
+    for (int i = 0; i < CB_COUNT; i++) same &= oa.r_bed[i] == ob.r_bed[i];
+    for (int i = 0; i < AUTO_HIST; i++) same &= a.hist_s[i] == b.hist_s[i] && a.hist_v[i] == b.hist_v[i];
+    CHECK(same);
     /* The noise is there: a quiet body and a noisy one differ. */
     autonomic q;
     auto_init(&q, 64.0f);

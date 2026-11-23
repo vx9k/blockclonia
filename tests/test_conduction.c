@@ -18,7 +18,7 @@ typedef struct {
 } cond_log;
 
 /* Runs seconds of conduction, logging every ventricular beat. */
-static void run(conduction *k, conduction_input *in, double seconds, uint32_t seed, cond_log *log)
+static void run(conduction *k, const conduction_input *in, double seconds, uint32_t seed, cond_log *log)
 {
     memset(log, 0, sizeof *log);
     uint32_t rng = seed;
@@ -188,7 +188,10 @@ static void test_cond_replay(void)
     in.irritability = 3.0f;
     run(&a, &in, 120.0, 99u, &g_log);
     run(&b, &in, 120.0, 99u, &g_log2);
-    CHECK(g_log.n_rr == g_log2.n_rr && memcmp(g_log.t_beat, g_log2.t_beat, sizeof g_log.t_beat) == 0);
+    int same = g_log.n_rr == g_log2.n_rr;
+    for (size_t i = 0; i < sizeof g_log.t_beat / sizeof g_log.t_beat[0]; i++)
+        same &= g_log.t_beat[i] == g_log2.t_beat[i];
+    CHECK(same);
 }
 
 void test_conduction_all(void)

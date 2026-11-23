@@ -511,9 +511,11 @@ static void debug_health_screen(ctx *c)
     for (int p = 0; p < BP_COUNT; p++) debug_target(c, cx + FIG[p].x, fy + FIG[p].y, FIG[p].w, FIG[p].h, p, NULL);
     ui_text(u, x + 8, fy + 178, 1, C_DIM, "ORGANS");
     const float ow = (lw - 4) * 0.5f;
-    for (int o = 0; o < ORG_COUNT; o++)
-        debug_target(c, x + 8 + (float)(o % 2) * (ow + 4), fy + 190 + (float)(o / 2) * ROW_H, ow, ROW_H,
-                     HDBG_TARGET_ORGAN + o, health_debug_target_name(HDBG_TARGET_ORGAN + o));
+    for (int o = 0; o < ORG_COUNT; o++) {
+        const int col = o % 2, row = o / 2; /* two to a row */
+        debug_target(c, x + 8 + (float)col * (ow + 4), fy + 190 + (float)row * ROW_H, ow, ROW_H, HDBG_TARGET_ORGAN + o,
+                     health_debug_target_name(HDBG_TARGET_ORGAN + o));
+    }
     debug_target(c, x + 8, fy + 190 + 3 * ROW_H + 4, lw, ROW_H, HDBG_TARGET_BODY,
                  health_debug_target_name(HDBG_TARGET_BODY));
 
@@ -526,7 +528,8 @@ static void debug_health_screen(ctx *c)
     int shown = 0;
     for (int i = 0; i < HEALTH_DEBUG_COUNT; i++) {
         if (!health_debug_fits(i, m->debug_target)) continue;
-        float bx = rx + (float)(shown % 2) * (bw + 6), by = y + 50 + (float)(shown / 2) * ROW_H;
+        const int col = shown % 2, row = shown / 2; /* two to a row */
+        float bx = rx + (float)col * (bw + 6), by = y + 50 + (float)row * ROW_H;
         shown++;
         if (button(c, bx, by, bw, HEALTH_DEBUG_KINDS[i].label)) {
             m->debug_kind = i;

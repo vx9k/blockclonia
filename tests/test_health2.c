@@ -650,7 +650,7 @@ static void test_variance_shortterm(void)
     health *ref = new_body(99), *ref2 = new_body(12345);
     live(ref, &e, 30.0);
     live(ref2, &e, 30.0);
-    float ref_lo = ref->hr, ref_hi = ref->hr;
+    float ref_lo = ref->hr, ref_hi = ref_lo;
     int same = 1;
     for (int i = 0; i < 600; i++) {
         health_step(ref, &e, 1.0 / 60.0);
