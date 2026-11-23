@@ -35,12 +35,17 @@ Agreed 2026-11-23: all the effects first, then the sounds themselves, so
 each new sound is judged in the setting it will be heard in. One pull
 request per step.
 
-**S0. A listening tool.** `--sound-render <dir>` writes every sound, in
-every variant and material, to WAV files: dry, and through fixed settings
-(an open field, a cave, a small room, under water, 50 m away). It is
-headless and runs without an audio device. Each later step is judged by
-rendering before and after and listening, and by comparing spectra and
-decay times with recordings. The settings grow as S1 and S2 add effects.
+**S0. A listening tool** (done: `src/audio/audition.c`).
+`--sound-render <dir>` plays every sound through the real mixer and
+writes WAV files: every variant and material dry, and one take of each
+sound 2 m ahead, 8 m off to the right, 16 m away and under water, with
+the wind, water and fire loops. `index.csv` lists each file's length,
+peak, RMS and spectral centroid. It is headless and runs without an
+audio device. Each later step is judged by rendering before and after
+and listening, and by comparing spectra and decay times with
+recordings. The settings grow as S1 and S2 add effects: an open field,
+a cave and a small room once propagation knows the world, and longer
+distances once sounds carry further.
 
 **S1. The spatial core** (in `sound.c` and a new propagation module):
 

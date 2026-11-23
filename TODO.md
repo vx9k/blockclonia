@@ -12,7 +12,7 @@ unless it says otherwise.
 0. **The sound overhaul** (#110, [docs/design/sound.md](docs/design/sound.md)),
    first since 2026-11-23: every sound today is a placeholder that sounds
    artificial. The optimisation series is paused until it is done.
-   - [ ] S0: `--sound-render`, every sound to WAV, dry and in fixed settings
+   - [x] S0: `--sound-render`, every sound to WAV, dry and in fixed settings
    - [ ] S1: occlusion, air absorption, propagation delay, under water,
          reverb from the space around the listener
    - [ ] S2: sound through openings, a head model, hearing for creatures

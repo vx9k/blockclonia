@@ -173,6 +173,7 @@ set(MC_CORE_SOURCES
   src/render/sky.c
   src/audio/sound.c
   src/audio/sound_synth.c
+  src/audio/audition.c
   src/health/survival.c
   src/core/sysinfo.c
   src/render/texgen.c
@@ -265,7 +266,7 @@ endif()
 if(MC_BUILD_TESTS)
   enable_testing()
   add_executable(mc_tests tests/test_main.c tests/test_util.c tests/test_thermo.c tests/test_health2.c
-                          tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_gpucaps.c tests/test_light.c tests/test_itemmodel.c
+                          tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_audition.c tests/test_gpucaps.c tests/test_light.c tests/test_itemmodel.c
                           tests/test_lightfx.c tests/test_bloom.c
                           tests/test_health_debug.c tests/test_thoughts.c tests/test_drugs.c tests/test_faint.c tests/test_fear.c tests/test_conscious.c tests/test_impair.c tests/test_dark.c tests/test_lamps.c tests/test_shadow.c tests/test_mobmodel.c tests/test_avatar.c tests/test_defib.c tests/test_paths.c
                           tests/test_save_db.c tests/test_worlds.c tests/test_backups.c tests/test_hud.c tests/test_cardio.c tests/test_circulation.c tests/test_conduction.c tests/test_autonomic.c

@@ -556,7 +556,7 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
             [--play] [--screen title|worlds|backups|create|multiplayer|pause|settings|controls|debug-health|inventory]
             [--debug] [--time HH] [--mode NAME] [--give LIST] [--mobs LIST] [--figures LIST] [--hurt LIST]
             [--frames N] [--screenshot F] [--look YAW,PITCH] [--spawn X,Z]
-            [--demo] [--health-panel] [--bench] [--mem-stats]
+            [--demo] [--health-panel] [--bench] [--mem-stats] [--sound-render DIR]
             [--host [--port N] [--client-server] | --join ADDR[:PORT]] [--name NAME]
 ```
 
@@ -577,6 +577,12 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
 - For very weak devices start with `--radius 4`. `--demo` builds a tower
   with a timber cantilever in front of you and knocks out its middle.
   `--bench` runs CPU benchmarks without opening a window.
+- `--sound-render DIR` writes every sound, through the real mixer, as WAV
+  files into `DIR`: each take dry, and each sound near, off to the right,
+  far away and under water, with the ambience loops. `DIR/index.csv`
+  lists each file's length, peak, loudness and brightness, so a change to
+  a sound can be heard and compared before and after. It opens no window
+  or audio device.
 - `--world` and `--config` default to the XDG paths described in "Where
   files live" below, instead of a fixed name in the working directory.
 - `--host` opens the world you play to other players, and `--join` plays

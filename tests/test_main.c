@@ -2236,6 +2236,7 @@ int main(void)
     test_bodies_all();
     test_visual_all();
     test_sound_all();
+    test_audition_all();
     test_gpucaps_all();
     test_itemmodel_all();
     test_light_all();

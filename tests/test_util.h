@@ -58,6 +58,7 @@ void test_health2_all(void);
 void test_bodies_all(void);
 void test_visual_all(void);
 void test_sound_all(void);
+void test_audition_all(void);
 void test_gpucaps_all(void);
 void test_png_all(void);
 void test_health_debug_all(void);

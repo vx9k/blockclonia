@@ -4,6 +4,7 @@
 #include "audio_device.h"
 #include "avatar.h"
 #include "backups.h"
+#include "audition.h"
 #include "bench.h"
 #include "camera.h"
 #include "combat.h"
@@ -72,6 +73,7 @@ typedef struct {
     const char *world_dir;
     int frames;
     const char *screenshot;
+    const char *sound_render; /* --sound-render: write every sound as WAVs here, then exit */
     int bench, demo, mem_stats;
     int open_panel;      /* start with the health panel open (screenshots) */
     const char *hurt;    /* injuries to start with (screenshots, testing) */
@@ -244,6 +246,8 @@ static void usage(void)
            "  --bench           run CPU benchmarks and exit (no window)\n"
            "  --mem-stats       print mimalloc statistics at exit\n"
            "  --no-sound        do not open an audio device\n"
+           "  --sound-render DIR  write every sound as WAV files into DIR and exit\n"
+           "                    (no window or audio device; index.csv sums them up)\n"
            "  --host            let others join this world (UDP port 27450, or --port)\n"
            "  --join ADDR[:P]   play in the world another player hosts\n"
            "  --port N          UDP port to host on\n"
@@ -374,6 +378,9 @@ static int parse_value_option(options *o, const char *a, const char *v, int *ok)
         o->screen = v;
     } else if (strcmp(a, "--screenshot") == 0) {
         o->screenshot = v;
+    } else if (strcmp(a, "--sound-render") == 0) {
+        *ok = strlen(v) < 900;
+        o->sound_render = v;
     } else if (strcmp(a, "--give") == 0) {
         o->give = v;
     } else if (strcmp(a, "--mobs") == 0) {
@@ -2976,6 +2983,8 @@ int main(int argc, char **argv)
     g->cfg_vsync = g->st.vsync; /* the file's value, kept while --no-vsync overrides it */
     if (!g->o.no_vsync) g->o.vsync = g->st.vsync;
     else g->st.vsync = 0;
+
+    if (g->o.sound_render) return audition_render(g->o.sound_render, g->o.have_seed ? g->o.seed : 1337u) < 0;
 
     if (g->o.bench) {
         int r = bench_run(g->o.have_seed ? g->o.seed : 1337u);
