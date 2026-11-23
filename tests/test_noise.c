@@ -320,6 +320,17 @@ static void test_column_order(void)
     /* Another seed's columns, then this seed again. */
     (void)column_hash(78, 0, 0);
     CHECK(column_hash(77, 0, 0) == first[0]);
+    /* Single samples too: the same with the memory warm as cold. */
+    worldgen_point warm[COUNT] = {0};
+    for (int i = 0; i < COUNT; i++) warm[i] = worldgen_sample(77, AT[i][0] * CHUNK_W + 5, AT[i][1] * CHUNK_W + 9);
+    worldgen_forget();
+    same = 1;
+    for (int i = 0; i < COUNT; i++) {
+        worldgen_point cold = worldgen_sample(77, AT[i][0] * CHUNK_W + 5, AT[i][1] * CHUNK_W + 9);
+        same &= cold.height == warm[i].height && cold.level == warm[i].level && cold.b == warm[i].b;
+        same &= bits_equal(cold.temp, warm[i].temp) && bits_equal(cold.rain, warm[i].rain);
+    }
+    CHECK(same);
     worldgen_forget();
 }
 
