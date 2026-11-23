@@ -637,38 +637,39 @@ static float parts_span(const entity_instance *e, int from, int n)
 static void test_held(void)
 {
     entity_instance out[VIEWMODEL_MAX] = {{0}};
-    /* Every item fits the view model with a forearm and a fist for each
-     * hand it takes. */
+    /* Every item fits the view model with a whole arm for each hand it
+     * takes. */
     for (item_id id = ITEM_FIRST; id < ITEM_END; id++) {
         item_model m = {0};
         itemmodel_build(id, &m);
-        CHECK(held_parts(id, out) == 2 * viewmodel_hands(id) + m.n);
+        CHECK(held_parts(id, out) == VIEWMODEL_ARM_PARTS * viewmodel_hands(id) + m.n);
     }
     /* A cartridge is shown larger than it is, a bucket smaller. */
     item_model m = {0};
     itemmodel_build(I_CARTRIDGE, &m);
     int n = held_parts(I_CARTRIDGE, out);
     float shown = 0.0f;
-    for (int i = 2; i < n; i++) shown = fmaxf(shown, out[i].scale[1]);
+    for (int i = VIEWMODEL_ARM_PARTS; i < n; i++) shown = fmaxf(shown, out[i].scale[1]);
     CHECK(shown > 1.5f * m.box[0].size[1]);
     itemmodel_build(I_BUCKET, &m);
-    CHECK(held_parts(I_BUCKET, out) == 2 + m.n);
-    CHECK(out[2].scale[0] < m.box[0].size[0]);
+    CHECK(held_parts(I_BUCKET, out) == VIEWMODEL_ARM_PARTS + m.n);
+    CHECK(out[VIEWMODEL_ARM_PARTS].scale[0] < m.box[0].size[0]);
     /* A pick's head is above the hand and its handle reaches into it. */
     n = held_parts(item_tool_id(TOOL_PICKAXE, TIER_IRON), out);
     float top = -9.0f;
-    for (int i = 2; i < n; i++) top = fmaxf(top, out[i].pos[1]);
-    CHECK(top > out[1].pos[1] + 0.2f);
-    CHECK(parts_span(out, 2, n) > 0.2f);
+    const int item0 = 2 * VIEWMODEL_ARM_PARTS; /* both arms first */
+    for (int i = item0; i < n; i++) top = fmaxf(top, out[i].pos[1]);
+    CHECK(top > out[VIEWMODEL_PALM].pos[1] + 0.2f);
+    CHECK(parts_span(out, item0, n) > 0.2f);
     /* The rifle points away: its muzzle is well ahead of the hand. */
     n = held_parts(I_RIFLE, out);
     float ahead = 0.0f;
-    for (int i = 2; i < n; i++) ahead = fmaxf(ahead, out[1].pos[2] - out[i].pos[2]);
+    for (int i = item0; i < n; i++) ahead = fmaxf(ahead, out[VIEWMODEL_PALM].pos[2] - out[i].pos[2]);
     CHECK(ahead > 0.4f);
     /* The torch's flame lights itself in the hand. */
     n = held_parts(B_TORCH, out);
     int lit = 0;
-    for (int i = 2; i < n; i++) lit += out[i].light >= 1.0f;
+    for (int i = VIEWMODEL_ARM_PARTS; i < n; i++) lit += out[i].light >= 1.0f;
     CHECK(lit >= 1);
 }
 

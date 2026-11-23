@@ -10,8 +10,8 @@
 #define VM_DT (1.0f / 60.0f)
 #define TAN_HALF_VFOV 0.7002f /* tan(35 deg): the view-model pass draws a 70 degree vertical view */
 #define NEAR_Z (-0.02f)       /* its near plane */
-#define HAND 1                /* instance order: forearm, hand, held */
-#define HELD 2
+#define HAND VIEWMODEL_PALM    /* instance order: the arm's parts, then the held item */
+#define HELD VIEWMODEL_ARM_PARTS
 
 static viewmodel_input vm_input(item_id held)
 {
@@ -116,19 +116,28 @@ static void test_vm_parts(void)
     viewmodel_init(&vm);
     viewmodel_input in = vm_input(0);
     int n = vm_run(&vm, &in, 0.5f, out);
-    CHECK(n == 2); /* the bare hand: forearm and hand */
-    CHECK(out[0].tex == (uint32_t)T_SKIN * 0x010101u && out[HAND].tex == (uint32_t)T_SKIN * 0x010101u);
+    CHECK(n == VIEWMODEL_ARM_PARTS); /* the bare arm: forearm, wrist, palm, fingers, thumb */
+    for (int i = 0; i < n; i++) CHECK(out[i].tex == (uint32_t)T_SKIN * 0x010101u);
     CHECK(vm_sane(out, n) && in_view(out[HAND].pos));
-    /* The forearm runs 0.5 m along the arm and the hand sits at its far end,
-     * further from the eye. */
-    CHECK(fabsf(out[0].scale[2] - 0.5f) < 1e-6f && fabsf(out[0].scale[0] - 0.085f) < 1e-6f);
-    CHECK(out[HAND].scale[0] > out[0].scale[0] && out[HAND].scale[0] < 0.1f); /* a fist, wider than the wrist */
-    CHECK(-out[HAND].pos[2] > -out[0].pos[2] + 0.2f);
-    CHECK(out[HAND].pos[0] > 0.1f && out[HAND].pos[1] < -0.1f); /* lower right */
+    /* The forearm tapers to a wrist and the hand sits at its far end,
+     * about 0.55 m along the arm, further from the eye. */
+    const entity_instance *fore = &out[0], *wrist = &out[1], *palm = &out[HAND], *fingers = &out[HAND + 1],
+                          *thumb = &out[HAND + 2];
+    CHECK(fabsf(fore->scale[2] + wrist->scale[2] - 0.5f) < 0.02f && fabsf(fore->scale[0] - 0.085f) < 1e-6f);
+    CHECK(wrist->scale[0] < fore->scale[0] - 0.01f && wrist->scale[1] < fore->scale[1] - 0.01f);
+    CHECK(-wrist->pos[2] > -fore->pos[2] && -palm->pos[2] > -wrist->pos[2]);
+    CHECK(-palm->pos[2] > -fore->pos[2] + 0.2f);
+    /* A flat palm, wider than the wrist and less than half as thick as wide. */
+    CHECK(palm->scale[0] > wrist->scale[0] && palm->scale[0] < 0.1f && palm->scale[1] < 0.5f * palm->scale[0]);
+    /* The fingers curl down under its front; the thumb sits on the inner
+     * side, toward the crosshair, and is the slimmest part. */
+    CHECK(-fingers->pos[2] > -palm->pos[2] && fingers->pos[1] < palm->pos[1]);
+    CHECK(thumb->pos[0] < palm->pos[0] - 0.02f && thumb->scale[0] < 0.03f && thumb->scale[1] < 0.03f);
+    CHECK(palm->pos[0] > 0.1f && palm->pos[1] < -0.1f); /* lower right */
 
     in.held_id = B_LOG;
     n = vm_run(&vm, &in, 0.5f, out);
-    CHECK(n == 3 && vm.shown_id == B_LOG);
+    CHECK(n == HELD + 1 && vm.shown_id == B_LOG);
     const block_def *d = block_get(B_LOG);
     CHECK(out[HELD].tex == ((uint32_t)d->tex[0] | (uint32_t)d->tex[2] << 8 | (uint32_t)d->tex[3] << 16));
     CHECK(fabsf(out[HELD].scale[0] - 0.18f) < 1e-6f && fabsf(out[HELD].scale[2] - 0.18f) < 1e-6f);
@@ -207,7 +216,7 @@ static void test_vm_equip(void)
         float t = (float)k * VM_DT; /* elapsed once this frame is built */
         int n = viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
         viewmodel_build(&twin, &tin, tout, VIEWMODEL_MAX);
-        ok &= vm_sane(out, n) && n == 3;
+        ok &= vm_sane(out, n) && n == HELD + 1;
         if (out[HAND].pos[1] < lowest) lowest = out[HAND].pos[1];
         if (swapped_at < 0.0f && vm.shown_id == B_PLANKS) {
             swapped_at = t;
@@ -225,9 +234,9 @@ static void test_vm_equip(void)
     const block_def *d = block_get(B_PLANKS);
     CHECK((out[HELD].tex & 255u) == d->tex[0]);
 
-    /* Back to the bare hand: two parts once swapped. */
+    /* Back to the bare hand: the arm alone once swapped. */
     in.held_id = 0;
-    CHECK(vm_run(&vm, &in, 0.5f, out) == 2 && vm.equip == 1.0f);
+    CHECK(vm_run(&vm, &in, 0.5f, out) == VIEWMODEL_ARM_PARTS && vm.equip == 1.0f);
 }
 
 /* ---- swing */
@@ -408,7 +417,7 @@ static void test_vm_robust(void)
     in.swing = 1.0f;
     int n = viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
     viewmodel_build(&vm, &in, again, VIEWMODEL_MAX);
-    CHECK(n == 3 && vm_sane(out, n));
+    CHECK(n == HELD + 1 && vm_sane(out, n));
     CHECK(vm.time == 0.0f && vm.lag_x == 0.0f && vm.equip == 0.0f);
     CHECK(memcmp(out, again, (size_t)n * sizeof out[0]) == 0);
 
@@ -419,7 +428,7 @@ static void test_vm_robust(void)
     in.stride = NAN;
     in.sprint = 7.0f;
     n = viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
-    CHECK(n == 2 && vm_sane(out, n));
+    CHECK(n == VIEWMODEL_ARM_PARTS && vm_sane(out, n));
     in.dt = 30.0f;
     n = viewmodel_build(&vm, &in, out, VIEWMODEL_MAX);
     CHECK(vm_sane(out, n) && isfinite(vm.time));
@@ -482,9 +491,9 @@ static float off_axis(const float p[3], const entity_instance *box)
     return sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
 }
 
-#define R_HAND 1 /* two hands: right forearm, right fist, left forearm, left fist, item */
-#define L_HAND 3
-#define ITEM 4
+#define R_HAND VIEWMODEL_PALM /* two hands: the right arm's parts, the left's, the item */
+#define L_HAND (VIEWMODEL_ARM_PARTS + VIEWMODEL_PALM)
+#define ITEM (2 * VIEWMODEL_ARM_PARTS)
 
 static void test_vm_two_hands(void)
 {

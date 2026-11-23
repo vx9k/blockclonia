@@ -110,11 +110,12 @@ static void test_bolt_cycle(void)
     int n = viewmodel_build(&still, &in, a, VIEWMODEL_MAX);
     in.bolt = 0.58f;
     int m = viewmodel_build(&worked, &in, b, VIEWMODEL_MAX);
-    /* The rifle comes down off the cheek, and the right hand (fist 1)
-     * travels to the knob relative to the left (fist 3) on the fore-end. */
+    /* The rifle comes down off the cheek, and the right palm travels to
+     * the knob relative to the left one on the fore-end. */
+    const int r = VIEWMODEL_PALM, l = VIEWMODEL_ARM_PARTS + VIEWMODEL_PALM;
     float rel = 0.0f;
-    for (int k = 0; k < 3; k++) rel += fabsf((b[1].pos[k] - a[1].pos[k]) - (b[3].pos[k] - a[3].pos[k]));
-    CHECK(n == m && n > 4 && b[n - 1].pos[1] < a[n - 1].pos[1] - 0.05f && rel > 0.05f);
+    for (int k = 0; k < 3; k++) rel += fabsf((b[r].pos[k] - a[r].pos[k]) - (b[l].pos[k] - a[l].pos[k]));
+    CHECK(n == m && n > 2 * VIEWMODEL_ARM_PARTS && b[n - 1].pos[1] < a[n - 1].pos[1] - 0.05f && rel > 0.05f);
 }
 
 /* Every round carries a real charge and pushes back; the slow, heavy

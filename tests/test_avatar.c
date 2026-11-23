@@ -400,6 +400,116 @@ static void test_avatar_turns(void)
     }
 }
 
+static void test_avatar_wrist(void)
+{
+    /* The forearm tapers: a second, slimmer box below it makes the wrist,
+     * and the flat palm hangs from that. */
+    entity_instance e[AVATAR_BOXES] = {0};
+    avatar_anim a = moving(0.0f, 0, 0.0f);
+    avatar_build(&a, FEET, 0.0f, 0.0f, 0, 1.0f, e, AVATAR_BOXES);
+    for (int s = 0; s < 2; s++) {
+        int fore = side_box(AV_SHOULDER_R, AV_SHOULDER_L, s, 1), wrist = fore + 1;
+        int palm = side_box(AV_SHOULDER_R, AV_SHOULDER_L, s, 2);
+        CHECK(avatar_box_bone(wrist) == avatar_box_bone(fore) && palm == wrist + 1);
+        CHECK(e[wrist].scale[0] < e[fore].scale[0] - 0.01f && e[wrist].scale[2] < e[fore].scale[2] - 0.005f);
+        CHECK(e[wrist].pos[1] < e[fore].pos[1] && e[palm].pos[1] < e[wrist].pos[1]);
+        CHECK(e[palm].scale[0] < 0.5f * e[palm].scale[2]); /* flat, seen from the side */
+    }
+}
+
+/* A box's distance from the point p (0 inside it). */
+static float box_dist(const entity_instance *e, const float p[3])
+{
+    const float d[3] = {p[0] - e->pos[0], p[1] - e->pos[1], p[2] - e->pos[2]};
+    quat q = rot_of(e);
+    q.x = -q.x;
+    q.y = -q.y;
+    q.z = -q.z;
+    float l[3] = {0};
+    quat_apply(q, d, l);
+    float sum = 0.0f;
+    for (int k = 0; k < 3; k++) {
+        float out = fmaxf(fabsf(l[k]) - 0.5f * e->scale[k], 0.0f);
+        sum += out * out;
+    }
+    return sqrtf(sum);
+}
+
+/* The boxes the first-person figure keeps: all but the head, the neck and
+ * the arms. */
+static int self_kept(int box)
+{
+    int b = avatar_box_bone(box);
+    return b != AV_HEAD && b != AV_NECK && (b < AV_SHOULDER_R || b >= AV_HIP_R);
+}
+
+static void test_avatar_self(void)
+{
+    entity_instance all[AVATAR_BOXES] = {0}, self[AVATAR_BOXES] = {0};
+    const float eye[3] = {0.0f, 0.0f, 0.0f}, feet_y = -1.62f;
+    int kept = 0;
+    for (int i = 0; i < AVATAR_BOXES; i++) kept += self_kept(i);
+    CHECK(kept >= 10 && kept < AVATAR_BOXES - 12);
+    const float speeds[] = {0.0f, 1.4f, 4.0f, 6.5f, 1.3f};
+    int same = 1, clear = 1, below = 1, grounded = 1;
+    float nearest = 9.0f;
+    for (int g = 0; g < 5; g++)
+        for (int k = 0; k < 8; k++)
+            for (int p = -3; p <= 2; p++) {
+                avatar_anim m = moving(speeds[g], g == 4, (float)k / 8.0f);
+                float pitch = 0.5f * (float)p;
+                CHECK(avatar_build_self(&m, eye, feet_y, 0.3f, pitch, 0.7f, self, AVATAR_BOXES) == kept);
+                avatar_build(&m, FEET, 0.3f, pitch, 0, 0.7f, all, AVATAR_BOXES);
+                /* The same pose others see, moved as one: every box keeps its
+                 * turn and is shifted by the same amount. */
+                const float shift[3] = {self[0].pos[0] - all[0].pos[0], self[0].pos[1] - all[0].pos[1],
+                                  self[0].pos[2] - all[0].pos[2]};
+                float low = 9.0f;
+                for (int i = 0, j = 0; i < AVATAR_BOXES; i++) {
+                    if (!self_kept(i)) continue;
+                    for (int c = 0; c < 3; c++) same &= fabsf(self[j].pos[c] - all[i].pos[c] - shift[c]) < 1e-4f;
+                    for (int c = 0; c < 4; c++) same &= fabsf(self[j].rot[c] - all[i].rot[c]) < 1e-5f;
+                    same &= self[j].light == 0.7f && self[j].tex == all[i].tex;
+                    float lo = 0.0f, hi = 0.0f;
+                    span_y(&self[j], &lo, &hi);
+                    low = fminf(low, lo);
+                    below &= hi < eye[1] - 0.05f;
+                    float d = box_dist(&self[j], eye);
+                    nearest = fminf(nearest, d);
+                    clear &= d > 0.1f; /* well past the 5 cm near plane */
+                    j++;
+                }
+                grounded &= fabsf(low - feet_y) < 1e-4f;
+            }
+    if (!clear) printf("  avatar_build_self: a box comes %.0f mm from the eye\n", (double)nearest * 1e3);
+    CHECK(same && clear && below && grounded);
+
+    /* Looking down bends the neck forward over the chest, so the body
+     * slips back beneath the view instead of filling it; looking ahead the
+     * chest is below and a little behind the eye. Yaw 0 faces -z. */
+    avatar_anim a = moving(0.0f, 0, 0.0f);
+    avatar_build_self(&a, eye, feet_y, 0.0f, 0.0f, 1.0f, self, AVATAR_BOXES);
+    float ahead = self[2].pos[2]; /* pelvis, spine, chest */
+    CHECK(ahead > 0.02f && fabsf(self[2].pos[0]) < 1e-3f);
+    avatar_build_self(&a, eye, feet_y, 0.0f, -1.4f, 1.0f, self, AVATAR_BOXES);
+    CHECK(self[2].pos[2] > ahead + 0.05f);
+    /* The eye is where it was asked to be, wherever that is. */
+    const float there[3] = {5.0f, 2.0f, -3.0f};
+    avatar_build_self(&a, there, 0.4f, 0.0f, 0.0f, 1.0f, all, AVATAR_BOXES);
+    avatar_build_self(&a, eye, 0.4f - 2.0f, 0.0f, 0.0f, 1.0f, self, AVATAR_BOXES);
+    for (int i = 0; i < kept; i++)
+        CHECK(fabsf(all[i].pos[0] - self[i].pos[0] - 5.0f) < 1e-4f &&
+              fabsf(all[i].pos[1] - self[i].pos[1] - 2.0f) < 1e-4f &&
+              fabsf(all[i].pos[2] - self[i].pos[2] + 3.0f) < 1e-4f);
+    /* Limits and garbage. */
+    CHECK(avatar_build_self(&a, eye, feet_y, 0.0f, 0.0f, 1.0f, self, 3) == 3);
+    CHECK(avatar_build_self(&a, eye, feet_y, 0.0f, 0.0f, 1.0f, NULL, 3) == 0);
+    avatar_anim bad = {NAN, NAN, NAN, NAN, 0.0, 0.0, 1};
+    CHECK(avatar_build_self(&bad, eye, feet_y, NAN, INFINITY, 1.0f, self, AVATAR_BOXES) == kept);
+    for (int i = 0; i < kept; i++)
+        for (int k = 0; k < 4; k++) CHECK(isfinite(self[i].pos[k % 3]) && isfinite(self[i].rot[k]));
+}
+
 static void test_avatar_breath(void)
 {
     /* Breathing moves only the chest, and never by more than a few
@@ -469,6 +579,8 @@ void test_avatar_all(void)
     test_avatar_stride_shape();
     test_avatar_turns();
     test_avatar_breath();
+    test_avatar_wrist();
+    test_avatar_self();
     test_avatar_settles();
     test_avatar_textures();
     test_avatar_boxes();

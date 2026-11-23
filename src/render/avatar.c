@@ -87,7 +87,8 @@ static const struct {
     {AV_HEAD, 0.03f, 0.03f, 0.06f, 0.1f, 0.0f, -0.12f, SKIN}, /* nose */
 #define ARM(s)                                                                          \
     {AV_SHOULDER_##s, 0.095f, 0.1f, 0.03f, -UPPER_ARM, 0.0f, 0.0f, SKIN},               \
-        {AV_SHOULDER_##s + 1, 0.08f, 0.075f, 0.0f, -FOREARM + 0.01f, 0.0f, 0.0f, SKIN}, \
+        {AV_SHOULDER_##s + 1, 0.08f, 0.075f, 0.0f, -0.16f, 0.0f, 0.0f, SKIN},           \
+        {AV_SHOULDER_##s + 1, 0.05f, 0.062f, -0.155f, -FOREARM + 0.01f, 0.0f, 0.0f, SKIN}, /* tapers to the wrist */ \
         {AV_SHOULDER_##s + 2, 0.032f, 0.085f, 0.0f, -0.1f, 0.0f, 0.0f, SKIN},           \
         {AV_SHOULDER_##s + 3, 0.026f, 0.078f, 0.0f, -0.085f, 0.0f, 0.0f, SKIN},         \
         {AV_SHOULDER_##s + 4, 0.024f, 0.024f, 0.0f, -0.06f, 0.0f, 0.0f, SKIN}
@@ -366,10 +367,14 @@ static void pose_joints(const avatar_anim *a, joints *j)
     mix(j, &walk, smooth(0.05f, 0.6f, v)); /* from standing into the stride as it gets going */
 }
 
-int avatar_build(const avatar_anim *a, const float feet[3], float yaw, float pitch, int dead, float light,
-                 entity_instance *out, int max)
+/* The eyes, in the head bone's frame: halfway up the head, at the face. */
+static const float EYES[3] = {0.0f, 0.115f, -0.1f};
+
+/* Poses every box with the root at the origin, before standing the figure
+ * on its lowest point (returned). eyes gets where the eyes are. */
+static float pose(const avatar_anim *a, float yaw, float pitch, int dead, float light, entity_instance *e,
+                  float eyes[3])
 {
-    if (!out || max <= 0) return 0;
     joints j = {0};
     pose_joints(a, &j);
     float t = isfinite(a->time) ? a->time : 0.0f;
@@ -391,7 +396,9 @@ int avatar_build(const avatar_anim *a, const float feet[3], float yaw, float pit
         w[b].q = quat_norm(quat_mul(pq, turn[b]));
     }
 
-    entity_instance e[AVATAR_BOXES] = {0};
+    float at[3] = {0};
+    quat_apply(w[AV_HEAD].q, EYES, at);
+    for (int k = 0; k < 3; k++) eyes[k] = w[AV_HEAD].p[k] + at[k];
     float low = 1e9f;
     for (int i = 0; i < AVATAR_BOXES; i++) {
         const xform *x = &w[BOXES[i].bone];
@@ -418,6 +425,16 @@ int avatar_build(const avatar_anim *a, const float feet[3], float yaw, float pit
             low = fminf(low, e[i].pos[1] + o[1]);
         }
     }
+    return low;
+}
+
+int avatar_build(const avatar_anim *a, const float feet[3], float yaw, float pitch, int dead, float light,
+                 entity_instance *out, int max)
+{
+    if (!out || max <= 0) return 0;
+    entity_instance e[AVATAR_BOXES] = {0};
+    float eyes[3] = {0};
+    float low = pose(a, yaw, pitch, dead, light, e, eyes);
     /* Stand on the lowest point, a heel or a toe walking: the hips rise and
      * fall because the legs do, with no bob added. */
     int n = max < AVATAR_BOXES ? max : AVATAR_BOXES;
@@ -426,6 +443,25 @@ int avatar_build(const avatar_anim *a, const float feet[3], float yaw, float pit
         out[i].pos[0] += feet[0];
         out[i].pos[1] += feet[1] - low;
         out[i].pos[2] += feet[2];
+    }
+    return n;
+}
+
+int avatar_build_self(const avatar_anim *a, const float eye[3], float feet_y, float yaw, float pitch, float light,
+                      entity_instance *out, int max)
+{
+    if (!out || max <= 0) return 0;
+    entity_instance e[AVATAR_BOXES] = {0};
+    float eyes[3] = {0};
+    float low = pose(a, yaw, pitch, 0, light, e, eyes);
+    const float shift[3] = {eye[0] - eyes[0], feet_y - low, eye[2] - eyes[2]};
+    int n = 0;
+    for (int i = 0; i < AVATAR_BOXES && n < max; i++) {
+        int b = BOXES[i].bone;
+        if (b == AV_HEAD || b == AV_NECK || (b >= AV_SHOULDER_R && b < AV_HIP_R)) continue;
+        out[n] = e[i];
+        for (int k = 0; k < 3; k++) out[n].pos[k] += shift[k];
+        n++;
     }
     return n;
 }

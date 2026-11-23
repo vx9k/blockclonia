@@ -991,6 +991,7 @@ typedef struct {
     viewmodel vm;
     entity_instance vm_ents[VIEWMODEL_MAX];
     avatar_anim avatars[NET_MAX_PLAYERS]; /* the other players' strides, by player id */
+    avatar_anim self_anim;                /* this player's own, seen looking down */
     figure figs[MAX_FIGURES];             /* --figures */
     int nfigs;
     float eat_anim;           /* 1 at the start of eating, easing to 0 */
@@ -2177,6 +2178,27 @@ static void add_figures(game *g, dvec3 eye, const lightfx_frame *lf, float dt, i
     }
 }
 
+/* The player's own body, seen from its eyes: the figure the others see,
+ * without the head (the camera is in it) or the arms (the view model draws
+ * them), standing where the player stands. The camera's bob and lean move
+ * the view, not the body. */
+static void add_self(game *g, dvec3 eye, double alpha, const lightfx_frame *lf, float dt, int *n_op, int n_tr)
+{
+    if (RENDER_MAX_ENTS - *n_op - n_tr < AVATAR_BOXES) return;
+    const player *pl = &g->pl;
+    dvec3 ip = dv3_lerp(pl->prev_pos, pl->pos, alpha);
+    avatar_anim_update(&g->self_anim, ip.x, ip.z, pl->sneaking, pl->flying, dt);
+    memmove(g->ents + *n_op + AVATAR_BOXES, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
+    const float at[3] = {(float)(ip.x - eye.x), 0.0f, (float)(ip.z - eye.z)};
+    float rgb[3] = {1.0f, 1.0f, 1.0f};
+    float lit = figure_light(g, lf, eye, dv3(ip.x, ip.y + 1.0, ip.z), rgb);
+    int k = avatar_build_self(&g->self_anim, at, (float)(ip.y - eye.y), pl->yaw, pl->pitch, lit, g->ents + *n_op,
+                              AVATAR_BOXES);
+    memmove(g->ents + *n_op + k, g->ents + *n_op + AVATAR_BOXES, sizeof g->ents[0] * (size_t)n_tr);
+    entity_shine(g->ents + *n_op, k, rgb);
+    *n_op += k;
+}
+
 /* Creatures as figures among the opaque entities: the ones simulated here,
  * or on a client the ones the host last sent. */
 static void add_mobs(game *g, dvec3 eye, double alpha, const lightfx_frame *lf, double now, int *n_op, int n_tr)
@@ -2213,6 +2235,8 @@ static void add_tracers(game *g, dvec3 eye, double alpha, int *n_op, int n_tr)
     memcpy(g->ents + *n_op, t, sizeof t[0] * (size_t)k);
     *n_op += k;
 }
+
+_Static_assert(VIEWMODEL_MAX <= RENDER_MAX_VIEW_MODEL, "the renderer draws every part of the view model");
 
 /* Camera, sky, entities and the first-person arm for the renderer. */
 static render_view build_view(game *g, double now, double dt, double alpha)
@@ -2321,6 +2345,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     if (g->mp) add_players(g, v.eye, alpha, now, &v.lfx, (float)dt, &n_op, n_tr);
     if (!on_title) {
         add_figures(g, v.eye, &v.lfx, (float)dt, &n_op, n_tr);
+        if (mode_hands(g->pl.mode) && !g->hl.dead) add_self(g, v.eye, alpha, &v.lfx, (float)dt, &n_op, n_tr);
         add_mobs(g, v.eye, alpha, &v.lfx, now, &n_op, n_tr);
         add_tracers(g, v.eye, alpha, &n_op, n_tr);
     }
