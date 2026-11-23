@@ -408,7 +408,14 @@ class Lint(unittest.TestCase):
         self.assertIn('-clang-tidy-binary "$(command -v clang-tidy)"', script)
         # The venv is installed before the first step that needs it.
         self.assertLess(script.index('export PATH="$tools/bin:$PATH"'), script.index('run-clang-tidy -clang-tidy'))
-        self.assertLess(script.index('export PATH="$tools/bin:$PATH"'), script.index('git clang-format'))
+        self.assertLess(script.index('export PATH="$tools/bin:$PATH"'), script.index('tools/format_check.py'))
+
+    def test_the_format_check_follows_renames_with_the_pinned_binary(self):
+        script = (ROOT / 'tools/lint.sh').read_text()
+        # git clang-format checks a moved file as new from top to bottom.
+        self.assertNotIn('git clang-format', script)
+        self.assertIn('tools/format_check.py --base "$base" --binary "$(command -v clang-format)"', script)
+        self.assertIn('base=${MC_FORMAT_BASE:-HEAD}', script)
 
     def test_ci_lint_installs_venv_not_a_second_clang_format(self):
         lint = job(CI, 'lint')

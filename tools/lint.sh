@@ -76,12 +76,8 @@ base=${MC_FORMAT_BASE:-HEAD}   # in CI: the merge base with the main branch
 step "clang-format (lines changed since $base only)"
 if git -C "$src" rev-parse --git-dir >/dev/null 2>&1; then
   clang-format --version
-  diff=$(cd "$src" && git clang-format --diff --extensions c,h "$base" -- src tests 2>/dev/null || true)
-  if [ -n "$diff" ] && ! printf '%s' "$diff" | grep -qE '^(no modified files|clang-format did not modify)'; then
-    printf '%s\n' "$diff"; fail=1
-  else
-    echo "clean"
-  fi
+  # Follows renames, so moving a file doesn't hold its old lines to the format.
+  (cd "$src" && python3 tools/format_check.py --base "$base" --binary "$(command -v clang-format)") || fail=1
 fi
 
 exit $fail
