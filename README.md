@@ -769,7 +769,7 @@ The unit tests (about 2400 checks, no window or GPU needed) cover:
 src/main.c        entry point, input, the frame loop and glue
 src/renderer.c    Vulkan renderer      src/gpucaps.c   which Vulkan features to use
 src/world.c       column streaming, block access, job scheduling
-src/worldgen.c    terrain generation   src/noise.c     gradient noise
+src/worldgen.c    terrain generation   src/noise.c     simplex noise
 src/mesher.c      greedy mesher with AO
 src/texgen.c      procedural textures  src/block.c     block materials
 src/physics.c     player, bodies, items, structure, water, raycast

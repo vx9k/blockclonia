@@ -14,12 +14,15 @@ int bench_run(uint32_t seed)
     const int side = 16; /* 16 x 16 columns */
     printf("blockclonia benchmark (seed %u, single thread)\n", seed);
 
-    /* Terrain generation. */
+    /* Terrain generation: sixteen patches of 4 x 4 columns spread over
+     * 60 km, so the time is the land's mix, not whatever one patch grows
+     * (a forest costs twice what a plain does). */
     column **cols = mem_calloc((size_t)side * (size_t)side, sizeof *cols);
     double t0 = os_now();
     for (int z = 0; z < side; z++)
         for (int x = 0; x < side; x++) {
-            column *c = column_alloc(x, z);
+            int p = z / 4 * 4 + x / 4;
+            column *c = column_alloc((p * 7919) % 3800 - 1900 + x % 4, (p * 6151) % 3800 - 1900 + z % 4);
             worldgen_column(seed, c);
             column_recount(c);
             cols[z * side + x] = c;
