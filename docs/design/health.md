@@ -10,14 +10,22 @@ page holds the reasoning and the detail.
 ## Where it stands
 
 `src/health/health.c` is a lumped model: no hit points, injuries change
-tissues and organs, and the vitals come out of the model. Its
-circulation, though, is a formula. Each step solves cardiac output from
-venous return (Guyton) and sets mean pressure to output times
-resistance. Exercise feeds the muscle pump, vessel tone and the
-baroreflex set-point straight from power demand, and mean pressure lags
-only 1 s, so **blood pressure jumps the moment the player starts
-running**. The arterial and plethysmograph traces are drawn shapes, and
-rhythms are labels with hand-set effects on output.
+tissues and organs, and the vitals come out of the model. Stage 1 is in
+(#124): the circulation is a pulsing four-chamber heart and vessel
+circuit (`circulation.c`), fired by conduction timing (`conduction.c`)
+and held by a delayed baroreflex (`autonomic.c`), so blood pressure
+builds over tens of seconds of running instead of jumping, and the
+monitor traces are the circuit's own pressures. Each body draws its own
+constitution, including its fastest heart rate (185–215 bpm).
+
+Known rough edges from the first playtest, left for play feedback
+rather than more tests: creative mode still runs the health model, a
+pain jump with no wound can start an adrenaline rush, a large body
+holds more than `BLOOD_NORMAL`, the monitor traces can show a step,
+and the two clocks (real time and the 72x survival clock) have no
+written rule yet. A drained vessel's pressure is linear below its
+unstressed volume; the readings floor at zero, but the circuit itself
+still lets a vessel suck.
 
 ## Principles (the maintainer's, 2026-11-23)
 
@@ -237,7 +245,7 @@ real spread, each drawn from the seed within healthy adult ranges:
 
 Gas exchange keeps today's model, now fed real cardiac output and
 pulmonary flow (stage 2). Consciousness keeps its three levels but reads
-brain-bed flow (stage 3). The defibrillator stays as it is (stage 4).
+brain-bed flow until stage 3 replaces them with a continuous scale. The defibrillator stays as it is (stage 4).
 Kidneys, the renin–angiotensin system and ADH come with stage 5;
 stage 1's slow volume control is only the plasma refill.
 
