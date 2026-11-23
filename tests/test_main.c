@@ -2252,6 +2252,7 @@ int main(void)
     test_net_all();
     test_mp_all();
     test_worldgen_all();
+    test_noise_all();
     test_trees_all();
     test_treetex_all();
     test_edge_all();

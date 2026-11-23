@@ -29,14 +29,31 @@ worldgen, the tree pass was ~47 % (point queries in `tree_site_at`).
    root on a jittered 4 x 4 grid, and each column's site list is
    cached and shared by the workers. A per-thread memo keeps the slow
    fields' 8-block grid points. Worldgen 0.960 → 0.633 ms per column.
-2. **Simplex noise, batched SIMD noise, coarse climate grid.** Replace
-   Perlin with simplex: fewer corners in 3D, no axis artefacts. Evaluate
-   noise for 4 or 8 points at once, as plain loops over small arrays
-   that the auto-vectoriser turns into SSE/AVX or NEON (the code is C11,
-   so no vector extensions); check the assembly.
-   Sample climate on a 4 x 4 grid and interpolate. Changes the terrain:
-   bump `WORLDGEN_VERSION` and the golden hash. Keep `FP_CONTRACT OFF`
-   so x86_64 and arm64 stay bit-identical.
+2. **Simplex noise, batched SIMD noise**: done in this item's pull
+   request (generator 8).
+   - Simplex replaces the lattice noise: 3 corners in 2D and 4 in 3D,
+     gradients picked with selects, cells counted modulo 2^32 with an
+     add instead of a conversion. Each sample goes through an odd
+     polynomial fitted so its distribution matches the old noise's
+     quantile for quantile; without it a simplex sum never passes 0.56,
+     and lakes and cave chambers vanished. Input frequencies are set for
+     the old mean slope, and `eroded2d`'s damping for the old share of
+     high ground. Biomes, slopes, lakes, rivers, trees and plants stay
+     within a few per cent of generator 7 over scattered samples; cave
+     air is up about 8 %.
+   - Batches (`noise2d_n` and the rest) run the same kernels as plain
+     loops, which clang vectorises for SSE4.2 or NEON, with an AVX2 copy
+     picked at run time from cpuid. Batches equal single points to the
+     bit on either path. Worldgen batches its fields per column, and
+     the cave grid skips the blocks between grid heights that cannot
+     carve.
+   - The climate already sits on the slow fields' 8-block grid with a
+     memo (#105), so no coarser grid was needed.
+   - Per sample: 2D 20.8 → 15.8 ns, 3D 53.8 → 20.2 ns (AVX2 batch on
+     Gracemont). `--bench` worldgen 0.772 → 0.514 ms per column, and
+     0.750 → 0.606 ms over scattered columns. `--bench` now generates
+     sixteen patches spread over 60 km instead of one 256 m square, so
+     one forest no longer decides its number.
 3. **Hybrid incremental lighting.** Ordinary edits use a removal queue
    then an add queue (darken what the old light lit, refill from the
    borders), FIFO so each block is visited once. Big changes

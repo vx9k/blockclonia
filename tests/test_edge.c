@@ -113,7 +113,11 @@ static double cave_share(int cx0, int cz0)
 static void test_edge_terrain(void)
 {
     static const int AT[][2] = {
-        {-64, -64}, {EDGE - 129, EDGE - 129}, {-EDGE, -EDGE}, {EDGE - 129, -EDGE + 5000}, {-EDGE + 77777, EDGE - 129},
+        {-64, -64},
+        {EDGE - 129, EDGE - 129},
+        {-EDGE + 1000, -EDGE},
+        {EDGE - 2129, -EDGE + 5000},
+        {-EDGE + 79777, EDGE - 129},
     };
     for (size_t i = 0; i < sizeof AT / sizeof AT[0]; i++) {
         relief r = relief_at(AT[i][0], AT[i][1]);

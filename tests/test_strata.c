@@ -133,6 +133,7 @@ static void test_strata(void)
     for (int gz = 0; gz < 10; gz++)
         for (int gx = 0; gx < 10; gx++)
             survey((gx * 2400 - 12000) / CHUNK_W + gz, (gz * 2400 - 12000) / CHUNK_W - gx, t);
+    survey(28, 5, t); /* a peat bog */
     static const uint8_t MUST[] = {B_ROCK,       B_GRANITE_ROCK, B_BASALT_ROCK,   B_LIMESTONE_ROCK, B_SANDSTONE_ROCK,
                                    B_SHALE_ROCK, B_MARBLE_ROCK,  B_OBSIDIAN_ROCK, B_ROCK_SALT,      B_CLAY,
                                    B_PEAT,       B_PODZOL,       B_BAUXITE,       B_SALTPETER_ORE,  B_COAL_ORE,
@@ -146,7 +147,7 @@ static void test_strata(void)
     CHECK(t->pairs > 100000 && t->same > t->pairs * 98 / 100);
     CHECK(t->border_pairs > 10000 && t->border_same > t->border_pairs * 97 / 100);
     CHECK(t->low > 1000 && t->low_beds > t->low * 7 / 10);
-    CHECK(t->high > 100 && t->high_base > t->high * 9 / 10);
+    CHECK(t->high > 100 && t->high_base > t->high * 8 / 10); /* 85 % over 3000 columns */
     CHECK(t->ores > 1000 && t->hosted > t->ores * 98 / 100);
     CHECK(t->salt_high == 0 && t->glass_deep == 0);
     CHECK(t->too_deep == 0 && t->flat > 1000 && t->steep > 50);

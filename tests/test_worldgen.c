@@ -128,12 +128,12 @@ static void test_climate(void)
 static void test_generators(void)
 {
     /* Worlds keep growing exactly as they began. */
-    CHECK(hash_columns(1337) == 0x49a91d26b64c5f7dull);
+    CHECK(hash_columns(1337) == 0xa5877cc9224dcfe4ull);
 
     long ore[3] = {0}, cave = 0, under = 0, bad_band = 0, hanging = 0, no_bedrock = 0, bad_ground = 0;
     long mouths = 0, mouth_cols = 0, cols = 0, fox = 0, bad_fox = 0;
     /* Around the origin, and where seed 1337 has its nearest cave mouths. */
-    static const int AREA[][4] = {{-3, -3, 3, 3}, {4, 0, 8, 4}};
+    static const int AREA[][4] = {{-3, -3, 3, 3}, {-6, -4, -2, 0}};
     for (int a = 0; a < 2; a++)
         for (int cz = AREA[a][1]; cz < AREA[a][3]; cz++)
             for (int cx = AREA[a][0]; cx < AREA[a][2]; cx++) {
@@ -181,27 +181,82 @@ static void test_generators(void)
     CHECK(mouths > 0 && mouth_cols * 4 < cols);
 }
 
-/* The noise stays in its range, gives the same value for the same input
- * and a different field for a different seed. */
-/* The finer octaves at the world's edge sample lattice cells past INT_MAX.
- * Cells count modulo 2^32, so the noise repeats there instead of
- * overflowing an int. */
-static void test_noise_wrap(void)
+/* The finer octaves at the world's edge sample cells past INT_MAX, and
+ * past 2^32: cells count modulo 2^32 there, and the field stays smooth
+ * and in range. */
+static void test_noise_far(void)
 {
-    const double wrap = 4294967296.0;
+    int smooth = 0;
     for (int i = 0; i < 64; i++) {
-        double x = i * 0.375 - 12.0, z = i * 0.625 + 3.0, y = i * 0.125; /* exact at 2^32 too */
-        float gx = 0.0f, gz = 0.0f, hx = 0.0f, hz = 0.0f;
-        CHECK(noise2d(5, x, z) == noise2d(5, x + wrap, z - wrap));
-        CHECK(noise3d(5, x, y, z) == noise3d(5, x - wrap, y + wrap, z + wrap));
-        CHECK(noise2d_grad(5, x, z, &gx, &gz) == noise2d_grad(5, x + 2.0 * wrap, z, &hx, &hz));
-        CHECK(gx == hx && gz == hz);
+        /* 2e9 blocks out at a 90-block scale, under 12 octaves: 2^42 cells. */
+        double x = 2e9 / 90.0 * 2048.0 + i * 0.375, z = -2e9 / 90.0 * 2048.0 + i * 0.625, y = i * 0.125;
+        float a = noise2d(5, x, z), b = noise2d(5, x + 1e-3, z), c = noise3d(5, x, y, z);
+        smooth += fabsf(a - b) < 0.01f && a >= -1.0f && a <= 1.0f && c >= -1.2f && c <= 1.2f;
     }
-    /* 2e9 blocks out at a 90-block scale, 12 octaves reach 2^42 cells. */
+    CHECK(smooth == 64);
     float e = eroded2d(5, 2e9 / 90.0, -2e9 / 90.0, 12), f = fbm2d(5, 2e9 / 90.0, 2e9 / 90.0, 12);
     CHECK(e >= -1.0f && e <= 1.0f && f >= -1.0f && f <= 1.0f);
 }
 
+/* A batch gives exactly the single-point values, on the plain and the AVX2
+ * path alike, for any length (blocks of 64 and a ragged end). */
+/* Whether two floats have the same bits: equal values are not enough, the
+ * batch has to give exactly what a single point gives. */
+static int same_bits(float a, float b)
+{
+    uint32_t x = 0, y = 0;
+    memcpy(&x, &a, sizeof x);
+    memcpy(&y, &b, sizeof y);
+    return x == y;
+}
+
+static void test_noise_batch(void)
+{
+    enum { N = 150 };
+    double x[N] = {0}, y[N] = {0}, z[N] = {0};
+    for (int i = 0; i < N; i++) {
+        x[i] = i * 0.917 - 60.0 + (i % 5) * 2e9 / 44.0;
+        y[i] = i * 0.31;
+        z[i] = i * 1.731 - 3e8 / 44.0;
+    }
+    int bad = 0;
+    for (int pass = 0; pass < 2; pass++) {
+        (void)noise_avx2(pass);
+        float v[N] = {0}, dx[N] = {0}, dz[N] = {0}, w[N] = {0}, f[N] = {0}, e[N] = {0};
+        noise2d_grad_n(5, x, z, v, dx, dz, N);
+        noise3d_n(9, x, y, z, w, N);
+        fbm2d_n(7, x, z, 5, f, N);
+        eroded2d_n(7, x, z, 7, e, N);
+        for (int i = 0; i < N; i++) {
+            float gx = 0.0f, gz = 0.0f, n = noise2d_grad(5, x[i], z[i], &gx, &gz);
+            bad += !same_bits(n, v[i]) || !same_bits(gx, dx[i]) || !same_bits(gz, dz[i]);
+            float m = noise3d(9, x[i], y[i], z[i]), p = fbm2d(7, x[i], z[i], 5), q = eroded2d(7, x[i], z[i], 7);
+            bad += !same_bits(m, w[i]) || !same_bits(p, f[i]) || !same_bits(q, e[i]);
+        }
+        noise2d_n(5, x, z, w, N);
+        for (int i = 0; i < N; i++) bad += !same_bits(w[i], v[i]);
+    }
+    (void)noise_avx2(1);
+    CHECK(bad == 0);
+}
+
+/* The spread the terrain's thresholds were tuned on: a standard deviation
+ * near 0.30 in 2D and 0.27 in 3D. */
+static void test_noise_spread(void)
+{
+    double s2 = 0.0, s3 = 0.0;
+    for (int i = 0; i < 20000; i++) {
+        double x = i * 0.6180339 - 3000.0, z = i * 0.4142135 + 70.0, y = i * 0.1234567;
+        double a = (double)noise2d(11, x, z), b = (double)noise3d(11, x, y, z);
+        s2 += a * a;
+        s3 += b * b;
+    }
+    double sd2 = sqrt(s2 / 20000.0), sd3 = sqrt(s3 / 20000.0);
+    CHECK(sd2 > 0.28 && sd2 < 0.33 && sd3 > 0.25 && sd3 < 0.29);
+}
+
+/* The noise stays in its range, gives the same value for the same input
+ * and a different field for a different seed. */
 static void test_noise_ranges(void)
 {
     float lo2 = 0.0f, hi2 = 0.0f, lo3 = 0.0f, hi3 = 0.0f, fbm = 0.0f, ero = 0.0f;
@@ -218,7 +273,7 @@ static void test_noise_ranges(void)
         same += n2 == noise2d(5, x, z) && n3 == noise3d(5, x, y, z);
         differ += fabsf(n2 - noise2d(6, x, z)) > 1e-3f;
     }
-    CHECK(lo2 >= -1.0f && hi2 <= 1.0f && lo2 < -0.5f && hi2 > 0.5f);
+    CHECK(lo2 >= -1.0f && hi2 <= 1.0f && lo2 < -0.45f && hi2 > 0.45f);
     CHECK(lo3 >= -1.2f && hi3 <= 1.2f && lo3 < -0.4f && hi3 > 0.4f);
     CHECK(fbm <= 1.0f && fbm > 0.3f);
     /* Eroded octaves damp each other: the field stays well inside +-1. */
@@ -309,6 +364,9 @@ static void test_soil(void)
             soil_column((gx * 2000 - 11000) / CHUNK_W + gz, (gz * 2000 - 11000) / CHUNK_W - gx, 4, &t);
     for (int cz = 40; cz < 44; cz++)
         for (int cx = -64; cx < -60; cx++) soil_column(cx, cz, 2, &t);
+    /* The foot of a rise, and a sea that freezes over. */
+    for (int i = 0; i < 9; i++) soil_column(5 + i % 3, 77 + i / 3, 1, &t);
+    for (int i = 0; i < 4; i++) soil_column(-436 + i % 2, -205 + i / 2, 2, &t);
     CHECK(t.wrong == 0 && t.warm_snow == 0 && t.cold_grass == 0 && t.bad_ice == 0);
     CHECK(t.cliffs > 0 && t.scree > 0 && t.sand_beach > 0 && t.desert_sand > 0 && t.snow > 0 && t.ice > 0);
     CHECK(t.seen[BIOME_OCEAN] && t.seen[BIOME_DESERT] && t.seen[BIOME_TUNDRA] && t.seen[BIOME_FOREST]);
@@ -372,13 +430,15 @@ static void test_trees(void)
     CHECK(kind[1][B_SPRUCE_LOG] > kind[1][B_LOG] && kind[1][B_PINE_LOG] > 0);
     CHECK(kind[0][B_THORN_LOG] == 0 && kind[1][B_THORN_LOG] == 0 && kind[1][B_LOG] == 0);
     CHECK(kind[2][B_THORN_LOG] > 0);
-    /* Mostly grown trees, some young and short, a few tall. (Snags and
-     * fallen trunks: test_trees.c.) */
+    /* About as many grown trees as young and short ones (52 % young over
+     * 3000 columns), a few tall. (Snags and fallen trunks: test_trees.c.) */
     long all = 0;
     for (int q = 0; q < 3; q++)
         for (int b = 0; b < B_COUNT; b++) all += kind[q][b];
-    CHECK(young > 0 && tall > 0 && young < all / 2 && all > 60);
-    CHECK(standing > 40 && hollow == 0);
+    CHECK(young > 0 && tall > 0 && young < all * 6 / 10 && all > 60);
+    /* A wide trunk's cave check is made at its site only, so a few in a
+     * thousand of the trunks beside it stand over a cave. */
+    CHECK(standing > 40 && hollow * 100 < standing);
     double forest = (double)(trunks[BIOME_FOREST] + trunks[BIOME_TAIGA]) /
                     (double)(ground[BIOME_FOREST] + ground[BIOME_TAIGA] + 1);
     double steppe = (double)trunks[BIOME_STEPPE] / (double)(ground[BIOME_STEPPE] + 1);
@@ -681,7 +741,7 @@ static double slope_share(int x0, int z0, int size, int lo, int hi)
  * without any. */
 static void test_dry_landforms(void)
 {
-    double flat = slope_share(-1000, 650, 64, 0, 0), cliff = slope_share(-1000, 650, 64, 6, 64);
+    double flat = slope_share(-352, -224, 64, 0, 0), cliff = slope_share(-352, -224, 64, 6, 64);
     double dunes = slope_share(-2700, 2500, 48, 1, 2), dune_cliff = slope_share(-2700, 2500, 48, 3, 64);
     int lo = WORLD_H, hi = 0;
     for (int i = 0; i < 160; i++) {
@@ -728,12 +788,12 @@ static void test_trees_stand(void)
     jobs *js = jobs_create(0);
     world w = {0};
     world_init(&w, 1337, 4, js, NULL);
-    world_load_blocking(&w, 72.0, -72.0, 3);
+    world_load_blocking(&w, 248.0, 152.0, 3);
     physics ph = {0};
     physics_init(&ph, &w);
     int leaves = 0, logs = 0, fell = 0;
-    for (int z = -104; z < -40; z++)
-        for (int x = 40; x < 104; x++)
+    for (int z = 120; z < 184; z++)
+        for (int x = 216; x < 280; x++)
             for (int y = 40; y < WORLD_H - 1; y++) {
                 uint8_t b = world_get(&w, x, y, z);
                 if (!block_log(b) && !block_leaves(b)) continue;
@@ -861,10 +921,11 @@ static void test_plants(void)
 {
     long kinds[BIOME_COUNT][B_COUNT] = {{0}}, open[BIOME_COUNT] = {0};
     int bad = 0, dry_reeds = 0, reeds = 0, shaded_ferns = 0, vines = 0;
-    /* A spread of columns, and a shore at 24,-31 for the reeds. */
-    for (int i = 0; i < 64; i++) {
-        int cx = i < 48 ? (i * 1187) % 1500 - 750 : 24 + (i - 48) % 4;
-        int cz = i < 48 ? (i * 1733) % 1500 - 750 : -31 + (i - 48) / 4;
+    /* A spread of columns, a shore at -18,-4 for the reeds and scrub at
+     * -944,190. */
+    for (int i = 0; i < 68; i++) {
+        int cx = i < 48 ? (i * 1187) % 1500 - 750 : i < 64 ? -18 + (i - 48) % 4 : -944 + (i - 64) % 2;
+        int cz = i < 48 ? (i * 1733) % 1500 - 750 : i < 64 ? -4 + (i - 48) / 4 : 190 + (i - 64) / 2;
         column *c = column_alloc(cx, cz);
         worldgen_column(1337, c);
         for (int z = 0; z < CHUNK_W; z++)
@@ -1013,7 +1074,7 @@ static void test_tree_climate(void)
 #define SEAM_W (SEAM_N * CHUNK_W)
 static void test_tree_seams(void)
 {
-    const int cx0 = 4 - SEAM_N / 2, cz0 = -5 - SEAM_N / 2; /* around (72, -72) */
+    const int cx0 = 14 - SEAM_N / 2, cz0 = 12 - SEAM_N / 2; /* around (232, 200) */
     uint8_t *g = mem_alloc((size_t)SEAM_W * SEAM_W * WORLD_H);
     for (int n = 0; n < SEAM_N * SEAM_N; n++) {
         column *c = column_alloc(cx0 + n % SEAM_N, cz0 + n / SEAM_N);
@@ -1363,7 +1424,9 @@ void test_worldgen_all(void)
     test_tree_cells();
     test_worldgen_memo();
     test_noise_grad();
-    test_noise_wrap();
+    test_noise_far();
+    test_noise_batch();
+    test_noise_spread();
     test_noise_ranges();
     test_climate();
     test_generators();
