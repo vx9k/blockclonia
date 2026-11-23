@@ -33,16 +33,20 @@ static const float PIVOT[3] = {0.46f, -0.38f, -0.28f};
 /* The arm is bare (the base layer is a singlet) and shaped like the
  * figure's: a forearm 8.5 cm across that tapers to a 6 cm wrist, a flat
  * palm, the fingers curled under its front and the thumb along its inner
- * side. A box hand as thick as the forearm read as a slab. */
-#define FOREARM_W 0.085f
-#define FOREARM_H 0.075f
-#define WRIST_W 0.064f
-#define WRIST_H 0.05f
+ * side. A box hand as thick as the forearm read as a slab. The arm is
+ * drawn half a metre long so it reaches into view, and at the real
+ * thickness it looked spindly next to that, so every part across and the
+ * whole hand are drawn ARM_SCALE times life size. */
+#define ARM_SCALE 1.3f
+#define FOREARM_W (0.085f * ARM_SCALE)
+#define FOREARM_H (0.075f * ARM_SCALE)
+#define WRIST_W (0.064f * ARM_SCALE)
+#define WRIST_H (0.05f * ARM_SCALE)
 #define WRIST_SHARE 0.4f /* of the arm between the elbow (or the pivot) and the palm */
-#define PALM_W 0.088f
-#define PALM_H 0.034f
-#define PALM_LEN 0.1f
-#define PALM_BACK 0.05f /* the heel of the hand, behind the palm's centre */
+#define PALM_W (0.088f * ARM_SCALE)
+#define PALM_H (0.034f * ARM_SCALE)
+#define PALM_LEN (0.1f * ARM_SCALE)
+#define PALM_BACK (0.05f * ARM_SCALE) /* the heel of the hand, behind the palm's centre */
 #define HAND_Z (-0.555f) /* the palm's centre */
 #define BLOCK_SIZE 0.18f
 #define PALM_SIZE 0.14f /* m: what an item in the palm is scaled to, within limits */
@@ -262,8 +266,12 @@ static int arm_chain(entity_instance *out, int side, const float p[3], quat r, f
         {{0.0f, 0.0f, back - 0.5f * fl}, {FOREARM_W, FOREARM_H, fl}, 0.0f},
         {{0.0f, 0.0f, PALM_BACK + 0.5f * wl}, {WRIST_W, WRIST_H, wl}, 0.0f},
         {{0.0f, 0.0f, PALM_BACK - 0.5f * PALM_LEN}, {PALM_W, PALM_H, PALM_LEN}, 0.0f},
-        {{0.0f, -0.02f, -0.05f}, {0.084f, 0.048f, 0.04f}, 0.0f},                 /* curled round the grip */
-        {{-sx * 0.047f, -0.012f, -0.012f}, {0.024f, 0.024f, 0.06f}, sx * 0.5f}, /* angled in, ahead */
+        {{0.0f, -0.02f * ARM_SCALE, -0.05f * ARM_SCALE},
+         {0.084f * ARM_SCALE, 0.048f * ARM_SCALE, 0.04f * ARM_SCALE},
+         0.0f}, /* curled round the grip */
+        {{-sx * 0.047f * ARM_SCALE, -0.012f * ARM_SCALE, -0.012f * ARM_SCALE},
+         {0.024f * ARM_SCALE, 0.024f * ARM_SCALE, 0.06f * ARM_SCALE},
+         sx * 0.5f}, /* angled in, ahead */
     };
     for (int i = 0; i < VIEWMODEL_ARM_PARTS; i++) {
         float at[3] = {0};
