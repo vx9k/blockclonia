@@ -187,9 +187,9 @@ static int health_equal(const health *a, const health *b)
            a->co == b->co && a->svr == b->svr && a->map == b->map && a->sbp == b->sbp && a->dbp == b->dbp &&
            a->symp == b->symp && a->ischemia == b->ischemia && a->strain == b->strain && a->catechol == b->catechol &&
            a->surge == b->surge && a->rhythm == b->rhythm && a->arrest_time == b->arrest_time &&
-           a->brain_flow == b->brain_flow && a->plasma_deficit == b->plasma_deficit && a->last_beat_pvc == b->last_beat_pvc &&
-           a->last_r == b->last_r && a->prev_r == b->prev_r && a->next_r == b->next_r &&
-           a->rr == b->rr && a->breath_phase == b->breath_phase &&
+           a->brain_flow == b->brain_flow && a->plasma_deficit == b->plasma_deficit &&
+           a->last_beat_pvc == b->last_beat_pvc && a->last_r == b->last_r && a->prev_r == b->prev_r &&
+           a->next_r == b->next_r && a->rr == b->rr && a->breath_phase == b->breath_phase &&
            a->breathing == b->breathing && a->o2_store == b->o2_store && a->pao2 == b->pao2 && a->sao2 == b->sao2 &&
            a->spo2_shown == b->spo2_shown && a->paco2 == b->paco2 && a->etco2 == b->etco2 &&
            a->lung_water == b->lung_water && a->pneumothorax == b->pneumothorax && a->apnea_time == b->apnea_time &&

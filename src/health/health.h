@@ -250,12 +250,12 @@ typedef struct health {
     float surge_ng; /* ng/mL/s it releases */
     int rhythm;
     float arrest_time;                /* s without circulation */
-    int last_beat_pvc;                /* the last beat was an ectopic one */
-    double last_r, prev_r, next_r;    /* s, ventricular activations: last, before it, expected next */
+    int last_beat_pvc; /* the last beat was an ectopic one */
+    double last_r, prev_r, next_r; /* s, ventricular activations: last, before it, expected next */
     defib_state defib;
     /* The simulated heart and vessels, its timing and its nerves. */
-    float brain_flow;                 /* the brain's blood flow over its resting flow */
-    float plasma_deficit;             /* mL the circulating volume is short of this body's normal */
+    float brain_flow; /* the brain's blood flow over its resting flow */
+    float plasma_deficit; /* mL the circulating volume is short of this body's normal */
 
     /* Respiration. */
     float rr, breath_phase;
