@@ -79,6 +79,7 @@ void test_recoil_all(void);
 void test_gamemode_all(void);
 void test_plants_all(void);
 void test_worldgen_all(void);
+void test_noise_all(void);
 void test_trees_all(void);
 void test_treetex_all(void);
 void test_edge_all(void);
