@@ -123,16 +123,17 @@ static void test_vm_parts(void)
      * about 0.55 m along the arm, further from the eye. */
     const entity_instance *fore = &out[0], *wrist = &out[1], *palm = &out[HAND], *fingers = &out[HAND + 1],
                           *thumb = &out[HAND + 2];
-    CHECK(fabsf(fore->scale[2] + wrist->scale[2] - 0.5f) < 0.02f && fabsf(fore->scale[0] - 0.085f) < 1e-6f);
+    /* Drawn 1.3 times the figure's 8.5 cm, so the long arm doesn't look spindly. */
+    CHECK(fabsf(fore->scale[2] + wrist->scale[2] - 0.5f) < 0.03f && fabsf(fore->scale[0] - 1.3f * 0.085f) < 1e-5f);
     CHECK(wrist->scale[0] < fore->scale[0] - 0.01f && wrist->scale[1] < fore->scale[1] - 0.01f);
     CHECK(-wrist->pos[2] > -fore->pos[2] && -palm->pos[2] > -wrist->pos[2]);
     CHECK(-palm->pos[2] > -fore->pos[2] + 0.2f);
     /* A flat palm, wider than the wrist and less than half as thick as wide. */
-    CHECK(palm->scale[0] > wrist->scale[0] && palm->scale[0] < 0.1f && palm->scale[1] < 0.5f * palm->scale[0]);
+    CHECK(palm->scale[0] > wrist->scale[0] && palm->scale[0] < 0.13f && palm->scale[1] < 0.5f * palm->scale[0]);
     /* The fingers curl down under its front; the thumb sits on the inner
      * side, toward the crosshair, and is the slimmest part. */
     CHECK(-fingers->pos[2] > -palm->pos[2] && fingers->pos[1] < palm->pos[1]);
-    CHECK(thumb->pos[0] < palm->pos[0] - 0.02f && thumb->scale[0] < 0.03f && thumb->scale[1] < 0.03f);
+    CHECK(thumb->pos[0] < palm->pos[0] - 0.02f && thumb->scale[0] < 0.04f && thumb->scale[1] < 0.04f);
     CHECK(palm->pos[0] > 0.1f && palm->pos[1] < -0.1f); /* lower right */
 
     in.held_id = B_LOG;
@@ -725,9 +726,35 @@ static void test_vm_mount(void)
     CHECK(vm.aim_x == 0.0f && vm.aim_v == 0.0f);
 }
 
+/* The arm is drawn thicker than life all through, so it stays one arm:
+ * each hand on a haft is the bare hand, the wrist and forearm keep their
+ * thickness (only their lengths follow the grip), the hand is about as
+ * wide as the forearm, and the thicker hand still fits the view. */
+static void test_vm_arm_scale(void)
+{
+    entity_instance bare[VIEWMODEL_MAX] = {0}, two[VIEWMODEL_MAX] = {0};
+    viewmodel vm = {0};
+    viewmodel_init(&vm);
+    viewmodel_input in = vm_input(0);
+    vm_run(&vm, &in, 0.5f, bare);
+    viewmodel_init(&vm);
+    in = vm_input(item_tool_id(TOOL_PICKAXE, TIER_IRON));
+    CHECK(vm_run(&vm, &in, 0.5f, two) > 2 * VIEWMODEL_ARM_PARTS);
+    int same = 1;
+    for (int s = 0; s < 2; s++)
+        for (int i = 0; i < VIEWMODEL_ARM_PARTS; i++)
+            for (int k = 0; k < (i < VIEWMODEL_PALM ? 2 : 3); k++)
+                same &= fabsf(two[s * VIEWMODEL_ARM_PARTS + i].scale[k] - bare[i].scale[k]) < 1e-6f;
+    CHECK(same);
+    float ratio = bare[VIEWMODEL_PALM].scale[0] / bare[0].scale[0];
+    CHECK(ratio > 0.9f && ratio < 1.2f);
+    CHECK(vm_sane(bare, VIEWMODEL_ARM_PARTS) && in_view(bare[VIEWMODEL_PALM + 2].pos));
+}
+
 void test_visual_all(void)
 {
     test_vm_parts();
+    test_vm_arm_scale();
     test_vm_equip();
     test_vm_swing();
     test_vm_motion();
