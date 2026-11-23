@@ -123,16 +123,17 @@ static void test_vm_parts(void)
      * about 0.55 m along the arm, further from the eye. */
     const entity_instance *fore = &out[0], *wrist = &out[1], *palm = &out[HAND], *fingers = &out[HAND + 1],
                           *thumb = &out[HAND + 2];
-    CHECK(fabsf(fore->scale[2] + wrist->scale[2] - 0.5f) < 0.02f && fabsf(fore->scale[0] - 0.085f) < 1e-6f);
+    /* Drawn 1.3 times the figure's 8.5 cm, so the long arm doesn't look spindly. */
+    CHECK(fabsf(fore->scale[2] + wrist->scale[2] - 0.5f) < 0.03f && fabsf(fore->scale[0] - 1.3f * 0.085f) < 1e-5f);
     CHECK(wrist->scale[0] < fore->scale[0] - 0.01f && wrist->scale[1] < fore->scale[1] - 0.01f);
     CHECK(-wrist->pos[2] > -fore->pos[2] && -palm->pos[2] > -wrist->pos[2]);
     CHECK(-palm->pos[2] > -fore->pos[2] + 0.2f);
     /* A flat palm, wider than the wrist and less than half as thick as wide. */
-    CHECK(palm->scale[0] > wrist->scale[0] && palm->scale[0] < 0.1f && palm->scale[1] < 0.5f * palm->scale[0]);
+    CHECK(palm->scale[0] > wrist->scale[0] && palm->scale[0] < 0.13f && palm->scale[1] < 0.5f * palm->scale[0]);
     /* The fingers curl down under its front; the thumb sits on the inner
      * side, toward the crosshair, and is the slimmest part. */
     CHECK(-fingers->pos[2] > -palm->pos[2] && fingers->pos[1] < palm->pos[1]);
-    CHECK(thumb->pos[0] < palm->pos[0] - 0.02f && thumb->scale[0] < 0.03f && thumb->scale[1] < 0.03f);
+    CHECK(thumb->pos[0] < palm->pos[0] - 0.02f && thumb->scale[0] < 0.04f && thumb->scale[1] < 0.04f);
     CHECK(palm->pos[0] > 0.1f && palm->pos[1] < -0.1f); /* lower right */
 
     in.held_id = B_LOG;
