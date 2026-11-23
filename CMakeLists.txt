@@ -278,13 +278,15 @@ if(MC_BUILD_TESTS)
   target_link_libraries(mc_tests PRIVATE mccore mc_warnings)
   add_test(NAME unit COMMAND mc_tests)
   # Under qemu user emulation (cross builds) and the sanitizers the suite
-  # runs several times slower than a plain build.
+  # runs several times slower than a plain build. A plain build takes 70 to
+  # 90 s on GitHub's shared macOS runners and over 120 s on a slow one, so
+  # it gets room to grow.
   if(CMAKE_CROSSCOMPILING_EMULATOR)
     set(_mc_unit_timeout 600)
   elseif(MC_SANITIZE)
     set(_mc_unit_timeout 360)
   else()
-    set(_mc_unit_timeout 120)
+    set(_mc_unit_timeout 300)
   endif()
   set_tests_properties(unit PROPERTIES LABELS headless TIMEOUT ${_mc_unit_timeout})
 
