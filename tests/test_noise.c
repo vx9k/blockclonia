@@ -34,20 +34,11 @@ static int bits_equal(float a, float b)
 }
 
 /* A spread of sample points that hits every part of a cell. */
-static double px(int i)
-{
-    return i * 0.7311 + 0.1;
-}
+static double px(int i) { return i * 0.7311 + 0.1; }
 
-static double pz(int i)
-{
-    return (i % 997) * 1.913;
-}
+static double pz(int i) { return (i % 997) * 1.913; }
 
-static double py(int i)
-{
-    return (i % 89) * 0.77;
-}
+static double py(int i) { return (i % 89) * 0.77; }
 
 /* The derivative noise2d_grad reports, against central differences of the
  * value it returns. eroded2d damps the finer octaves by this slope, so a
@@ -199,8 +190,9 @@ static void test_noise_seeds(void)
  * all give finite values in range. */
 static void test_noise_extremes(void)
 {
-    static const double AT[] = {0.0, 1.0, -1.0, 0.5, -0.5, 1e-9, -1e-9, 30000000.0, -30000000.0,
-                                4294967296.0, -4294967296.0, 1e11, -1e11, 123456789.123, -98765.4321};
+    static const double AT[] = {0.0,           1.0,   -1.0,       0.5,           -0.5,
+                                1e-9,          -1e-9, 30000000.0, -30000000.0,   4294967296.0,
+                                -4294967296.0, 1e11,  -1e11,      123456789.123, -98765.4321};
     int ok = 1;
     for (size_t i = 0; i < sizeof AT / sizeof AT[0]; i++)
         for (size_t j = 0; j < sizeof AT / sizeof AT[0]; j++) {
