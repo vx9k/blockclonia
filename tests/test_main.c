@@ -2435,112 +2435,117 @@ static void test_stack_scratch(void)
     column_free(low);
 }
 
-int main(void)
+/* Every suite. They start in this order, so the longest come first: a
+ * long one started last would leave the other cores idle at the end. */
+#define SUITE(f) {#f, f, 1}
+#define SPLIT(f, n) {#f, f, n}
+static const test_suite SUITES[] = {
+    SPLIT(test_cardio_all, 6),
+    SPLIT(test_health2_all, 15),
+    SPLIT(test_circulation_all, 27),
+    SPLIT(test_defib_all, 8),
+    SUITE(test_health_infection),
+    SPLIT(test_fear_all, 8),
+    SPLIT(test_conscious_all, 9),
+    SUITE(test_drugs_all),
+    SPLIT(test_worldgen_all, 32),
+    SUITE(test_thermo_all),
+    SUITE(test_thread_stack),
+    SUITE(test_gpupool),
+    SUITE(test_save_roundtrip),
+    SUITE(test_save_heights),
+    SUITE(test_stack_scratch),
+    SUITE(test_save_reject_untouched),
+    SUITE(test_save_files),
+    SUITE(test_mesher),
+    SUITE(test_world_basics),
+    SUITE(test_world_retry),
+    SUITE(test_world_anchors),
+    SUITE(test_player_physics),
+    SUITE(test_friction),
+    SUITE(test_sprint_sneak),
+    SUITE(test_camera),
+    SUITE(test_camera_third),
+    SUITE(test_camera_shoulder),
+    SUITE(test_structure),
+    SUITE(test_structure_budget),
+    SUITE(test_buoyancy),
+    SUITE(test_swim_out),
+    SUITE(test_settle),
+    SUITE(test_fluid),
+    SUITE(test_raycast),
+    SUITE(test_health_rest),
+    SUITE(test_health_exercise),
+    SUITE(test_health_bleeding),
+    SUITE(test_health_drowning),
+    SUITE(test_health_fractures),
+    SUITE(test_health_needs),
+    SUITE(test_survival),
+    SUITE(test_ui),
+    SUITE(test_settings),
+    SUITE(test_menu_worlds),
+    SUITE(test_menu_backups),
+    SUITE(test_mem),
+    SUITE(test_sysinfo),
+    SUITE(test_settings_file),
+    SUITE(test_menu),
+    SUITE(test_inventory),
+    SUITE(test_items_physics),
+    SUITE(test_interact),
+    SUITE(test_review_fixes),
+    SUITE(test_bodies_all),
+    SUITE(test_visual_all),
+    SUITE(test_sound_all),
+    SUITE(test_gpucaps_all),
+    SUITE(test_itemmodel_all),
+    SUITE(test_light_all),
+    SUITE(test_lightfx_all),
+    SUITE(test_bloom_all),
+    SUITE(test_png_all),
+    SUITE(test_health_debug_all),
+    SUITE(test_paths_all),
+    SUITE(test_save_db_all),
+    SUITE(test_worlds_all),
+    SUITE(test_backups_all),
+    SUITE(test_hud_all),
+    SUITE(test_discord_all),
+    SUITE(test_netcrypto_all),
+    SUITE(test_wire_all),
+    SUITE(test_net_all),
+    SUITE(test_mp_all),
+    SUITE(test_noise_all),
+    SUITE(test_trees_all),
+    SUITE(test_treetex_all),
+    SUITE(test_edge_all),
+    SUITE(test_tools_all),
+    SUITE(test_combat_all),
+    SUITE(test_ballistics_all),
+    SUITE(test_muzzle_all),
+    SUITE(test_recoil_all),
+    SUITE(test_gamemode_all),
+    SUITE(test_plants_all),
+    SUITE(test_invui_all),
+    SUITE(test_body_risks_all),
+    SUITE(test_thoughts_all),
+    SUITE(test_materials_all),
+    SUITE(test_strata_all),
+    SUITE(test_fluid_all),
+    SUITE(test_liquids_all),
+    SUITE(test_faint_all),
+    SUITE(test_impair_all),
+    SUITE(test_dark_all),
+    SUITE(test_lamps_all),
+    SUITE(test_shadow_all),
+    SUITE(test_mobmodel_all),
+    SUITE(test_avatar_all),
+    SUITE(test_blood_all),
+    SUITE(test_conduction_all),
+    SUITE(test_autonomic_all),
+};
+
+int main(int argc, char **argv)
 {
     mem_init(64);
     mesher_init();
-    test_thread_stack();
-    test_gpupool();
-    test_save_roundtrip();
-    test_save_heights();
-    test_stack_scratch();
-    test_save_reject_untouched();
-    test_save_files();
-    test_mesher();
-    test_world_basics();
-    test_world_retry();
-    test_world_anchors();
-    test_player_physics();
-    test_friction();
-    test_sprint_sneak();
-    test_camera();
-    test_camera_third();
-    test_camera_shoulder();
-    test_structure();
-    test_structure_budget();
-    test_buoyancy();
-    test_swim_out();
-    test_settle();
-    test_fluid();
-    test_raycast();
-    test_health_rest();
-    test_health_exercise();
-    test_health_bleeding();
-    test_health_drowning();
-    test_health_fractures();
-    test_health_infection();
-    test_health_needs();
-    test_survival();
-    test_ui();
-    test_settings();
-    test_menu_worlds();
-    test_menu_backups();
-    test_mem();
-    test_sysinfo();
-    test_settings_file();
-    test_menu();
-    test_inventory();
-    test_items_physics();
-    test_interact();
-    test_review_fixes();
-    test_thermo_all();
-    test_health2_all();
-    test_bodies_all();
-    test_visual_all();
-    test_sound_all();
-    test_gpucaps_all();
-    test_itemmodel_all();
-    test_light_all();
-    test_lightfx_all();
-    test_bloom_all();
-    test_png_all();
-    test_health_debug_all();
-    test_defib_all();
-    // test_cardio_all(); TODO: broken
-    test_paths_all();
-    test_save_db_all();
-    test_worlds_all();
-    test_backups_all();
-    test_hud_all();
-    test_discord_all();
-    test_netcrypto_all();
-    test_wire_all();
-    test_net_all();
-    test_mp_all();
-    test_worldgen_all();
-    test_noise_all();
-    test_trees_all();
-    test_treetex_all();
-    test_edge_all();
-    test_tools_all();
-    test_combat_all();
-    test_ballistics_all();
-    test_muzzle_all();
-    test_recoil_all();
-    test_gamemode_all();
-    test_plants_all();
-    test_invui_all();
-    test_body_risks_all();
-    test_thoughts_all();
-    test_drugs_all();
-    test_materials_all();
-    test_strata_all();
-    test_fluid_all();
-    test_liquids_all();
-    test_faint_all();
-    test_fear_all();
-    test_conscious_all();
-    test_impair_all();
-    test_dark_all();
-    test_lamps_all();
-    test_shadow_all();
-    test_mobmodel_all();
-    test_avatar_all();
-    test_blood_all();
-    test_cardio_all();
-    test_circulation_all();
-    test_conduction_all();
-    test_autonomic_all();
-    printf("%d/%d checks passed\n", g_checks - g_failed, g_checks);
-    return g_failed ? 1 : 0;
+    return test_run(SUITES, (int)(sizeof SUITES / sizeof SUITES[0]), argc, argv);
 }

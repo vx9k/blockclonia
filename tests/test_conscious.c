@@ -243,13 +243,13 @@ static void test_cons_glimpses(void)
 
 void test_conscious_all(void)
 {
-    test_cons_glimpses();
-    test_cons_greyout();
-    test_cons_dim();
-    test_cons_control();
-    test_cons_lapses();
-    test_cons_steps();
-    test_cons_hurt_brain();
-    test_cons_cold();
-    test_cons_choke();
+    TEST_PART(test_cons_glimpses);
+    TEST_PART(test_cons_greyout);
+    TEST_PART(test_cons_dim);
+    TEST_PART(test_cons_control);
+    TEST_PART(test_cons_lapses);
+    TEST_PART(test_cons_steps);
+    TEST_PART(test_cons_hurt_brain);
+    TEST_PART(test_cons_cold);
+    TEST_PART(test_cons_choke);
 }
