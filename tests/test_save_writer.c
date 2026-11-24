@@ -3,11 +3,14 @@
  * write beats an older queued one, and a game killed mid-save opens to
  * an intact world holding every save it had been told was committed. */
 #include "health.h"
+#include "jobs.h"
 #include "mem.h"
 #include "os.h"
+#include "save.h"
 #include "save_batch.h"
 #include "save_db.h"
 #include "test_util.h"
+#include "world.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -120,6 +123,28 @@ static void test_batch_merge(void)
     save_batch_free(&empty);
 }
 
+/* Batches grow past their first allocation and still find every row. */
+static void test_batch_grows(void)
+{
+    save_batch b = {0};
+    uint8_t v[1] = {0};
+    for (int i = 0; i < 100; i++) {
+        v[0] = (uint8_t)i;
+        CHECK(save_batch_column(&b, i, -i, v, 1) == 0);
+    }
+    CHECK(b.n == 100 && b.cap >= 100 && b.bytes == 100);
+    int found = 1;
+    for (int i = 0; i < 100; i++) {
+        const save_op *o = save_batch_find(&b, SAVE_OP_COLUMN, i, -i, NULL);
+        found &= o && o->len == 1 && o->data[0] == (uint8_t)i;
+    }
+    CHECK(found);
+    for (int i = 0; i < 100; i += 2) save_batch_drop(&b, SAVE_OP_COLUMN, i, -i, NULL);
+    CHECK(b.n == 50 && b.bytes == 50);
+    CHECK(save_batch_find(&b, SAVE_OP_COLUMN, 1, -1, NULL) && !save_batch_find(&b, SAVE_OP_COLUMN, 2, -2, NULL));
+    save_batch_free(&b);
+}
+
 /* Submitted rows reach the table and a reopened world. */
 static void test_writer_commits(void)
 {
@@ -190,6 +215,77 @@ static void test_writer_queued_reads(void)
     CHECK(save_db_commit(db) == 0);
     CHECK(save_db_flush(db) == 0 && blob_is(db, "only", "y"));
     save_db_close(db);
+    remove_world(dir);
+}
+
+/* A column written directly while older bytes of it are queued: the
+ * direct write wins, before and after the writer runs. */
+static void test_direct_column_wins(void)
+{
+    char dir[400] = {0};
+    CHECK(tmp_dir_make(dir, sizeof dir, "mc_direct_"));
+    save_db *db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (!db) return;
+    column *c = column_alloc(5, 6), *back = column_alloc(5, 6);
+    test_flat_gen(0, c);
+    CHECK(save_db_begin(db) == 0);
+    save_batch b = {0};
+    CHECK(save_batch_column(&b, 5, 6, (const uint8_t *)"stale", 5) == 0);
+    save_db_submit(db, &b);
+    CHECK(column_is(db, 5, 6, "stale"));
+    CHECK(save_db_put_column(db, c) == 0);
+    for (int pass = 0; pass < 2; pass++) {
+        uint8_t *got = NULL;
+        long n = save_db_get_column(db, 5, 6, &got);
+        CHECK(n > 5 && save_decode_column(back, got, (size_t)n) == 0);
+        CHECK(memcmp(back->blocks, c->blocks, COL_VOL) == 0);
+        mem_free(got);
+        if (pass == 0) CHECK(save_db_commit(db) == 0 && save_db_flush(db) == 0);
+    }
+    column_free(c);
+    column_free(back);
+    save_db_close(db);
+    remove_world(dir);
+}
+
+/* A column unloaded while the writer is held up (here by a transaction)
+ * loads back from the queue with its edits, and lands once it runs. */
+static void test_world_reload_from_queue(void)
+{
+    char dir[400] = {0};
+    CHECK(tmp_dir_make(dir, sizeof dir, "mc_reload_"));
+    save_db *db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (!db) return;
+    jobs *js = jobs_create(1);
+    world w = {0};
+    world_init(&w, 1, 2, js, db);
+    w.generator = test_flat_gen;
+    world_load_blocking(&w, 0.5, 0.5, 1);
+    CHECK(world_set(&w, 3, GROUND, 4, B_GLASS, 0)); /* column 0,0 */
+    CHECK(save_db_begin(db) == 0);
+    world_load_blocking(&w, 16 * CHUNK_W + 0.5, 0.5, 1); /* 0,0 unloads: saved into the queue */
+    CHECK(world_column(&w, 0, 0) == NULL && save_db_committed(db) == 0);
+    world_load_blocking(&w, 0.5, 0.5, 1);
+    CHECK(world_get(&w, 3, GROUND, 4) == B_GLASS);
+    CHECK(save_db_commit(db) == 0);
+    world_save_now(&w);
+    CHECK(save_db_flush(db) == 0 && save_db_committed(db) >= 1);
+    world_destroy(&w);
+    save_db_close(db);
+
+    db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (db) {
+        world_init(&w, 1, 2, js, db);
+        w.generator = test_flat_gen;
+        world_load_blocking(&w, 0.5, 0.5, 1);
+        CHECK(world_get(&w, 3, GROUND, 4) == B_GLASS);
+        world_destroy(&w);
+        save_db_close(db);
+    }
+    jobs_destroy(js);
     remove_world(dir);
 }
 
@@ -325,8 +421,11 @@ void test_save_writer_all(void)
 {
     TEST_PART(test_batch_rows);
     TEST_PART(test_batch_merge);
+    TEST_PART(test_batch_grows);
     TEST_PART(test_writer_commits);
     TEST_PART(test_writer_queued_reads);
+    TEST_PART(test_direct_column_wins);
+    TEST_PART(test_world_reload_from_queue);
     TEST_PART(test_writer_restore);
     TEST_PART(test_writer_many);
     TEST_PART(test_writer_crash);
