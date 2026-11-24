@@ -388,10 +388,11 @@ int blood_build(const blood_state *b, const world *w, const lightfx_frame *lf, d
     return n;
 }
 
-void blood_spot(int part, int salt, dvec3 feet, float yaw, dvec3 *at, dvec3 *out)
+void blood_spot(int part, int salt, const avatar_pose *pose, dvec3 feet, dvec3 *at, dvec3 *out)
 {
-    /* Where on a standing 1.8 m figure each part's wound opens, in its
-     * own frame: right, up, forward (m), and the way that skin faces. */
+    /* Where on the still standing figure each part's wound opens, in its
+     * own frame: right, up, forward (m), and the way that skin faces. The
+     * spot then rides on the part's bone wherever the posed body has it. */
     static const float SPOT[7][6] = {
         {0.0f, 1.62f, 0.10f, 0.0f, 0.3f, 1.0f}, /* head: the face and scalp */
         {0.0f, 1.35f, 0.12f, 0.0f, 0.0f, 1.0f}, /* chest */
@@ -407,11 +408,10 @@ void blood_spot(int part, int salt, dvec3 feet, float yaw, dvec3 *at, dvec3 *out
      * far (rad) from the first, so several wounds in one part bleed as
      * separate jets, the first ones on the side the eye sees. */
     static const float TURN[8] = {0.0f, 0.9f, -0.9f, 1.75f, -1.75f, 0.45f, -0.45f, 1.3f};
+    static const int BONE[7] = {AV_HEAD,           AV_CHEST,     AV_SPINE,    AV_SHOULDER_L + 1,
+                                AV_SHOULDER_R + 1, AV_HIP_L + 1, AV_HIP_R + 1};
     int p = part >= 0 && part < 7 ? part : 1;
     const float *sp = SPOT[p];
-    float sy = sinf(isfinite(yaw) ? yaw : 0.0f), cy = cosf(isfinite(yaw) ? yaw : 0.0f);
-    /* yaw 0 faces -z with the right toward +x. */
-    const float right[3] = {cy, 0.0f, sy}, fwd[3] = {sy, 0.0f, -cy};
     int k = salt < 0 ? -salt : salt;
     /* Below the head, skin on a standing body mostly faces a little down
      * and blood runs that way out of the wound, so jets leave below level
@@ -423,22 +423,24 @@ void blood_spot(int part, int salt, dvec3 feet, float yaw, dvec3 *at, dvec3 *out
     float nr = sp[3] / hl, nf = sp[5] / hl;
     float tr = nr * cosf(a) - nf * sinf(a), tf = nr * sinf(a) + nf * cosf(a);
     float rad = RADIUS[p];
-    const float l[3] = {sp[0] + (tr - nr) * rad, sp[1] + du, sp[2] + (tf - nf) * rad};
-    *at = dv3(feet.x + (double)(right[0] * l[0] + fwd[0] * l[2]), feet.y + (double)l[1],
-              feet.z + (double)(right[2] * l[0] + fwd[2] * l[2]));
-    const float o[3] = {(right[0] * tr + fwd[0] * tf) * hl, sp[4] + tilt, (right[2] * tr + fwd[2] * tf) * hl};
-    float ol = sqrtf(o[0] * o[0] + o[1] * o[1] + o[2] * o[2]);
-    *out = dv3((double)(o[0] / ol), (double)(o[1] / ol), (double)(o[2] / ol));
+    /* The figure faces -z with its right toward +x. */
+    const float l[3] = {sp[0] + (tr - nr) * rad, sp[1] + du, -(sp[2] + (tf - nf) * rad)};
+    const float o[3] = {tr * hl, sp[4] + tilt, -tf * hl};
+    float pa[3] = {0}, po[3] = {0};
+    avatar_pose_map(pose, BONE[p], l, o, pa, po);
+    *at = dv3(feet.x + (double)pa[0], feet.y + (double)pa[1], feet.z + (double)pa[2]);
+    float ol = sqrtf(po[0] * po[0] + po[1] * po[1] + po[2] * po[2]);
+    *out = dv3((double)(po[0] / ol), (double)(po[1] / ol), (double)(po[2] / ol));
 }
 
-int blood_from_health(const struct health *h, dvec3 feet, float yaw, blood_source *out)
+int blood_from_health(const struct health *h, const avatar_pose *pose, dvec3 feet, blood_source *out)
 {
     int n = h->wound_count < BLOOD_SOURCES ? h->wound_count : BLOOD_SOURCES;
     int upright = health_awake(h) && h->down <= 0.0f;
-    double heart = feet.y + 1.3; /* m, the heart's level on a 1.8 m figure */
+    double heart = feet.y + (double)pose->at[AV_CHEST][1] + 0.08; /* m, a little above the chest joint */
     for (int i = 0; i < n; i++) {
         const wound *wd = &h->wounds[i];
-        blood_spot(wd->part, i, feet, yaw, &out[i].at, &out[i].out);
+        blood_spot(wd->part, i, pose, feet, &out[i].at, &out[i].out);
         out[i].ml_min = wd->bandage ? 0.0f : wd->bleed;
         out[i].arterial = wd->arterial;
         /* Standing, blood presses on a wound by the height of the column

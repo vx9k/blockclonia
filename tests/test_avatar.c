@@ -573,8 +573,52 @@ static void test_avatar_textures(void)
     CHECK(pupil[0] < 80 && white[0] > 200 && cheek[0] > pupil[0] + 100);
 }
 
+/* The bones avatar_pose_get gives are the ones the boxes hang from, in
+ * any pose: each box turns with its bone and sits within reach of it. */
+static void test_avatar_pose_bones(void)
+{
+    avatar_anim a = {.speed = 1.4f, .sneak = 1.0f, .phase = 0.3f, .time = 1.1f};
+    for (int dead = 0; dead < 2; dead++) {
+        avatar_pose p = {0};
+        avatar_pose_get(&a, 0.7f, -0.3f, dead, &p);
+        entity_instance e[AVATAR_BOXES] = {0};
+        CHECK(avatar_build(&a, FEET, 0.7f, -0.3f, dead, 1.0f, e, AVATAR_BOXES) == AVATAR_BOXES);
+        for (int i = 0; i < AVATAR_BOXES; i++) {
+            int b = avatar_box_bone(i);
+            quat q = rot_of(&e[i]);
+            float dot = q.x * p.q[b].x + q.y * p.q[b].y + q.z * p.q[b].z + q.w * p.q[b].w;
+            CHECK(fabsf(fabsf(dot) - 1.0f) < 1e-4f);
+            float d = sqrtf(powf(e[i].pos[0] - p.at[b][0], 2.0f) + powf(e[i].pos[1] - p.at[b][1], 2.0f) +
+                            powf(e[i].pos[2] - p.at[b][2], 2.0f));
+            CHECK(d < 0.45f);
+        }
+    }
+}
+
+/* A point on the still standing figure maps onto itself there, and onto
+ * the same place on the bone however the figure is posed: the crown of the
+ * head comes down with the eyes in a crouch. */
+static void test_avatar_pose_map(void)
+{
+    avatar_anim still = {0}, crouch = {.sneak = 1.0f};
+    avatar_pose st = {0}, low = {0};
+    avatar_pose_get(&still, 0.0f, 0.0f, 0, &st);
+    avatar_pose_get(&crouch, 0.0f, 0.0f, 0, &low);
+    const float crown[3] = {0.0f, AVATAR_HEIGHT, 0.0f}, up[3] = {0.0f, 1.0f, 0.0f};
+    float at[3] = {0}, dir[3] = {0};
+    avatar_pose_map(&st, AV_HEAD, crown, up, at, dir);
+    CHECK(fabsf(at[0]) < 1e-4f && fabsf(at[1] - AVATAR_HEIGHT) < 1e-4f && fabsf(at[2]) < 1e-4f);
+    CHECK(fabsf(dir[1] - 1.0f) < 1e-4f);
+    avatar_pose_map(&low, AV_HEAD, crown, up, at, dir);
+    float drop = st.eyes[1] - low.eyes[1];
+    CHECK(drop > 0.2f && fabsf((AVATAR_HEIGHT - at[1]) - drop) < 0.05f);
+    CHECK(fabsf(sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]) - 1.0f) < 1e-4f);
+}
+
 void test_avatar_all(void)
 {
+    test_avatar_pose_bones();
+    test_avatar_pose_map();
     test_avatar_symmetry();
     test_avatar_stride_shape();
     test_avatar_turns();

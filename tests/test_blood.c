@@ -3,6 +3,7 @@
  * surging with each beat as far as the pressure throws it; stains land on
  * any face, pool, dry and, minutes later, clean themselves up; and it all
  * looks the same at 30 and 144 fps. */
+#include "avatar.h"
 #include "blood.h"
 #include "health.h"
 #include "mem.h"
@@ -462,14 +463,24 @@ static void test_blood_build(void)
     tw_free(&t);
 }
 
+/* The still standing figure, facing yaw. */
+static avatar_pose standing(float yaw)
+{
+    avatar_anim a = {0};
+    avatar_pose p = {0};
+    avatar_pose_get(&a, yaw, 0.0f, 0, &p);
+    return p;
+}
+
 static void test_blood_spots(void)
 {
+    const avatar_pose st = standing(0.0f), quarter = standing(1.5707963f);
     /* Wounds open where the parts are: the head highest, the legs lowest,
      * the right arm on the right; the way a wound faces is a unit vector
      * turning with the body. */
     dvec3 at[BP_COUNT], out[BP_COUNT];
     for (int p = 0; p < BP_COUNT; p++) {
-        blood_spot(p, 0, dv3(10.0, 20.0, 30.0), 0.0f, &at[p], &out[p]);
+        blood_spot(p, 0, &st, dv3(10.0, 20.0, 30.0), &at[p], &out[p]);
         CHECK(fabs(dv3_len(out[p]) - 1.0) < 1e-4);
     }
     CHECK(at[BP_HEAD].y > at[BP_CHEST].y && at[BP_CHEST].y > at[BP_ABDOMEN].y && at[BP_ABDOMEN].y > at[BP_LLEG].y);
@@ -477,16 +488,16 @@ static void test_blood_spots(void)
     CHECK(at[BP_RARM].x > 10.1 && at[BP_LARM].x < 9.9 && out[BP_RARM].x > 0.5);
     CHECK(out[BP_CHEST].z < -0.5); /* yaw 0 faces -z */
     dvec3 a2, o2;
-    blood_spot(BP_RARM, 0, dv3(10.0, 20.0, 30.0), 1.5707963f, &a2, &o2);
+    blood_spot(BP_RARM, 0, &quarter, dv3(10.0, 20.0, 30.0), &a2, &o2);
     CHECK(a2.z > 30.1 && o2.z > 0.5); /* a quarter turn: the right is +z */
-    blood_spot(BP_CHEST, 1, dv3(10.0, 20.0, 30.0), 0.0f, &a2, &o2);
+    blood_spot(BP_CHEST, 1, &st, dv3(10.0, 20.0, 30.0), &a2, &o2);
     CHECK(dv3_len(dv3(a2.x - at[BP_CHEST].x, a2.y - at[BP_CHEST].y, a2.z - at[BP_CHEST].z)) > 0.02);
     /* Several wounds in one part open at different places around it and
      * bleed different ways, so four cut arteries in a leg are four jets,
      * not one thick one; and each stays on the leg's skin. */
     dvec3 la[4], lo[4];
     for (int k = 0; k < 4; k++) {
-        blood_spot(BP_RLEG, k, dv3(10.0, 20.0, 30.0), 0.0f, &la[k], &lo[k]);
+        blood_spot(BP_RLEG, k, &st, dv3(10.0, 20.0, 30.0), &la[k], &lo[k]);
         CHECK(fabs(dv3_len(lo[k]) - 1.0) < 1e-4 && lo[k].z < 0.3); /* none bleeds back into the body's front */
         CHECK(la[k].y > 20.1 && la[k].y < 20.9 && fabs(la[k].x - 10.1) < 0.12 && fabs(la[k].z - 30.0) < 0.12);
         for (int j = 0; j < k; j++) {
@@ -500,7 +511,7 @@ static void test_blood_spots(void)
     for (int p = BP_CHEST; p < BP_COUNT; p++)
         for (int k = 0; k < 8; k++) {
             dvec3 a3, o3;
-            blood_spot(p, k, dv3(10.0, 20.0, 30.0), 0.0f, &a3, &o3);
+            blood_spot(p, k, &st, dv3(10.0, 20.0, 30.0), &a3, &o3);
             CHECK(o3.y < -0.1 && o3.y > -0.6);
         }
 }
@@ -546,33 +557,69 @@ static void test_blood_from_health(void)
     live(h, &e, 1.0);
     blood_source s[BLOOD_SOURCES];
     const dvec3 feet = dv3(5.0, 20.0, 5.0);
-    int n = blood_from_health(h, feet, 0.0f, s);
+    const avatar_pose st = standing(0.0f);
+    int n = blood_from_health(h, &st, feet, s);
     CHECK(n == 2 && h->wound_count == 2);
     CHECK(s[0].arterial == 1 && s[1].arterial == 0);
     CHECK(s[0].ml_min > 1.0f && fabsf(s[0].ml_min - h->wounds[0].bleed) < 1e-4f);
     CHECK(s[1].ml_min > 0.1f && fabsf(s[1].ml_min - h->wounds[1].bleed) < 1e-4f);
     dvec3 at = {0}, out = {0};
-    blood_spot(BP_LLEG, 0, feet, 0.0f, &at, &out);
+    blood_spot(BP_LLEG, 0, &st, feet, &at, &out);
     CHECK(fabs(s[0].at.y - at.y) < 0.15 && s[0].at.y < 21.0 && s[1].at.x > 5.1);
     /* Standing, the column of blood above the heart's level pushes harder
      * at the leg: rho g h over the ~0.85 m from heart to thigh. */
     float column = 1060.0f * 9.81f * (float)(21.3 - s[0].at.y) / 133.322f;
     CHECK(s[0].p_column > 40.0f && fabsf(s[0].p_column - column) < 1.0f);
     h->down = 30.0f; /* lying flat, no column */
-    blood_from_health(h, feet, 0.0f, s);
+    blood_from_health(h, &st, feet, s);
     CHECK(s[0].p_column == 0.0f);
     h->down = 0.0f;
     h->wounds[1].bandage = BANDAGE_STERILE;
-    n = blood_from_health(h, feet, 0.0f, s);
+    n = blood_from_health(h, &st, feet, s);
     CHECK(n == 2 && s[1].ml_min == 0.0f && s[0].ml_min > 1.0f);
     /* More wounds than it follows: the first BLOOD_SOURCES. */
     for (int i = 0; i < BLOOD_SOURCES + 3; i++) health_cut(h, BP_CHEST, 0.2f, 0, 0.0f);
-    CHECK(blood_from_health(h, feet, 0.0f, s) == BLOOD_SOURCES);
+    CHECK(blood_from_health(h, &st, feet, s) == BLOOD_SOURCES);
+    mem_free(h);
+}
+
+/* Wounds bleed from the body where it is drawn: crouched, a head wound
+ * comes down with the head; lying on its front, at the ground ahead of
+ * the feet; and the heart's column falls with the chest. */
+static void test_blood_follows_pose(void)
+{
+    const dvec3 feet = dv3(10.0, 20.0, 30.0);
+    avatar_anim still = {0}, crouch = {.sneak = 1.0f};
+    avatar_pose st = standing(0.0f), low = {0}, flat = {0};
+    avatar_pose_get(&crouch, 0.0f, 0.0f, 0, &low);
+    avatar_pose_get(&still, 0.0f, 0.0f, 1, &flat);
+    dvec3 a0 = {0}, o0 = {0}, a1 = {0}, o1 = {0}, a2 = {0}, o2 = {0};
+    blood_spot(BP_HEAD, 0, &st, feet, &a0, &o0);
+    blood_spot(BP_HEAD, 0, &low, feet, &a1, &o1);
+    blood_spot(BP_HEAD, 0, &flat, feet, &a2, &o2);
+    double drop = (double)(st.eyes[1] - low.eyes[1]);
+    CHECK(drop > 0.2 && fabs((a0.y - a1.y) - drop) < 0.08);
+    CHECK(fabs(a1.y - (20.0 + (double)low.eyes[1])) < 0.15);
+    CHECK(a2.y < 20.4 && a2.z < 29.0); /* yaw 0 faces -z: the head lies that way */
+    CHECK(fabs(dv3_len(o1) - 1.0) < 1e-4 && fabs(dv3_len(o2) - 1.0) < 1e-4);
+    /* A shin wound stays by the shin bone in a crouch. */
+    blood_spot(BP_RLEG, 0, &low, feet, &a1, &o1);
+    dvec3 knee = dv3(10.0 + (double)low.at[AV_HIP_R + 1][0], 20.0 + (double)low.at[AV_HIP_R + 1][1],
+                     30.0 + (double)low.at[AV_HIP_R + 1][2]);
+    CHECK(dv3_len(dv3(a1.x - knee.x, a1.y - knee.y, a1.z - knee.z)) < 0.25);
+    health *h = new_body(42u);
+    health_cut(h, BP_LLEG, 0.6f, 1, 0.0f);
+    blood_source s[BLOOD_SOURCES];
+    blood_from_health(h, &st, feet, s);
+    float tall = s[0].p_column;
+    blood_from_health(h, &low, feet, s);
+    CHECK(s[0].p_column < tall - 5.0f);
     mem_free(h);
 }
 
 void test_blood_all(void)
 {
+    test_blood_follows_pose();
     test_blood_from_health();
     test_blood_drips();
     test_blood_fps();

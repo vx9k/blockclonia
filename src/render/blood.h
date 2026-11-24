@@ -17,6 +17,7 @@
 #ifndef MC_BLOOD_H
 #define MC_BLOOD_H
 
+#include "avatar.h"
 #include "entity.h"
 #include "lightfx.h"
 #include "mathlib.h"
@@ -91,15 +92,16 @@ int blood_build(const blood_state *b, const world *w, const lightfx_frame *lf, d
  * brown. */
 uint32_t blood_colour(int shade, float age);
 
-/* Where a wound on body part (health.h's BP_*) opens on a figure standing
- * at feet facing yaw (0 toward -z), and the way it faces; salt spreads
- * several wounds on one part apart. */
-void blood_spot(int part, int salt, dvec3 feet, float yaw, dvec3 *at, dvec3 *out);
+/* Where a wound on body part (health.h's BP_*) opens on the figure posed
+ * as pose (avatar.h) with its feet at feet, and the way it faces: it rides
+ * on the part's bone, so it stays on the body crouched or lying. salt
+ * spreads several wounds on one part apart. */
+void blood_spot(int part, int salt, const avatar_pose *pose, dvec3 feet, dvec3 *at, dvec3 *out);
 
-/* The sources for a body's wounds (health.h) on a figure standing at feet
- * facing yaw: wound i is source i, up to BLOOD_SOURCES of them, and a
+/* The sources for a body's wounds (health.h) on the figure posed as pose
+ * with its feet at feet: wound i is source i, up to BLOOD_SOURCES of them, and a
  * bandaged wound bleeds into its bandage. Returns how many. */
 struct health;
-int blood_from_health(const struct health *h, dvec3 feet, float yaw, blood_source *out);
+int blood_from_health(const struct health *h, const avatar_pose *pose, dvec3 feet, blood_source *out);
 
 #endif
