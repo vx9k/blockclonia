@@ -2536,6 +2536,7 @@ int main(void)
     test_shadow_all();
     test_mobmodel_all();
     test_avatar_all();
+    test_blood_all();
     test_cardio_all();
     test_circulation_all();
     test_conduction_all();

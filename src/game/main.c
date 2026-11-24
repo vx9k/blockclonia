@@ -5,6 +5,7 @@
 #include "avatar.h"
 #include "backups.h"
 #include "bench.h"
+#include "blood.h"
 #include "camera.h"
 #include "combat.h"
 #include "debug.h"
@@ -963,6 +964,7 @@ typedef struct {
     int cfg_vsync;            /* vsync as the settings file has it (--no-vsync is not saved) */
     int cfg_keep;             /* the settings file could not be used: never written over */
     uint32_t seed;
+    int fps_frames; /* here, beside seed, it fills what would be padding */
     sys_info sys;
     sys_budget plan;          /* budgets for this machine (sysinfo.h) */
     GLFWwindow *win;
@@ -995,6 +997,7 @@ typedef struct {
     health hl;
     hud_state hs;
     fx_state *fx;
+    blood_state *blood;
     interact ia;
     invui iu;
     entity_instance *ents;
@@ -1033,7 +1036,6 @@ typedef struct {
     int frame;
     int inv_was_open, panel_was_open;
     double title_t, save_t;
-    int fps_frames;
     float *gpu_samples;       /* --frames: GPU frame times over the run's second half, ms */
     int gpu_sample_count;
     int last_step;            /* stride half-cycles, for footsteps */
@@ -1374,6 +1376,25 @@ static void set_fullscreen(game *g, int on)
  * the menus' backdrop. The renderer and job threads stay up across
  * worlds; everything that belongs to one world is made here and undone by
  * close_world. */
+/* A new world starts without the last one's blood. */
+static void restart_blood(game *g)
+{
+    if (!g->blood) return;
+    blood_free(g->blood);
+    blood_init(g->blood, g->plan.blood_stains, g->seed);
+}
+
+/* This frame's blood from the player's wounds, the arteries surging with
+ * the pressure wave in the aorta. A spectator has no body to bleed. */
+static void bleed(game *g, double dt)
+{
+    blood_source src[BLOOD_SOURCES] = {0};
+    const player *pl = &g->pl;
+    int n = mode_hands(pl->mode) ? blood_from_health(&g->hl, pl->pos, pl->yaw, src) : 0;
+    blood_bleed(g->blood, src, n, g->hl.cv.wave_ao, g->hl.map, g->hl.sao2, pl->vel, (float)dt);
+    blood_step(g->blood, &g->w, (float)dt);
+}
+
 static void open_world(game *g, const char *dir, int backdrop)
 {
     options *o = &g->o;
@@ -1449,6 +1470,7 @@ static void open_world(game *g, const char *dir, int backdrop)
     if (o->hurt && !backdrop) apply_hurt(&g->hl, o->hurt);
 
     fx_init(g->fx, g->seed);
+    restart_blood(g);
     mobs_init(&g->mobs, g->seed ^ 0x5EEDB0A5u);
     if (o->mobs && !backdrop) place_mobs(&g->mobs, &g->w, &g->pl, o->mobs);
     if (o->figures && !backdrop) g->nfigs = place_figures(g->figs, &g->pl, o->figures);
@@ -1574,6 +1596,7 @@ static void open_remote_world(game *g, uint32_t seed)
     inv_init(&g->inv);
     health_init(&g->hl, seed);
     fx_init(g->fx, seed);
+    restart_blood(g);
     interact_init(&g->ia, seed);
     viewmodel_init(&g->vm);
     camera_init(&g->cam);
@@ -1736,6 +1759,8 @@ static void game_init(game *g)
     snprintf(g->versions, sizeof g->versions, "%s  GLFW %d.%d.%d", mi, gmaj, gmin, grev);
 
     g->fx = mem_alloc(sizeof *g->fx);
+    g->blood = mem_alloc(sizeof *g->blood);
+    blood_init(g->blood, g->plan.blood_stains, g->seed);
     invui_init(&g->iu);
     g->ents = mem_alloc(sizeof(entity_instance) * RENDER_MAX_ENTS);
     g->world_list = mem_alloc(sizeof(world_entry) * WORLDS_MAX);
@@ -1979,6 +2004,7 @@ static void frame_simulate(game *g, const player_input *raw, double dt)
         if (steps == MAX_STEPS_PER_FRAME) g->acc = 0.0;
         g->landing = landing;
         fx_step(g->fx, &g->w, dt);
+        bleed(g, dt);
         g->phys_ms = anim_approach(g->phys_ms, (float)((glfwGetTime() - t0) * 1000.0), 5.0f, (float)dt);
         g->pose = camera_update(&g->cam, &g->pl, landing, g->hl.hurt_flash, g->st.view_bob, g->st.fov_effects,
                                 g->in_menu ? 0.0f : (float)dt);
@@ -2031,6 +2057,7 @@ static void frame_simulate(game *g, const player_input *raw, double dt)
         thermo_step(g->th, &g->w, dt, g->pl.pos);
         g->fx->wind = atmos_wind_at(&g->w, g->cb.wind_seed, g->cb.time, g->pl.pos);
         fx_step(g->fx, &g->w, dt);
+        bleed(g, dt);
     }
     g->phys_ms = anim_approach(g->phys_ms, (float)((glfwGetTime() - t0) * 1000.0), 5.0f, (float)dt);
     g->pose = camera_update(&g->cam, &g->pl, landing, g->hl.hurt_flash, g->st.view_bob, g->st.fov_effects,
@@ -2254,6 +2281,19 @@ static void add_figures(game *g, dvec3 eye, const lightfx_frame *lf, float dt, i
         entity_shine(g->ents + *n_op, k, rgb);
         *n_op += k;
     }
+}
+
+/* Blood in the air and on the blocks, among the opaque entities. */
+static void add_blood(game *g, dvec3 eye, const lightfx_frame *lf, float day, int *n_op, int n_tr)
+{
+    int room = RENDER_MAX_ENTS - *n_op - n_tr;
+    int want = g->blood->drops + 4 * g->blood->max_stains; /* a stain is four boxes */
+    int max = want < room ? want : room;
+    if (max <= 0) return;
+    memmove(g->ents + *n_op + max, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
+    int k = blood_build(g->blood, &g->w, lf, eye, day, g->ents + *n_op, max);
+    memmove(g->ents + *n_op + k, g->ents + *n_op + max, sizeof g->ents[0] * (size_t)n_tr);
+    *n_op += k;
 }
 
 /* The player's own body, seen from its eyes: the figure the others see,
@@ -2504,6 +2544,7 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     int n_op = 0, n_tr = 0;
     fx_build_entities(g->fx, &g->ph, &g->crack, v.eye, alpha, v.time, v.daylight, &v.lfx, g->ents, RENDER_MAX_ENTS,
                       &n_op, &n_tr);
+    add_blood(g, v.eye, &v.lfx, v.daylight, &n_op, n_tr);
     if (g->mp) add_players(g, v.eye, alpha, now, &v.lfx, (float)dt, &n_op, n_tr);
     if (!on_title) {
         add_figures(g, v.eye, &v.lfx, (float)dt, &n_op, n_tr);
@@ -3112,6 +3153,8 @@ static void game_shutdown(game *g)
     sound_destroy(g->snd);
     mem_free(g->ents);
     mem_free(g->fx);
+    blood_free(g->blood);
+    mem_free(g->blood);
     mem_free(g->world_list);
     mem_free(g->world_rows);
     jobs_destroy(g->js);
