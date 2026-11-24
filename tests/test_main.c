@@ -787,7 +787,6 @@ static void test_camera_third(void)
     float a30 = cam_ease(&o.w, head, 1.0f, 0.5f, 30), a144 = cam_ease(&o.w, head, 1.0f, 0.5f, 144);
     CHECK(early > 1.05f && early < 3.0f);
     CHECK(fabsf(a30 - a144) < 0.02f && a30 > early);
-    tw_free(&o);
 
     /* A body that is down is watched around its middle, 0.8 m ahead of the
      * feet along its facing; fallen against a step, the point pulls back
@@ -806,8 +805,31 @@ static void test_camera_third(void)
     CHECK(barm > 3.0f);
     tw_free(&b);
 
+    /* In front, a wall before the face shortens the arm the same way; a
+     * head boxed in on every side keeps the camera at the head, and a
+     * zero-length arm never leaves it. */
+    test_world f = {0};
+    tw_init(&f);
+    for (int y = GROUND; y < GROUND + 4; y++)
+        for (int x = -4; x <= 4; x++) world_set(&f.w, x, y, -1, B_STONE, 0); /* yaw 0 faces -z */
+    float farm = 3.5f;
+    v = camera_third(&f.w, &farm, head, 0.0f, 0.0f, 1, 3.5f, 1.0f / 60.0f);
+    CHECK(v.eye.z > -0.1 && farm < 1.0f && cam_clear(&f.w, v.eye, 0.1));
+    static const int NB[6][3] = {{-1, 1, 0}, {1, 1, 0}, {0, 2, 0}, {0, 0, 0}, {0, 1, 1}, {0, 1, -1}};
+    for (int i = 0; i < 6; i++) world_set(&f.w, NB[i][0], GROUND + NB[i][1], NB[i][2], B_STONE, 0);
+    farm = 2.0f;
+    v = camera_third(&f.w, &farm, head, 1.1f, 0.4f, 0, 3.5f, 1.0f / 60.0f);
+    CHECK(farm < 0.3f && cam_dist(v.eye, head) < 0.3);
+    farm = 0.0f;
+    v = camera_third(&o.w, &farm, head, 1.1f, 0.4f, 0, 0.0f, 1.0f / 60.0f);
+    CHECK(farm == 0.0f && cam_dist(v.eye, head) < 1e-9);
+    tw_free(&f);
+    tw_free(&o);
+
     /* The free camera flies where it looks, at the speed asked. */
-    dvec3 at = camera_fly(dv3(0, 50, 0), 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 8.0f, 0.5f);
+    dvec3 at = camera_fly(dv3(0, 50, 0), 0.0f, 1.5707963f, 1.0f, 0.0f, 0.0f, 8.0f, 0.5f);
+    CHECK(at.y > 53.99 && fabs(at.z) < 1e-3);
+    at = camera_fly(dv3(0, 50, 0), 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 8.0f, 0.5f);
     CHECK(fabs(at.z + 4.0) < 1e-3 && fabs(at.x) < 1e-3 && fabs(at.y - 50.0) < 1e-3);
     at = camera_fly(dv3(0, 50, 0), 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 8.0f, 0.5f);
     CHECK(fabs(at.x - 4.0) < 1e-3 && fabs(at.y - 54.0) < 1e-3);
