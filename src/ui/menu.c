@@ -328,6 +328,8 @@ static int settings_video(ctx *c, settings *s, float rx, float ry, float rw)
     /* SHADOW_OFF, SHADOW_ON, SHADOW_AUTO, as bloom's */
     changed |= cycle(c, rx, ry + 180, rw, "Sun shadows", &s->shadows, BLOOM, 3);
     changed |= cycle(c, rx, ry + 200, rw, "Leaves and grass sway", &s->sway, ONOFF, 2);
+    changed |= slider(c, rx, ry + 220, rw, "Third-person distance (F5)", &s->camera_distance, SETTINGS_CAM_MIN,
+                      SETTINGS_CAM_MAX, 1, " m");
     return changed;
 }
 
@@ -366,7 +368,9 @@ static int settings_controls(ctx *c, settings *s, float rx, float ry, float rw)
     changed |= cycle(c, rx, ry + 40, rw, "Sprint", &s->sprint_toggle, SPRINT, 2);
     changed |= cycle(c, rx, ry + 60, rw, "Key hints", &s->show_hints, ONOFF, 2);
     changed |= cycle(c, rx, ry + 80, rw, "Inner voice", &s->inner_voice, ONOFF, 2);
-    if (c->m->discord_ok) changed |= cycle(c, rx, ry + 100, rw, "Discord status", &s->discord, ONOFF, 2);
+    static const char *const COLLAPSE[] = {"Stay in head", "Behind the body", "Look around"}; /* COLLAPSE_* */
+    changed |= cycle(c, rx, ry + 100, rw, "Camera on collapse", &s->collapse_camera, COLLAPSE, 3);
+    if (c->m->discord_ok) changed |= cycle(c, rx, ry + 120, rw, "Discord status", &s->discord, ONOFF, 2);
     return changed;
 }
 
@@ -389,7 +393,7 @@ static void settings_screen(ctx *c, settings *s)
     menu *m = c->m;
     backdrop(c);
     float x = 0.0f, y = 0.0f;
-    const float w = 300, h = 296;
+    const float w = 300, h = 316;
     panel(u, m->age, w, h, &x, &y, "SETTINGS");
     static const char *const TABS[SETTINGS_TABS] = {"Video", "Display", "Controls", "Audio"};
     float tw = (w - 16 - 4.0f * (SETTINGS_TABS - 1)) / (float)SETTINGS_TABS;
@@ -429,6 +433,7 @@ static void controls_screen(ctx *c)
         {"E / R", "Eat / drink"},
         {"F2 / F11", "Screenshot / fullscreen"},
         {"F3", "Debug overlay (K: injury menu)"},
+        {"F5", "Camera: first person, behind, in front"},
         {"T / Esc", "Chat (multiplayer) / pause"},
     };
     const int n = (int)(sizeof KEYS / sizeof KEYS[0]);

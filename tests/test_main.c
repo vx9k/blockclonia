@@ -694,6 +694,125 @@ static void test_sprint_sneak(void)
     tw_free(&t);
 }
 
+static double cam_dist(dvec3 a, dvec3 b) { return dv3_len(dv3(a.x - b.x, a.y - b.y, a.z - b.z)); }
+
+/* No solid block within r of p, in any of the box's corners or its centre. */
+static int cam_clear(const world *w, dvec3 p, double r)
+{
+    for (int i = 0; i < 9; i++) {
+        double x = p.x + (i == 8 ? 0.0 : ((i & 1) ? r : -r));
+        double y = p.y + (i == 8 ? 0.0 : ((i & 2) ? r : -r));
+        double z = p.z + (i == 8 ? 0.0 : ((i & 4) ? r : -r));
+        if (block_solid(world_get(w, (int)floor(x), (int)floor(y), (int)floor(z)))) return 0;
+    }
+    return 1;
+}
+
+/* Eases a third-person arm from `from` metres for `secs` at `fps` in open
+ * air, and returns its length. */
+static float cam_ease(const world *w, dvec3 head, float from, float secs, int fps)
+{
+    float arm = from;
+    for (int i = 0; i < (int)(secs * (float)fps + 0.5f); i++)
+        (void)camera_third(w, &arm, head, 0.3f, -0.2f, 0, 4.0f, 1.0f / (float)fps);
+    return arm;
+}
+
+static void test_camera_third(void)
+{
+    /* F5 cycles first person, behind and in front; the free camera only
+     * joins the cycle while the debug view is on. */
+    CHECK(camera_next(CAM_FIRST, 0) == CAM_BEHIND && camera_next(CAM_BEHIND, 0) == CAM_FRONT);
+    CHECK(camera_next(CAM_FRONT, 0) == CAM_FIRST && camera_next(CAM_FRONT, 1) == CAM_FREE);
+    CHECK(camera_next(CAM_FREE, 1) == CAM_FIRST && camera_next(CAM_FREE, 0) == CAM_FIRST);
+    CHECK(camera_mode_parse("back") == CAM_BEHIND && camera_mode_parse("front") == CAM_FRONT);
+    CHECK(camera_mode_parse("first") == CAM_FIRST && camera_mode_parse("free") == CAM_FREE);
+    CHECK(camera_mode_parse("sideways") < 0 && camera_mode_parse("") < 0);
+
+    test_world t = {0};
+    tw_init(&t);
+    dvec3 head = dv3(0.5, GROUND + 1.62, 0.5);
+    /* Behind, in open air: the arm reaches its length, and the camera sits
+     * on the line of the player's look, so the crosshair stays true. */
+    float arm = 0.0f;
+    camera_view v = {0};
+    for (int i = 0; i < 120; i++) v = camera_third(&t.w, &arm, head, 0.8f, -0.3f, 0, 3.5f, 1.0f / 60.0f);
+    vec3 look = look_dir(0.8f, -0.3f);
+    CHECK(fabsf(arm - 3.5f) < 0.02f && fabs(cam_dist(v.eye, head) - 3.5) < 0.02);
+    CHECK(fabs(v.eye.x + (double)(look.x * 3.5f) - head.x) < 0.03 &&
+          fabs(v.eye.y + (double)(look.y * 3.5f) - head.y) < 0.03 &&
+          fabs(v.eye.z + (double)(look.z * 3.5f) - head.z) < 0.03);
+    CHECK(v.yaw == 0.8f && v.pitch == -0.3f);
+    /* In front, it looks back at the face. */
+    v = camera_third(&t.w, &arm, head, 0.8f, -0.3f, 1, 3.5f, 1.0f / 60.0f);
+    vec3 back = look_dir(v.yaw, v.pitch);
+    CHECK(fabs(v.eye.x - (double)(look.x * 3.5f) - head.x) < 0.03 &&
+          fabs(v.eye.y - (double)(look.y * 3.5f) - head.y) < 0.03);
+    CHECK(fabsf(back.x + look.x) < 0.01f && fabsf(back.y + look.y) < 0.01f && fabsf(back.z + look.z) < 0.01f);
+
+    /* A wall 1.5 m behind: the arm is short at once, never through it. */
+    for (int y = GROUND; y < GROUND + 4; y++)
+        for (int x = -4; x <= 4; x++) world_set(&t.w, x, y, 2, B_STONE, 0); /* yaw 0 looks to -z, so +z is behind */
+    arm = 3.5f;
+    v = camera_third(&t.w, &arm, head, 0.0f, 0.0f, 0, 3.5f, 1.0f / 60.0f);
+    CHECK(v.eye.z < 2.0 - 0.1 && cam_clear(&t.w, v.eye, 0.1));
+
+    /* A small room with a low ceiling: from every direction, the camera
+     * stays out of the blocks. */
+    for (int y = GROUND; y < GROUND + 4; y++)
+        for (int z = -3; z <= 3; z++)
+            for (int x = -3; x <= 3; x++)
+                if (abs(x) == 3 || abs(z) == 3 || y == GROUND + 2) world_set(&t.w, x, y, z, B_STONE, 0);
+                else world_set(&t.w, x, y, z, B_AIR, 0);
+    int clear = 1;
+    uint32_t seed = 7;
+    for (int i = 0; i < 400; i++) {
+        seed = seed * 1664525u + 1013904223u;
+        float yaw = (float)(seed >> 8) / 16777216.0f * 6.2831853f;
+        seed = seed * 1664525u + 1013904223u;
+        float pitch = ((float)(seed >> 8) / 16777216.0f - 0.5f) * 3.0f;
+        dvec3 h = dv3(-1.5 + (double)(i % 4), GROUND + 1.62, -1.5 + (double)(i / 4 % 4));
+        arm = 3.5f;
+        v = camera_third(&t.w, &arm, h, yaw, pitch, i & 1, 3.5f, 1.0f / 60.0f);
+        clear &= cam_clear(&t.w, v.eye, 0.1);
+    }
+    CHECK(clear);
+    tw_free(&t);
+
+    /* Once the way clears, the arm eases back out: not in one jump, and
+     * the same at 30 and 144 frames a second. */
+    test_world o = {0};
+    tw_init(&o);
+    float early = cam_ease(&o.w, head, 1.0f, 0.1f, 60);
+    float a30 = cam_ease(&o.w, head, 1.0f, 0.5f, 30), a144 = cam_ease(&o.w, head, 1.0f, 0.5f, 144);
+    CHECK(early > 1.05f && early < 3.0f);
+    CHECK(fabsf(a30 - a144) < 0.02f && a30 > early);
+    tw_free(&o);
+
+    /* A body that is down is watched around its middle, 0.8 m ahead of the
+     * feet along its facing; fallen against a step, the point pulls back
+     * toward the feet, out of the block, so the arm has air to grow in. */
+    test_world b = {0};
+    tw_init(&b);
+    dvec3 feet = dv3(0.5, GROUND, 0.5);
+    dvec3 mid = camera_body_pivot(&b.w, feet, 0.0f);
+    CHECK(fabs(mid.z - (0.5 - 0.8)) < 1e-6 && fabs(mid.y - (GROUND + 0.5)) < 1e-6 && fabs(mid.x - 0.5) < 1e-6);
+    world_set(&b.w, 0, GROUND, -1, B_STONE, 0); /* yaw 0 faces -z */
+    mid = camera_body_pivot(&b.w, feet, 0.0f);
+    CHECK(!block_solid(world_get(&b.w, (int)floor(mid.x), (int)floor(mid.y), (int)floor(mid.z))));
+    CHECK(mid.z >= 0.0 && mid.z <= 0.5);
+    float barm = 0.0f;
+    for (int i = 0; i < 120; i++) (void)camera_third(&b.w, &barm, mid, 0.0f, -0.6f, 0, 4.0f, 1.0f / 60.0f);
+    CHECK(barm > 3.0f);
+    tw_free(&b);
+
+    /* The free camera flies where it looks, at the speed asked. */
+    dvec3 at = camera_fly(dv3(0, 50, 0), 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 8.0f, 0.5f);
+    CHECK(fabs(at.z + 4.0) < 1e-3 && fabs(at.x) < 1e-3 && fabs(at.y - 50.0) < 1e-3);
+    at = camera_fly(dv3(0, 50, 0), 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 8.0f, 0.5f);
+    CHECK(fabs(at.x - 4.0) < 1e-3 && fabs(at.y - 54.0) < 1e-3);
+}
+
 static void test_camera(void)
 {
     camera_anim c = {0};
@@ -1812,6 +1931,8 @@ static void test_settings(void)
     s.smooth_light = 0;
     s.bloom = BLOOM_ON;
     s.shadows = SHADOW_OFF;
+    s.camera_distance = 6;
+    s.collapse_camera = COLLAPSE_LOOK;
     int n = settings_format(&s, buf, (int)sizeof buf);
     CHECK(n > 0 && n < (int)sizeof buf);
     CHECK(strstr(buf, "smooth_light 0\n") != NULL); /* saved under its key */
@@ -1822,6 +1943,13 @@ static void test_settings(void)
     settings_default(&t);
     CHECK(settings_parse(&t, "fov 500\nfov 12x\nbogus 3\n# fov 80\nsensitivity 250\r\nvsync -1\n fov 60\n") == 1);
     CHECK(t.fov == 70 && t.sensitivity == 250 && t.vsync == 1);
+    /* The third-person arm is 2 to 8 m, 4 by default; the camera stays in
+     * the head on collapse unless the player asks for it to leave. */
+    settings_default(&t);
+    CHECK(t.camera_distance == 4 && t.collapse_camera == COLLAPSE_OFF);
+    CHECK(settings_parse(&t, "camera_distance 1\ncamera_distance 9\ncollapse_camera 3\n") == 0);
+    CHECK(settings_parse(&t, "camera_distance 8\ncollapse_camera 1\n") == 2);
+    CHECK(t.camera_distance == 8 && t.collapse_camera == COLLAPSE_BEHIND);
     /* Smooth lighting is on unless a file turns it off; a file from before
      * the setting keeps it on. */
     settings_default(&t);
@@ -2265,6 +2393,7 @@ int main(void)
     test_friction();
     test_sprint_sneak();
     test_camera();
+    test_camera_third();
     test_structure();
     test_structure_budget();
     test_buoyancy();

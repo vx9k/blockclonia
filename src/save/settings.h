@@ -32,7 +32,13 @@ typedef struct {
     int flicker;          /* flames and carried fire waver; off: they burn steady, for light-sensitive eyes */
     int shadows;          /* SHADOW_OFF, SHADOW_ON or SHADOW_AUTO (shadow.h): the sun's and moon's shadows */
     int sway; /* leaves and plants move in the wind; off: they stand still, for motion-sensitive eyes */
+    int camera_distance; /* m from the head to a third-person camera */
+    int collapse_camera; /* COLLAPSE_*: where the camera goes while the body is down or dead */
 } settings;
+
+/* The camera while the player is unresponsive or dead: stays in the head,
+ * follows the body from behind, or can be turned around the body. */
+enum { COLLAPSE_OFF, COLLAPSE_BEHIND, COLLAPSE_LOOK };
 
 #define SETTINGS_FOV_MIN 50
 #define SETTINGS_FOV_MAX 110
@@ -44,6 +50,8 @@ typedef struct {
 /* Values below SETTINGS_FPS_MIN (except 0, no limit) are raised to it. */
 #define SETTINGS_FPS_MIN 20
 #define SETTINGS_FPS_MAX 360
+#define SETTINGS_CAM_MIN 2
+#define SETTINGS_CAM_MAX 8
 
 /* The values a fresh install starts with. */
 void settings_default(settings *s);

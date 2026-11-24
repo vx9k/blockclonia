@@ -84,6 +84,7 @@ typedef struct {
     int world_given;     /* --world or --no-save: play that, never the backdrop */
     const char *screen;  /* open this screen at start (screenshots) */
     int debug;           /* start with F3 on */
+    int camera;          /* --camera: CAM_* + 1, 0 for first person */
     const char *give;    /* items to start with: "stone:32,apple:3" */
     const char *mobs;    /* creatures to stand in front of the player: "wolf,boar" */
     const char *figures; /* players' figures to stand in front: "walk,run" */
@@ -117,6 +118,7 @@ typedef struct {
     int respawn;
     int screen;         /* menu screen, SCREEN_NONE while playing */
     int debug;          /* F3 overlay */
+    int cycle_camera;   /* F5 pressed */
     int lost_focus;     /* the window lost focus: pause */
     int focused;        /* the window has the keyboard (for mute in background) */
     int focus_changed;
@@ -230,6 +232,8 @@ static void usage(void)
            "                    create, multiplayer, pause, settings, controls or\n"
            "                    debug-health at start\n"
            "  --debug           start with the F3 overlay on\n"
+           "  --camera NAME     start in the first, back or front view, or the free\n"
+           "                    camera (debug)\n"
            "  --give LIST       start with items, e.g. log:8,sand:4 (names as shown in game)\n"
            "  --mobs LIST       stand creatures 4 m in front of you, e.g. wolf,boar\n"
            "  --figures LIST    stand players' figures 4 m in front of you, moving on the\n"
@@ -372,6 +376,10 @@ static int parse_value_option(options *o, const char *a, const char *v, int *ok)
     } else if (strcmp(a, "--screen") == 0) {
         *ok = valid_screen(v);
         o->screen = v;
+    } else if (strcmp(a, "--camera") == 0) {
+        int m = camera_mode_parse(v);
+        *ok = m >= 0;
+        o->camera = m + 1;
     } else if (strcmp(a, "--screenshot") == 0) {
         o->screenshot = v;
     } else if (strcmp(a, "--give") == 0) {
@@ -487,6 +495,7 @@ static void key_cb(GLFWwindow *win, int key, int sc, int action, int mods)
     if (action == GLFW_PRESS && key == GLFW_KEY_F2) g_in.want_shot = 1;
     if (action == GLFW_PRESS && key == GLFW_KEY_F11) g_in.toggle_fullscreen = 1;
     if (action == GLFW_PRESS && key == GLFW_KEY_F3 && g_in.screen != SCREEN_TITLE) g_in.debug = !g_in.debug;
+    if (action == GLFW_PRESS && key == GLFW_KEY_F5 && g_in.screen == SCREEN_NONE) g_in.cycle_camera = 1;
     if (g_in.screen != SCREEN_NONE) {
         menu_key(key, action);
         return;
@@ -1007,6 +1016,12 @@ typedef struct {
     int actions;              /* blocks broken or placed since the last physics step */
     menu mn;
     camera_anim cam;
+    camera_mode cam_mode;                 /* F5: first person, behind, in front, or the free camera */
+    float cam_arm;                        /* m, the third-person arm's eased length */
+    dvec3 free_at;                        /* the free camera, once placed (free_set) */
+    float free_yaw, free_pitch;
+    int free_set;
+    float orbit_yaw, orbit_pitch;         /* turned around a collapsed body (COLLAPSE_LOOK) */
     debug_frames dframes;
     float phys_ms;
     char versions[128];
@@ -1173,6 +1188,21 @@ static void frame_sound(game *g, double dt, const render_view *v)
     if (g_in.inv_open != g->snd_inv_open) sound_play(g->snd, g_in.inv_open ? SND_UI_OPEN : SND_UI_CLOSE, NULL, 0, 0.6f);
     g->snd_inv_open = g_in.inv_open;
     sound_update(g->snd, (float)dt);
+}
+
+/* The body can't hold itself up or look for itself: unresponsive, coming
+ * round on the ground, or dead. */
+static int body_down(const game *g)
+{
+    return mode_body(g->pl.mode) && (g->hl.dead || !health_awake(&g->hl) || g->hl.down > 0.0f);
+}
+
+/* The view this frame: the player's choice, unless the body is down and
+ * the collapse setting takes the camera out of the head. */
+static camera_mode view_mode(const game *g)
+{
+    if (g->cam_mode != CAM_FREE && body_down(g) && g->st.collapse_camera != COLLAPSE_OFF) return CAM_BEHIND;
+    return g->cam_mode;
 }
 
 /* Drops a stack in front of the player (inventory closed with a stack on
@@ -1720,6 +1750,7 @@ static void game_init(game *g)
     g_in.slot = -1;
     g_in.panel = g->o.open_panel;
     g_in.debug = g->o.debug;
+    g->cam_mode = g->o.camera ? (camera_mode)(g->o.camera - 1) : CAM_FIRST;
     open_start_screen(g);
     refresh_worlds(g); /* --screen worlds opens the list without asking for it */
     if (g->mn.screen == SCREEN_BACKUPS) refresh_backups(g, g->world_count ? &g->world_list[0] : NULL);
@@ -1810,6 +1841,15 @@ static void frame_menus(game *g, double dt)
      * so does coming round on the ground after a faint. */
     g->frozen = g->in_menu || g_in.panel || g_in.inv_open || g_in.chat_open || g->hl.dead || !health_awake(&g->hl) ||
                 g->hl.down > 0.0f;
+    /* Looking around a collapsed body: the mouse turns the camera, not the
+     * body, which can't move. */
+    if (body_down(g) && g->st.collapse_camera == COLLAPSE_LOOK && !g->in_menu && !g_in.panel) {
+        float sens = 0.0022f * (float)g->st.sensitivity / 100.0f;
+        g->orbit_yaw += (float)g_in.mouse_dx * sens;
+        g->orbit_pitch = clampf(g->orbit_pitch - (float)g_in.mouse_dy * sens, -0.7f, 1.4f);
+    } else if (!body_down(g)) {
+        g->orbit_yaw = g->orbit_pitch = 0.0f;
+    }
     if (g->frozen) g_in.mouse_dx = g_in.mouse_dy = 0;
 }
 
@@ -1847,6 +1887,19 @@ static player_input frame_input(game *g, double now, double dt)
     }
     if (g_in.slot >= 0 && g_in.slot < INV_HOTBAR) g->inv.selected = g_in.slot;
     g_in.slot = -1;
+    if (g_in.cycle_camera) {
+        g->cam_mode = camera_next(g->cam_mode, g_in.debug);
+        g->free_set = 0;
+        g_in.cycle_camera = 0;
+    }
+    if (g->cam_mode == CAM_FREE && !g->free_set) {
+        vec3 back = look_dir(pl->yaw, pl->pitch); /* starts 3 m behind the head, the body in view */
+        g->free_at = dv3(pl->pos.x - (double)back.x * 3.0, pl->pos.y + PLAYER_EYE - (double)back.y * 3.0,
+                         pl->pos.z - (double)back.z * 3.0);
+        g->free_yaw = pl->yaw;
+        g->free_pitch = pl->pitch;
+        g->free_set = 1;
+    }
     if (g_in.toggle_fly) {
         gamemode_toggle_fly(pl);
         g_in.toggle_fly = 0;
@@ -1863,6 +1916,17 @@ static player_input frame_input(game *g, double now, double dt)
     if (!st->sprint_toggle) g_in.sprint_latch = 0;
     in.sprint = (st->sprint_toggle ? g_in.sprint_latch : g_in.keys[GLFW_KEY_LEFT_CONTROL]) || g_in.sprint_tap;
     if (g->frozen) memset(&in, 0, sizeof in);
+    if (g->cam_mode == CAM_FREE && !g->frozen) {
+        /* The free camera takes the keys and the mouse; the body stands. */
+        float up = (float)(g_in.keys[GLFW_KEY_SPACE] - g_in.keys[GLFW_KEY_LEFT_SHIFT]);
+        g->free_at = camera_fly(g->free_at, g->free_yaw, g->free_pitch, in.forward, in.right, up,
+                                in.sprint ? 24.0f : 8.0f, (float)dt);
+        g->free_yaw = fmodf(g->free_yaw + g->look_dx, (float)(2 * MC_PI));
+        g->free_pitch = clampf(g->free_pitch - g->look_dy * (st->invert_y ? -1.0f : 1.0f), -1.55f, 1.55f);
+        g->look_dx = g->look_dy = 0.0f;
+        memset(&in, 0, sizeof in);
+        g_in.click_break = g_in.click_place = 0;
+    }
     /* A clouded mind acts on the player's hands late and not always: the
      * look, the keys and the clicks all pass through it together. */
     if (mode_body(pl->mode) && !g->in_menu) {
@@ -2017,7 +2081,8 @@ static void frame_interact(game *g, double dt)
     g->eye = dv3(pl->pos.x, pl->pos.y + PLAYER_EYE - (double)g->cam.crouch, pl->pos.z);
     g->look = look_dir(pl->yaw, pl->pitch);
     g->hit = physics_raycast(&g->w, g->eye, g->look, REACH);
-    if (!mode_hands(pl->mode)) g->hit.hit = 0; /* a spectator selects nothing */
+    /* A spectator, a body that is down and the free camera select nothing. */
+    if (!mode_hands(pl->mode) || body_down(g) || g->cam_mode == CAM_FREE) g->hit.hit = 0;
     if (g->client) {
         client_hands(g, dt);
         return;
@@ -2201,6 +2266,26 @@ static void add_self(game *g, dvec3 eye, double alpha, const lightfx_frame *lf, 
     *n_op += k;
 }
 
+/* The player's whole figure, for the third-person and free cameras: head
+ * and all, lying on its front while the body is down. */
+static void add_self_whole(game *g, dvec3 eye, double alpha, const lightfx_frame *lf, float dt, int lying, int *n_op,
+                           int n_tr)
+{
+    if (RENDER_MAX_ENTS - *n_op - n_tr < AVATAR_BOXES) return;
+    const player *pl = &g->pl;
+    dvec3 ip = dv3_lerp(pl->prev_pos, pl->pos, alpha);
+    avatar_anim_update(&g->self_anim, ip.x, ip.z, pl->sneaking, pl->flying, dt);
+    memmove(g->ents + *n_op + AVATAR_BOXES, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);
+    const float feet[3] = {(float)(ip.x - eye.x), (float)(ip.y - eye.y), (float)(ip.z - eye.z)};
+    float rgb[3] = {1.0f, 1.0f, 1.0f};
+    float lit = figure_light(g, lf, eye, dv3(ip.x, ip.y + 1.0, ip.z), rgb);
+    int k = avatar_build(&g->self_anim, feet, pl->yaw, lying ? 0.0f : pl->pitch, lying, lit, g->ents + *n_op,
+                         AVATAR_BOXES);
+    memmove(g->ents + *n_op + k, g->ents + *n_op + AVATAR_BOXES, sizeof g->ents[0] * (size_t)n_tr);
+    entity_shine(g->ents + *n_op, k, rgb);
+    *n_op += k;
+}
+
 /* Creatures as figures among the opaque entities: the ones simulated here,
  * or on a client the ones the host last sent. */
 static void add_mobs(game *g, dvec3 eye, double alpha, const lightfx_frame *lf, double now, int *n_op, int n_tr)
@@ -2269,10 +2354,43 @@ static render_view build_view(game *g, double now, double dt, double alpha)
         v.pitch = -0.32f;
         v.roll = 0.0f;
     }
+    camera_mode cm = on_title ? CAM_FIRST : view_mode(g);
+    if (cm == CAM_FREE) {
+        v.eye = g->free_at;
+        v.yaw = g->free_yaw;
+        v.pitch = g->free_pitch;
+        v.roll = 0.0f;
+    } else if (cm != CAM_FIRST) {
+        /* On an arm from the head; a body that is down is looked at from
+         * above, around its middle, and the mouse may turn the view. */
+        dvec3 head = dv3(ip.x, ip.y + PLAYER_EYE - (double)g->cam.crouch, ip.z);
+        float yaw = pl->yaw, pitch = pl->pitch;
+        if (body_down(g)) {
+            head = camera_body_pivot(&g->w, ip, pl->yaw);
+            yaw += g->orbit_yaw;
+            pitch = -0.6f - g->orbit_pitch;
+        }
+        camera_view cv = camera_third(&g->w, &g->cam_arm, head, yaw, pitch, cm == CAM_FRONT,
+                                      (float)g->st.camera_distance, (float)dt);
+        v.eye = cv.eye;
+        v.yaw = cv.yaw;
+        v.pitch = cv.pitch;
+        v.roll = 0.0f;
+    } else {
+        g->cam_arm = 0.0f; /* eases out again from the head next time */
+    }
     if (!on_title) {
         /* A hurt brain or a concussion: the view drifts and rolls. Only the
          * view: aiming follows the player's own look. */
         health_senses hs = health_get_senses(&g->hl);
+        if (cm != CAM_FIRST && body_down(g)) {
+            /* The camera has left the head: what the eyes don't see (the
+             * dark, the tunnel, the doubling) isn't its view. A dimmer, greyer
+             * world still says the body is down. */
+            hs.sway = hs.blur = hs.doubled = hs.tunnel = 0.0f;
+            hs.dim = fminf(hs.dim, 0.45f);
+            hs.grey = fmaxf(hs.grey, 0.5f);
+        }
         float sway = hs.sway;
         v.roll += sway * 0.07f * sinf((float)now * 0.9f);
         v.yaw += sway * 0.03f * sinf((float)now * 0.53f);
@@ -2332,7 +2450,9 @@ static render_view build_view(game *g, double now, double dt, double alpha)
                               hand_light,
                               (float)dt};
         v.view_model = g->vm_ents;
-        v.view_model_count = mode_hands(g->pl.mode) ? viewmodel_build(&g->vm, &vi, g->vm_ents, VIEWMODEL_MAX) : 0;
+        v.view_model_count = mode_hands(g->pl.mode) && cm == CAM_FIRST
+                                 ? viewmodel_build(&g->vm, &vi, g->vm_ents, VIEWMODEL_MAX)
+                                 : 0;
         entity_shine(g->vm_ents, v.view_model_count, hand_rgb);
         /* Shaking hands (adrenaline, the crash after it, low sugar, cold). */
         float tremor = health_get_senses(&g->hl).tremor;
@@ -2347,14 +2467,21 @@ static render_view build_view(game *g, double now, double dt, double alpha)
     if (g->mp) add_players(g, v.eye, alpha, now, &v.lfx, (float)dt, &n_op, n_tr);
     if (!on_title) {
         add_figures(g, v.eye, &v.lfx, (float)dt, &n_op, n_tr);
-        if (mode_hands(g->pl.mode) && !g->hl.dead) add_self(g, v.eye, alpha, &v.lfx, (float)dt, &n_op, n_tr);
+        if (cm == CAM_FIRST && mode_hands(g->pl.mode) && !g->hl.dead) {
+            add_self(g, v.eye, alpha, &v.lfx, (float)dt, &n_op, n_tr);
+        } else if (cm != CAM_FIRST && mode_hands(g->pl.mode) && (cm == CAM_FREE || g->cam_arm > 0.6f)) {
+            /* Closer than that the camera is inside the head. */
+            add_self_whole(g, v.eye, alpha, &v.lfx, (float)dt, body_down(g), &n_op, n_tr);
+        }
         add_mobs(g, v.eye, alpha, &v.lfx, now, &n_op, n_tr);
         add_tracers(g, v.eye, alpha, &n_op, n_tr);
     }
     v.ents = g->ents;
     v.ent_opaque = n_op;
     v.ent_trans = n_tr;
-    v.hide_crosshair = g->frozen || on_title || g->aim > 0.5f; /* the sights take its place */
+    /* The sights take its place; from behind it stays true (the camera is on
+     * the line of the look), elsewhere it would point at nothing. */
+    v.hide_crosshair = g->frozen || on_title || g->aim > 0.5f || (cm != CAM_FIRST && cm != CAM_BEHIND);
     return v;
 }
 
