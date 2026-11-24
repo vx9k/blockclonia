@@ -59,6 +59,23 @@ int avatar_build(const avatar_anim *a, const float feet[3], float yaw, float pit
 int avatar_build_self(const avatar_anim *a, const float eye[3], float feet_y, float yaw, float pitch, float light,
                       entity_instance *out, int max);
 
+/* Where each bone of the figure avatar_build draws sits, relative to its
+ * feet, and how it is turned; and where its eyes are. For what follows
+ * the body as it moves, such as the wounds bleeding. */
+typedef struct {
+    float at[AVATAR_BONES][3];
+    quat q[AVATAR_BONES];
+    float eyes[3];
+} avatar_pose;
+
+void avatar_pose_get(const avatar_anim *a, float yaw, float pitch, int dead, avatar_pose *out);
+
+/* Carries a point and a direction given on the still standing figure
+ * facing -z (x its right, y up, from its feet) to the same place on bone
+ * `bone` of the posed figure p. */
+void avatar_pose_map(const avatar_pose *p, int bone, const float at[3], const float dir[3], float at_out[3],
+                     float dir_out[3]);
+
 /* The bone box i hangs from, and a bone's parent (-1 for the pelvis); for
  * the tests that look for boxes passing into each other. */
 int avatar_box_bone(int box);

@@ -1385,12 +1385,23 @@ static void restart_blood(game *g)
 }
 
 /* This frame's blood from the player's wounds, the arteries surging with
- * the pressure wave in the aorta. A spectator has no body to bleed. */
+ * the pressure wave in the aorta. It leaves the body as it is drawn:
+ * crouched, walking, or lying on the ground once it is down; seen from
+ * the eyes, the figure stands with its eyes over the feet. A spectator
+ * has no body to bleed. */
 static void bleed(game *g, double dt)
 {
     blood_source src[BLOOD_SOURCES] = {0};
     const player *pl = &g->pl;
-    int n = mode_hands(pl->mode) ? blood_from_health(&g->hl, pl->pos, pl->yaw, src) : 0;
+    int lying = body_down(g);
+    avatar_pose pose = {0};
+    avatar_pose_get(&g->self_anim, pl->yaw, lying ? 0.0f : pl->pitch, lying, &pose);
+    dvec3 feet = pl->pos;
+    if (view_mode(g) == CAM_FIRST && !g->hl.dead) {
+        feet.x -= (double)pose.eyes[0];
+        feet.z -= (double)pose.eyes[2];
+    }
+    int n = mode_hands(pl->mode) ? blood_from_health(&g->hl, &pose, feet, src) : 0;
     blood_bleed(g->blood, src, n, g->hl.cv.wave_ao, g->hl.map, g->hl.sao2, pl->vel, (float)dt);
     blood_step(g->blood, &g->w, (float)dt);
 }

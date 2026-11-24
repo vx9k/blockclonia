@@ -371,9 +371,10 @@ static void pose_joints(const avatar_anim *a, joints *j)
 static const float EYES[3] = {0.0f, 0.115f, -0.1f};
 
 /* Poses every box with the root at the origin, before standing the figure
- * on its lowest point (returned). eyes gets where the eyes are. */
+ * on its lowest point (returned). eyes gets where the eyes are, and bones
+ * (if not NULL) every bone. */
 static float pose(const avatar_anim *a, float yaw, float pitch, int dead, float light, entity_instance *e,
-                  float eyes[3])
+                  float eyes[3], xform *bones)
 {
     joints j = {0};
     pose_joints(a, &j);
@@ -395,6 +396,7 @@ static float pose(const avatar_anim *a, float yaw, float pitch, int dead, float 
         for (int k = 0; k < 3; k++) w[b].p[k] = (p < 0 ? 0.0f : w[p].p[k]) + off[k];
         w[b].q = quat_norm(quat_mul(pq, turn[b]));
     }
+    if (bones) memcpy(bones, w, sizeof w);
 
     float at[3] = {0};
     quat_apply(w[AV_HEAD].q, EYES, at);
@@ -434,7 +436,7 @@ int avatar_build(const avatar_anim *a, const float feet[3], float yaw, float pit
     if (!out || max <= 0) return 0;
     entity_instance e[AVATAR_BOXES] = {0};
     float eyes[3] = {0};
-    float low = pose(a, yaw, pitch, dead, light, e, eyes);
+    float low = pose(a, yaw, pitch, dead, light, e, eyes, NULL);
     /* Stand on the lowest point, a heel or a toe walking: the hips rise and
      * fall because the legs do, with no bob added. */
     int n = max < AVATAR_BOXES ? max : AVATAR_BOXES;
@@ -453,7 +455,7 @@ int avatar_build_self(const avatar_anim *a, const float eye[3], float feet_y, fl
     if (!out || max <= 0) return 0;
     entity_instance e[AVATAR_BOXES] = {0};
     float eyes[3] = {0};
-    float low = pose(a, yaw, pitch, 0, light, e, eyes);
+    float low = pose(a, yaw, pitch, 0, light, e, eyes, NULL);
     const float shift[3] = {eye[0] - eyes[0], feet_y - low, eye[2] - eyes[2]};
     int n = 0;
     for (int i = 0; i < AVATAR_BOXES && n < max; i++) {
@@ -464,4 +466,36 @@ int avatar_build_self(const avatar_anim *a, const float eye[3], float feet_y, fl
         n++;
     }
     return n;
+}
+
+void avatar_pose_get(const avatar_anim *a, float yaw, float pitch, int dead, avatar_pose *out)
+{
+    entity_instance e[AVATAR_BOXES] = {0};
+    xform w[AVATAR_BONES] = {0};
+    float low = pose(a, yaw, pitch, dead, 1.0f, e, out->eyes, w);
+    for (int b = 0; b < AVATAR_BONES; b++) {
+        for (int k = 0; k < 3; k++) out->at[b][k] = w[b].p[k];
+        out->at[b][1] -= low;
+        out->q[b] = w[b].q;
+    }
+    out->eyes[1] -= low;
+}
+
+void avatar_pose_map(const avatar_pose *p, int bone, const float at[3], const float dir[3], float at_out[3],
+                     float dir_out[3])
+{
+    avatar_anim still = {0};
+    avatar_pose ref = {0};
+    avatar_pose_get(&still, 0.0f, 0.0f, 0, &ref);
+    int b = bone >= 0 && bone < AVATAR_BONES ? bone : AV_CHEST;
+    /* Into the bone's own frame on the standing figure, then out of it
+     * where the bone is now. */
+    quat inv = {-ref.q[b].x, -ref.q[b].y, -ref.q[b].z, ref.q[b].w};
+    const float rel[3] = {at[0] - ref.at[b][0], at[1] - ref.at[b][1], at[2] - ref.at[b][2]};
+    float local[3] = {0}, ldir[3] = {0}, o[3] = {0};
+    quat_apply(inv, rel, local);
+    quat_apply(inv, dir, ldir);
+    quat_apply(p->q[b], local, o);
+    for (int k = 0; k < 3; k++) at_out[k] = p->at[b][k] + o[k];
+    quat_apply(p->q[b], ldir, dir_out);
 }
