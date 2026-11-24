@@ -55,7 +55,8 @@ typedef struct tag_table {
 #define TAG_ELEMS(T, f, size) ((uint16_t)(sizeof(((T *)0)->f) / (size)))
 /* A field under another name than its member's (a renamed member); size
  * is the bytes of one element of the type. */
-#define TAG_AS(name, T, f, type, size, lo, hi) {name, (uint32_t)offsetof(T, f), type, TAG_ELEMS(T, f, size), 0, lo, hi, NULL}
+#define TAG_AS(name, T, f, type, size, lo, hi) \
+    {name, (uint32_t)offsetof(T, f), type, TAG_ELEMS(T, f, size), 0, lo, hi, NULL}
 /* A scalar or an array of one type; arrays take their length from the
  * member. The R forms limit the values. */
 #define TAG_F32(T, f) TAG_AS(#f, T, f, TAG_F32, 4u, 0, 0)
@@ -70,7 +71,7 @@ typedef struct tag_table {
 #define TAG_I64(T, f) TAG_AS(#f, T, f, TAG_I64, 8u, 0, 0)
 #define TAG_I64R(T, f, lo, hi) TAG_AS(#f, T, f, TAG_I64, 8u, lo, hi)
 /* A struct, or an array of them, of element type E described by table. */
-#define TAG_SUB(T, f, E, table)                                                                                        \
+#define TAG_SUB(T, f, E, table) \
     {#f, (uint32_t)offsetof(T, f), TAG_SUB, TAG_ELEMS(T, f, (size_t)sizeof(E)), (uint32_t)sizeof(E), 0, 0, &(table)}
 #define TAG_TABLE(fields) {(fields), sizeof(fields) / sizeof((fields)[0])}
 

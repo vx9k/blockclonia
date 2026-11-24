@@ -28,8 +28,14 @@ typedef struct {
 static const tag_field INNER_F[] = {TAG_I32R(inner, a, -10, 10), TAG_U8(inner, b)};
 static const tag_table INNER = TAG_TABLE(INNER_F);
 static const tag_field OUTER_F[] = {
-    TAG_F32(outer, f), TAG_F64(outer, d), TAG_I32(outer, i),     TAG_U32(outer, u),
-    TAG_U8R(outer, c, 0, 9), TAG_I64(outer, l), TAG_F32(outer, arr), TAG_SUB(outer, one, inner, INNER),
+    TAG_F32(outer, f),
+    TAG_F64(outer, d),
+    TAG_I32(outer, i),
+    TAG_U32(outer, u),
+    TAG_U8R(outer, c, 0, 9),
+    TAG_I64(outer, l),
+    TAG_F32(outer, arr),
+    TAG_SUB(outer, one, inner, INNER),
     TAG_SUB(outer, many, inner, INNER),
 };
 static const tag_table OUTER = TAG_TABLE(OUTER_F);
@@ -99,8 +105,8 @@ typedef struct {
 } later;
 
 static const tag_field LATER_F[] = {
-    TAG_F32(later, f), TAG_F64(later, d), TAG_F32(later, i), TAG_F32(later, arr), TAG_F32(later, added),
-    TAG_SUB(later, many, inner, INNER),
+    TAG_F32(later, f),   TAG_F64(later, d),     TAG_F32(later, i),
+    TAG_F32(later, arr), TAG_F32(later, added), TAG_SUB(later, many, inner, INNER),
 };
 static const tag_table LATER = TAG_TABLE(LATER_F);
 

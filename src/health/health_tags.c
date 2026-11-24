@@ -18,7 +18,6 @@ _Static_assert(sizeof(circ) == 1968, "a field changed in circ (circulation.h): u
 _Static_assert(sizeof(conduction) == 96, "a field changed in conduction (conduction.h): update COND_F");
 _Static_assert(sizeof(autonomic) == 2976, "a field changed in autonomic (autonomic.h): update ANS_F");
 
-
 static const tag_field PART_F[] = {
     TAG_F32(body_part, integrity),
     TAG_U8R(body_part, fracture, 0, FX_OPEN),
@@ -76,13 +75,11 @@ static const tag_field DEFIB_F[] = {
 static const tag_table DEFIB = TAG_TABLE(DEFIB_F);
 
 static const tag_field BASE_F[] = {
-    TAG_F32(health_baseline, hr_rest),      TAG_F32(health_baseline, map_set),
-    TAG_F32(health_baseline, pain_gain),    TAG_F32(health_baseline, clot_gain),
-    TAG_F32(health_baseline, metab_gain),   TAG_F32(health_baseline, cold_bias),
-    TAG_F32(health_baseline, heart_size),   TAG_F32(health_baseline, art_stiff),
-    TAG_F32(health_baseline, blood_per_kg), TAG_F32(health_baseline, baro_gain),
-    TAG_F32(health_baseline, venous_tone),  TAG_F32(health_baseline, symp_noise),
-    TAG_F32(health_baseline, hr_max),       TAG_I32R(health_baseline, vary, 0, 1),
+    TAG_F32(health_baseline, hr_rest),    TAG_F32(health_baseline, map_set),     TAG_F32(health_baseline, pain_gain),
+    TAG_F32(health_baseline, clot_gain),  TAG_F32(health_baseline, metab_gain),  TAG_F32(health_baseline, cold_bias),
+    TAG_F32(health_baseline, heart_size), TAG_F32(health_baseline, art_stiff),   TAG_F32(health_baseline, blood_per_kg),
+    TAG_F32(health_baseline, baro_gain),  TAG_F32(health_baseline, venous_tone), TAG_F32(health_baseline, symp_noise),
+    TAG_F32(health_baseline, hr_max),     TAG_I32R(health_baseline, vary, 0, 1),
 };
 static const tag_table BASE = TAG_TABLE(BASE_F);
 
@@ -159,19 +156,32 @@ static const tag_field COND_F[] = {
 static const tag_table COND = TAG_TABLE(COND_F);
 
 static const tag_field ANS_F[] = {
-    TAG_F32(autonomic, p_cs),       TAG_F32(autonomic, p_prev),
-    TAG_F32(autonomic, f_cs),       TAG_F32(autonomic, f_s),
-    TAG_F32(autonomic, f_v),        TAG_F32(autonomic, hist_s),
-    TAG_F32(autonomic, hist_v),     TAG_I32R(autonomic, hist_pos, 0, AUTO_HIST - 1),
-    TAG_I32R(autonomic, hist_n, 0, AUTO_HIST), TAG_F32(autonomic, eff_emax),
-    TAG_F32(autonomic, eff_r),      TAG_F32(autonomic, eff_v0),
-    TAG_F32(autonomic, eff_ts),     TAG_F32(autonomic, eff_tv),
-    TAG_F32(autonomic, ls0),        TAG_F32(autonomic, fv0),
-    TAG_F32(autonomic, t0),         TAG_F32(autonomic, command),
-    TAG_F32(autonomic, vagal_off),  TAG_F32(autonomic, ex_drive),
-    TAG_F32(autonomic, metab),      TAG_F32(autonomic, metab_fast),
-    TAG_F32(autonomic, metabo),     TAG_F32(autonomic, noise),
-    TAG_F32(autonomic, autoreg),    TAG_F32(autonomic, fail),
+    TAG_F32(autonomic, p_cs),
+    TAG_F32(autonomic, p_prev),
+    TAG_F32(autonomic, f_cs),
+    TAG_F32(autonomic, f_s),
+    TAG_F32(autonomic, f_v),
+    TAG_F32(autonomic, hist_s),
+    TAG_F32(autonomic, hist_v),
+    TAG_I32R(autonomic, hist_pos, 0, AUTO_HIST - 1),
+    TAG_I32R(autonomic, hist_n, 0, AUTO_HIST),
+    TAG_F32(autonomic, eff_emax),
+    TAG_F32(autonomic, eff_r),
+    TAG_F32(autonomic, eff_v0),
+    TAG_F32(autonomic, eff_ts),
+    TAG_F32(autonomic, eff_tv),
+    TAG_F32(autonomic, ls0),
+    TAG_F32(autonomic, fv0),
+    TAG_F32(autonomic, t0),
+    TAG_F32(autonomic, command),
+    TAG_F32(autonomic, vagal_off),
+    TAG_F32(autonomic, ex_drive),
+    TAG_F32(autonomic, metab),
+    TAG_F32(autonomic, metab_fast),
+    TAG_F32(autonomic, metabo),
+    TAG_F32(autonomic, noise),
+    TAG_F32(autonomic, autoreg),
+    TAG_F32(autonomic, fail),
 };
 static const tag_table ANS = TAG_TABLE(ANS_F);
 

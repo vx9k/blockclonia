@@ -146,7 +146,10 @@ static void test_body_missing_and_text(void)
     CHECK(survival_decode_player(&q, &inv, fresh, buf, n) == 0 && same(fresh, was, sizeof *was));
 
     health *h = battered(4, 0, 1, 0.5);
-    memcpy(h->log[0], "\x01" "bad\x7f", 6);
+    memcpy(h->log[0],
+           "\x01"
+           "bad\x7f",
+           6);
     memset(h->log[1], 'x', sizeof h->log[1]); /* no terminator */
     CHECK(trip(h, fresh) == 0);
     CHECK(strcmp(fresh->log[0], "?bad?") == 0 && strlen(fresh->log[1]) == sizeof h->log[1] - 1);
