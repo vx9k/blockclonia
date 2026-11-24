@@ -249,6 +249,53 @@ static void test_tagged_sections(void)
     }
 }
 
+/* Ranges include their ends, a range of 0..0 means any value, NaN is
+ * never accepted, and sections may come in any order or be unknown. */
+typedef struct {
+    int64_t big;
+    double any;
+    uint8_t small;
+} ranged;
+static const tag_field RANGED_F[] = {TAG_I64R(ranged, big, -5, 1e12), TAG_F64(ranged, any),
+                                     TAG_U8R(ranged, small, 2, 4)};
+static const tag_table RANGED = TAG_TABLE(RANGED_F);
+
+static int ranged_reads(int64_t big, double any, uint8_t small, ranged *out)
+{
+    ranged v = {big, any, small};
+    uint8_t buf[128] = {0};
+    size_t n = put(&v, &RANGED, buf, sizeof buf);
+    wire_r r = wire_reader(buf, n);
+    tag_get(&r, out, &RANGED);
+    return n && !r.bad;
+}
+
+static void test_tagged_edges(void)
+{
+    ranged got = {0};
+    CHECK(ranged_reads(-5, -1e308, 2, &got) && got.big == -5 && got.any == -1e308);
+    CHECK(ranged_reads(1000000000000LL, 1e308, 4, &got) && got.small == 4);
+    CHECK(!ranged_reads(-6, 0.0, 3, &got));
+    CHECK(!ranged_reads(1000000000001LL, 0.0, 3, &got));
+    CHECK(!ranged_reads(0, 0.0, 1, &got) && !ranged_reads(0, 0.0, 5, &got));
+    CHECK(!ranged_reads(0, (double)NAN, 3, &got));
+
+    /* Written two, two, read in the other order, with one the reader
+     * does not know and one it wants that is not there. */
+    uint8_t buf[512] = {0};
+    inner a = {5, {1, 1, 1}};
+    ranged b = {7, 0.5, 3};
+    tag_section out[] = {{"b", &b, NULL, &RANGED}, {"x", &a, NULL, &INNER}, {"a", &a, NULL, &INNER}};
+    wire_w w = wire_writer(buf, sizeof buf);
+    tag_put_sections(&w, out, 3);
+    inner ia = {0}, missing = {-1, {9, 9, 9}};
+    ranged ib = {0};
+    tag_section in[] = {{"a", NULL, &ia, &INNER}, {"gone", NULL, &missing, &INNER}, {"b", NULL, &ib, &RANGED}};
+    wire_r r = wire_reader(buf, w.len);
+    tag_get_sections(&r, in, 3);
+    CHECK(!r.bad && r.pos == w.len && ia.a == 5 && ib.big == 7 && ib.any == 0.5 && missing.a == -1);
+}
+
 void test_tagged_all(void)
 {
     test_tagged_sections();
@@ -256,4 +303,5 @@ void test_tagged_all(void)
     test_tagged_versions();
     test_tagged_damage();
     test_tagged_keys();
+    test_tagged_edges();
 }
