@@ -877,6 +877,66 @@ static void test_buoyancy(void)
     tw_free(&t);
 }
 
+/* A swimmer pressing toward the bank with jump held, in a pool whose
+ * banks rise `bank` blocks above the water (0: level with it). Returns the
+ * player once they stand on dry ground, or after `seconds`. */
+static player swim_to_bank(int bank, float forward, double seconds)
+{
+    test_world t = {0};
+    tw_init(&t);
+    for (int y = GROUND - 6; y < GROUND; y++)
+        for (int z = -3; z <= 3; z++)
+            for (int x = -3; x <= 3; x++) world_set(&t.w, x, y, z, B_WATER, 0);
+    for (int y = GROUND; y < GROUND + bank; y++)
+        for (int z = -4; z <= 4; z++) world_set(&t.w, 4, y, z, B_STONE, 0);
+    fluid_forget(&t.ph.fl);
+    player p = {0};
+    player_spawn(&p, &t.w, 0.5, 0.5);
+    p.pos = dv3(1.5, GROUND - 2.0, 0.5);
+    p.prev_pos = p.pos;
+    p.on_ground = 0;
+    p.yaw = 1.5707963f; /* facing +x, the bank at x = 4 */
+    player_input in = {0};
+    in.forward = forward;
+    in.jump = 1;
+    for (int i = 0; i < (int)(seconds * 60.0) && !(p.on_ground && p.submerged == 0.0); i++)
+        physics_step(&t.ph, &p, &in);
+    tw_free(&t);
+    return p;
+}
+
+static void test_swim_out(void)
+{
+    /* A swimmer gets out the way people do: hands on the edge, then press
+     * up and over. Onto a bank level with the water, and onto one a block
+     * above it, the swimmer ends up standing on top, out of the water. */
+    player p = swim_to_bank(0, 1.0f, 10.0);
+    CHECK(p.pos.x + PLAYER_HALF_W > 4.0 && fabs(p.pos.y - GROUND) < 0.01 && p.on_ground && p.submerged == 0.0);
+    p = swim_to_bank(1, 1.0f, 10.0);
+    CHECK(p.pos.x + PLAYER_HALF_W > 4.0 && fabs(p.pos.y - (GROUND + 1)) < 0.01 && p.on_ground);
+    /* A wall two blocks above the water is out of reach. */
+    p = swim_to_bank(2, 1.0f, 10.0);
+    CHECK(p.pos.x < 4.0 && p.pos.y < GROUND);
+    /* Treading water lifts the head out, not the whole body. */
+    p = swim_to_bank(0, 0.0f, 10.0);
+    CHECK(p.pos.y < GROUND && p.pos.x < 4.0);
+
+    /* On dry land a wall two blocks high can't be climbed this way. */
+    test_world t = {0};
+    tw_init(&t);
+    for (int y = GROUND; y < GROUND + 2; y++)
+        for (int z = -4; z <= 4; z++) world_set(&t.w, 4, y, z, B_STONE, 0);
+    player q = {0};
+    player_spawn(&q, &t.w, 2.5, 0.5);
+    q.yaw = 1.5707963f;
+    player_input in = {0};
+    in.forward = 1.0f;
+    in.jump = 1;
+    for (int i = 0; i < 180; i++) physics_step(&t.ph, &q, &in);
+    CHECK(q.pos.x < 4.0 && q.pos.y < GROUND + 1.0);
+    tw_free(&t);
+}
+
 static void test_settle(void)
 {
     test_world t = {0};
@@ -2208,6 +2268,7 @@ int main(void)
     test_structure();
     test_structure_budget();
     test_buoyancy();
+    test_swim_out();
     test_settle();
     test_fluid();
     test_raycast();
