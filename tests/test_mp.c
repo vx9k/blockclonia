@@ -254,8 +254,8 @@ static void check_saved_players(host_side *h, const nc_keypair *kh, const char *
     inventory kept = {0};
     inv_init(&kept);
     inv_add(&kept, I_COAL, 7);
-    uint8_t rec[PLAYER_FILE_SIZE] = {0};
-    size_t rn = survival_encode_player(&was, &kept, 0.5, rec, sizeof rec);
+    uint8_t rec[4096] = {0};
+    size_t rn = survival_encode_player(&was, &kept, NULL, rec, sizeof rec);
     nc_key_hex(kp[0].pk, khex);
     CHECK(rn && save_db_put_player(db, khex, rec, rn) == 0);
     nc_key_hex(kp[1].pk, khex);
@@ -275,12 +275,19 @@ static void check_saved_players(host_side *h, const nc_keypair *kh, const char *
     mp_destroy(sm);
     player back = {0};
     inventory got[3] = {0};
+    health *body = mem_alloc(sizeof *body);
+    uint8_t *b = mem_alloc(PLAYER_RECORD_MAX + 1);
     for (int i = 0; i < 3; i++) {
         nc_key_hex(kp[i].pk, khex);
-        uint8_t b[PLAYER_FILE_SIZE + 1] = {0};
-        long bn = save_db_get_player(db, khex, b, sizeof b);
-        CHECK(bn > 0 && survival_decode_player(&back, &got[i], NULL, b, (size_t)bn) == 0);
+        long bn = save_db_get_player(db, khex, b, PLAYER_RECORD_MAX + 1);
+        /* Every joined player's body is saved with them. */
+        health_init(body, 1);
+        body->temp = -1.0f;
+        CHECK(bn > 0 && survival_decode_player(&back, &got[i], body, b, (size_t)bn) == 0);
+        CHECK(body->temp > 30.0f && body->blood > 0.0f);
     }
+    mem_free(b);
+    mem_free(body);
     CHECK(inv_count(&got[0], I_COAL) == 7);
     CHECK(inv_count(&got[1], I_COAL) == 0 && inv_count(&got[2], I_COAL) == 0);
     int kit1 = 0, kit2 = 0;

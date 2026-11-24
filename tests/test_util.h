@@ -94,6 +94,8 @@ void test_backups_all(void);
 void test_discord_all(void);
 void test_netcrypto_all(void);
 void test_wire_all(void);
+void test_tagged_all(void);
+void test_save_body_all(void);
 void test_net_all(void);
 void test_mp_all(void);
 void test_ballistics_all(void);

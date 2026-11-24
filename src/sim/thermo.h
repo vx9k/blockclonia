@@ -53,6 +53,9 @@ void thermo_set_climate(thermo *t, int on);
 
 double thermo_day_time(const thermo *t);   /* 0..1, 0 = midnight, 0.5 = noon */
 void thermo_set_day_time(thermo *t, double day);
+/* Whole days passed since the world began, counted at each midnight. */
+int64_t thermo_days(const thermo *t);
+void thermo_set_days(thermo *t, int64_t days);
 /* Daylight under a clear night sky: moon and starlight, as dark as it can
  * be while terrain still reads on a screen (4% of noon is about 20% grey
  * in sRGB). */

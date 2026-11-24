@@ -189,6 +189,7 @@ struct thermo {
     uint32_t seed;     /* for the climate, and later the weather */
     int climate;       /* 1: the air follows the world's climate (worldgen_sea_temp) */
     double day;
+    int64_t days;      /* whole days passed since the world began */
     uint32_t stamp;
     cell *cells;
     int count;
@@ -250,6 +251,10 @@ void thermo_set_day_time(thermo *t, double day)
     if (!isfinite(day)) day = THERMO_DAY_START;
     t->day = day - floor(day);
 }
+
+int64_t thermo_days(const thermo *t) { return t->days; }
+
+void thermo_set_days(thermo *t, int64_t days) { t->days = days > 0 ? days : 0; }
 
 static double sun_sin(const thermo *t) { return SUN_LAT_COS * cos(2.0 * MC_PI * (t->day - 0.5)); }
 
@@ -1092,7 +1097,9 @@ void thermo_step(thermo *t, world *w, double dt, dvec3 player)
     dt = fmin(dt, 60.0);
     double dts = dt * HEALTH_CLOCK;
     t->day += dts / 86400.0;
-    t->day -= floor(t->day);
+    double whole = floor(t->day);
+    t->days += (int64_t)whole;
+    t->day -= whole;
 
     int have_player = isfinite(player.x) && isfinite(player.y) && isfinite(player.z);
     if (have_player) {

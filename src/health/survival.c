@@ -1,5 +1,7 @@
 #include "survival.h"
 #include "gamemode.h"
+#include "mem.h"
+#include "tagged.h"
 #include "thermo.h"
 
 #include <math.h>
@@ -149,85 +151,78 @@ int survival_find_liquid(const world *w, dvec3 eye, vec3 dir, double reach, ipos
     return 0;
 }
 
-/* Little-endian doubles and floats by their bit patterns. */
-static void put64(uint8_t *p, double v)
+static const tag_field PLAYER_F[] = {
+    TAG_F64(player, pos),
+    TAG_F64(player, prev_pos),
+    TAG_F64(player, vel),
+    TAG_F32R(player, yaw, -100.0, 100.0),
+    TAG_F32R(player, pitch, -1.6, 1.6),
+    TAG_I32R(player, on_ground, 0, 1),
+    TAG_I32R(player, flying, 0, 1),
+    TAG_I32R(player, mode, 0, MODE_COUNT - 1),
+    TAG_F64R(player, submerged, 0.0, 1.0),
+    TAG_I32R(player, sprinting, 0, 1),
+    TAG_I32R(player, sneaking, 0, 1),
+    TAG_I32R(player, hit_wall, 0, 1),
+    TAG_F64R(player, fall_speed, -1000.0, 1000.0),
+    TAG_F32R(player, height, 0.0, 3.0),
+    TAG_F32R(player, half_w, 0.0, 2.0),
+};
+static const tag_table PLAYER_TAGS = TAG_TABLE(PLAYER_F);
+_Static_assert(sizeof(player) == 136, "a field changed in player: update PLAYER_F (survival.c)");
+
+static const uint8_t PLAYER_MAGIC[4] = {'M', 'C', 'P', 'R'};
+
+static void sections(tag_section sec[3], const player *p, const inventory *inv, const health *h, player *pd,
+                     inventory *invd, health *hd)
 {
-    uint64_t u = 0;
-    memcpy(&u, &v, 8);
-    for (int i = 0; i < 8; i++) p[i] = (uint8_t)(u >> (8 * i));
+    sec[0] = (tag_section){"player", p, pd, &PLAYER_TAGS};
+    sec[1] = (tag_section){"inventory", inv, invd, &g_inv_tags};
+    sec[2] = (tag_section){"body", h, hd, &g_health_tags};
 }
 
-static double get64(const uint8_t *p)
+size_t survival_encode_player(const player *p, const inventory *inv, const health *h, uint8_t *out, size_t cap)
 {
-    uint64_t u = 0;
-    for (int i = 0; i < 8; i++) u |= (uint64_t)p[i] << (8 * i);
-    double v = 0.0;
-    memcpy(&v, &u, 8);
-    return v;
+    tag_section sec[3] = {0};
+    sections(sec, p, inv, h, NULL, NULL, NULL);
+    wire_w w = wire_writer(out, cap);
+    wire_bytes(&w, PLAYER_MAGIC, sizeof PLAYER_MAGIC);
+    tag_put_sections(&w, sec, 3);
+    return w.bad ? 0 : w.len;
 }
 
-static void put32f(uint8_t *p, float v)
+/* A position physics can hold: x and z anywhere it clamps to
+ * (+-WORLD_LIMIT), so a player saved at the edge is not thrown away. NaN
+ * fails every comparison, so this also rejects it. */
+static int pos_ok(dvec3 v)
 {
-    uint32_t u = 0;
-    memcpy(&u, &v, 4);
-    for (int i = 0; i < 4; i++) p[i] = (uint8_t)(u >> (8 * i));
+    return fabs(v.x) <= WORLD_LIMIT && fabs(v.z) <= WORLD_LIMIT && v.y >= -64.0 && v.y <= WORLD_H + 64.0;
 }
 
-static float get32f(const uint8_t *p)
+int survival_decode_player(player *p, inventory *inv, health *h, const uint8_t *in, size_t len)
 {
-    uint32_t u = (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
-    float v = 0.0f;
-    memcpy(&v, &u, 4);
-    return v;
-}
-
-/* "MCPL", u8 version (3, with an INV3 inventory), 3 reserved, x y z (f64), yaw pitch (f32), u8
- * flying, 1 reserved, u16 time of day (1/65536 day), then the inventory
- * block. */
-size_t survival_encode_player(const player *p, const inventory *inv, double day, uint8_t *out, size_t cap)
-{
-    if (cap < PLAYER_FILE_SIZE) return 0;
-    static const uint8_t MAGIC[4] = {'M', 'C', 'P', 'L'};
-    memset(out, 0, PLAYER_FILE_SIZE);
-    memcpy(out, MAGIC, sizeof MAGIC);
-    out[4] = 3;
-    put64(out + 8, p->pos.x);
-    put64(out + 16, p->pos.y);
-    put64(out + 24, p->pos.z);
-    put32f(out + 32, p->yaw);
-    put32f(out + 36, p->pitch);
-    out[40] = (uint8_t)(p->flying != 0);
-    double frac = day - floor(day);
-    uint32_t d16 = (uint32_t)(frac >= 0.0 && frac < 1.0 ? frac * 65536.0 : 0.0) & 0xffffu;
-    out[42] = (uint8_t)d16;
-    out[43] = (uint8_t)(d16 >> 8);
-    if (inv_encode(inv, out + 44, cap - 44) != INV_ENCODED_SIZE) return 0;
-    return PLAYER_FILE_SIZE;
-}
-
-int survival_decode_player(player *p, inventory *inv, double *day, const uint8_t *in, size_t len)
-{
-    /* Reserved bytes are zero in every file written. */
-    int ok_len = in && len == PLAYER_FILE_SIZE && in[4] == 3;
-    if (!ok_len || memcmp(in, "MCPL", 4) != 0 || in[5] || in[6] || in[7] || in[40] > 1 || in[41]) return -1;
-    double x = get64(in + 8), y = get64(in + 16), z = get64(in + 24);
-    float yaw = get32f(in + 32), pitch = get32f(in + 36);
-    /* NaN fails every comparison, so these also reject it. x and z may be
-     * anywhere physics can put the player (it clamps to +-WORLD_LIMIT), or
-     * one saved at the edge would be thrown away as corrupt. */
-    if (!(fabs(x) <= WORLD_LIMIT) || !(fabs(z) <= WORLD_LIMIT) || !(y >= -64.0 && y <= WORLD_H + 64.0) ||
-        !(fabsf(yaw) <= 100.0f) || !(fabsf(pitch) <= 1.6f))
-        return -1;
-    inventory t = {0};
-    if (inv_decode(&t, in + 44, len - 44) != 0) return -1;
-    *inv = t;
-    memset(p, 0, sizeof *p);
-    p->pos = p->prev_pos = dv3(x, y, z);
-    p->yaw = yaw;
-    p->pitch = pitch;
-    p->flying = in[40];
-    if (day) *day = (double)((uint32_t)in[42] | (uint32_t)in[43] << 8) / 65536.0;
-    return 0;
+    if (!in || len < sizeof PLAYER_MAGIC || memcmp(in, PLAYER_MAGIC, sizeof PLAYER_MAGIC) != 0) return -1;
+    player tp = *p;
+    inventory ti = *inv;
+    /* Too big for the stack. */
+    health *th = h ? mem_alloc(sizeof *th) : NULL;
+    if (th) memcpy(th, h, sizeof *th);
+    tag_section sec[3] = {0};
+    sections(sec, NULL, NULL, NULL, &tp, &ti, th);
+    wire_r r = wire_reader(in + sizeof PLAYER_MAGIC, len - sizeof PLAYER_MAGIC);
+    tag_get_sections(&r, sec, 3);
+    int ok = !r.bad && r.pos == r.len && pos_ok(tp.pos) && pos_ok(tp.prev_pos) && fabs(tp.vel.x) <= 1000.0 &&
+             fabs(tp.vel.y) <= 1000.0 && fabs(tp.vel.z) <= 1000.0 && inv_valid(&ti);
+    if (ok) {
+        *p = tp;
+        *inv = ti;
+        if (th) {
+            health_loaded(th);
+            memcpy(h, th, sizeof *h);
+        }
+    }
+    mem_free(th);
+    return ok ? 0 : -1;
 }
 
 int survival_water_nearby(const world *w, const player *p, vec3 dir)

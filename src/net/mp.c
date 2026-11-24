@@ -285,31 +285,32 @@ static void saved_name(const uint8_t *key, char *out, size_t cap)
     snprintf(out, cap, "%s", hex);
 }
 
-/* What the world kept of this key from an earlier session: 1 with *pl and
- * *inv set, 0 if nothing usable (the row is untrusted and decoded with
- * the single-player checks). */
-static int load_saved(const mp *m, const uint8_t *key, player *pl, inventory *inv)
+/* What the world kept of this key from an earlier session: 1 with *pl,
+ * *inv and *hl set, 0 if nothing usable (the row is untrusted and decoded
+ * with the single-player checks). Their body comes back as it was, so
+ * leaving the server heals nothing. */
+static int load_saved(const mp *m, const uint8_t *key, player *pl, inventory *inv, health *hl)
 {
     if (!m->ctx.db || !key) return 0;
     char name[80] = {0};
     saved_name(key, name, sizeof name);
-    uint8_t buf[PLAYER_FILE_SIZE + 1] = {0};
-    long n = save_db_get_player(m->ctx.db, name, buf, sizeof buf);
-    if (n <= 0) return 0;
-    if (survival_decode_player(pl, inv, NULL, buf, (size_t)n) != 0) {
-        log_warn("mp: the saved state of %.15s... is corrupt; a fresh start", name);
-        return 0;
-    }
-    return 1;
+    uint8_t *buf = mem_alloc(PLAYER_RECORD_MAX + 1);
+    long n = save_db_get_player(m->ctx.db, name, buf, PLAYER_RECORD_MAX + 1);
+    int ok = n > 0 && survival_decode_player(pl, inv, hl, buf, (size_t)n) == 0;
+    if (n > 0 && !ok) log_warn("mp: the saved state of %.15s... is corrupt; a fresh start", name);
+    mem_free(buf);
+    return ok;
 }
 
-static int save_one(const mp *m, const uint8_t *key, const player *pl, const inventory *inv)
+static int save_one(const mp *m, const uint8_t *key, const player *pl, const inventory *inv, const health *hl)
 {
     char name[80] = {0};
     saved_name(key, name, sizeof name);
-    uint8_t buf[PLAYER_FILE_SIZE] = {0};
-    size_t n = survival_encode_player(pl, inv, thermo_day_time(m->ctx.th), buf, sizeof buf);
-    return n && save_db_put_player(m->ctx.db, name, buf, n) == 0 ? 0 : -1;
+    uint8_t *buf = mem_alloc(PLAYER_RECORD_MAX);
+    size_t n = survival_encode_player(pl, inv, hl, buf, PLAYER_RECORD_MAX);
+    int r = n && save_db_put_player(m->ctx.db, name, buf, n) == 0 ? 0 : -1;
+    mem_free(buf);
+    return r;
 }
 
 int mp_save_players(const mp *m)
@@ -317,11 +318,11 @@ int mp_save_players(const mp *m)
     if (!m->host || !m->ctx.db) return 0;
     for (int id = 1; id < NET_MAX_PLAYERS; id++) {
         const remote *r = &m->r[id];
-        if (r->active && !r->hl->dead && save_one(m, m->keys[id], &r->pl, &r->inv) != 0) return -1;
+        if (r->active && save_one(m, m->keys[id], &r->pl, &r->inv, r->hl) != 0) return -1;
     }
     for (int i = 0; i < GONE_MAX; i++) {
         const gone *g = &m->gone[i];
-        if (g->used && !(g->hl && g->hl->dead) && save_one(m, g->pk, &g->pl, &g->inv) != 0) return -1;
+        if (g->used && save_one(m, g->pk, &g->pl, &g->inv, g->hl) != 0) return -1;
     }
     return 0;
 }
@@ -355,7 +356,7 @@ static void host_join(mp *m, int id)
         health_init_varied(r->hl, r->rng);
         health_settle(r->hl);
         inv_init(&r->inv);
-        have_was = load_saved(m, key, &was, &r->inv);
+        have_was = load_saved(m, key, &was, &r->inv, r->hl);
         if (!have_was) inv_starting_kit(&r->inv);
     }
     interact_init(&r->ia, r->rng);

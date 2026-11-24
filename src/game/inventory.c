@@ -1,4 +1,5 @@
 #include "inventory.h"
+#include "tagged.h"
 
 #include <string.h>
 
@@ -288,6 +289,31 @@ int inv_craft(inventory *inv, int r, int stations)
 
 /* "INV3", selected, 3 reserved bytes, then (id as u32 little-endian,
  * count, wear) for every slot and the cursor. */
+static int stack_ok(item_stack s)
+{
+    if ((s.id == 0) != (s.count == 0)) return 0;
+    if (s.count && (!item_valid(s.id) || s.count > max_stack(s.id))) return 0;
+    /* Wear only on things that wear, and never past worn out. */
+    return !s.wear || (s.count && s.wear < item_durability(s.id));
+}
+
+int inv_valid(const inventory *inv)
+{
+    if (inv->selected < 0 || inv->selected >= INV_HOTBAR || !stack_ok(inv->cursor)) return 0;
+    for (int i = 0; i < INV_SLOTS; i++)
+        if (!stack_ok(inv->slot[i])) return 0;
+    return 1;
+}
+
+static const tag_field STACK_F[] = {TAG_U32(item_stack, id), TAG_U8(item_stack, count), TAG_U8(item_stack, wear)};
+static const tag_table STACK = TAG_TABLE(STACK_F);
+static const tag_field INV_F[] = {
+    TAG_SUB(inventory, slot, item_stack, STACK),
+    TAG_SUB(inventory, cursor, item_stack, STACK),
+    TAG_I32R(inventory, selected, 0, INV_HOTBAR - 1),
+};
+const tag_table g_inv_tags = TAG_TABLE(INV_F);
+
 size_t inv_encode(const inventory *inv, uint8_t *out, size_t cap)
 {
     if (cap < INV_ENCODED_SIZE) return 0;
@@ -318,10 +344,7 @@ int inv_decode(inventory *inv, const uint8_t *in, size_t len)
     for (int i = 0; i <= INV_SLOTS; i++, p += 6) {
         item_id id = (item_id)p[0] | (item_id)p[1] << 8 | (item_id)p[2] << 16 | (item_id)p[3] << 24;
         item_stack s = {id, p[4], p[5]};
-        if ((s.id == 0) != (s.count == 0)) return -1;
-        if (s.count && (!item_valid(s.id) || s.count > max_stack(s.id))) return -1;
-        /* Wear only on things that wear, and never past worn out. */
-        if (s.wear && (!s.count || s.wear >= item_durability(s.id))) return -1;
+        if (!stack_ok(s)) return -1;
         if (i < INV_SLOTS) t.slot[i] = s;
         else t.cursor = s;
     }

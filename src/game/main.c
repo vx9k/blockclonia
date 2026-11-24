@@ -45,6 +45,7 @@
 #include "ui.h"
 #include "viewmodel.h"
 #include "world.h"
+#include "world_state.h"
 #include "worldgen.h"
 #include "worlds.h"
 
@@ -681,6 +682,7 @@ typedef struct {
     physics *ph;
     const player *pl;
     const inventory *inv;
+    const health *hl;
     const thermo *th;
     save_db *db;
     mp *const *mp; /* the session, if hosting: its players are saved too */
@@ -693,9 +695,11 @@ typedef struct {
 static int save_player(void *user)
 {
     const save_ctx *sc = user;
-    uint8_t buf[PLAYER_FILE_SIZE] = {0};
-    size_t n = survival_encode_player(sc->pl, sc->inv, thermo_day_time(sc->th), buf, sizeof buf);
-    if (!n || save_db_put_player(sc->db, SAVE_DB_LOCAL_PLAYER, buf, n) != 0) {
+    uint8_t *buf = mem_alloc(PLAYER_RECORD_MAX);
+    size_t n = survival_encode_player(sc->pl, sc->inv, sc->hl, buf, PLAYER_RECORD_MAX);
+    int ok = n && save_db_put_player(sc->db, SAVE_DB_LOCAL_PLAYER, buf, n) == 0;
+    mem_free(buf);
+    if (!ok || world_state_save(sc->db, sc->th) != 0) {
         log_warn("could not save the player");
         return -1;
     }
@@ -706,19 +710,19 @@ static int save_player(void *user)
     return 0;
 }
 
-/* 1 if a saved player was loaded into pl and inv, -1 if it could not be
- * read (a database error). */
-static int load_player(save_db *db, player *pl, inventory *inv, double *day)
+/* 1 if a saved player was loaded into pl, inv and hl (which hold a fresh
+ * player for whatever the record lacks), -1 if it could not be read (a
+ * database error). */
+static int load_player(save_db *db, player *pl, inventory *inv, health *hl)
 {
     if (!db) return 0;
-    uint8_t buf[PLAYER_FILE_SIZE + 1] = {0};
-    long n = save_db_get_player(db, SAVE_DB_LOCAL_PLAYER, buf, sizeof buf);
-    if (n < 0) return n == -2 ? -1 : 0;
-    if (survival_decode_player(pl, inv, day, buf, (size_t)n) != 0) {
-        log_warn("the saved player is corrupt; starting fresh");
-        return 0;
-    }
-    return 1;
+    uint8_t *buf = mem_alloc(PLAYER_RECORD_MAX + 1);
+    long n = save_db_get_player(db, SAVE_DB_LOCAL_PLAYER, buf, PLAYER_RECORD_MAX + 1);
+    int r = n == -2 ? -1 : 0;
+    if (n >= 0) r = survival_decode_player(pl, inv, hl, buf, (size_t)n) == 0 ? 1 : 0;
+    if (n >= 0 && !r) log_warn("the saved player is corrupt; starting fresh");
+    mem_free(buf);
+    return r;
 }
 
 /* A fatal error (device lost, surface lost) must not take the player's
@@ -1432,7 +1436,7 @@ static void open_world(game *g, const char *dir, int backdrop)
     g->w.glow = lamps_glow;
     g->w.glow_user = &g->lamps;
     g->w.on_column_unload = on_column_unload;
-    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, g->db, &g->mp};
+    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, &g->hl, g->th, g->db, &g->mp};
     log_set_fatal_hook(save_on_fatal, &g->sc);
     renderer_bind_world(g->rd, &g->w);
 
@@ -1449,8 +1453,12 @@ static void open_world(game *g, const char *dir, int backdrop)
         g->pl.pitch = clampf(o->look_pitch, -89.0f, 89.0f) * (float)(MC_PI / 180.0);
     }
     inv_starting_kit(&g->inv);
-    double day = THERMO_DAY_START;
-    int loaded = !o->have_spawn && !o->demo ? load_player(g->db, &g->pl, &g->inv, &day) : 0;
+    /* A fresh body, which a saved one replaces. */
+    health_init_varied(&g->hl, g->seed ^ 0x9E3779B9u);
+    health_settle(&g->hl);
+    int loaded = !o->have_spawn && !o->demo ? load_player(g->db, &g->pl, &g->inv, &g->hl) : 0;
+    if (!backdrop && !o->demo && g->db && world_state_load(g->db, g->th) < 0)
+        log_warn("the world's saved state is corrupt; the clock starts again");
     if (backdrop) thermo_set_day_time(g->th, THERMO_DAY_START);
     if (loaded < 0) {
         /* Playing on is fine; saving would write a fresh player over it. */
@@ -1459,7 +1467,6 @@ static void open_world(game *g, const char *dir, int backdrop)
         g->sc.db = NULL;
     }
     if (loaded > 0) {
-        thermo_set_day_time(g->th, day);
         world_load_blocking(&g->w, g->pl.pos.x, g->pl.pos.z, 1);
         log_info("player restored from %s/world.db", o->world_dir);
     }
@@ -1475,9 +1482,7 @@ static void open_world(game *g, const char *dir, int backdrop)
     log_info("spawn at %.1f %.1f %.1f with %d worker threads", g->pl.pos.x, g->pl.pos.y, g->pl.pos.z,
              jobs_worker_count(g->js));
 
-    health_init_varied(&g->hl, g->seed ^ 0x9E3779B9u);
     impair_init(&g->imp, g->seed);
-    health_settle(&g->hl);
     if (o->hurt && !backdrop) apply_hurt(&g->hl, o->hurt);
 
     fx_init(g->fx, g->seed);
@@ -1511,7 +1516,6 @@ static void close_world(game *g)
     if (g->client) g->w.on_save = NULL; /* a client's world was never saved here */
     log_set_fatal_hook(NULL, NULL);
     physics_settle_bodies(&g->ph, NULL);
-    if (g->hl.dead) g->w.on_save = NULL; /* quitting dead keeps the last saved player */
     world_save_all(&g->w);               /* a host's joined players too: before the session ends */
     /* Leaving ends the session: a host's players are told. */
     mp_destroy(g->mp);
@@ -1601,7 +1605,7 @@ static void open_remote_world(game *g, uint32_t seed)
     lamps_init(&g->lamps, thermo_glow, g->th);
     g->w.glow = lamps_glow;
     g->w.glow_user = &g->lamps;
-    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, g->th, NULL, &g->mp};
+    g->sc = (save_ctx){&g->w, &g->ph, &g->pl, &g->inv, &g->hl, g->th, NULL, &g->mp};
     renderer_bind_world(g->rd, &g->w);
     memset(&g->pl, 0, sizeof g->pl);
     inv_init(&g->inv);

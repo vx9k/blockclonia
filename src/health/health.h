@@ -360,6 +360,14 @@ typedef struct health {
     double atria_prev; /* s, the atria's activation before cond.t_atria */
 } health;
 
+/* The whole body as a tagged record (tagged.h, health_tags.c) for saves:
+ * every field, so a body loaded steps on exactly as the saved one would
+ * have. Decode it into a scratch body that holds a fresh one's values,
+ * then call health_loaded, which makes the text fields safe to print. */
+struct tag_table;
+extern const struct tag_table g_health_tags;
+void health_loaded(health *h);
+
 /* The whole body as bytes for a multiplayer client, whose HUD, limits and
  * sounds read the same struct the authority simulates. Every field goes
  * except the monitor traces, of which only the newest HEALTH_NET_WAVE
