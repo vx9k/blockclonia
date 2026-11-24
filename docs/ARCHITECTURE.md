@@ -54,7 +54,7 @@ frame_render
   frame_sound                     listener, ambience loops, fires -> sound commands
   draw_overlay                    HUD, hotbar, inventory, menus, F3 -> the UI batch
   renderer_end_frame              record, submit, present
-frame_bookkeeping                 window title, autosave every 60 s
+frame_bookkeeping                 window title, autosave every 5 s, a synced save after a body event
 ```
 
 Physics runs at a fixed 60 Hz, and rendering interpolates between the last
@@ -68,6 +68,7 @@ accumulator stays at zero, so the world stands still.
 |---|---|---|
 | Main | everything in the frame above | all game state |
 | Workers (`jobs.c`, cores − 1 while memory allows; `sys_plan`) | terrain generation (decoding a saved column first), lighting a column, meshing | only the job's own data: a column being generated, a snapshot of the 3 x 3 columns being lit, or a snapshot of a section and its neighbours with their light |
+| Save writer (`save_db.c`, one per open world) | committing the batches of saved rows the main thread encoded | the database connection, under its lock, and the queue of batches |
 | Audio (miniaudio's device thread) | `sound_render`: mixing voices | the mixer's own voices, fed by a lock-free single-producer ring |
 | Driver threads | whatever the Vulkan driver does | nothing of ours |
 
@@ -175,10 +176,25 @@ limiter.
   time of day and the days passed, plus empty sections for systems
   still to come (vehicles, machines, weather, animals). Every field has
   a range, and a record that breaks one is refused whole.
-- Each save writes the edited columns, the players and the world's state
-  in one transaction, so they always match on disk. A saved column that cannot be read is
-  shown as generated terrain and never written over, so its real data stays
-  on disk.
+- Each save encodes the edited columns, the players and the world's state
+  on the main thread into one batch (`save_batch.c`) and hands it to the
+  world's writer thread, which commits it in one transaction, so they
+  always match on disk. The main thread never waits for the disk. Batches
+  waiting for the writer merge row by row, the newer bytes winning, and
+  reads look in that queue before the table, so a column that unloads
+  before its save lands loads back as it was left. A commit that fails
+  (a full disk) goes back to the queue and is tried again every half
+  second, nothing dropped; the world keeps playing meanwhile. A saved
+  column that cannot be read is shown as generated terrain and never
+  written over, so its real data stays on disk.
+- Saves run with SQLite's write-ahead log at `synchronous = NORMAL`,
+  which keeps every committed save when the game crashes or is killed.
+  Saves that must also survive a power cut or an OS crash (an event in
+  the body's log, dying, respawning, quitting, a fatal error) are durable
+  batches, committed at `synchronous = FULL`; they cost the writer an
+  fsync, not the main thread. A test kills a saving process at random
+  moments and checks that the world opens intact with every save it was
+  told had landed.
 - The database format is a number in the file's header (`SAVE_DB_FORMAT`).
   Every format's exact schema is kept in `save_db.c`, so a file whose
   tables match a known older format is upgraded on open: copied first to
@@ -199,9 +215,11 @@ limiter.
 - SQLite's exclusive locking mode keeps a world open in only one game at
   a time; a second instance pointed at the same folder disables saving
   instead of sharing the database.
-- The game saves every 60 seconds, when a column unloads, when you leave
-  to the title screen, on quit, and from the fatal-error hook
-  (`log_set_fatal_hook`), so a lost GPU device doesn't lose the world.
+- The game saves every 5 seconds, at once (durably) whenever something
+  is logged about the body (an injury, a treatment, a change of rhythm,
+  death), when a column unloads, when you leave to the title screen, on
+  quit, and from the fatal-error hook (`log_set_fatal_hook`), which also
+  waits for the writer, so a lost GPU device doesn't lose the world.
 - Settings live in `blockclonia.cfg`, a text file with one `key value`
   per line. A settings file the game cannot read is left alone, never
   overwritten with the defaults.

@@ -7,10 +7,13 @@
 #include "mem.h"
 #include "os.h"
 #include "save.h"
+#include "save_batch.h"
 #include "save_db.h"
 #include "test_util.h"
 
 #include <sqlite3.h>
+
+#include <stdatomic.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,7 +67,7 @@ static long long raw_pragma(const char *dir, const char *name, const char *pragm
  * flag is set, as a failing SD card or a full disk would. save_db opens
  * through the default VFS, so installing this as the default puts it under
  * the game's database with no hook in the game. */
-static int g_fail_reads, g_fail_writes;
+static atomic_int g_fail_reads, g_fail_writes; /* the writer thread reads them too */
 static sqlite3_vfs *g_real_vfs;
 static sqlite3_vfs g_fault_vfs;
 
@@ -420,11 +423,12 @@ static void test_import(void)
     column_free(d);
 }
 
-/* Stands in for the game's player: written by the world's on_save hook. */
+/* Stands in for the game's player: added by the world's on_save hook. */
 static int g_player_fails;
-static int save_test_player(void *user)
+static int save_test_player(void *user, save_batch *b)
 {
-    return g_player_fails ? -1 : save_db_put_player(user, SAVE_DB_LOCAL_PLAYER, "new", 3);
+    (void)user;
+    return g_player_fails ? -1 : save_batch_player(b, SAVE_DB_LOCAL_PLAYER, "new", 3);
 }
 
 static int player_is(save_db *db, const char *want)
@@ -469,6 +473,11 @@ static void test_save_with_player(void)
     long n = save_db_get_column(db, 0, 0, &b);
     CHECK(n > 0 && player_is(db, "new"));
     mem_free(b);
+    b = NULL;
+    CHECK(save_db_flush(db) == 0); /* and from the table, not the queue */
+    n = save_db_get_column(db, 0, 0, &b);
+    CHECK(n > 0 && player_is(db, "new"));
+    mem_free(b);
     world_destroy(&w);
     jobs_destroy(js);
     save_db_close(db);
@@ -502,9 +511,18 @@ static void test_world_db(void)
     save_db_close(db);
 }
 
+/* Waits for the writer while it may still be retrying an attempt that
+ * began before the disk was fixed. */
+static int flushed(save_db *db)
+{
+    int ok = 0;
+    for (int i = 0; i < 8 && !ok; i++) ok = save_db_flush(db) == 0;
+    return ok;
+}
+
 /* A column whose save fails as it unloads (a full disk) keeps its edits:
- * it stays loaded in its ring slot until a save goes through, and loading
- * over that slot leaves it alone instead of waiting for it. */
+ * the writer holds them and keeps trying, a reload reads them back from
+ * it, and they reach the disk once it has room again. */
 static void test_unload_save_fails(void)
 {
     char dir[400] = {0};
@@ -528,27 +546,30 @@ static void test_unload_save_fails(void)
     CHECK(w.grid_w == 16);
     g_fail_writes = 1;
     world_load_blocking(&w, 16 * CHUNK_W + 0.5, 0.5, 1);
-    const column *kept = w.grid[0];
-    CHECK(kept && kept->cx == 0 && kept->cz == 0 && kept->unsaved);
-    CHECK(world_column(&w, 16, 0) == NULL && world_column(&w, 17, 0) != NULL);
-    world_save_all(&w); /* the autosave, while the disk is still full */
-    CHECK(kept && kept->unsaved);
-    g_fail_writes = 0;
-    world_save_all(&w);
-    CHECK(kept && kept->unsaved == 0 && w.grid[0] == kept);
-    world_update(&w, 16 * CHUNK_W + 0.5, GROUND, 0.5); /* now it can go */
-    jobs_wait_idle(js);
-    jobs_poll(js, -1);
-    CHECK(world_column(&w, 16, 0) != NULL);
-    world_destroy(&w);
-
-    world_init(&w, 1, 2, js, db);
-    w.generator = test_flat_gen;
+    CHECK(world_column(&w, 0, 0) == NULL && world_column(&w, 16, 0) != NULL);
+    CHECK(save_db_flush(db) == -1 && save_db_failing(db));
+    uint8_t *b = NULL;
+    CHECK(save_db_get_column(db, 0, 0, &b) > 0); /* from the queue */
+    mem_free(b);
     world_load_blocking(&w, 0.5, 0.5, 1);
     CHECK(world_get(&w, 3, GROUND, 4) == B_GLASS);
+    world_save_all(&w); /* the autosave, while the disk is still full */
     world_destroy(&w);
-    jobs_destroy(js);
+    g_fail_writes = 0;
+    CHECK(flushed(db) && !save_db_failing(db));
     save_db_close(db);
+
+    db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (db) {
+        world_init(&w, 1, 2, js, db);
+        w.generator = test_flat_gen;
+        world_load_blocking(&w, 0.5, 0.5, 1);
+        CHECK(world_get(&w, 3, GROUND, 4) == B_GLASS);
+        world_destroy(&w);
+        save_db_close(db);
+    }
+    jobs_destroy(js);
     fault_vfs_remove();
 }
 

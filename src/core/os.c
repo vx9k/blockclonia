@@ -38,6 +38,14 @@ int os_cpu_count(void)
 }
 
 void os_mutex_init(os_mutex *m) { pthread_mutex_init(m, NULL); }
+void os_mutex_init_recursive(os_mutex *m)
+{
+    pthread_mutexattr_t a = {0};
+    pthread_mutexattr_init(&a);
+    pthread_mutexattr_settype(&a, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(m, &a);
+    pthread_mutexattr_destroy(&a);
+}
 void os_mutex_destroy(os_mutex *m) { pthread_mutex_destroy(m); }
 void os_mutex_lock(os_mutex *m) { pthread_mutex_lock(m); }
 void os_mutex_unlock(os_mutex *m) { pthread_mutex_unlock(m); }

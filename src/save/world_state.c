@@ -1,4 +1,5 @@
 #include "world_state.h"
+#include "save_batch.h"
 #include "tagged.h"
 
 #include <string.h>
@@ -42,11 +43,11 @@ int world_state_decode(thermo *th, const uint8_t *in, size_t len)
     return 0;
 }
 
-int world_state_save(save_db *db, const thermo *th)
+int world_state_save(save_batch *b, const thermo *th)
 {
     uint8_t buf[WORLD_STATE_MAX] = {0};
     size_t n = world_state_encode(th, buf, sizeof buf);
-    return n && save_db_put_blob(db, "state", buf, n) == 0 ? 0 : -1;
+    return n && save_batch_blob(b, "state", buf, n) == 0 ? 0 : -1;
 }
 
 int world_state_load(save_db *db, thermo *th)

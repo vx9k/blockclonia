@@ -5,6 +5,7 @@
 #include "mem.h"
 #include "netkeys.h"
 #include "save.h"
+#include "save_batch.h"
 #include "save_db.h"
 #include "survival.h"
 #include "wire.h"
@@ -302,27 +303,27 @@ static int load_saved(const mp *m, const uint8_t *key, player *pl, inventory *in
     return ok;
 }
 
-static int save_one(const mp *m, const uint8_t *key, const player *pl, const inventory *inv, const health *hl)
+static int save_one(save_batch *b, const uint8_t *key, const player *pl, const inventory *inv, const health *hl)
 {
     char name[80] = {0};
     saved_name(key, name, sizeof name);
     uint8_t *buf = mem_alloc(PLAYER_RECORD_MAX);
     size_t n = survival_encode_player(pl, inv, hl, buf, PLAYER_RECORD_MAX);
-    int r = n && save_db_put_player(m->ctx.db, name, buf, n) == 0 ? 0 : -1;
+    int r = n && save_batch_player(b, name, buf, n) == 0 ? 0 : -1;
     mem_free(buf);
     return r;
 }
 
-int mp_save_players(const mp *m)
+int mp_save_players(const mp *m, save_batch *b)
 {
     if (!m->host || !m->ctx.db) return 0;
     for (int id = 1; id < NET_MAX_PLAYERS; id++) {
         const remote *r = &m->r[id];
-        if (r->active && save_one(m, m->keys[id], &r->pl, &r->inv, r->hl) != 0) return -1;
+        if (r->active && save_one(b, m->keys[id], &r->pl, &r->inv, r->hl) != 0) return -1;
     }
     for (int i = 0; i < GONE_MAX; i++) {
         const gone *g = &m->gone[i];
-        if (g->used && save_one(m, g->pk, &g->pl, &g->inv, g->hl) != 0) return -1;
+        if (g->used && save_one(b, g->pk, &g->pl, &g->inv, g->hl) != 0) return -1;
     }
     return 0;
 }

@@ -3,6 +3,7 @@
 #include "mem.h"
 #include "os.h"
 #include "save.h"
+#include "save_batch.h"
 
 #include <sqlite3.h>
 
@@ -108,11 +109,33 @@ static const char *const STMT_SQL[S_COUNT] = {
     "INSERT OR REPLACE INTO players(id, data, saved) VALUES (?1, ?2, ?3)",
 };
 
+/* Seconds the writer waits before trying a failed save again. */
+#define RETRY_SECONDS 0.5
+
+/* The connection is shared by the game's thread and the writer: the
+ * exclusive lock a world is opened with lets no second connection in.
+ * lock (recursive, so a transaction can span calls) guards the connection
+ * and qlock the queue; whoever needs both takes lock first. The writer
+ * holds lock for a whole commit, so a direct write never lands between it
+ * taking rows from the queue and writing them, where older queued bytes
+ * would then overwrite it. */
 struct save_db {
     sqlite3 *h;
     sqlite3_stmt *st[S_COUNT];
-    uint8_t *buf; /* SAVE_MAX_FILE bytes for encoding and importing */
+    uint8_t *buf; /* SAVE_MAX_FILE bytes for encoding and importing; the game's thread only */
+    os_mutex lock, qlock;
+    os_cond wake, done;
+    os_thread thread;
+    int started, quit;
+    save_batch pending;  /* submitted, not yet taken by the writer */
+    save_batch inflight; /* being committed; read-only while it is */
+    uint64_t submitted, pending_serial, committed, failures;
+    int failing;  /* the last commit failed: the rows wait in pending */
+    int retrying; /* under lock: a failed write was already logged */
 };
+
+static void lock(save_db *db) { os_mutex_lock(&db->lock); }
+static void unlock(save_db *db) { os_mutex_unlock(&db->lock); }
 
 static int exec(sqlite3 *h, const char *sql) { return sqlite3_exec(h, sql, NULL, NULL, NULL) == SQLITE_OK ? 0 : -1; }
 
@@ -340,7 +363,10 @@ static int check_or_create(sqlite3 *h, const char *path)
 
 int save_db_copy(save_db *db, const char *path)
 {
+    save_db_flush(db); /* the copy holds every save so far, unless the disk refuses them */
+    lock(db);
     int r = backup_to(db->h, path);
+    unlock(db);
     if (r != 0) log_error("could not copy the world to %s", path);
     return r;
 }
@@ -367,10 +393,17 @@ int save_db_restore(save_db *db, const char *path)
     }
     /* Page by page into the open world, in one write: it lands whole or
      * not at all. An older format is upgraded the next time it opens. */
+    lock(db);
+    os_mutex_lock(&db->qlock);
+    save_batch_free(&db->pending); /* saves of the world being replaced */
+    db->committed = db->submitted;
+    os_cond_broadcast(&db->done);
+    os_mutex_unlock(&db->qlock);
     sqlite3_backup *b = sqlite3_backup_init(db->h, "main", src, "main");
     int rc = b ? sqlite3_backup_step(b, -1) : SQLITE_ERROR;
     if (b) sqlite3_backup_finish(b);
     if (rc != SQLITE_DONE) log_error("restoring %s failed: %s", path, sqlite3_errmsg(db->h));
+    unlock(db);
     sqlite3_close(src);
     return rc == SQLITE_DONE ? 0 : -1;
 }
@@ -412,6 +445,8 @@ static int side_files_ok(const char *path)
 }
 
 static int g_cache_kb;
+
+static void writer_main(void *arg); /* below, with the queue */
 
 void save_db_set_cache_kb(int kb) { g_cache_kb = kb > 0 ? kb : 0; }
 
@@ -469,6 +504,10 @@ save_db *save_db_open(const char *dir)
 
     save_db *db = mem_calloc(1, sizeof *db);
     db->h = h;
+    os_mutex_init_recursive(&db->lock);
+    os_mutex_init(&db->qlock);
+    os_cond_init(&db->wake);
+    os_cond_init(&db->done);
     for (int i = 0; i < S_COUNT; i++)
         if (sqlite3_prepare_v3(h, STMT_SQL[i], -1, SQLITE_PREPARE_PERSISTENT, &db->st[i], NULL) != SQLITE_OK) {
             log_error("%s: %s", path, sqlite3_errmsg(h));
@@ -476,12 +515,29 @@ save_db *save_db_open(const char *dir)
             return NULL;
         }
     db->buf = mem_alloc(SAVE_MAX_FILE);
+    if (os_thread_start(&db->thread, writer_main, db) != 0) {
+        log_error("%s: cannot start the thread that saves it", path);
+        save_db_close(db);
+        return NULL;
+    }
+    db->started = 1;
     return db;
 }
 
 void save_db_close(save_db *db)
 {
     if (!db) return;
+    if (db->started) {
+        save_db_flush(db);
+        os_mutex_lock(&db->qlock);
+        db->quit = 1;
+        os_cond_broadcast(&db->wake);
+        os_mutex_unlock(&db->qlock);
+        os_thread_join(db->thread);
+        if (db->pending.n)
+            log_error("%zu saved rows could not be written; their latest changes are lost", db->pending.n);
+        save_batch_free(&db->pending);
+    }
     /* The pages freed by replaced columns are handed back once they are a
      * quarter of the file. (No PRAGMA optimize: every lookup is by primary
      * key, and the sqlite_stat1 table ANALYZE would add is not part of the
@@ -492,22 +548,42 @@ void save_db_close(save_db *db)
         exec(db->h, "PRAGMA incremental_vacuum");
     for (int i = 0; i < S_COUNT; i++) sqlite3_finalize(db->st[i]);
     if (sqlite3_close(db->h) != SQLITE_OK) log_warn("world database did not close cleanly");
+    os_cond_destroy(&db->done);
+    os_cond_destroy(&db->wake);
+    os_mutex_destroy(&db->qlock);
+    os_mutex_destroy(&db->lock);
     mem_free(db->buf);
     mem_free(db);
 }
 
-int save_db_begin(save_db *db) { return exec(db->h, "BEGIN"); }
-
-int save_db_commit(save_db *db)
+/* The transaction holds the connection's lock from begin to commit or
+ * rollback, so the writer waits rather than writing into it. */
+int save_db_begin(save_db *db)
 {
-    if (exec(db->h, "COMMIT") == 0) return 0;
-    log_error("world save failed: %s", sqlite3_errmsg(db->h));
-    exec(db->h, "ROLLBACK");
+    lock(db);
+    if (exec(db->h, "BEGIN") == 0) return 0;
+    unlock(db);
     return -1;
 }
 
+int save_db_commit(save_db *db)
+{
+    int r = 0;
+    if (exec(db->h, "COMMIT") != 0) {
+        log_error("world save failed: %s", sqlite3_errmsg(db->h));
+        exec(db->h, "ROLLBACK");
+        r = -1;
+    }
+    unlock(db);
+    return r;
+}
+
 /* Also fine when SQLite rolled back on its own after a failed write. */
-void save_db_rollback(save_db *db) { exec(db->h, "ROLLBACK"); }
+void save_db_rollback(save_db *db)
+{
+    exec(db->h, "ROLLBACK");
+    unlock(db);
+}
 
 /* Runs a prepared write to completion and resets it. */
 static int step_write(save_db *db, sqlite3_stmt *s)
@@ -516,7 +592,7 @@ static int step_write(save_db *db, sqlite3_stmt *s)
     sqlite3_reset(s);
     sqlite3_clear_bindings(s);
     if (rc == SQLITE_DONE) return 0;
-    log_error("world save failed: %s", sqlite3_errmsg(db->h));
+    if (!db->retrying) log_error("world save failed: %s", sqlite3_errmsg(db->h));
     return -1;
 }
 
@@ -544,6 +620,7 @@ static long read_blob(sqlite3_stmt *s, void *buf, size_t cap)
 
 int save_db_get_meta(save_db *db, const char *key, int64_t *v)
 {
+    lock(db);
     sqlite3_stmt *s = db->st[S_GET_META];
     int r = -1;
     sqlite3_bind_text(s, 1, key, -1, SQLITE_STATIC);
@@ -557,15 +634,19 @@ int save_db_get_meta(save_db *db, const char *key, int64_t *v)
     }
     sqlite3_reset(s);
     sqlite3_clear_bindings(s);
+    unlock(db);
     return r;
 }
 
 int save_db_set_meta(save_db *db, const char *key, int64_t v)
 {
+    lock(db);
     sqlite3_stmt *s = db->st[S_PUT_META];
     sqlite3_bind_text(s, 1, key, -1, SQLITE_STATIC);
     sqlite3_bind_int64(s, 2, (sqlite3_int64)v);
-    return step_write(db, s);
+    int r = step_write(db, s);
+    unlock(db);
+    return r;
 }
 
 int save_db_get_seed(save_db *db, uint32_t *seed)
@@ -606,28 +687,78 @@ static long read_text(sqlite3_stmt *s, char *buf, size_t cap)
 
 long save_db_get_text(save_db *db, const char *key, char *buf, size_t cap)
 {
+    lock(db);
     sqlite3_stmt *s = db->st[S_GET_META];
     sqlite3_bind_text(s, 1, key, -1, SQLITE_STATIC);
-    return read_text(s, buf, cap);
+    long r = read_text(s, buf, cap);
+    unlock(db);
+    return r;
 }
 
 int save_db_set_text(save_db *db, const char *key, const char *text, size_t len)
 {
     if (len > 256) return -1;
+    lock(db);
     sqlite3_stmt *s = db->st[S_PUT_META];
     sqlite3_bind_text(s, 1, key, -1, SQLITE_STATIC);
     sqlite3_bind_text(s, 2, text, (int)len, SQLITE_STATIC);
-    return step_write(db, s);
+    int r = step_write(db, s);
+    unlock(db);
+    return r;
+}
+
+/* The newest bytes of a row while they wait for the writer, which the
+ * table does not have yet: copied into buf if they fit in cap, or into a
+ * mem_alloc'd *out when out is given. The length, -1 if they do not fit,
+ * or -4 if the row is not queued. */
+static long queued(save_db *db, save_op_kind kind, int cx, int cz, const char *key, void *buf, size_t cap,
+                   uint8_t **out)
+{
+    long r = -4;
+    os_mutex_lock(&db->qlock);
+    const save_op *o = save_batch_find(&db->pending, kind, cx, cz, key);
+    if (!o) o = save_batch_find(&db->inflight, kind, cx, cz, key);
+    if (o && out) {
+        *out = mem_alloc(o->len ? o->len : 1);
+        memcpy(*out, o->data, o->len);
+        r = (long)o->len;
+    } else if (o && buf) {
+        r = -1;
+        if (o->len <= cap) {
+            memcpy(buf, o->data, o->len);
+            r = (long)o->len;
+        }
+    }
+    os_mutex_unlock(&db->qlock);
+    return r;
+}
+
+/* A direct write is newer than whatever of that row is queued, so the
+ * queued bytes go. Called under lock: the writer is not mid-commit. */
+static void unqueue(save_db *db, save_op_kind kind, int cx, int cz, const char *key)
+{
+    os_mutex_lock(&db->qlock);
+    save_batch_drop(&db->pending, kind, cx, cz, key);
+    if (!db->pending.n && !db->inflight.n) {
+        db->committed = db->submitted; /* nothing is left to wait for */
+        os_cond_broadcast(&db->done);
+    }
+    os_mutex_unlock(&db->qlock);
 }
 
 long save_db_get_player(save_db *db, const char *id, void *buf, size_t cap)
 {
+    long r = queued(db, SAVE_OP_PLAYER, 0, 0, id, buf, cap, NULL);
+    if (r != -4) return r;
+    lock(db);
     sqlite3_stmt *s = db->st[S_GET_PLAYER];
     sqlite3_bind_text(s, 1, id, -1, SQLITE_STATIC);
-    return read_blob(s, buf, cap);
+    r = read_blob(s, buf, cap);
+    unlock(db);
+    return r;
 }
 
-int save_db_put_player(save_db *db, const char *id, const void *data, size_t len)
+static int put_player_bytes(save_db *db, const char *id, const void *data, size_t len)
 {
     if (len > SAVE_MAX_FILE) return -1;
     sqlite3_stmt *s = db->st[S_PUT_PLAYER];
@@ -635,6 +766,15 @@ int save_db_put_player(save_db *db, const char *id, const void *data, size_t len
     sqlite3_bind_blob(s, 2, data, (int)len, SQLITE_STATIC);
     sqlite3_bind_int64(s, 3, (sqlite3_int64)time(NULL));
     return step_write(db, s);
+}
+
+int save_db_put_player(save_db *db, const char *id, const void *data, size_t len)
+{
+    lock(db);
+    unqueue(db, SAVE_OP_PLAYER, 0, 0, id);
+    int r = put_player_bytes(db, id, data, len);
+    unlock(db);
+    return r;
 }
 
 /* One integer from meta on a bare connection (the peek has no prepared
@@ -722,6 +862,9 @@ void save_db_peek(const char *dir, save_peek *p)
 
 long save_db_get_column(save_db *db, int cx, int cz, uint8_t **out)
 {
+    long q = queued(db, SAVE_OP_COLUMN, cx, cz, NULL, NULL, 0, out);
+    if (q != -4) return q;
+    lock(db);
     sqlite3_stmt *s = db->st[S_GET_COLUMN];
     sqlite3_bind_int(s, 1, cx);
     sqlite3_bind_int(s, 2, cz);
@@ -743,6 +886,7 @@ long save_db_get_column(save_db *db, int cx, int cz, uint8_t **out)
     }
     sqlite3_reset(s);
     sqlite3_clear_bindings(s);
+    unlock(db);
     return r;
 }
 
@@ -757,24 +901,162 @@ static int put_column_bytes(save_db *db, int cx, int cz, const uint8_t *data, si
 
 int save_db_put_column(save_db *db, const column *c)
 {
+    lock(db);
+    unqueue(db, SAVE_OP_COLUMN, c->cx, c->cz, NULL);
     size_t len = save_encode_column(c, db->buf, SAVE_MAX_FILE);
-    return len ? put_column_bytes(db, c->cx, c->cz, db->buf, len) : -1;
+    int r = len ? put_column_bytes(db, c->cx, c->cz, db->buf, len) : -1;
+    unlock(db);
+    return r;
 }
 
 long save_db_get_blob(save_db *db, const char *name, void *buf, size_t cap)
 {
+    long r = queued(db, SAVE_OP_BLOB, 0, 0, name, buf, cap, NULL);
+    if (r != -4) return r;
+    lock(db);
     sqlite3_stmt *s = db->st[S_GET_BLOB];
     sqlite3_bind_text(s, 1, name, -1, SQLITE_STATIC);
-    return read_blob(s, buf, cap);
+    r = read_blob(s, buf, cap);
+    unlock(db);
+    return r;
 }
 
-int save_db_put_blob(save_db *db, const char *name, const void *data, size_t len)
+static int put_blob_bytes(save_db *db, const char *name, const void *data, size_t len)
 {
     if (len > SAVE_MAX_FILE) return -1;
     sqlite3_stmt *s = db->st[S_PUT_BLOB];
     sqlite3_bind_text(s, 1, name, -1, SQLITE_STATIC);
     sqlite3_bind_blob(s, 2, data, (int)len, SQLITE_STATIC);
     return step_write(db, s);
+}
+
+int save_db_put_blob(save_db *db, const char *name, const void *data, size_t len)
+{
+    lock(db);
+    unqueue(db, SAVE_OP_BLOB, 0, 0, name);
+    int r = put_blob_bytes(db, name, data, len);
+    unlock(db);
+    return r;
+}
+
+/* Commits one batch whole: 0, or -1 with none of it kept. A durable batch
+ * syncs the write-ahead log before the commit returns, so it survives a
+ * power cut too; the rest survive the game crashing, not the OS. */
+static int write_batch(save_db *db, const save_batch *b)
+{
+    if (b->durable) exec(db->h, "PRAGMA synchronous = FULL");
+    int ok = exec(db->h, "BEGIN") == 0;
+    for (size_t i = 0; ok && i < b->n; i++) {
+        const save_op *o = &b->ops[i];
+        if (o->kind == SAVE_OP_COLUMN) ok = put_column_bytes(db, o->cx, o->cz, o->data, o->len) == 0;
+        else if (o->kind == SAVE_OP_PLAYER) ok = put_player_bytes(db, o->key, o->data, o->len) == 0;
+        else ok = put_blob_bytes(db, o->key, o->data, o->len) == 0;
+    }
+    if (ok) ok = exec(db->h, "COMMIT") == 0;
+    if (!ok) {
+        if (!db->retrying) log_error("world save failed: %s", sqlite3_errmsg(db->h));
+        exec(db->h, "ROLLBACK");
+    }
+    if (b->durable) exec(db->h, "PRAGMA synchronous = NORMAL");
+    return ok ? 0 : -1;
+}
+
+/* Waits up to RETRY_SECONDS, or until the database closes. */
+static void back_off(save_db *db)
+{
+    for (int i = 0; i < 10; i++) {
+        os_sleep(RETRY_SECONDS / 10);
+        os_mutex_lock(&db->qlock);
+        int quit = db->quit;
+        os_mutex_unlock(&db->qlock);
+        if (quit) return;
+    }
+}
+
+/* The writer: commits whatever has been submitted, as one batch. A failed
+ * batch goes back to the queue under any newer bytes of its rows and is
+ * tried again, so its rows stay readable and none is dropped while the
+ * disk is full or gone. */
+static void writer_main(void *arg)
+{
+    save_db *db = arg;
+    os_mutex_lock(&db->qlock);
+    for (;;) {
+        while (!db->pending.n && !db->quit) os_cond_wait(&db->wake, &db->qlock);
+        if (db->quit) break;
+        os_mutex_unlock(&db->qlock);
+        lock(db);
+        os_mutex_lock(&db->qlock);
+        db->inflight = db->pending;
+        save_batch_init(&db->pending);
+        uint64_t serial = db->pending_serial;
+        os_mutex_unlock(&db->qlock);
+        int r = write_batch(db, &db->inflight);
+        db->retrying = r != 0;
+        os_mutex_lock(&db->qlock);
+        if (r == 0) {
+            save_batch_free(&db->inflight);
+            db->committed = serial;
+            if (db->failing) log_info("saving works again");
+            db->failing = 0;
+        } else {
+            save_batch_merge(&db->inflight, &db->pending);
+            db->pending = db->inflight;
+            save_batch_init(&db->inflight);
+            if (!db->failing) log_error("could not save the world; keeping the changes in memory and trying again");
+            db->failing = 1;
+            db->failures++;
+        }
+        os_cond_broadcast(&db->done);
+        unlock(db);
+        if (r != 0) {
+            os_mutex_unlock(&db->qlock);
+            back_off(db);
+            os_mutex_lock(&db->qlock);
+        }
+    }
+    os_mutex_unlock(&db->qlock);
+}
+
+uint64_t save_db_submit(save_db *db, save_batch *b)
+{
+    os_mutex_lock(&db->qlock);
+    if (b->n) {
+        save_batch_merge(&db->pending, b);
+        db->pending_serial = ++db->submitted;
+        os_cond_signal(&db->wake);
+    } else {
+        save_batch_free(b);
+    }
+    uint64_t serial = db->submitted;
+    os_mutex_unlock(&db->qlock);
+    return serial;
+}
+
+int save_db_flush(save_db *db)
+{
+    os_mutex_lock(&db->qlock);
+    uint64_t want = db->submitted, failures = db->failures;
+    while (db->committed < want && db->failures == failures) os_cond_wait(&db->done, &db->qlock);
+    int r = db->committed >= want ? 0 : -1;
+    os_mutex_unlock(&db->qlock);
+    return r;
+}
+
+uint64_t save_db_committed(save_db *db)
+{
+    os_mutex_lock(&db->qlock);
+    uint64_t c = db->committed;
+    os_mutex_unlock(&db->qlock);
+    return c;
+}
+
+int save_db_failing(save_db *db)
+{
+    os_mutex_lock(&db->qlock);
+    int f = db->failing;
+    os_mutex_unlock(&db->qlock);
+    return f;
 }
 
 /* Imports one file of an old world folder; 1 if it was. The bytes go in
@@ -790,7 +1072,7 @@ static int import_file(save_db *db, const char *dir, const char *name, int *fail
      * the folder would have failed as well. */
     long len = save_read_file(path, db->buf, SAVE_MAX_FILE);
     if (len < 0) return 0;
-    int r = player ? (len > 0 ? save_db_put_player(db, SAVE_DB_LOCAL_PLAYER, db->buf, (size_t)len) : 0)
+    int r = player ? (len > 0 ? put_player_bytes(db, SAVE_DB_LOCAL_PLAYER, db->buf, (size_t)len) : 0)
                    : put_column_bytes(db, cx, cz, db->buf, (size_t)len);
     if (r != 0) *failed = 1;
     return r == 0;
@@ -814,7 +1096,7 @@ int save_db_import(save_db *db, const char *dir)
     const char *name = NULL;
     while (!failed && (name = os_dir_next(d)) != NULL) files += import_file(db, dir, name, &failed);
     os_dir_close(d);
-    if (!failed && save_db_set_seed(db, seed) == 0 && save_db_commit(db) == 0) return files;
-    exec(db->h, "ROLLBACK");
+    if (!failed && save_db_set_seed(db, seed) == 0) return save_db_commit(db) == 0 ? files : -1;
+    save_db_rollback(db);
     return -1;
 }

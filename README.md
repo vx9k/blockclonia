@@ -89,8 +89,10 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
 - **Saves**: each world is one SQLite database holding only the columns
   you changed (RLE-compressed), your position, inventory and the time of
   day, and on a host every joined player's place and inventory. Saves
-  are transactions, so a crash never leaves half a save. Autosave runs
-  every minute.
+  are transactions written by a thread of their own, so a crash never
+  leaves half a save and the game never waits for the disk. Autosave
+  runs every 5 seconds, and anything that happens to your body is saved
+  at once.
 
 ## Controls
 

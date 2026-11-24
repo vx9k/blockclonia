@@ -350,6 +350,7 @@ typedef struct health {
     /* Recent events for the HUD. */
     char log[HEALTH_LOG][72];
     float log_age[HEALTH_LOG];
+    uint32_t log_count; /* events logged so far: a new one asks for a durable save */
 
     /* The simulated heart and vessels (circulation.c, conduction.c,
      * autonomic.c). Only the server steps them; clients get the vitals

@@ -132,12 +132,12 @@ combat_targets mp_targets(const mp *m);
 /* On a client, the creatures near this player as the host last sent them
  * (positions, headings and kinds only, for drawing). */
 const mobs *mp_client_mobs(const mp *m);
-/* Host: writes every joined player, present or gone this session, into
- * the world's players table under its key in hex (the single-player record:
- * position, view, inventory), for the next time that key joins. Call
- * inside the transaction that saves the world. A dead player keeps the
- * record saved before. 0, or -1 if a write failed. */
-int mp_save_players(const mp *m);
+/* Host: adds every joined player, present or gone this session, to the
+ * batch that saves the world, for the world's players table under its key
+ * in hex (the single-player record: position, view, inventory, body), for
+ * the next time that key joins. 0, or -1 if one could not be added. */
+struct save_batch;
+int mp_save_players(const mp *m, struct save_batch *b);
 /* Host: the column each joined player stands in, for world_set_anchors,
  * so the world loads around them too. Returns how many (at most max). */
 #define MP_ANCHOR_RADIUS 4 /* columns around a player: creatures spawn up to 44 m out */

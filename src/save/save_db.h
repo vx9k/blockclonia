@@ -19,6 +19,7 @@
 #include <stdint.h>
 
 typedef struct save_db save_db;
+struct save_batch;
 
 /* The world format this build writes. Older formats are upgraded when
  * opened (the original kept as world.db.format<N>); newer ones refused. */
@@ -107,6 +108,22 @@ int save_db_put_player(save_db *db, const char *id, const void *data, size_t len
  * if it could not be read (a database error). */
 long save_db_get_blob(save_db *db, const char *name, void *buf, size_t cap);
 int save_db_put_blob(save_db *db, const char *name, const void *data, size_t len);
+
+/* The writer thread. submit hands the batch's rows to it (b is left
+ * empty) and returns the batch's serial; the game goes on while it
+ * commits them. Until then the gets above return the queued bytes, so a
+ * column unloaded before it reached the disk still loads as it was left.
+ * A failed commit is tried again, every row kept, until it lands or the
+ * database closes. A direct put replaces that row's queued bytes. Don't
+ * submit or flush between begin and commit: the writer waits for those.
+ * flush waits until everything submitted so far is committed (0) or a
+ * commit failed meanwhile (-1). committed is the newest serial on disk,
+ * and failing says whether the last commit failed. close flushes first
+ * and logs what could not be written. */
+uint64_t save_db_submit(save_db *db, struct save_batch *b);
+int save_db_flush(save_db *db);
+uint64_t save_db_committed(save_db *db);
+int save_db_failing(save_db *db);
 
 /* Imports a world folder in the file format older builds wrote
  * (level.dat, player.dat, c.X.Z.bin) into a database that has no seed yet,

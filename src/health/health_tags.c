@@ -305,6 +305,7 @@ static const tag_field HEALTH_F[] = {
     TAG_F32R(health, wave_acc, 0, 1),
     TAG_U8(health, log),
     TAG_F32(health, log_age),
+    TAG_U32(health, log_count),
     TAG_SUB(health, cv, circ, CIRC),
     TAG_SUB(health, cond, conduction, COND),
     TAG_SUB(health, ans, autonomic, ANS),
