@@ -1,13 +1,47 @@
-# blockclonia
+<h1 align="center">blockclonia</h1>
 
-A Minecraft-style voxel sandbox written from scratch in C11 and Vulkan,
-with physics that tries to behave like the real world, a simulated human
-body instead of a health bar, encrypted multiplayer you can join across
-the internet by typing an address, and a renderer tuned for low-end
-hardware. Every texture and sound is generated at start-up, and all
-memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
+<p align="center"><b>Real physics. A body that works like one.</b></p>
 
-![the title screen](docs/title.jpg)
+<p align="center">
+  <a href="https://github.com/vx9k/blockclonia/actions/workflows/ci.yml"><img src="https://github.com/vx9k/blockclonia/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/vx9k/blockclonia/releases/latest"><img src="https://img.shields.io/github/v/release/vx9k/blockclonia?label=release" alt="latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/vx9k/blockclonia" alt="license"></a>
+  <img src="https://img.shields.io/badge/C11-no%20extensions-blue" alt="C11">
+  <img src="https://img.shields.io/badge/Vulkan-1.2%2B-red" alt="Vulkan 1.2+">
+  <img src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS-lightgrey" alt="Linux and macOS">
+</p>
+
+<p align="center">
+  <img src="docs/title.jpg" alt="the title screen" width="100%">
+</p>
+
+A voxel sandbox written from scratch in C11 and Vulkan, with physics that
+tries to behave like the real world, a simulated human body instead of a
+health bar, encrypted multiplayer you can join across the internet by
+typing an address, and a renderer tuned for low-end hardware. Every
+texture and sound is generated at start-up, and all memory comes from
+[mimalloc](https://github.com/microsoft/mimalloc).
+
+<p align="center">
+  <a href="#building">Building</a> ·
+  <a href="#controls">Controls</a> ·
+  <a href="#physics">Physics</a> ·
+  <a href="#health">Health</a> ·
+  <a href="#multiplayer">Multiplayer</a> ·
+  <a href="#settings">Settings</a> ·
+  <a href="docs/ARCHITECTURE.md">Architecture</a>
+</p>
+
+<table align="center">
+  <tr>
+    <td><img src="docs/day.jpg" alt="a river through grassland at mid-morning" width="100%"></td>
+    <td><img src="docs/sunset.jpg" alt="the same land at sunset" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Mid-morning by a river</sub></td>
+    <td align="center"><sub>Sunset, lit by the sky and the sun's shadows</sub></td>
+  </tr>
+</table>
 
 ## What's in it
 
@@ -160,9 +194,9 @@ and heads it off; once down, you come round within seconds.
 
 **Menus**: mouse, or arrows and Enter; ←/→ change a setting; Esc goes back.
 
-![inventory and crafting](docs/inventory.png)
-
 ## Physics
+
+<img align="right" width="42%" src="docs/collapse.png" alt="structural collapse">
 
 - **Gravity and drag**: 9.81 m/s², quadratic air drag (terminal velocity
   ≈ 49 m/s for the player), buoyancy from real densities (a human barely
@@ -187,8 +221,6 @@ and heads it off; once down, you come round within seconds.
   block: it falls, spreads, levels out and never duplicates itself.
   Placing a block into water pushes the water aside instead of deleting
   it.
-
-![structural collapse](docs/collapse.png)
 
 ## Heat
 
@@ -252,7 +284,7 @@ and heads it off; once down, you come round within seconds.
 
 ## Health
 
-![the H panel](docs/health.png)
+<img align="right" width="42%" src="docs/health.png" alt="the H panel">
 
 The player is a 75 kg adult simulated in real time: a circulation model
 (blood volume, heart rate, stroke volume, vascular resistance, a
@@ -307,6 +339,8 @@ arrest, sepsis, dehydration, starvation, hypothermia, heatstroke, trauma
 or burns.
 
 ## Crafting
+
+<p align="center"><img src="docs/inventory.jpg" alt="inventory and crafting" width="70%"></p>
 
 | Makes | From | Needs |
 |---|---|---|
@@ -435,6 +469,8 @@ touching the world.
 
 ## Settings
 
+<p align="center"><img src="docs/settings.jpg" alt="the settings screen" width="70%"></p>
+
 Settings are saved in `blockclonia.cfg` under the config directory (or
 the file given with `--config`) as one `key value` pair per line. See
 "Where files live" below for the exact path. Unknown keys and
@@ -537,7 +573,7 @@ them off for testing, as a comma list of `mdi`, `dynrend`, `sync2`,
 `all`; unknown names are logged and ignored. `MC_VK_API=1.2
 MC_VK_DISABLE=all` is the plainest path, the one a bare 1.2 driver takes.
 
-![the F3 debug overlay](docs/debug.jpg)
+<p align="center"><img src="docs/debug.jpg" alt="the F3 debug overlay" width="80%"></p>
 
 ## Building
 
@@ -600,9 +636,9 @@ xvfb-run -a env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
 
 ## Multiplayer
 
-One player hosts and the others join; there is no separate server.
+<img align="right" width="42%" src="docs/multiplayer.png" alt="the Multiplayer screen">
 
-![the Multiplayer screen](docs/multiplayer.png)
+One player hosts and the others join; there is no separate server.
 
 From the title screen, **Multiplayer** asks for your name and the host's
 address to join, or lets you pick a world to host (and whether players
