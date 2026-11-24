@@ -447,7 +447,7 @@ static void vitals(ui *u, const health *h, float x, float y)
         float v;
         uint32_t c;
     } bars[4] = {
-        {UI_CH_DROP, h->blood / BLOOD_NORMAL, ui_rgba(210, 40, 40, 255)},
+        {UI_CH_DROP, h->blood / health_blood_normal(h), ui_rgba(210, 40, 40, 255)},
         {"W", health_hydration(h), ui_rgba(60, 140, 240, 255)},
         {"F", 1.0f - health_hunger(h), ui_rgba(235, 150, 50, 255)},
         {"S", health_stamina(h), ui_rgba(235, 215, 60, 255)},
@@ -838,7 +838,7 @@ static void panel(ui *u, const health *h, hud_state *s)
     float sy = oy + 80;
     ui_text(u, ox, sy, 1, C_HEAD, "BODY");
     sy += 11;
-    float vol = h->blood / BLOOD_NORMAL;
+    float vol = h->blood / health_blood_normal(h);
     snprintf(buf, sizeof buf, "%.2f L", (double)h->blood);
     labelled_bar(u, ox, sy, "Blood", clamp01((vol - 0.5f) / 0.5f), vol < 0.7f ? SEV[3] : ui_rgba(210, 40, 40, 255),
                  buf);
