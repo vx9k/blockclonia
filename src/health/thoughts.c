@@ -248,7 +248,7 @@ static int level_body(const health *h, int f)
     switch (f) {
     case FEEL_PAIN: return grade(h->pain, 2.5f, 5.0f, 7.5f);
     case FEEL_BLEEDING: return grade(h->bleed_ext, 5.0f, 30.0f, 100.0f);
-    case FEEL_FAINT: return grade(1.0f - h->blood / BLOOD_NORMAL, 0.12f, 0.22f, 0.32f);
+    case FEEL_FAINT: return grade(1.0f - h->blood / health_blood_normal(h), 0.12f, 0.22f, 0.32f);
     case FEEL_BREATH:
         if (!h->breathing) return 0;
         return maxi(grade(0.95f - h->sao2, 0.03f, 0.1f, 0.2f), h->pneumothorax > 0.2f ? 2 : 0);

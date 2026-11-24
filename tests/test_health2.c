@@ -709,6 +709,29 @@ static void test_vision_blur(void)
     mem_free(h);
 }
 
+/* Blood loss is judged against the body's own volume (65 to 75 mL/kg),
+ * not one fixed 5.25 L: the small-volume body a tenth down is fine, the
+ * large-volume one a fifth down is in trouble, not the other way round. */
+static void test_own_blood_volume(void)
+{
+    health *h = new_body(3u);
+    h->base.blood_per_kg = 65.0f;
+    CHECK(fabsf(health_blood_normal(h) - 4.875f) < 1e-4f);
+    h->blood = 4.39f; /* 90% of its own 4.875 L; under 85% of 5.25 */
+    CHECK(health_debug_severity(h, HDBG_TARGET_BODY) == 0);
+    h->base.blood_per_kg = 75.0f;
+    h->blood = 4.5f; /* 80% of its own 5.625 L; over 85% of 5.25 */
+    CHECK(health_debug_severity(h, HDBG_TARGET_BODY) == 2);
+    h->blood = 3.83f; /* 68% of its own; over 70% of 5.25 */
+    CHECK(health_debug_severity(h, HDBG_TARGET_BODY) == 3);
+    mem_free(h);
+    /* A fresh body starts full at its own volume, red cells included. */
+    h = new_body(5u);
+    CHECK(fabsf(h->blood - health_blood_normal(h)) < 0.01f);
+    CHECK(fabsf(h->rbc - 0.45f * health_blood_normal(h)) < 0.01f);
+    mem_free(h);
+}
+
 void test_health2_all(void)
 {
     TEST_PART(test_mild_air);
@@ -726,4 +749,5 @@ void test_health2_all(void)
     TEST_PART(test_variance_emergent);
     TEST_PART(test_variance_shortterm);
     TEST_PART(test_vision_blur);
+    TEST_PART(test_own_blood_volume);
 }

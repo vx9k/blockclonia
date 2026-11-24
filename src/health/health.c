@@ -1202,9 +1202,9 @@ static int arrest_cause(const health *h, int airway)
 {
     if (airway == AIRWAY_WATER && h->sao2 < 0.7f) return DEATH_DROWNING;
     if ((airway == AIRWAY_BLOCKED || h->part[BP_CHEST].crush_load > 60.0f) && h->sao2 < 0.7f) return DEATH_SUFFOCATION;
-    if (h->burn_tbsa > 10.0f && h->blood < BLOOD_NORMAL * 0.8f) return DEATH_BURNS;
+    if (h->burn_tbsa > 10.0f && h->blood < health_blood_normal(h) * 0.8f) return DEATH_BURNS;
     if (h->ich > 25.0f || h->icp > 40.0f) return DEATH_HEAD_INJURY;
-    if (h->blood < BLOOD_NORMAL * 0.72f) return DEATH_BLOOD_LOSS;
+    if (h->blood < health_blood_normal(h) * 0.72f) return DEATH_BLOOD_LOSS;
     if (h->sepsis > 0.6f) return DEATH_SEPSIS;
     if (h->temp < 30.0f) return DEATH_HYPOTHERMIA;
     if (h->temp > 41.5f) return DEATH_HYPERTHERMIA;
@@ -1367,7 +1367,7 @@ static void step_bleeding(health *h, const health_env *e, double dt, float gh, c
     h->bleed_int = internal;
     h->ich += h->ich_rate * fdt / 60.0f;
     h->ich_rate *= (float)exp(-dt / 600.0);
-    if (h->rbc < BLOOD_NORMAL * 0.45f) h->rbc += 0.02f / 24.0f * gh * h->organ[ORG_KIDNEYS];
+    if (h->rbc < health_blood_normal(h) * 0.45f) h->rbc += 0.02f / 24.0f * gh * h->organ[ORG_KIDNEYS];
 }
 
 /* Blood the circuit lost to wounds takes its red cells and water with it;
@@ -2301,7 +2301,8 @@ static void step_brain(health *h, float cao2_rel, float dehyd, int arrest, doubl
      * mind is as clear as its worst insult allows. */
     const float sed = health_sedation(h);
     float want = minf(cons_low(h->brain_o2, 0.7f, 0.55f, 0.4f), cons_low(h->sao2, 0.85f, 0.7f, 0.5f));
-    want = minf(want, cons_low(h->blood, 0.8f * BLOOD_NORMAL, 0.7f * BLOOD_NORMAL, 0.4f * BLOOD_NORMAL));
+    const float bn = health_blood_normal(h);
+    want = minf(want, cons_low(h->blood, 0.8f * bn, 0.7f * bn, 0.4f * bn));
     /* Mild hypothermia (32-35 C) already brings confusion and poor
      * judgement; consciousness is lost near 30. */
     want = minf(want, minf(cons_low(h->temp, 35.5f, 34.5f, 30.0f), cons_low(-h->temp, -39.0f, -40.0f, -41.5f)));
@@ -2409,7 +2410,7 @@ void health_step(health *h, const health_env *e, double dt)
      * is already warm. */
     float skin_drive = maxf(0.0f, 27.0f - health_skin_mean(h)) * fclamp((37.1f - h->temp) / 0.3f, 0.0f, 1.0f);
     p += minf(400.0f, 250.0f * maxf(0.0f, 36.5f - h->base.cold_bias - h->temp) + 20.0f * skin_drive);
-    float cap = cao2_rel * h->organ[ORG_HEART] * fclamp(h->blood / BLOOD_NORMAL, 0.0f, 1.0f) *
+    float cap = cao2_rel * h->organ[ORG_HEART] * fclamp(h->blood / health_blood_normal(h), 0.0f, 1.0f) *
                 (h->glycogen > 50.0f ? 1.0f : 0.7f) * (1.0f - fclamp(dehyd * 3.0f, 0.0f, 0.4f));
     cap = fclamp(cap, 0.05f, 1.0f);
     float cp = crit_power * cap, aer_max = vo2max_w * cap;
@@ -2848,7 +2849,7 @@ health_limits health_get_limits(const health *h)
     if (h->glycogen < 50.0f) sys *= 0.8f;
     if (dehyd > 0.1f) sys *= 0.6f;
     else if (dehyd > 0.06f) sys *= 0.85f;
-    float v = h->blood / BLOOD_NORMAL;
+    float v = h->blood / health_blood_normal(h);
     if (v < 0.65f) sys *= 0.5f;
     else if (v < 0.8f) sys *= 0.75f;
     if (h->sao2 < 0.85f) sys *= 0.7f;
@@ -3105,8 +3106,9 @@ int health_debug_severity(const health *h, int target)
 {
     if (target < 0 || target >= HDBG_TARGET_COUNT) return 0;
     if (target == HDBG_TARGET_BODY) {
-        if (!health_rhythm_perfusing(h->rhythm) || h->blood < BLOOD_NORMAL * 0.7f) return 3;
-        if (h->blood < BLOOD_NORMAL * 0.85f || h->temp < 35.0f || h->temp > 39.0f || h->sepsis > 0.3f) return 2;
+        const float bn = health_blood_normal(h);
+        if (!health_rhythm_perfusing(h->rhythm) || h->blood < bn * 0.7f) return 3;
+        if (h->blood < bn * 0.85f || h->temp < 35.0f || h->temp > 39.0f || h->sepsis > 0.3f) return 2;
         return h->sepsis > 0.05f || h->bac > 0.5f || h->opioid > 10.0f || h->rhythm != RHYTHM_SINUS ? 1 : 0;
     }
     if (target >= HDBG_TARGET_ORGAN) {
@@ -3575,3 +3577,5 @@ int health_decode(health *h, const uint8_t *in, size_t len)
     mem_free(t);
     return ok ? 0 : -1;
 }
+
+float health_blood_normal(const health *h) { return h->base.blood_per_kg * 75.0f / 1000.0f; }

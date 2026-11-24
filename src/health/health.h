@@ -584,6 +584,10 @@ const char *health_bone_name(int part); /* "right forearm", "skull" */
 const char *health_organ_name(int organ);
 const char *health_death_text(int cause);
 
+/* L of blood this body holds when full: its own 65..75 mL/kg, which the
+ * thresholds for blood loss are measured against. */
+float health_blood_normal(const health *h);
+
 /* One-line status for a part, e.g. "Closed fracture (splinted), bleeding
  * 12 mL/min". Returns a severity 0 (fine) .. 3 (critical). */
 int health_part_status(const health *h, int part, char *buf, size_t n);
