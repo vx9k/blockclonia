@@ -159,13 +159,24 @@ limiter.
 ## Saving
 
 - Each world lives in one SQLite database, `world.db`, in the `world/`
-  folder, holding the seed, the player (position, view, time of day,
-  inventory) and one row per edited column (`save_db.c`); `save.c` still
-  encodes and decodes the payloads. A folder written by an older build
+  folder, holding the seed, every player, the world's state and one row
+  per edited column (`save_db.c`); `save.c` still encodes and decodes the
+  columns. A folder written by an older build
   (`level.dat`, `player.dat`, `c.X.Z.bin`) is imported into the database
   the first time it is opened, leaving the old files in place.
-- Each save writes the edited columns and the player in one transaction,
-  so the two on disk always match. A saved column that cannot be read is
+- Players and the world's state are tagged records (`tagged.c`): named
+  sections of fields keyed by a hash of their names, so a build reads
+  what it knows, skips what it does not, and keeps its defaults for
+  fields a record lacks. Adding a field changes no format. A player's
+  record (`survival.c`) holds the player, the inventory and the whole
+  body (`health_tags.c`), dead or alive, so leaving a world neither heals
+  nor revives; joined players' bodies are saved the same way. The
+  world's state (`world_state.c`, the `blobs` row `state`) holds the
+  time of day and the days passed, plus empty sections for systems
+  still to come (vehicles, machines, weather, animals). Every field has
+  a range, and a record that breaks one is refused whole.
+- Each save writes the edited columns, the players and the world's state
+  in one transaction, so they always match on disk. A saved column that cannot be read is
   shown as generated terrain and never written over, so its real data stays
   on disk.
 - The database format is a number in the file's header (`SAVE_DB_FORMAT`).

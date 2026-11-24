@@ -352,7 +352,7 @@ static void test_edge_records(void)
     static const double BAD[] = {EDGE + 1.0, -EDGE - 1.0, EDGE + 1e-3, 1e300, (double)NAN, (double)INFINITY};
     inventory inv = {0};
     inv_init(&inv);
-    uint8_t rec[PLAYER_FILE_SIZE] = {0}, sent[PLAYER_NET_BYTES] = {0};
+    uint8_t rec[4096] = {0}, sent[PLAYER_NET_BYTES] = {0};
     for (int bad = 0; bad < 2; bad++) {
         const double *xs = bad ? BAD : OK;
         size_t count = bad ? sizeof BAD / sizeof BAD[0] : sizeof OK / sizeof OK[0];
@@ -362,7 +362,7 @@ static void test_edge_records(void)
                 p.pos = dv3(axis ? 3.5 : xs[i], GROUND, axis ? xs[i] : -3.5);
                 p.prev_pos = p.pos;
                 inventory got = {0};
-                size_t n = survival_encode_player(&p, &inv, 0.25, rec, sizeof rec);
+                size_t n = survival_encode_player(&p, &inv, NULL, rec, sizeof rec);
                 int read = n > 0 && survival_decode_player(&back, &got, NULL, rec, n) == 0;
                 CHECK(read == !bad);
                 if (read) CHECK(back.pos.x == p.pos.x && back.pos.z == p.pos.z);

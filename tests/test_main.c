@@ -1563,6 +1563,8 @@ static int slot_of(const inventory *inv, item_id id)
     return -1;
 }
 
+static void test_player_record(const inventory *kept);
+
 static void test_inventory(void)
 {
     inventory inv = {0};
@@ -1643,33 +1645,47 @@ static void test_inventory(void)
         CHECK(inv_decode(&back, buf, sizeof buf) == -1);
     }
 
-    /* The player file. */
+    test_player_record(&inv);
+}
+
+/* The player record around a given inventory. */
+static void test_player_record(const inventory *kept)
+{
+    inventory inv = *kept;
     player p = {0};
     memset(&p, 0, sizeof p);
     p.pos = dv3(-123.25, 70.5, 9999.75);
     p.yaw = 1.25f;
     p.pitch = -0.5f;
     p.flying = 1;
-    uint8_t pf[PLAYER_FILE_SIZE] = {0};
-    CHECK(survival_encode_player(&p, &inv, 0.75, pf, sizeof pf) == PLAYER_FILE_SIZE);
+    uint8_t pf[4096] = {0};
+    size_t n = survival_encode_player(&p, &inv, NULL, pf, sizeof pf);
+    CHECK(n > 4 && memcmp(pf, "MCPR", 4) == 0);
     player q = {0};
     inventory qi = {0};
-    double day = 0.0;
-    CHECK(survival_decode_player(&q, &qi, &day, pf, sizeof pf) == 0);
-    CHECK(fabs(day - 0.75) < 1e-4);
+    CHECK(survival_decode_player(&q, &qi, NULL, pf, n) == 0);
     CHECK(q.pos.x == p.pos.x && q.pos.y == p.pos.y && q.pos.z == p.pos.z && q.yaw == p.yaw && q.flying == 1);
     CHECK(inv_equal(&qi, &inv));
-    const int reserved[] = {5, 6, 7, 41, 44 + 5};
-    for (size_t k = 0; k < sizeof reserved / sizeof reserved[0]; k++) {
-        survival_encode_player(&p, &inv, 0.75, pf, sizeof pf);
-        pf[reserved[k]] = 1;
-        q.yaw = 9.0f;
-        CHECK(survival_decode_player(&q, &qi, &day, pf, sizeof pf) == -1 && q.yaw == 9.0f);
-    }
-    survival_encode_player(&p, &inv, 0.75, pf, sizeof pf);
-    double nan = (double)NAN;
-    memcpy(pf + 16, &nan, 8);
-    CHECK(survival_decode_player(&q, &qi, NULL, pf, sizeof pf) == -1);
+    /* Refused, leaving the destination alone: another magic, a cut
+     * record, a position outside the world, a value that is not finite,
+     * and an inventory that could not exist. */
+    q.yaw = 9.0f;
+    pf[3] = 'X';
+    CHECK(survival_decode_player(&q, &qi, NULL, pf, n) == -1 && q.yaw == 9.0f);
+    pf[3] = 'R';
+    CHECK(survival_decode_player(&q, &qi, NULL, pf, n - 1) == -1 && q.yaw == 9.0f);
+    player far = p;
+    far.pos.y = 1e6;
+    size_t fn = survival_encode_player(&far, &inv, NULL, pf, sizeof pf);
+    CHECK(fn && survival_decode_player(&q, &qi, NULL, pf, fn) == -1 && q.yaw == 9.0f);
+    far = p;
+    far.yaw = NAN;
+    fn = survival_encode_player(&far, &inv, NULL, pf, sizeof pf);
+    CHECK(fn && survival_decode_player(&q, &qi, NULL, pf, fn) == -1 && q.yaw == 9.0f);
+    inventory odd = inv;
+    odd.slot[0] = (item_stack){I_APPLE, 255, 0};
+    fn = survival_encode_player(&p, &odd, NULL, pf, sizeof pf);
+    CHECK(fn && survival_decode_player(&q, &qi, NULL, pf, fn) == -1 && q.yaw == 9.0f && inv_equal(&qi, &inv));
 }
 
 static void test_items_physics(void)
@@ -2444,6 +2460,7 @@ static const test_suite SUITES[] = {
     SPLIT(test_health2_all, 15),
     SPLIT(test_circulation_all, 27),
     SPLIT(test_defib_all, 8),
+    SPLIT(test_save_body_all, 13),
     SUITE(test_health_infection),
     SPLIT(test_fear_all, 8),
     SPLIT(test_conscious_all, 9),
@@ -2511,6 +2528,7 @@ static const test_suite SUITES[] = {
     SUITE(test_discord_all),
     SUITE(test_netcrypto_all),
     SUITE(test_wire_all),
+    SUITE(test_tagged_all),
     SUITE(test_net_all),
     SUITE(test_mp_all),
     SUITE(test_noise_all),

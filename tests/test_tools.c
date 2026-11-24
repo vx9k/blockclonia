@@ -114,16 +114,19 @@ static void test_formats(void)
     CHECK(inv_decode(&back, buf, sizeof buf) == -1);
     CHECK(inv_decode(&back, buf, sizeof buf - 1) == -1);
 
-    /* The player record is version 3, with an INV3 inventory inside. */
+    /* The player record keeps the wear too, and refuses wear past worn out. */
     player p = {0};
     p.pos = dv3(10.5, 70.0, -3.5);
-    uint8_t pf[PLAYER_FILE_SIZE] = {0};
-    CHECK(survival_encode_player(&p, &inv, 0.5, pf, sizeof pf) == PLAYER_FILE_SIZE && pf[4] == 3);
+    uint8_t pf[4096] = {0};
+    size_t n = survival_encode_player(&p, &inv, NULL, pf, sizeof pf);
     player q = {0};
     inventory qi = {0};
-    CHECK(survival_decode_player(&q, &qi, NULL, pf, sizeof pf) == 0 && q.pos.x == 10.5 && inv_count(&qi, pick) == 1);
-    pf[4] = 2;
-    CHECK(survival_decode_player(&q, &qi, NULL, pf, sizeof pf) == -1);
+    CHECK(n && survival_decode_player(&q, &qi, NULL, pf, n) == 0 && q.pos.x == 10.5 && inv_count(&qi, pick) == 1);
+    CHECK(qi.slot[1].wear == inv.slot[1].wear);
+    inventory worn = inv;
+    worn.slot[1].wear = (uint8_t)item_durability(pick);
+    n = survival_encode_player(&p, &worn, NULL, pf, sizeof pf);
+    CHECK(n && survival_decode_player(&q, &qi, NULL, pf, n) == -1);
 }
 
 /* Breaking rock: slow and fruitless by hand, faster with a pickaxe, which

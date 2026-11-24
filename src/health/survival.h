@@ -66,11 +66,18 @@ int survival_water_nearby(const world *w, const player *p, vec3 dir);
  * Returns 1 and the cell if found. */
 int survival_find_liquid(const world *w, dvec3 eye, vec3 dir, double reach, ipos *out);
 
-/* The player file: position, view, fly mode, the time of day (0..1) and
- * the inventory. decode
- * returns 0 on success and -1 (nothing changed) for malformed data. */
-#define PLAYER_FILE_SIZE (4 + 4 + 3 * 8 + 2 * 4 + 4 + INV_ENCODED_SIZE)
-size_t survival_encode_player(const player *p, const inventory *inv, double day, uint8_t *out, size_t cap);
-int survival_decode_player(player *p, inventory *inv, double *day, const uint8_t *in, size_t len);
+/* The player record (players table, save_db.h): "MCPR", then a tagged
+ * record (tagged.h) with the sections player (where and how the body
+ * stands and moves), inventory and body (the whole health model), so
+ * leaving a world or a crash neither heals nor harms. h may be NULL to
+ * leave the body out, or to skip it when reading.
+ *
+ * decode reads into p, inv and h, which hold the values for anything the
+ * record lacks (a fresh player, the starting kit, a fresh body), and
+ * returns 0; or -1, all three untouched, for malformed data, a position
+ * outside the world, or an inventory that is not real. */
+#define PLAYER_RECORD_MAX (64 * 1024)
+size_t survival_encode_player(const player *p, const inventory *inv, const health *h, uint8_t *out, size_t cap);
+int survival_decode_player(player *p, inventory *inv, health *h, const uint8_t *in, size_t len);
 
 #endif

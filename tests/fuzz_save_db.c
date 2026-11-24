@@ -6,6 +6,7 @@
 #include "save.h"
 #include "save_db.h"
 #include "survival.h"
+#include "world_state.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -49,16 +50,20 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
             if (n >= 0) save_decode_column(c, bytes, (size_t)n);
             mem_free(bytes);
         }
-    static uint8_t buf[PLAYER_FILE_SIZE + 1];
+    static uint8_t buf[PLAYER_RECORD_MAX + 1];
+    static health body;
     long n = save_db_get_player(db, SAVE_DB_LOCAL_PLAYER, buf, sizeof buf);
     if (n >= 0) {
         player p = {0};
         inventory inv = {0};
-        double day = 0.0;
         memset(&p, 0, sizeof p);
         memset(&inv, 0, sizeof inv);
-        survival_decode_player(&p, &inv, &day, buf, (size_t)n);
+        health_init(&body, 1);
+        survival_decode_player(&p, &inv, &body, buf, (size_t)n);
     }
+    thermo *th = thermo_create(seed);
+    world_state_load(db, th);
+    thermo_destroy(th);
     save_db_close(db);
     return 0;
 }

@@ -80,4 +80,11 @@ size_t inv_encode(const inventory *inv, uint8_t *out, size_t cap);
 /* 0 on success; -1 (inventory untouched) if the bytes are malformed. */
 int inv_decode(inventory *inv, const uint8_t *in, size_t len);
 
+/* The inventory as a tagged record (tagged.h) for saves; a decoded one is
+ * used only if inv_valid: real items, stacks within their size, wear only
+ * on what wears. */
+struct tag_table;
+extern const struct tag_table g_inv_tags;
+int inv_valid(const inventory *inv);
+
 #endif
