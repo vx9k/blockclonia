@@ -101,6 +101,7 @@ void test_lamps_all(void);
 void test_shadow_all(void);
 void test_mobmodel_all(void);
 void test_avatar_all(void);
+void test_blood_all(void);
 void test_materials_all(void);
 void test_strata_all(void);
 void test_fluid_all(void);

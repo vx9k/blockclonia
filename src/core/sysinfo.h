@@ -22,6 +22,7 @@ typedef struct {
     int render_distance;  /* columns, for a first run without a settings file */
     int sqlite_cache_kb;  /* page cache per open world */
     int arena_mb;         /* mimalloc's reservation step */
+    int blood_stains;     /* blood stains kept in the world at once */
 } sys_budget;
 
 /* Fills si from the running system; never fails (unknowns are 0). */

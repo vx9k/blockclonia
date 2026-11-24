@@ -123,6 +123,12 @@ void sys_plan(const sys_info *si, sys_budget *b)
     /* mimalloc reserves address space in this step; larger steps mean
      * fewer mappings, and only committed pages cost memory. */
     b->arena_mb = si->ram >= 8 * GIB ? 256 : 64;
+
+    /* Blood stains are a few dozen bytes each, but every one is a box
+     * drawn each frame among the renderer's 2048 entities: one per 4 MB
+     * the game may use, from 256 on a small machine to 1024. */
+    uint64_t stains = usable / (4 * MIB);
+    b->blood_stains = (int)(stains < 256 ? 256 : (stains > 1024 ? 1024 : stains));
 }
 
 void sys_log(const sys_info *si, const sys_budget *b)
