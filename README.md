@@ -113,6 +113,8 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
 | F2 | Screenshot (`screenshot.png`) |
 | F11 | Fullscreen on or off |
 | F3 | Debug overlay |
+| F5 | Camera: first person, behind, in front (and, with F3 on, a free camera: WASD, Space/Shift, Ctrl for speed) |
+| V | Look over the other shoulder (camera behind) |
 | K (with F3 on) | Debug health menu: trigger any injury, or heal |
 | T | Chat, in a multiplayer game: type a line, Enter sends it, Esc cancels |
 | Esc | Close the inventory or panel; otherwise pause |
@@ -451,6 +453,8 @@ starts with the defaults and doesn't save changes over it.
 | Video | Light flicker | on (default)/off: flames, torches and other fire waver; off, they burn at a steady level |
 | Video | Leaves and grass sway | on (default)/off: leaves, grass and flowers move in the wind; off, they stand still |
 | Video | Brightness (nights) | 0–100% (default 0): a floor under all light, for dark nights and caves; daylight is unchanged |
+| Video | Third-person distance | 2–8 m (default 4): how far behind or in front of the head the F5 camera sits; walls bring it closer |
+| Video | Third-person shoulder | Right (default), Left or Centre (also V): the camera behind looks over that shoulder, turned in so the crosshair marks what the look hits |
 | Display | Fullscreen | on/off (also F11): borderless at the monitor's own resolution |
 | Display | VSync | on/off |
 | Display | Frame limit | unlimited (default), 30, 60, 90, 120, 144, 165 or 240 fps; used while VSync is off |
@@ -458,6 +462,7 @@ starts with the defaults and doesn't save changes over it.
 | Controls | Mouse sensitivity | 10–300% |
 | Controls | Invert Y, sprint toggle, key hints | on/off |
 | Controls | Inner voice | on (default)/off: thoughts and body sensations above the hotbar |
+| Controls | Camera on collapse | Stay in head (default): glimpses through the eyes while unresponsive; Behind the body: the camera leaves the head and watches the body while it is down or dead; Look around: the same, and the mouse turns the camera around the body. Watched from outside, the world is greyer and dimmer instead of dark |
 | Controls | Discord status | off (default)/on: shows Discord friends how the body is doing ("Badly hurt (Bleeding 40 mL/min)", "Dead man walking"), the world's name and the time played, or "In the menus". Only in builds made with `MC_DISCORD_APP_ID` (see BUILDING.md); needs the Discord app running on the same machine |
 | Audio | Master, effects, ambience volume | 0–100% |
 | Audio | Interface, body (heartbeat, breathing) volume | 0–100%, on top of effects |
@@ -554,14 +559,15 @@ blockclonia [--seed N] [--radius 2-32] [--size WxH] [--no-vsync]
             [--threads N] [--pool-mb N] [--gpu N] [--world DIR | --no-save]
             [--config FILE] [--validate] [--no-sound]
             [--play] [--screen title|worlds|backups|create|multiplayer|pause|settings|controls|debug-health|inventory]
-            [--debug] [--time HH] [--mode NAME] [--give LIST] [--mobs LIST] [--figures LIST] [--hurt LIST]
+            [--debug] [--camera first|back|front|free] [--time HH] [--mode NAME] [--give LIST] [--mobs LIST] [--figures LIST] [--hurt LIST]
             [--frames N] [--screenshot F] [--look YAW,PITCH] [--spawn X,Z]
             [--demo] [--health-panel] [--bench] [--mem-stats]
             [--host [--port N] [--client-server] | --join ADDR[:PORT]] [--name NAME]
 ```
 
 - `--play` skips the menus and plays the default world; `--screen` opens a menu at start and
-  `--debug` turns F3 on.
+  `--debug` turns F3 on. `--camera back` (or `front`, or `free`) starts in
+  that view, as if F5 had been pressed.
 - `--give log:8,sand:4` starts you with items (names as shown in game).
   `--mobs wolf,boar` stands creatures side by side 4 m in front of you, and
   `--figures walk,run,sneak` does the same with players' figures, moving on the spot.

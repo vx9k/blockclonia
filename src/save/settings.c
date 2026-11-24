@@ -44,6 +44,9 @@ static const field FIELDS[] = {
     {"flicker", 0, 1},
     {"shadows", 0, 2},
     {"sway", 0, 1},
+    {"camera_distance", SETTINGS_CAM_MIN, SETTINGS_CAM_MAX},
+    {"collapse_camera", 0, COLLAPSE_LOOK},
+    {"camera_side", 0, 2}, /* CAM_SIDE_*: centre, right, left */
 };
 #define NFIELDS ((int)(sizeof FIELDS / sizeof FIELDS[0]))
 _Static_assert(sizeof FIELDS / sizeof FIELDS[0] * sizeof(int) == sizeof(settings), "every setting needs a FIELDS row");
@@ -77,6 +80,9 @@ void settings_default(settings *s)
     s->flicker = 1;
     s->shadows = SHADOW_AUTO;
     s->sway = 1;
+    s->camera_distance = 4;
+    s->collapse_camera = COLLAPSE_OFF; /* the glimpses from inside the head, unless asked */
+    s->camera_side = 1;                /* CAM_SIDE_RIGHT: over the shoulder, the body off the crosshair */
 }
 
 static int *field_ptr(settings *s, int i)
@@ -108,7 +114,10 @@ static int *field_ptr(settings *s, int i)
     case 23: return &s->bloom;
     case 24: return &s->flicker;
     case 25: return &s->shadows;
-    default: return &s->sway;
+    case 26: return &s->sway;
+    case 27: return &s->camera_distance;
+    case 28: return &s->collapse_camera;
+    default: return &s->camera_side;
     }
 }
 

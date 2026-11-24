@@ -56,3 +56,131 @@ camera_pose camera_update(camera_anim *c, const player *p, float landing, float 
     if (fov_fx) o.fov_scale = 1.0f + 0.12f * c->sprint;
     return o;
 }
+
+camera_mode camera_next(camera_mode m, int debug)
+{
+    switch (m) {
+    case CAM_FIRST: return CAM_BEHIND;
+    case CAM_BEHIND: return CAM_FRONT;
+    case CAM_FRONT: return debug ? CAM_FREE : CAM_FIRST;
+    default: return CAM_FIRST;
+    }
+}
+
+int camera_mode_parse(const char *s)
+{
+    static const char *const NAMES[] = {"first", "back", "front", "free"};
+    for (int i = 0; i < 4; i++)
+        if (strcmp(s, NAMES[i]) == 0) return i;
+    return -1;
+}
+
+#define ARM_GAP 0.25f  /* m the camera keeps from a block: the near plane sits just in front of it */
+#define ARM_STEP 0.05f /* m between the samples along the arm */
+#define ARM_EASE 0.25f /* s for the arm to win back most of its length */
+
+/* The free length along dir from head, sampled along the centre line and
+ * four lines ARM_GAP to its sides so the view's corners stay clear too. A
+ * side line that starts inside a block (a ceiling just above the head)
+ * says nothing about the arm and is skipped. */
+static float arm_room(const world *w, dvec3 head, vec3 dir, float want)
+{
+    vec3 side = v3(-dir.z, 0.0f, dir.x);
+    float sl = sqrtf(side.x * side.x + side.z * side.z);
+    side = sl > 1e-4f ? v3(side.x / sl, 0.0f, side.z / sl) : v3(1.0f, 0.0f, 0.0f);
+    vec3 up = v3(side.y * dir.z - side.z * dir.y, side.z * dir.x - side.x * dir.z, side.x * dir.y - side.y * dir.x);
+    float room = want + ARM_GAP;
+    for (int k = 0; k < 5; k++) {
+        float ox = 0.0f, oy = 0.0f, oz = 0.0f;
+        if (k > 0) {
+            vec3 o = k < 3 ? side : up;
+            float sgn = (k & 1) ? 1.0f : -1.0f;
+            ox = o.x * ARM_GAP * sgn;
+            oy = o.y * ARM_GAP * sgn;
+            oz = o.z * ARM_GAP * sgn;
+        }
+        for (int i = 0; (float)i * ARM_STEP < room; i++) {
+            float d = (float)i * ARM_STEP;
+            double x = head.x + (double)(ox + dir.x * d), y = head.y + (double)(oy + dir.y * d);
+            double z = head.z + (double)(oz + dir.z * d);
+            if (!block_solid(world_get(w, (int)floor(x), (int)floor(y), (int)floor(z)))) continue;
+            if (k == 0 || d > 0.0f) room = d;
+            break;
+        }
+    }
+    return fmaxf(0.0f, room - ARM_GAP);
+}
+
+camera_view camera_third(const world *w, float *arm, dvec3 head, float yaw, float pitch, int front, float want,
+                         float dt)
+{
+    camera_view v = {head, yaw, pitch};
+    if (front) {
+        v.yaw = fmodf(yaw + (float)MC_PI, 2.0f * (float)MC_PI);
+        v.pitch = -pitch;
+    }
+    vec3 look = look_dir(v.yaw, v.pitch);
+    vec3 out = v3(-look.x, -look.y, -look.z); /* from the head toward the camera */
+    float room = arm_room(w, head, out, want);
+    if (room < *arm) *arm = room;
+    else *arm += (room - *arm) * (1.0f - expf(-dt / ARM_EASE));
+    v.eye = dv3(head.x + (double)(out.x * *arm), head.y + (double)(out.y * *arm), head.z + (double)(out.z * *arm));
+    return v;
+}
+
+dvec3 camera_body_pivot(const world *w, dvec3 feet, float yaw)
+{
+    vec3 f = look_dir(yaw, 0.0f);
+    dvec3 p = dv3(feet.x, feet.y + 0.5, feet.z);
+    for (int i = 8; i > 0; i--) {
+        float d = 0.1f * (float)i;
+        dvec3 q = dv3(feet.x + (double)(f.x * d), feet.y + 0.5, feet.z + (double)(f.z * d));
+        if (!block_solid(world_get(w, (int)floor(q.x), (int)floor(q.y), (int)floor(q.z)))) return q;
+    }
+    return p; /* the feet's own cell, where the body stood */
+}
+
+dvec3 camera_fly(dvec3 at, float yaw, float pitch, float fwd, float right, float up, float speed, float dt)
+{
+    vec3 look = look_dir(yaw, pitch);
+    float s = speed * dt;
+    return dv3(at.x + (double)((look.x * fwd + cosf(yaw) * right) * s), at.y + (double)((look.y * fwd + up) * s),
+               at.z + (double)((look.z * fwd + sinf(yaw) * right) * s));
+}
+
+int camera_side_next(int side) { return side == CAM_SIDE_RIGHT ? CAM_SIDE_LEFT : CAM_SIDE_RIGHT; }
+
+/* About half a shoulder width out from the eyes: the body sits off the
+ * crosshair, with the view past it on the other side. */
+#define SHOULDER 0.6f
+
+float camera_side_offset(int side)
+{
+    if (side == CAM_SIDE_RIGHT) return SHOULDER;
+    if (side == CAM_SIDE_LEFT) return -SHOULDER;
+    return 0.0f;
+}
+
+/* The near the camera aims at: closer and the view would swing hard when
+ * the player looks at a wall at arm's length. */
+#define FOCUS_MIN 1.5f
+
+camera_view camera_shoulder(const world *w, float *arm, dvec3 head, float yaw, float pitch, float side, float focus,
+                            float want, float dt)
+{
+    if (side == 0.0f) return camera_third(w, arm, head, yaw, pitch, 0, want, dt);
+    float sgn = side > 0.0f ? 1.0f : -1.0f;
+    vec3 right = v3(cosf(yaw) * sgn, 0.0f, sinf(yaw) * sgn); /* look_dir's right, or its left */
+    float out = arm_room(w, head, right, fabsf(side));
+    dvec3 sh = dv3(head.x + (double)(right.x * out), head.y, head.z + (double)(right.z * out));
+    camera_view v = camera_third(w, arm, sh, yaw, pitch, 0, want, dt);
+    vec3 look = look_dir(yaw, pitch);
+    double f = (double)fmaxf(focus, FOCUS_MIN);
+    double dx = head.x + (double)look.x * f - v.eye.x, dy = head.y + (double)look.y * f - v.eye.y;
+    double dz = head.z + (double)look.z * f - v.eye.z;
+    double len = sqrt(dx * dx + dy * dy + dz * dz);
+    if (len < 1e-6) return v;
+    v.yaw = (float)atan2(dx, -dz);
+    v.pitch = (float)asin(dy / len);
+    return v;
+}
