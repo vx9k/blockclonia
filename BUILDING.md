@@ -245,7 +245,7 @@ xvfb-run -a env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
 ```sh
 cmake --preset dev && cmake --build --preset dev
 ctest --preset dev               # unit tests, benchmarks, and a render test when lavapipe and xvfb are installed
-./build/dev/mc_tests             # just the unit tests, a few seconds
+./build/dev/mc_tests             # just the unit tests, spread over the CPU's cores
 tools/lint.sh                    # the lint checks CI runs (-Werror build, clang-tidy, cppcheck, clang-format)
 ```
 

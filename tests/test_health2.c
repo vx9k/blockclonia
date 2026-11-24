@@ -711,19 +711,19 @@ static void test_vision_blur(void)
 
 void test_health2_all(void)
 {
-    test_mild_air();
-    test_cold();
-    test_burns();
-    test_cool_burn();
-    test_dislocation();
-    test_abrasion();
-    test_crush();
-    test_wetness();
-    test_hud();
-    test_variance_neutral();
-    test_variance_replay();
-    test_variance_range();
-    test_variance_emergent();
-    test_variance_shortterm();
-    test_vision_blur();
+    TEST_PART(test_mild_air);
+    TEST_PART(test_cold);
+    TEST_PART(test_burns);
+    TEST_PART(test_cool_burn);
+    TEST_PART(test_dislocation);
+    TEST_PART(test_abrasion);
+    TEST_PART(test_crush);
+    TEST_PART(test_wetness);
+    TEST_PART(test_hud);
+    TEST_PART(test_variance_neutral);
+    TEST_PART(test_variance_replay);
+    TEST_PART(test_variance_range);
+    TEST_PART(test_variance_emergent);
+    TEST_PART(test_variance_shortterm);
+    TEST_PART(test_vision_blur);
 }

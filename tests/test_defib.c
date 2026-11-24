@@ -383,12 +383,12 @@ static void test_defib_item(void)
 
 void test_defib_all(void)
 {
-    test_rhythm_table();
-    test_device_classifies();
-    test_shock_other_rhythms();
-    test_shock_outcomes();
-    test_shock_beating_heart();
-    test_device_normal_rhythm();
-    test_device_vf();
-    test_defib_item();
+    TEST_PART(test_rhythm_table);
+    TEST_PART(test_device_classifies);
+    TEST_PART(test_shock_other_rhythms);
+    TEST_PART(test_shock_outcomes);
+    TEST_PART(test_shock_beating_heart);
+    TEST_PART(test_device_normal_rhythm);
+    TEST_PART(test_device_vf);
+    TEST_PART(test_defib_item);
 }

@@ -265,7 +265,7 @@ endif()
 # ---------------------------------------------------------------- tests
 if(MC_BUILD_TESTS)
   enable_testing()
-  add_executable(mc_tests tests/test_main.c tests/test_util.c tests/test_thermo.c tests/test_health2.c
+  add_executable(mc_tests tests/test_main.c tests/test_runner.c tests/test_util.c tests/test_thermo.c tests/test_health2.c
                           tests/test_bodies.c tests/test_visual.c tests/test_sound.c tests/test_gpucaps.c tests/test_light.c tests/test_itemmodel.c
                           tests/test_lightfx.c tests/test_bloom.c
                           tests/test_health_debug.c tests/test_thoughts.c tests/test_drugs.c tests/test_faint.c tests/test_fear.c tests/test_conscious.c tests/test_impair.c tests/test_dark.c tests/test_lamps.c tests/test_shadow.c tests/test_mobmodel.c tests/test_avatar.c tests/test_defib.c tests/test_paths.c tests/test_blood.c

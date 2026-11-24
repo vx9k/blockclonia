@@ -19,10 +19,14 @@ threads and data flow.
 ```sh
 cmake --preset dev && cmake --build --preset dev   # Debug, fetches pinned deps if the system's are old
 ctest --preset dev                                 # unit tests, --bench, render smoke test (if lavapipe + xvfb)
-./build/dev/mc_tests                               # the unit tests alone (~2400 checks, a few seconds)
+./build/dev/mc_tests                               # the unit tests alone, one process per core (~45 s on 8)
 tools/lint.sh                                      # the CI lint gate; run it before you commit
 ```
 
+- `mc_tests` runs each suite in a child process of its own. Name suites
+  to run only those (`mc_tests circulation cardio`, `--list` shows them),
+  add `-v` for each one's time, and `-j 1` to run in one process under a
+  debugger.
 - `cmake --preset core` builds everything except the game (no Vulkan, GLFW
   or audio needed); the unit tests only link against the core library.
 - Run the game with `./build/dev/blockclonia --play`. Useful flags for
@@ -182,8 +186,12 @@ from a job.
 - `tests/test_main.c` holds the older suites; newer areas have their own
   file (`test_thermo.c`, `test_health2.c`, `test_bodies.c`,
   `test_visual.c`, `test_sound.c`, `test_gpucaps.c`) with an entry point
-  declared in `tests/test_util.h` and called from `main`. A new test file
-  also goes into the `mc_tests` source list in `CMakeLists.txt`.
+  declared in `tests/test_util.h` and listed in `SUITES` in
+  `test_main.c`. A new test file also goes into the `mc_tests` source
+  list in `CMakeLists.txt`. Suites run in parallel processes, so none may
+  depend on another having run first. A suite that takes more than a few
+  seconds calls its tests through `TEST_PART` and is listed with `SPLIT`
+  near the top, so its tests spread over several processes.
 - Use the `CHECK(cond)` macro and the helpers in `test_util.h`: a flat
   test world (`tw_init`, `run_steps`) for physics, and `new_body`,
   `calm_env` and `live` for the health model. Tests must not need a window,

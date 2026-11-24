@@ -6,6 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 
+int g_part, g_parts = 1;
 int g_failed, g_checks;
 
 int tmp_dir_make(char *out, size_t cap, const char *prefix)

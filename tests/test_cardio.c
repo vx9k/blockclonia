@@ -243,10 +243,10 @@ static void test_stroke(void)
 
 void test_cardio_all(void)
 {
-    test_calm_and_exercise();
-    test_crisis();
-    test_strain_risk();
-    test_hypotension_strain();
-    test_rhythm_mechanics();
-    test_stroke();
+    TEST_PART(test_calm_and_exercise);
+    TEST_PART(test_crisis);
+    TEST_PART(test_strain_risk);
+    TEST_PART(test_hypotension_strain);
+    TEST_PART(test_rhythm_mechanics);
+    TEST_PART(test_stroke);
 }

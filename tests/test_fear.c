@@ -198,12 +198,12 @@ static void test_fear_wire_replay(void)
 
 void test_fear_all(void)
 {
-    test_fear_mobs();
-    test_fear_rush();
-    test_fear_once();
-    test_fear_pressure();
-    test_fear_fades();
-    test_fear_unconscious();
-    test_fear_feel();
-    test_fear_wire_replay();
+    TEST_PART(test_fear_mobs);
+    TEST_PART(test_fear_rush);
+    TEST_PART(test_fear_once);
+    TEST_PART(test_fear_pressure);
+    TEST_PART(test_fear_fades);
+    TEST_PART(test_fear_unconscious);
+    TEST_PART(test_fear_feel);
+    TEST_PART(test_fear_wire_replay);
 }

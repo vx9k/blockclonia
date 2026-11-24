@@ -12,6 +12,28 @@
 
 extern int g_failed, g_checks;
 
+/* One suite of checks, named after its function. A long suite is split
+ * over "parts" processes: each runs every parts-th of the tests its
+ * function calls through TEST_PART. */
+typedef struct {
+    const char *name;
+    void (*run)(void);
+    int parts;
+} test_suite;
+
+extern int g_part, g_parts; /* this process's part of the suite, and how many */
+int test_part_take(void);   /* 1 when the next TEST_PART is this process's */
+#define TEST_PART(fn)               \
+    do {                            \
+        if (test_part_take()) fn(); \
+    } while (0)
+
+/* Runs the suites named on the command line (every one when none is),
+ * each in a child process, as many at once as the CPU has cores; "-j N"
+ * sets how many, and "-j 1" runs them in this process. Returns main's
+ * exit status. */
+int test_run(const test_suite *suites, int n, int argc, char **argv);
+
 #define CHECK(cond)                                                         \
     do {                                                                    \
         g_checks++;                                                         \
