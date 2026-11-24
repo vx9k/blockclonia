@@ -1,12 +1,14 @@
 /* Blood leaving the player's wounds: drops that fly and land, and the
  * stains they leave on whatever block face they hit, floor, wall or
  * ceiling. A venous wound oozes and drips at its bleed rate; an arterial
- * one spurts with each heartbeat, the jet as fast as the pressure behind
- * it drives it (Bernoulli), so the spurts shorten as the blood pressure
- * falls. Arterial blood is scarlet, darkening toward venous red as the
- * blood's oxygen falls; both dry to brown. A drop landing on a stain
- * grows it. Stains dry and clean themselves up after BLOOD_STAIN_S so the
- * world never fills with them, and water washes them off sooner.
+ * one streams out in a jet as fast as the pressure behind it drives it
+ * (Bernoulli), surging with each beat's systole and shortening as the
+ * blood pressure falls. Arterial blood is scarlet, darkening toward
+ * venous red as the blood's oxygen falls; both dry to brown over
+ * BLOOD_DRY_S. A drop landing on a stain pools into it, so a bleeding
+ * body standing still leaves a pool and a moving one a trail. Stains
+ * clean themselves up after BLOOD_STAIN_S so the world never fills with
+ * them, and water washes them off sooner.
  *
  * Visual only: it runs on the frame's dt with its own random state and
  * never feeds back into the deterministic simulation. The wounds and
@@ -21,7 +23,9 @@
 #include "world.h"
 
 #define BLOOD_MAX_DROPS 512
-#define BLOOD_STAIN_S 30.0f   /* s a stain lasts on dry ground */
+#define BLOOD_STAIN_S 600.0f  /* s a stain lasts on dry ground */
+#define BLOOD_DRY_S 180.0f    /* s for a stain to dry dark brown */
+#define BLOOD_LOBE_R 0.045f   /* m: a stain grows no wider; more blood spills into a new lobe */
 #define BLOOD_DROP_ML 0.05f   /* a drop of blood (about 4.6 mm across) */
 #define BLOOD_JET 0.6f        /* of the Bernoulli speed a jet keeps through the wound */
 
@@ -56,8 +60,8 @@ typedef struct {
     int drops;
     blood_stain *stain; /* a ring of max_stains (sys_plan's blood_stains) */
     int max_stains, next;
-    float owed[BLOOD_SOURCES]; /* mL bled but not yet out as drops */
-    double beat_r;             /* the heartbeat last spurted with (health's last_r), for blood_beat */
+    float owed[BLOOD_SOURCES];  /* mL bled, still in the wound */
+    float ready[BLOOD_SOURCES]; /* mL out of the wound but short of a whole drop */
     uint32_t rng;
 } blood_state;
 
@@ -65,12 +69,12 @@ void blood_init(blood_state *b, int max_stains, uint32_t seed);
 void blood_free(blood_state *b);
 
 /* This frame's bleeding from n sources (at most BLOOD_SOURCES; source i
- * keeps its place from frame to frame). beat is 1 if the heart beat since
- * the last call, p_sys that beat's systolic pressure in mmHg, hr the
- * heart rate, sat the arterial oxygen saturation (0..1), and body the
- * body's velocity, which the blood leaves with. Venous blood drips out as
- * it bleeds; arterial blood leaves in a jet at each beat. */
-void blood_bleed(blood_state *b, const blood_source *s, int n, int beat, float p_sys, float hr, float sat, dvec3 body,
+ * keeps its place from frame to frame). p_now is the arterial pressure
+ * this moment (mmHg, the pulse's wave), p_mean its mean, sat the arterial
+ * oxygen saturation (0..1), and body the body's velocity, which the blood
+ * leaves with. Venous blood drips out as it bleeds; arterial blood
+ * streams out, more and faster while p_now is above the mean. */
+void blood_bleed(blood_state *b, const blood_source *s, int n, float p_now, float p_mean, float sat, dvec3 body,
                  float dt);
 
 /* Drops fly under gravity and air drag and stain the face they hit (a
@@ -97,9 +101,5 @@ void blood_spot(int part, int salt, dvec3 feet, float yaw, dvec3 *at, dvec3 *out
  * bandaged wound bleeds into its bandage. Returns how many. */
 struct health;
 int blood_from_health(const struct health *h, dvec3 feet, float yaw, blood_source *out);
-
-/* 1 if the heart has beaten since *seen, given the time of its last
- * ventricular activation (health's last_r), which it then remembers. */
-int blood_beat(double *seen, double last_r);
 
 #endif

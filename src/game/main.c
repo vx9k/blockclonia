@@ -1349,19 +1349,16 @@ static void restart_blood(game *g)
     if (!g->blood) return;
     blood_free(g->blood);
     blood_init(g->blood, g->plan.blood_stains, g->seed);
-    g->blood->beat_r = g->hl.last_r;
 }
 
-/* This frame's blood from the player's wounds, spurting with the
- * heartbeats the health model has had since the last frame. A spectator
- * has no body to bleed. */
+/* This frame's blood from the player's wounds, the arteries surging with
+ * the pressure wave in the aorta. A spectator has no body to bleed. */
 static void bleed(game *g, double dt)
 {
     blood_source src[BLOOD_SOURCES] = {0};
     const player *pl = &g->pl;
     int n = mode_hands(pl->mode) ? blood_from_health(&g->hl, pl->pos, pl->yaw, src) : 0;
-    int beat = blood_beat(&g->blood->beat_r, g->hl.last_r);
-    blood_bleed(g->blood, src, n, beat, g->hl.sbp, g->hl.hr, g->hl.sao2, pl->vel, (float)dt);
+    blood_bleed(g->blood, src, n, g->hl.cv.wave_ao, g->hl.map, g->hl.sao2, pl->vel, (float)dt);
     blood_step(g->blood, &g->w, (float)dt);
 }
 
@@ -2214,7 +2211,7 @@ static void add_figures(game *g, dvec3 eye, const lightfx_frame *lf, float dt, i
 static void add_blood(game *g, dvec3 eye, const lightfx_frame *lf, float day, int *n_op, int n_tr)
 {
     int room = RENDER_MAX_ENTS - *n_op - n_tr;
-    int want = g->blood->drops + 2 * g->blood->max_stains; /* a stain is two boxes */
+    int want = g->blood->drops + 4 * g->blood->max_stains; /* a stain is four boxes */
     int max = want < room ? want : room;
     if (max <= 0) return;
     memmove(g->ents + *n_op + max, g->ents + *n_op, sizeof g->ents[0] * (size_t)n_tr);

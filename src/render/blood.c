@@ -17,6 +17,21 @@
 #define WASH_S 2.0f /* s for water to wash a stain off */
 #define STAIN_THICK 0.0015f /* m, the drawn stain, held just off the face */
 #define MIN_STAINS 16
+/* 1/s blood leaves a cut artery at mean pressure, scaled by the cube of
+ * the pressure over its mean, so most of a beat's blood goes in systole
+ * and the jet visibly surges. */
+#define RELEASE 12.0f
+#define JET_MIN 10.0f /* mmHg below which an artery only wells up */
+#define FADE_S 30.0f /* s over which an old stain shrinks away */
+#define STREAK_S 0.02f /* s of travel a falling drop is drawn stretched over */
+/* A regular octagon's side over the span between opposite sides
+ * (tan 22.5 degrees), and that span for a circle's radius at equal area:
+ * 2 sqrt(pi / (8 tan 22.5 degrees)). */
+#define OCT_SIDE 0.41421356f
+#define SPILL_MAX 8 /* lobes blood may run over before it stops */
+#define SPLASH_V 3.5f /* m/s into a face above which a drop splashes */
+#define SPLASH_SHARE 0.3f /* of a splashing drop thrown off as spots */
+#define OCT_SPAN 1.94740f
 
 static float frand(uint32_t *s)
 {
@@ -61,16 +76,27 @@ static void emit(blood_state *b, dvec3 at, dvec3 vel, float ml, uint8_t shade)
     d->shade = shade;
 }
 
-void blood_bleed(blood_state *b, const blood_source *s, int n, int beat, float p_sys, float hr, float sat, dvec3 body,
+/* A drop leaving at vel, spread over the last dt seconds: one that left
+ * earlier in the frame is further along, so the stream has no gaps at any
+ * frame rate. */
+static void leave(blood_state *b, dvec3 at, dvec3 vel, dvec3 body, float dt, float ml, uint8_t shade)
+{
+    double u = (double)(frand(&b->rng) * dt);
+    emit(b, dv3(at.x + (vel.x - body.x) * u, at.y + (vel.y - body.y) * u, at.z + (vel.z - body.z) * u), vel, ml, shade);
+}
+
+void blood_bleed(blood_state *b, const blood_source *s, int n, float p_now, float p_mean, float sat, dvec3 body,
                  float dt)
 {
     if (!b->stain || !isfinite(dt) || dt <= 0.0f) return;
     if (!finite3(body)) body = dv3(0, 0, 0);
-    if (!isfinite(p_sys) || p_sys < 0.0f) p_sys = 0.0f;
+    if (!isfinite(p_mean) || p_mean <= 0.0f) p_mean = isfinite(p_now) && p_now > 0.0f ? p_now : 0.0f;
+    if (!isfinite(p_now) || p_now < 0.0f) p_now = p_mean;
     if (!isfinite(sat)) sat = 0.0f;
-    /* Below about 20 beats a minute the heart throws no jet: the artery
-     * only wells up. */
-    int pulsing = isfinite(hr) && hr >= 20.0f;
+    /* How much faster than on average blood leaves at this moment: the
+     * systolic surge pushes most of each beat's blood out. */
+    float surge = p_mean > 0.0f ? clampf(p_now / p_mean, 0.0f, 3.0f) : 1.0f;
+    float release = 1.0f - expf(-RELEASE * surge * surge * surge * dt);
     if (n > BLOOD_SOURCES) n = BLOOD_SOURCES;
     for (int i = 0; i < n; i++) {
         float rate = s[i].ml_min;
@@ -78,39 +104,32 @@ void blood_bleed(blood_state *b, const blood_source *s, int n, int beat, float p
         dvec3 out = s[i].out;
         double len = isfinite(out.x) && isfinite(out.y) && isfinite(out.z) ? dv3_len(out) : 0.0;
         out = len > 1e-6 ? dv3(out.x / len, out.y / len, out.z / len) : dv3(0, -1, 0);
-        int jet = s[i].arterial && pulsing;
         uint8_t shade = shade_of(sat, s[i].arterial);
-        /* Whatever beat never came, a minute of bleeding is the most kept;
-         * what was already bled stays owed when the bleeding stops. */
+        /* A minute of bleeding is the most a wound holds back; what was
+         * already bled stays owed when the bleeding stops. */
         float cap = fmaxf(rate, 1.0f);
         if (b->owed[i] < cap) b->owed[i] = fminf(b->owed[i] + rate / 60.0f * dt, cap);
-        if (jet) {
-            if (!beat || b->owed[i] < 1e-4f) continue;
-            /* Systole drives blood through the hole at Bernoulli's speed,
-             * less what the wound's narrow track takes. Its drops leave
-             * over the spurt, so they start strung out along the jet. */
-            float p = p_sys + (isfinite(s[i].p_column) ? s[i].p_column : 0.0f);
-            float v = BLOOD_JET * sqrtf(2.0f * fmaxf(p, 0.0f) * MMHG / RHO);
-            int k = (int)(b->owed[i] / BLOOD_DROP_ML);
-            k = k < 1 ? 1 : (k > 48 ? 48 : k);
-            float ml = b->owed[i] / (float)k;
-            for (int j = 0; j < k && b->drops < BLOOD_MAX_DROPS; j++) {
-                float sp = v * (0.9f + 0.2f * frand(&b->rng));
-                dvec3 d = dv3(out.x + (double)((frand(&b->rng) - 0.5f) * 0.2f),
-                              out.y + (double)((frand(&b->rng) - 0.5f) * 0.2f),
-                              out.z + (double)((frand(&b->rng) - 0.5f) * 0.2f));
+        float p = p_now + (isfinite(s[i].p_column) ? s[i].p_column : 0.0f);
+        if (s[i].arterial && p >= JET_MIN) {
+            /* Blood leaves the artery through the hole at Bernoulli's
+             * speed, less what the wound's narrow track takes, in a tight
+             * jet. */
+            float a = b->owed[i] * release;
+            b->owed[i] -= a;
+            b->ready[i] += a;
+            float v = BLOOD_JET * sqrtf(2.0f * p * MMHG / RHO);
+            while (b->ready[i] >= BLOOD_DROP_ML && b->drops < BLOOD_MAX_DROPS) {
+                float sp = v * (0.97f + 0.06f * frand(&b->rng));
+                dvec3 d = dv3(out.x + (double)((frand(&b->rng) - 0.5f) * 0.06f),
+                              out.y + (double)((frand(&b->rng) - 0.5f) * 0.06f),
+                              out.z + (double)((frand(&b->rng) - 0.5f) * 0.06f));
                 double dl = dv3_len(d) / (double)sp;
-                dvec3 vel = dv3(body.x + d.x / dl, body.y + d.y / dl, body.z + d.z / dl);
-                double ahead = (double)(0.08f * frand(&b->rng));
-                emit(b,
-                     dv3(s[i].at.x + (vel.x - body.x) * ahead, s[i].at.y + (vel.y - body.y) * ahead,
-                         s[i].at.z + (vel.z - body.z) * ahead),
-                     vel, ml, shade);
-                b->owed[i] -= ml;
+                leave(b, s[i].at, dv3(body.x + d.x / dl, body.y + d.y / dl, body.z + d.z / dl), body, dt, BLOOD_DROP_ML,
+                      shade);
+                b->ready[i] -= BLOOD_DROP_ML;
             }
-            if (b->owed[i] < 0.0f) b->owed[i] = 0.0f;
         } else {
-            /* A vein, or an artery without a pulse behind it, wells up
+            /* A vein, or an artery without the pressure to jet, wells up
              * and drips off the wound a drop at a time. */
             while (b->owed[i] >= BLOOD_DROP_ML && b->drops < BLOOD_MAX_DROPS) {
                 dvec3 at = dv3(s[i].at.x + (double)((frand(&b->rng) - 0.5f) * 0.008f), s[i].at.y,
@@ -128,22 +147,47 @@ void blood_bleed(blood_state *b, const blood_source *s, int n, int beat, float p
 /* The radius blood of ml millilitres covers as a film on a face. */
 static float stain_radius(float ml) { return sqrtf(ml * 1e-6f / FILM / 3.14159265f); }
 
+static int cell(double v) { return (int)floor(v); }
+
+/* Blood of ml millilitres landing at `at` on a face. */
 static void land(blood_state *b, dvec3 at, int face, float ml, uint8_t shade)
 {
-    /* Blood landing on wet blood joins it. */
-    for (int i = 0; i < b->max_stains; i++) {
-        blood_stain *s = &b->stain[i];
-        if (!s->live || s->face != face) continue;
-        double r = (double)stain_radius(s->ml) + 0.01;
-        double dx = at.x - s->pos.x, dy = at.y - s->pos.y, dz = at.z - s->pos.z;
-        if (dx * dx + dy * dy + dz * dz > r * r) continue;
-        float sum = s->ml + ml;
-        double wt = (double)(ml / sum);
-        s->pos = dv3(s->pos.x + dx * wt, s->pos.y + dy * wt, s->pos.z + dz * wt);
-        s->shade = (uint8_t)lroundf(((float)s->shade * s->ml + (float)shade * ml) / sum);
-        s->age *= s->ml / sum; /* fresh blood keeps it wet */
-        s->ml = sum;
-        return;
+    /* Blood landing on wet blood joins it, until the stain is a lobe's
+     * width: then it runs off over the stain's edge, a random way, as a
+     * pool on real ground spreads along whatever unevenness it finds.
+     * The pool grows lopsided lobe by lobe instead of as one disc. */
+    for (int spill = 0;; spill++) {
+        const blood_stain *full = NULL;
+        for (int i = 0; i < b->max_stains; i++) {
+            blood_stain *s = &b->stain[i];
+            if (!s->live || s->face != face) continue;
+            double r = (double)stain_radius(s->ml) + 0.005;
+            double dx = at.x - s->pos.x, dy = at.y - s->pos.y, dz = at.z - s->pos.z;
+            if (dx * dx + dy * dy + dz * dz > r * r) continue;
+            if (stain_radius(s->ml + ml) > BLOOD_LOBE_R) {
+                if (!full) full = s;
+                continue;
+            }
+            float sum = s->ml + ml;
+            double wt = (double)(ml / sum);
+            s->pos = dv3(s->pos.x + dx * wt, s->pos.y + dy * wt, s->pos.z + dz * wt);
+            s->shade = (uint8_t)lroundf(((float)s->shade * s->ml + (float)shade * ml) / sum);
+            s->age *= s->ml / sum; /* fresh blood keeps it wet */
+            s->ml = sum;
+            return;
+        }
+        if (!full || spill >= SPILL_MAX) break;
+        /* No face is quite level: each block's tilts its own fixed way,
+         * and most spills run down it, so pools stretch out lopsided. */
+        int axis = face / 2;
+        uint32_t h = (uint32_t)cell(full->pos.x) * 73856093u ^ (uint32_t)cell(full->pos.y) * 19349663u ^
+                     (uint32_t)cell(full->pos.z) * 83492791u ^ (uint32_t)face * 2654435761u;
+        float down = (float)(h >> 8) * (6.2831853f / 16777216.0f);
+        float ang = frand(&b->rng) < 0.7f ? down + (frand(&b->rng) - 0.5f) * 2.0f : frand(&b->rng) * 6.2831853f;
+        double r = 1.3 * (double)stain_radius(full->ml), p[3] = {full->pos.x, full->pos.y, full->pos.z};
+        p[(axis + 1) % 3] += r * (double)cosf(ang);
+        p[(axis + 2) % 3] += r * (double)sinf(ang);
+        at = dv3(p[0], p[1], p[2]);
     }
     /* A new stain, in the ring's next slot: past the budget the oldest
      * goes. */
@@ -151,8 +195,6 @@ static void land(blood_state *b, dvec3 at, int face, float ml, uint8_t shade)
     b->next = (b->next + 1) % b->max_stains;
     *s = (blood_stain){at, ml, 0.0f, (uint8_t)face, shade, 1};
 }
-
-static int cell(double v) { return (int)floor(v); }
 
 /* Moves drop d one step of h seconds: 1 if it is still flying. */
 static int fly(blood_state *b, const world *w, blood_drop *d, float h)
@@ -186,7 +228,27 @@ static int fly(blood_state *b, const world *w, blood_drop *d, float h)
     for (int a = 0; a < 3; a++) hit[a] = a0[a] + (a1[a] - a0[a]) * t_hit;
     int up = a1[axis] < a0[axis]; /* moving down the axis: the face's normal points up it */
     hit[axis] = (double)(up ? c1[axis] + 1 : c1[axis]);
-    land(b, dv3(hit[0], hit[1], hit[2]), axis * 2 + up, d->ml, d->shade);
+    int face = axis * 2 + up;
+    /* A drop hitting hard splashes: part of it is thrown off as small
+     * spots around the impact, mostly the way it was going. */
+    const double vel[3] = {d->vel.x, d->vel.y, d->vel.z};
+    double vn = fabs(vel[axis]);
+    float ml = d->ml;
+    if (vn > (double)SPLASH_V) {
+        int t1 = (axis + 1) % 3, t2 = (axis + 2) % 3, spots = vn > 7.5 ? 5 : (int)(vn / 1.5);
+        double along = atan2(vel[t2], vel[t1]), side = hypot(vel[t1], vel[t2]);
+        float each = ml * SPLASH_SHARE / (float)spots;
+        for (int i = 0; i < spots; i++) {
+            double ang = side > 0.2 * vn ? along + (double)((frand(&b->rng) - 0.5f) * 1.6f)
+                                         : (double)(frand(&b->rng) * 6.2831853f);
+            double reach = (0.02 + (double)frand(&b->rng) * 0.08) * vn / 4.0, p[3] = {hit[0], hit[1], hit[2]};
+            p[t1] += reach * cos(ang);
+            p[t2] += reach * sin(ang);
+            land(b, dv3(p[0], p[1], p[2]), face, each, d->shade);
+        }
+        ml -= each * (float)spots;
+    }
+    land(b, dv3(hit[0], hit[1], hit[2]), face, ml, d->shade);
     return 0;
 }
 
@@ -226,7 +288,7 @@ uint32_t blood_colour(int shade, float age)
     /* Wet: dark venous red to arterial scarlet. Drying, haemoglobin
      * oxidises to methaemoglobin and the stain browns. */
     float a = clampf((float)shade / 255.0f, 0.0f, 1.0f);
-    float d = isfinite(age) ? clampf(age / BLOOD_STAIN_S, 0.0f, 1.0f) : 1.0f;
+    float d = isfinite(age) ? clampf(age / BLOOD_DRY_S, 0.0f, 1.0f) : 1.0f;
     const float wet[3] = {95.0f + 95.0f * a, 8.0f + 7.0f * a, 12.0f + 8.0f * a};
     const float dry[3] = {85.0f, 35.0f, 25.0f};
     uint32_t c = 0;
@@ -282,7 +344,9 @@ int blood_build(const blood_state *b, const world *w, const lightfx_frame *lf, d
     if (!out || max <= 0 || !b->stain) return 0;
     int n = 0;
     float rgb[3] = {0};
-    for (int i = 0; i < b->max_stains && n + 1 < max; i++) {
+    /* Stains first, but never into the room the drops in the air need. */
+    int stain_max = max - (b->drops < max ? b->drops : max);
+    for (int i = 0; i < b->max_stains && n + 4 <= stain_max; i++) {
         const blood_stain *s = &b->stain[i];
         if (!s->live) continue;
         const int *nm = NORMAL[s->face];
@@ -291,15 +355,18 @@ int blood_build(const blood_state *b, const world *w, const lightfx_frame *lf, d
         dvec3 c = dv3(s->pos.x + nm[0] * lift, s->pos.y + nm[1] * lift, s->pos.z + nm[2] * lift);
         float light = lit(w, lf, eye, dv3(s->pos.x + nm[0] * 0.02, s->pos.y + nm[1] * 0.02, s->pos.z + nm[2] * 0.02),
                           daylight, rgb);
-        float d = 2.0f * stain_radius(s->ml);
-        float sc[3] = {d, d, d};
+        /* A regular octagon of the pool's area, drawn as four boxes 45
+         * degrees apart, each spanning it across a pair of opposite sides
+         * and as wide as one side: together they are the octagon exactly.
+         * It is turned by an angle of its own so the stains don't line up
+         * with the blocks. */
+        float span = OCT_SPAN * stain_radius(s->ml) * clampf((BLOOD_STAIN_S - s->age) / FADE_S, 0.0f, 1.0f);
+        float sc[3] = {span, span, span};
         sc[axis] = STAIN_THICK;
-        /* Two squares a quarter of a right angle apart make an octagon,
-         * near enough a round pool, turned by an angle of its own so the
-         * stains don't line up with the blocks. */
-        float turn = (float)fmod(fabs(s->pos.x * 7.3 + s->pos.y * 3.1 + s->pos.z * 5.7), 1.5707963);
+        sc[axis == 2 ? 1 : 2] = span * OCT_SIDE;
+        float turn = (float)fmod(fabs(s->pos.x * 7.3 + s->pos.y * 3.1 + s->pos.z * 5.7), 0.7853982);
         uint32_t col = blood_colour(s->shade, s->age);
-        for (int k = 0; k < 2; k++) {
+        for (int k = 0; k < 4; k++) {
             quat r = quat_axis((float)nm[0], (float)nm[1], (float)nm[2], turn + 0.7853982f * (float)k);
             put(&out[n++], c, eye, r, sc[0], sc[1], sc[2], col, light, rgb);
         }
@@ -308,7 +375,15 @@ int blood_build(const blood_state *b, const world *w, const lightfx_frame *lf, d
         const blood_drop *d = &b->drop[i];
         float size = cbrtf(6.0f * d->ml * 1e-6f / 3.14159265f);
         float light = lit(w, lf, eye, d->pos, daylight, rgb);
-        put(&out[n++], d->pos, eye, quat_identity(), size, size, size, blood_colour(d->shade, 0.0f), light, rgb);
+        /* Drawn along its path, stretched over a moment of its travel, as
+         * the eye sees a falling drop. */
+        double sp = dv3_len(d->vel);
+        quat r = quat_identity();
+        if (sp > 1e-3)
+            r = quat_axis((float)(-d->vel.y / sp), (float)(d->vel.x / sp), 0.0f,
+                          acosf(clampf((float)(d->vel.z / sp), -1.0f, 1.0f)));
+        put(&out[n++], d->pos, eye, r, size, size, size + (float)sp * STREAK_S, blood_colour(d->shade, 0.0f), light,
+            rgb);
     }
     return n;
 }
@@ -326,16 +401,32 @@ void blood_spot(int part, int salt, dvec3 feet, float yaw, dvec3 *at, dvec3 *out
         {-0.10f, 0.45f, 0.07f, -0.3f, 0.0f, 1.0f}, /* left leg */
         {0.10f, 0.45f, 0.07f, 0.3f, 0.0f, 1.0f}, /* right leg */
     };
-    const float *sp = SPOT[part >= 0 && part < 7 ? part : 1];
+    /* Each part's thickness, as the radius of an upright cylinder. */
+    static const float RADIUS[7] = {0.10f, 0.14f, 0.13f, 0.05f, 0.05f, 0.07f, 0.07f};
+    /* Where the wounds after the first open around the part: turned this
+     * far (rad) from the first, so several wounds in one part bleed as
+     * separate jets, the first ones on the side the eye sees. */
+    static const float TURN[8] = {0.0f, 0.9f, -0.9f, 1.75f, -1.75f, 0.45f, -0.45f, 1.3f};
+    int p = part >= 0 && part < 7 ? part : 1;
+    const float *sp = SPOT[p];
     float sy = sinf(isfinite(yaw) ? yaw : 0.0f), cy = cosf(isfinite(yaw) ? yaw : 0.0f);
     /* yaw 0 faces -z with the right toward +x. */
     const float right[3] = {cy, 0.0f, sy}, fwd[3] = {sy, 0.0f, -cy};
     int k = salt < 0 ? -salt : salt;
-    float dr = 0.03f * (float)(k % 3 - 1), du = 0.05f * (float)((k * 3) % 5 - 2);
-    const float l[3] = {sp[0] + dr, sp[1] + du, sp[2]};
+    /* Below the head, skin on a standing body mostly faces a little down
+     * and blood runs that way out of the wound, so jets leave below level
+     * rather than rising like a fountain. */
+    float du = 0.05f * (float)((k * 3) % 5 - 2), tilt = 0.25f * (float)((k * 7) % 3 - 1) - (p > 0 ? 0.4f : 0.0f);
+    /* The first wound's skin faces (sp[3], sp[5]) across the ground; the
+     * others face that turned about the part's upright axis. */
+    float hl = sqrtf(sp[3] * sp[3] + sp[5] * sp[5]), a = TURN[k % 8];
+    float nr = sp[3] / hl, nf = sp[5] / hl;
+    float tr = nr * cosf(a) - nf * sinf(a), tf = nr * sinf(a) + nf * cosf(a);
+    float rad = RADIUS[p];
+    const float l[3] = {sp[0] + (tr - nr) * rad, sp[1] + du, sp[2] + (tf - nf) * rad};
     *at = dv3(feet.x + (double)(right[0] * l[0] + fwd[0] * l[2]), feet.y + (double)l[1],
               feet.z + (double)(right[2] * l[0] + fwd[2] * l[2]));
-    const float o[3] = {right[0] * sp[3] + fwd[0] * sp[5], sp[4], right[2] * sp[3] + fwd[2] * sp[5]};
+    const float o[3] = {(right[0] * tr + fwd[0] * tf) * hl, sp[4] + tilt, (right[2] * tr + fwd[2] * tf) * hl};
     float ol = sqrtf(o[0] * o[0] + o[1] * o[1] + o[2] * o[2]);
     *out = dv3((double)(o[0] / ol), (double)(o[1] / ol), (double)(o[2] / ol));
 }
@@ -355,11 +446,4 @@ int blood_from_health(const struct health *h, dvec3 feet, float yaw, blood_sourc
         out[i].p_column = upright ? RHO * G * (float)(heart - out[i].at.y) / MMHG : 0.0f;
     }
     return n < 0 ? 0 : n;
-}
-
-int blood_beat(double *seen, double last_r)
-{
-    if (!isfinite(last_r) || last_r == *seen) return 0;
-    *seen = last_r;
-    return 1;
 }
