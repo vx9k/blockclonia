@@ -119,6 +119,7 @@ typedef struct {
     int screen;         /* menu screen, SCREEN_NONE while playing */
     int debug;          /* F3 overlay */
     int cycle_camera;   /* F5 pressed */
+    int swap_shoulder;  /* V pressed */
     int lost_focus;     /* the window lost focus: pause */
     int focused;        /* the window has the keyboard (for mute in background) */
     int focus_changed;
@@ -496,6 +497,7 @@ static void key_cb(GLFWwindow *win, int key, int sc, int action, int mods)
     if (action == GLFW_PRESS && key == GLFW_KEY_F11) g_in.toggle_fullscreen = 1;
     if (action == GLFW_PRESS && key == GLFW_KEY_F3 && g_in.screen != SCREEN_TITLE) g_in.debug = !g_in.debug;
     if (action == GLFW_PRESS && key == GLFW_KEY_F5 && g_in.screen == SCREEN_NONE) g_in.cycle_camera = 1;
+    if (action == GLFW_PRESS && key == GLFW_KEY_V && g_in.screen == SCREEN_NONE) g_in.swap_shoulder = 1;
     if (g_in.screen != SCREEN_NONE) {
         menu_key(key, action);
         return;
@@ -1018,6 +1020,7 @@ typedef struct {
     camera_anim cam;
     camera_mode cam_mode;                 /* F5: first person, behind, in front, or the free camera */
     float cam_arm;                        /* m, the third-person arm's eased length */
+    float cam_focus;                      /* m along the look to what it hits, eased (camera_shoulder) */
     dvec3 free_at;                        /* the free camera, once placed (free_set) */
     float free_yaw, free_pitch;
     int free_set;
@@ -1892,6 +1895,14 @@ static player_input frame_input(game *g, double now, double dt)
         g->free_set = 0;
         g_in.cycle_camera = 0;
     }
+    if (g_in.swap_shoulder) {
+        /* Only in the view it moves, so a stray V elsewhere changes nothing. */
+        if (g->cam_mode == CAM_BEHIND) {
+            g->st.camera_side = camera_side_next(g->st.camera_side);
+            g->settings_dirty = 1;
+        }
+        g_in.swap_shoulder = 0;
+    }
     if (g->cam_mode == CAM_FREE && !g->free_set) {
         vec3 back = look_dir(pl->yaw, pl->pitch); /* starts 3 m behind the head, the body in view */
         g->free_at = dv3(pl->pos.x - (double)back.x * 3.0, pl->pos.y + PLAYER_EYE - (double)back.y * 3.0,
@@ -2266,6 +2277,22 @@ static void add_self(game *g, dvec3 eye, double alpha, const lightfx_frame *lf, 
     *n_op += k;
 }
 
+/* Metres from o along dir to the face of the block a raycast hit: the face
+ * it entered through, between the block and the cell before it; max_dist
+ * when nothing was hit. */
+static double hit_distance(dvec3 o, vec3 dir, ray_hit h, double max_dist)
+{
+    if (!h.hit) return max_dist;
+    double t = 0.0;
+    if (h.block.x != h.before.x && dir.x != 0.0f)
+        t = ((double)(h.block.x > h.before.x ? h.block.x : h.before.x) - o.x) / (double)dir.x;
+    else if (h.block.y != h.before.y && dir.y != 0.0f)
+        t = ((double)(h.block.y > h.before.y ? h.block.y : h.before.y) - o.y) / (double)dir.y;
+    else if (h.block.z != h.before.z && dir.z != 0.0f)
+        t = ((double)(h.block.z > h.before.z ? h.block.z : h.before.z) - o.z) / (double)dir.z;
+    return t > 0.0 && t < max_dist ? t : max_dist;
+}
+
 /* The player's whole figure, for the third-person and free cameras: head
  * and all, lying on its front while the body is down. */
 static void add_self_whole(game *g, dvec3 eye, double alpha, const lightfx_frame *lf, float dt, int lying, int *n_op,
@@ -2370,8 +2397,21 @@ static render_view build_view(game *g, double now, double dt, double alpha)
             yaw += g->orbit_yaw;
             pitch = -0.6f - g->orbit_pitch;
         }
-        camera_view cv = camera_third(&g->w, &g->cam_arm, head, yaw, pitch, cm == CAM_FRONT,
-                                      (float)g->st.camera_distance, (float)dt);
+        camera_view cv = {0};
+        if (cm == CAM_BEHIND && !body_down(g)) {
+            /* Over a shoulder, turned in on what the look hits, so the
+             * crosshair marks where the player aims. Eased, or the view
+             * would jump as the look slides off an edge onto the distance. */
+            vec3 look = look_dir(pl->yaw, pl->pitch);
+            double far = hit_distance(head, look, physics_raycast(&g->w, head, look, 64.0), 64.0);
+            if (g->cam_focus <= 0.0f) g->cam_focus = (float)far;
+            g->cam_focus += ((float)far - g->cam_focus) * (1.0f - expf(-(float)dt / 0.08f));
+            cv = camera_shoulder(&g->w, &g->cam_arm, head, yaw, pitch, camera_side_offset(g->st.camera_side),
+                                 g->cam_focus, (float)g->st.camera_distance, (float)dt);
+        } else {
+            cv = camera_third(&g->w, &g->cam_arm, head, yaw, pitch, cm == CAM_FRONT, (float)g->st.camera_distance,
+                              (float)dt);
+        }
         v.eye = cv.eye;
         v.yaw = cv.yaw;
         v.pitch = cv.pitch;

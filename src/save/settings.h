@@ -34,6 +34,7 @@ typedef struct {
     int sway; /* leaves and plants move in the wind; off: they stand still, for motion-sensitive eyes */
     int camera_distance; /* m from the head to a third-person camera */
     int collapse_camera; /* COLLAPSE_*: where the camera goes while the body is down or dead */
+    int camera_side; /* CAM_SIDE_* in camera.h: the shoulder the view from behind looks over */
 } settings;
 
 /* The camera while the player is unresponsive or dead: stays in the head,

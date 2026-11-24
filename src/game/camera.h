@@ -58,6 +58,19 @@ typedef struct {
  * shorten it at once, and it eases back out over dt when they clear. */
 camera_view camera_third(const world *w, float *arm, dvec3 head, float yaw, float pitch, int front, float want,
                          float dt);
+/* Which shoulder the view from behind looks over (settings camera_side). */
+enum { CAM_SIDE_CENTRE, CAM_SIDE_RIGHT, CAM_SIDE_LEFT };
+/* The other shoulder; from the centre, the right one (V). */
+int camera_side_next(int side);
+/* Metres to the right of the head for a CAM_SIDE_*: 0.6 one way or the
+ * other, 0 centred or unknown. */
+float camera_side_offset(int side);
+/* The view from behind, side metres to the right of the head (negative:
+ * left; walls bring it in) and want metres back. It turns in to look at
+ * the point focus metres along the player's own look, which is where the
+ * player aims, so the crosshair marks that point from off to the side. */
+camera_view camera_shoulder(const world *w, float *arm, dvec3 head, float yaw, float pitch, float side, float focus,
+                            float want, float dt);
 /* Where the camera watches a body lying on the ground from: its middle,
  * 0.8 m ahead of feet along yaw and 0.5 m up, pulled back toward the feet
  * while that point is inside a block. */

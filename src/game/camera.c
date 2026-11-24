@@ -147,3 +147,40 @@ dvec3 camera_fly(dvec3 at, float yaw, float pitch, float fwd, float right, float
     return dv3(at.x + (double)((look.x * fwd + cosf(yaw) * right) * s), at.y + (double)((look.y * fwd + up) * s),
                at.z + (double)((look.z * fwd + sinf(yaw) * right) * s));
 }
+
+int camera_side_next(int side) { return side == CAM_SIDE_RIGHT ? CAM_SIDE_LEFT : CAM_SIDE_RIGHT; }
+
+/* About half a shoulder width out from the eyes: the body sits off the
+ * crosshair, with the view past it on the other side. */
+#define SHOULDER 0.6f
+
+float camera_side_offset(int side)
+{
+    if (side == CAM_SIDE_RIGHT) return SHOULDER;
+    if (side == CAM_SIDE_LEFT) return -SHOULDER;
+    return 0.0f;
+}
+
+/* The near the camera aims at: closer and the view would swing hard when
+ * the player looks at a wall at arm's length. */
+#define FOCUS_MIN 1.5f
+
+camera_view camera_shoulder(const world *w, float *arm, dvec3 head, float yaw, float pitch, float side, float focus,
+                            float want, float dt)
+{
+    if (side == 0.0f) return camera_third(w, arm, head, yaw, pitch, 0, want, dt);
+    float sgn = side > 0.0f ? 1.0f : -1.0f;
+    vec3 right = v3(cosf(yaw) * sgn, 0.0f, sinf(yaw) * sgn); /* look_dir's right, or its left */
+    float out = arm_room(w, head, right, fabsf(side));
+    dvec3 sh = dv3(head.x + (double)(right.x * out), head.y, head.z + (double)(right.z * out));
+    camera_view v = camera_third(w, arm, sh, yaw, pitch, 0, want, dt);
+    vec3 look = look_dir(yaw, pitch);
+    double f = (double)fmaxf(focus, FOCUS_MIN);
+    double dx = head.x + (double)look.x * f - v.eye.x, dy = head.y + (double)look.y * f - v.eye.y;
+    double dz = head.z + (double)look.z * f - v.eye.z;
+    double len = sqrt(dx * dx + dy * dy + dz * dz);
+    if (len < 1e-6) return v;
+    v.yaw = (float)atan2(dx, -dz);
+    v.pitch = (float)asin(dy / len);
+    return v;
+}

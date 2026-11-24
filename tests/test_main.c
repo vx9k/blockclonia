@@ -718,6 +718,42 @@ static float cam_ease(const world *w, dvec3 head, float from, float secs, int fp
     return arm;
 }
 
+static void test_camera_shoulder(void)
+{
+    test_world o = {0};
+    tw_init(&o);
+    dvec3 head = dv3(0.5, GROUND + 1.62, 0.5);
+    vec3 look = look_dir(0.8f, -0.3f);
+    /* Over the shoulder: V swaps right and left, and the centre goes to the
+     * right; 0.6 m to the side of the head, the arm behind that. */
+    CHECK(camera_side_next(CAM_SIDE_RIGHT) == CAM_SIDE_LEFT && camera_side_next(CAM_SIDE_LEFT) == CAM_SIDE_RIGHT);
+    CHECK(camera_side_next(CAM_SIDE_CENTRE) == CAM_SIDE_RIGHT);
+    CHECK(camera_side_offset(CAM_SIDE_CENTRE) == 0.0f && camera_side_offset(CAM_SIDE_RIGHT) == 0.6f);
+    CHECK(camera_side_offset(CAM_SIDE_LEFT) == -0.6f && camera_side_offset(7) == 0.0f);
+    float sarm = 3.0f;
+    vec3 sl = look_dir(0.0f, -0.2f);
+    camera_view sv = camera_shoulder(&o.w, &sarm, head, 0.0f, -0.2f, 0.6f, 12.0f, 3.0f, 1.0f / 60.0f);
+    CHECK(fabs(sv.eye.x - head.x - 0.6) < 0.01 && sv.eye.z > head.z + 2.5); /* yaw 0: right is +x */
+    /* It turns in to look at what the player's own look hits, so the
+     * crosshair marks it although the camera is off to one side. */
+    dvec3 tgt = dv3(head.x + (double)sl.x * 12.0, head.y + (double)sl.y * 12.0, head.z + (double)sl.z * 12.0);
+    vec3 sd = look_dir(sv.yaw, sv.pitch);
+    double tl = cam_dist(tgt, sv.eye);
+    CHECK(fabs((tgt.x - sv.eye.x) / tl - (double)sd.x) < 1e-3 && fabs((tgt.y - sv.eye.y) / tl - (double)sd.y) < 1e-3 &&
+          fabs((tgt.z - sv.eye.z) / tl - (double)sd.z) < 1e-3);
+    sv = camera_shoulder(&o.w, &sarm, head, 0.0f, -0.2f, -0.6f, 12.0f, 3.0f, 1.0f / 60.0f);
+    CHECK(fabs(sv.eye.x - head.x + 0.6) < 0.01);
+    /* Centred, it is the plain view from behind. */
+    sv = camera_shoulder(&o.w, &sarm, head, 0.8f, -0.3f, 0.0f, 12.0f, 3.0f, 1.0f / 60.0f);
+    CHECK(sv.yaw == 0.8f && sv.pitch == -0.3f && fabs(sv.eye.x - head.x + (double)(look.x * 3.0f)) < 0.05);
+    /* A wall at the right shoulder pulls the camera in toward the head. */
+    for (int y = GROUND; y < GROUND + 4; y++)
+        for (int z = -4; z <= 6; z++) world_set(&o.w, 1, y, z, B_STONE, 0);
+    sv = camera_shoulder(&o.w, &sarm, head, 0.0f, -0.2f, 0.6f, 12.0f, 3.0f, 1.0f / 60.0f);
+    CHECK(sv.eye.x < 1.0 - 0.1 && cam_clear(&o.w, sv.eye, 0.1));
+    tw_free(&o);
+}
+
 static void test_camera_third(void)
 {
     /* F5 cycles first person, behind and in front; the free camera only
@@ -824,11 +860,11 @@ static void test_camera_third(void)
     v = camera_third(&o.w, &farm, head, 1.1f, 0.4f, 0, 0.0f, 1.0f / 60.0f);
     CHECK(farm == 0.0f && cam_dist(v.eye, head) < 1e-9);
     tw_free(&f);
-    tw_free(&o);
 
     /* The free camera flies where it looks, at the speed asked. */
     dvec3 at = camera_fly(dv3(0, 50, 0), 0.0f, 1.5707963f, 1.0f, 0.0f, 0.0f, 8.0f, 0.5f);
     CHECK(at.y > 53.99 && fabs(at.z) < 1e-3);
+    tw_free(&o);
     at = camera_fly(dv3(0, 50, 0), 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 8.0f, 0.5f);
     CHECK(fabs(at.z + 4.0) < 1e-3 && fabs(at.x) < 1e-3 && fabs(at.y - 50.0) < 1e-3);
     at = camera_fly(dv3(0, 50, 0), 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 8.0f, 0.5f);
@@ -1955,6 +1991,7 @@ static void test_settings(void)
     s.shadows = SHADOW_OFF;
     s.camera_distance = 6;
     s.collapse_camera = COLLAPSE_LOOK;
+    s.camera_side = CAM_SIDE_LEFT;
     int n = settings_format(&s, buf, (int)sizeof buf);
     CHECK(n > 0 && n < (int)sizeof buf);
     CHECK(strstr(buf, "smooth_light 0\n") != NULL); /* saved under its key */
@@ -1968,7 +2005,9 @@ static void test_settings(void)
     /* The third-person arm is 2 to 8 m, 4 by default; the camera stays in
      * the head on collapse unless the player asks for it to leave. */
     settings_default(&t);
-    CHECK(t.camera_distance == 4 && t.collapse_camera == COLLAPSE_OFF);
+    CHECK(t.camera_distance == 4 && t.collapse_camera == COLLAPSE_OFF && t.camera_side == CAM_SIDE_RIGHT);
+    CHECK(settings_parse(&t, "camera_side 3\n") == 0 && settings_parse(&t, "camera_side 2\n") == 1);
+    CHECK(t.camera_side == CAM_SIDE_LEFT);
     CHECK(settings_parse(&t, "camera_distance 1\ncamera_distance 9\ncollapse_camera 3\n") == 0);
     CHECK(settings_parse(&t, "camera_distance 8\ncollapse_camera 1\n") == 2);
     CHECK(t.camera_distance == 8 && t.collapse_camera == COLLAPSE_BEHIND);
@@ -2416,6 +2455,7 @@ int main(void)
     test_sprint_sneak();
     test_camera();
     test_camera_third();
+    test_camera_shoulder();
     test_structure();
     test_structure_budget();
     test_buoyancy();

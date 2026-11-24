@@ -114,6 +114,7 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
 | F11 | Fullscreen on or off |
 | F3 | Debug overlay |
 | F5 | Camera: first person, behind, in front (and, with F3 on, a free camera: WASD, Space/Shift, Ctrl for speed) |
+| V | Look over the other shoulder (camera behind) |
 | K (with F3 on) | Debug health menu: trigger any injury, or heal |
 | T | Chat, in a multiplayer game: type a line, Enter sends it, Esc cancels |
 | Esc | Close the inventory or panel; otherwise pause |
@@ -453,6 +454,7 @@ starts with the defaults and doesn't save changes over it.
 | Video | Leaves and grass sway | on (default)/off: leaves, grass and flowers move in the wind; off, they stand still |
 | Video | Brightness (nights) | 0–100% (default 0): a floor under all light, for dark nights and caves; daylight is unchanged |
 | Video | Third-person distance | 2–8 m (default 4): how far behind or in front of the head the F5 camera sits; walls bring it closer |
+| Video | Third-person shoulder | Right (default), Left or Centre (also V): the camera behind looks over that shoulder, turned in so the crosshair marks what the look hits |
 | Display | Fullscreen | on/off (also F11): borderless at the monitor's own resolution |
 | Display | VSync | on/off |
 | Display | Frame limit | unlimited (default), 30, 60, 90, 120, 144, 165 or 240 fps; used while VSync is off |

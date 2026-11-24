@@ -330,6 +330,8 @@ static int settings_video(ctx *c, settings *s, float rx, float ry, float rw)
     changed |= cycle(c, rx, ry + 200, rw, "Leaves and grass sway", &s->sway, ONOFF, 2);
     changed |= slider(c, rx, ry + 220, rw, "Third-person distance (F5)", &s->camera_distance, SETTINGS_CAM_MIN,
                       SETTINGS_CAM_MAX, 1, " m");
+    static const char *const SIDES[] = {"Centre", "Right", "Left"}; /* CAM_SIDE_* */
+    changed |= cycle(c, rx, ry + 240, rw, "Third-person shoulder (V)", &s->camera_side, SIDES, 3);
     return changed;
 }
 
@@ -393,7 +395,7 @@ static void settings_screen(ctx *c, settings *s)
     menu *m = c->m;
     backdrop(c);
     float x = 0.0f, y = 0.0f;
-    const float w = 300, h = 316;
+    const float w = 300, h = 336;
     panel(u, m->age, w, h, &x, &y, "SETTINGS");
     static const char *const TABS[SETTINGS_TABS] = {"Video", "Display", "Controls", "Audio"};
     float tw = (w - 16 - 4.0f * (SETTINGS_TABS - 1)) / (float)SETTINGS_TABS;
@@ -434,6 +436,7 @@ static void controls_screen(ctx *c)
         {"F2 / F11", "Screenshot / fullscreen"},
         {"F3", "Debug overlay (K: injury menu)"},
         {"F5", "Camera: first person, behind, in front"},
+        {"V", "Swap shoulder (camera behind)"},
         {"T / Esc", "Chat (multiplayer) / pause"},
     };
     const int n = (int)(sizeof KEYS / sizeof KEYS[0]);
