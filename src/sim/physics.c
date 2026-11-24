@@ -374,6 +374,41 @@ static void player_move(const physics *ph, player *p, double dt)
     p->pos.z = clampd(p->pos.z, -WORLD_LIMIT, WORLD_LIMIT);
 }
 
+/* Getting out of deep water. Nobody jumps out of it: a swimmer puts their
+ * hands on the edge and presses up and over, as out of a pool. That works
+ * onto an edge up to about a metre above the water, within reach of the
+ * arms above the head, with room to stand on top. */
+#define LEDGE_MAX 1.05 /* m an edge may stand above the water */
+#define ARM_REACH 0.5  /* m the hands reach above the head */
+#define PULL_UP 1.2    /* m/s the arms press the body up */
+#define PULL_OVER 0.6  /* m/s the body is drawn over the edge */
+
+/* The top of the edge a swimmer heading (dx, dz) can press out onto, or
+ * -1 if there is none. */
+static double ledge_out(const physics *ph, const player *p, double dx, double dz)
+{
+    aabb box = player_box(p);
+    double feet = box.min.y, ht = box.max.y - box.min.y, hw = (box.max.x - box.min.x) * 0.5;
+    /* The water the swimmer is in, or just pulling out of. */
+    int cx = (int)floor(p->pos.x), cz = (int)floor(p->pos.z), wy = -1;
+    for (int y = (int)floor(feet + ht); y >= (int)floor(feet) - 1 && wy < 0; y--)
+        if (y >= 0 && y < WORLD_H && block_fluid(world_get(ph->w, cx, y, cz))) wy = y;
+    if (wy < 0) return -1.0;
+    double surface = wy + (double)world_fluid_level(ph->w, cx, wy, cz) / FLUID_FULL;
+    int ix = (int)floor(p->pos.x + dx * (hw + 0.2)), iz = (int)floor(p->pos.z + dz * (hw + 0.2));
+    if (ix == cx && iz == cz) return -1.0;
+    double reach = fmin(surface + LEDGE_MAX, feet + ht + ARM_REACH);
+    for (int y = (int)floor(feet); y + 1 <= reach && y < WORLD_H; y++) {
+        if (y < 0 || !block_solid(world_get(ph->w, ix, y, iz))) continue;
+        int room = 1;
+        for (int k = 1; k <= (int)ceil(ht) && room; k++)
+            room = y + k >= WORLD_H || !block_solid(world_get(ph->w, ix, y + k, iz));
+        if (!room) continue;
+        return y + 1 > feet + 0.02 ? (double)(y + 1) : -1.0;
+    }
+    return -1.0;
+}
+
 static void player_step(const physics *ph, player *p, const player_input *in)
 {
     const double dt = PHYS_DT;
@@ -465,6 +500,11 @@ static void player_step(const physics *ph, player *p, const player_input *in)
         } else if (p->on_ground) {
             p->vel.y = sqrt(2.0 * GRAVITY * 1.15); /* just clears one block */
             p->on_ground = 0;
+        }
+        if (len > 0.5 && !p->on_ground && ledge_out(ph, p, fx / len, fz / len) > 0.0) {
+            p->vel.y = fmax(p->vel.y, PULL_UP);
+            p->vel.x = fx / len * PULL_OVER;
+            p->vel.z = fz / len * PULL_OVER;
         }
     }
 
