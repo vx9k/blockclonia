@@ -165,7 +165,7 @@ static void test_burns(void)
     health_burn(h, BP_LLEG, 2e4);
     health_burn(h, BP_RLEG, 2e4);
     float hb0 = health_hb(h);
-    live(h, &e, 300.0);
+    live(h, &e, 6.0 * GAME_H);
     CHECK(h->burn_tbsa > 30.0f);
     CHECK(h->blood < BLOOD_NORMAL - 1.0f && health_hb(h) > hb0 + 3.0f);
     CHECK(h->hr > 90.0f);
@@ -316,16 +316,17 @@ static void test_abrasion(void)
     tw_free(&t);
 }
 
-/* A leg under 400 kg for two game hours (100 s): the muscle dies. Freed,
+/* A leg under 400 kg for 2.4 game hours: the muscle dies. Freed,
  * it floods the blood with myoglobin and potassium and the kidneys suffer;
  * a brief pinning does not. A weight on the chest stops breathing. */
 static void test_crush(void)
 {
     health *a = new_body(33), *b = new_body(33);
     health_env e = calm_env();
-    for (int i = 0; i < 120 * 60; i++) {
+    const int pinned = (int)(2.4 * GAME_H * 60.0), brief = (int)(0.2 * GAME_H * 60.0);
+    for (int i = 0; i < pinned; i++) {
         health_crush(a, BP_LLEG, 400.0, 1.0 / 60.0);
-        if (i < 10 * 60) health_crush(b, BP_LLEG, 400.0, 1.0 / 60.0);
+        if (i < brief) health_crush(b, BP_LLEG, 400.0, 1.0 / 60.0);
         health_step(a, &e, 1.0 / 60.0);
         health_step(b, &e, 1.0 / 60.0);
     }
@@ -335,7 +336,7 @@ static void test_crush(void)
     CHECK(health_part_status(a, BP_LLEG, buf, sizeof buf) >= 2 && strstr(buf, "pinned under 400 kg") != NULL);
     CHECK(a->organ[ORG_KIDNEYS] > 0.99f); /* nothing reaches the kidneys while it is still trapped */
     float kmax = 0.0f, myo = 0.0f;
-    for (int s = 0; s < 300; s++) {
+    for (int s = 0; s < (int)(6.0 * GAME_H); s++) {
         live(a, &e, 1.0);
         live(b, &e, 1.0);
         kmax = fmaxf(kmax, a->potassium);
@@ -394,9 +395,9 @@ static void test_crush(void)
     tw_free(&t);
 }
 
-/* Soaked clothes dry by evaporation: in front of a fire within a minute or
- * two (game hours), in still freezing air far slower, and while wet they
- * chill the skin. */
+/* Soaked clothes dry by evaporation: in front of a fire within a few game
+ * hours, in still freezing air far slower, and while wet they chill the
+ * skin. */
 static void test_wetness(void)
 {
     health *a = new_body(36), *b = new_body(36);
@@ -410,11 +411,11 @@ static void test_wetness(void)
     fire.air_temp = fire.contact_temp = 10.0;
     fire.radiant = 1500.0;
     cold.air_temp = cold.contact_temp = -5.0;
-    live(a, &fire, 60.0);
-    live(b, &cold, 60.0);
+    live(a, &fire, 1.2 * GAME_H);
+    live(b, &cold, 1.2 * GAME_H);
     CHECK(a->wet < b->wet - 0.3f);
     CHECK(b->wet > 0.6f);
-    live(a, &fire, 120.0);
+    live(a, &fire, 2.4 * GAME_H);
     CHECK(a->wet == 0.0f);
     mem_free(a);
     mem_free(b);

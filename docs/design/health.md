@@ -19,13 +19,46 @@ monitor traces are the circuit's own pressures. Each body draws its own
 constitution, including its fastest heart rate (185–215 bpm).
 
 Known rough edges from the first playtest, left for play feedback
-rather than more tests: creative mode still runs the health model, a
-pain jump with no wound can start an adrenaline rush, a large body
-holds more than `BLOOD_NORMAL`, the monitor traces can show a step,
-and the two clocks (real time and the 72x survival clock) have no
-written rule yet. A drained vessel's pressure is linear below its
-unstressed volume; the readings floor at zero, but the circuit itself
-still lets a vessel suck.
+rather than more tests: creative mode still runs the health model, and
+the monitor traces can show a step. A drained vessel's pressure is
+linear below its unstressed volume; the readings floor at zero, but
+the circuit itself still lets a vessel suck.
+
+## Clocks
+
+Two clocks run the body and the world. **Real time** is the player's:
+anything they feel from moment to moment, or act against within
+seconds, runs at the speed it does in life. The **survival clock**
+(`HEALTH_CLOCK`, 24× real time, so a day is an hour of play) runs
+what takes hours or days in life, so that it happens within a session
+(the maintainer's choice, 2026-11-24). A step's `dt` is real seconds;
+`gh` is the survival-clock hours in it.
+
+| Process | Clock | Why |
+|---|---|---|
+| Heartbeat, circulation, baroreflex | real | felt beat by beat |
+| Breathing, O₂ and CO₂, drowning | real | held breath is seconds |
+| Bleeding flow and clotting | real | a wound is pressed within seconds |
+| Plasma refill | survival, capped at 0.25 mL/kg/min real | hours in life; the cap keeps the capillaries' real limit so an open artery still empties the body |
+| Fainting, consciousness, the brain's oxygen | real | |
+| Getting used to the sight of blood | real, 25 s | a reflex of the moment |
+| Fear, adrenaline, pain | real | |
+| Stamina | real | |
+| Heat exchange of skin and core, evaporative cooling | real | the chill is felt at once |
+| Wet clothes drying | survival | an hour in life by a fire; drying in real time would leave the player wet for a whole session |
+| Fever rise | survival | hours in life |
+| Digestion, thirst, hunger, insensible water loss | survival | |
+| Red-cell regrowth | survival | weeks in life |
+| Wound healing, infection, sepsis | survival | days in life |
+| Fractures, burns deepening and leaking, crush muscle death | survival | |
+| Organ recovery | survival | |
+| Morphine, alcohol, painkillers, antibiotics | survival | absorbed and cleared over hours |
+| Day and sun | survival | a day is an hour |
+| Fire fuel, the heat field, melting, freezing, catching fire | survival | `thermo.c` steps the world's heat in survival-clock seconds |
+
+Before #125 the clock ran at 72× (a 20-minute day), and the
+habituation to blood ran on it by mistake: 0.5 survival hours, which
+was 25 real seconds only at that speed.
 
 ## Principles (the maintainer's, 2026-11-23)
 

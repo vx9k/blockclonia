@@ -10,9 +10,6 @@
 
 #include <string.h>
 
-/* Real seconds in one game hour of the survival clock. */
-#define GAME_H (3600.0 / HEALTH_CLOCK)
-
 static int treat(health *h, inventory *inv, int what)
 {
     char msg[128] = {0};

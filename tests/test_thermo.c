@@ -42,6 +42,10 @@ static void detach(test_world *tw)
     tw->w.on_block_changed = physics_on_block_changed;
 }
 
+/* Real seconds in a second of the game clock: the world's heat runs on it,
+ * so the fuel, melting and burning times below are game times. */
+#define GAME_S (1.0 / HEALTH_CLOCK)
+
 static void advance(thermo *th, world *w, double seconds, double dt, dvec3 eye)
 {
     for (int i = 0, n = (int)(seconds / dt + 0.5); i < n; i++) thermo_step(th, w, dt, eye);
@@ -86,12 +90,12 @@ static void test_sun(void)
     thermo_set_day_time(th, 1.75);
     CHECK(fabs(thermo_day_time(th) - 0.75) < 1e-12);
 
-    /* One day is 20 real minutes: 600 s is half a day. */
+    /* One day is an hour of play: 900 s takes 06:00 to noon. */
     test_world tw = {0};
     tw_init(&tw);
     thermo_set_day_time(th, 0.25);
-    advance(th, &tw.w, 600.0, 1.0, dv3(0.5, GROUND, 0.5));
-    CHECK(fabs(thermo_day_time(th) - 0.75) < 1e-9);
+    advance(th, &tw.w, 900.0, 1.0, dv3(0.5, GROUND, 0.5));
+    CHECK(fabs(thermo_day_time(th) - 0.5) < 1e-9);
     tw_free(&tw);
     thermo_destroy(th);
 }
@@ -148,7 +152,7 @@ static void test_fire_air_and_radiation(void)
     CHECK(fabsf(thermo_block_temp(th, w, 0, GROUND, 0) - 827.0f) < 30.0f);
 
     /* The plume: the air cell's time constant is ~10 s of survival time, so
-     * 5 real s (360 s) reaches steady state; Heskestad's centreline rise
+     * 5 real s (120 s) reaches steady state; Heskestad's centreline rise
      * 1-2 m above a 10 kW fire is ~100 and ~30 K, a cell average less. */
     advance(th, w, 5.0, 1.0 / 60.0, eye);
     float amb = thermo_ambient(th, w, 0.5, GROUND + 1.5, 0.5);
@@ -200,20 +204,20 @@ static void test_fuel(void)
     world *w = &tw.w;
     dvec3 eye = dv3(0.5, GROUND, 0.5);
 
-    /* One unit burns for a survival-clock hour: 3600 / 72 = 50 real s. */
+    /* One unit burns for a game hour. */
     world_set(w, 0, GROUND, 0, B_CAMPFIRE, 1);
-    advance(th, w, 49.0, 0.1, eye);
+    advance(th, w, 3600.0 * GAME_S - 1.0, 0.1, eye);
     CHECK(world_get(w, 0, GROUND, 0) == B_CAMPFIRE);
     advance(th, w, 2.0, 0.1, eye);
     CHECK(world_get(w, 0, GROUND, 0) == B_ASH);
     CHECK(thermo_fire_count(th) == 0);
 
-    /* Two more units at 25 s: three in all, ash at 150 s. */
+    /* Two more units half an hour in: three in all, ash at three hours. */
     world_set(w, 4, GROUND, 4, B_CAMPFIRE, 1);
-    advance(th, w, 25.0, 0.1, eye);
+    advance(th, w, 1800.0 * GAME_S, 0.1, eye);
     CHECK(thermo_add_fuel(th, w, 4, GROUND, 4, 2) == 1);
     CHECK(world_get_meta(w, 4, GROUND, 4) == 3);
-    advance(th, w, 123.0, 0.1, eye);
+    advance(th, w, 9000.0 * GAME_S - 2.0, 0.1, eye);
     CHECK(world_get(w, 4, GROUND, 4) == B_CAMPFIRE);
     advance(th, w, 4.0, 0.1, eye);
     CHECK(world_get(w, 4, GROUND, 4) == B_ASH);
@@ -279,17 +283,18 @@ static void test_melting(void)
      * field is steady (10 min real). Sampled at 21:00, when the diurnal
      * swing is at its mean, as it is on average over the ~3 days of
      * survival time the melting takes. Ice: 917 kg * 334 kJ/kg = 306 MJ
-     * over ~1.2 kW (0.56 radiation, ~0.4 gas of the fire, ~0.2 air) = 70 real
-     * min. Snow insulates (k = 0.15): 134 MJ over ~0.6 kW, almost all
-     * radiation = 50 real min. The fires are topped up every 5 minutes. */
+     * over ~1.2 kW (0.56 radiation, ~0.4 gas of the fire, ~0.2 air) = 71 game
+     * hours. Snow insulates (k = 0.15): 134 MJ over ~0.6 kW, almost all
+     * radiation = 62 game hours. The fires are topped up every 6 hours. */
+    const int hour = (int)(3600.0 * GAME_S);
     double t_ice = -1.0, t_snow = -1.0, p_ice = 0.0, p_snow = 0.0, max_ice = -100.0;
-    for (int s = 1; s <= 8000 && (t_ice < 0.0 || t_snow < 0.0); s++) {
+    for (int s = 1; s <= 160 * hour && (t_ice < 0.0 || t_snow < 0.0); s++) {
         thermo_step(th, w, 1.0, eye);
-        if (s % 300 == 0) {
+        if (s % (6 * hour) == 0) {
             thermo_add_fuel(th, w, -10, GROUND, 0, CAMPFIRE_FUEL_MAX);
             thermo_add_fuel(th, w, 11, GROUND, 0, CAMPFIRE_FUEL_MAX);
         }
-        if (s == 600) {
+        if (s == 12 * hour) {
             p_ice = melt_power(th, w, -9, -10, 2.2);
             p_snow = melt_power(th, w, 10, 11, 0.15);
         }
@@ -340,11 +345,12 @@ static void test_freezing(void)
 
     /* A 10 cm skin, 33 MJ, released through the surface film (h = 10 W/K)
      * and five stone faces (2k = 5 W/K each, the stone barely warms: 2 MJ/K)
-     * at the day's mean: 35 W/K * 7.5 K = 262 W, 1770 real s (26 survival
-     * hours; Stefan's law gives ~19 h for 10 cm at -7.5 C). */
+     * at the day's mean: 35 W/K * 7.5 K = 262 W, 26 game hours (Stefan's
+     * law gives ~19 h for 10 cm at -7.5 C). */
+    const int hour = (int)(3600.0 * GAME_S);
     double est = 0.1 * 1000.0 * 334000.0 / ((10.0 + 5.0 * 5.0) * -amb) / HEALTH_CLOCK;
     double t_freeze = -1.0;
-    for (int s = 1; s <= 4000 && t_freeze < 0.0; s++) {
+    for (int s = 1; s <= 80 * hour && t_freeze < 0.0; s++) {
         thermo_step(th, w, 1.0, eye);
         if (world_get(w, 0, y, 0) == B_ICE) t_freeze = s;
     }
@@ -359,12 +365,12 @@ static void test_freezing(void)
     attach(&tw, &h, th);
     world_set(w, 0, y + 1, 0, B_CAMPFIRE, 0);
     double t_melt = -1.0;
-    for (int s = 1; s <= 1500 && t_melt < 0.0; s++) {
+    for (int s = 1; s <= 30 * hour && t_melt < 0.0; s++) {
         thermo_step(th, w, 1.0, eye);
-        if (s % 300 == 0) thermo_add_fuel(th, w, 0, y + 1, 0, CAMPFIRE_FUEL_MAX);
+        if (s % (6 * hour) == 0) thermo_add_fuel(th, w, 0, y + 1, 0, CAMPFIRE_FUEL_MAX);
         if (world_get(w, 0, y, 0) == B_WATER) t_melt = s;
     }
-    CHECK(t_melt > 200.0 && t_melt < 1000.0);
+    CHECK(t_melt > 4 * hour && t_melt < 20 * hour);
     CHECK(world_water_level(w, 0, y, 0) == 7);
     detach(&tw);
     thermo_destroy(th);
@@ -569,10 +575,10 @@ static void test_lava_ignites(void)
     world_set(w, 1, GROUND + 1, 1, B_LEAVES, 0);   /* on the lava */
     world_set(w, 0, GROUND + 1, 3, B_LOG, 0);      /* a metre off */
     world_set(w, 0, GROUND + 2, 0, B_PLANKS, 0);   /* on the log */
-    advance(th, w, 2.5, 1.0 / 60.0, eye);          /* 180 s: the leaves, not the log */
+    advance(th, w, 180.0 * GAME_S, 1.0 / 60.0, eye); /* 180 s: the leaves, not the log */
     CHECK(world_get(w, 1, GROUND + 1, 1) == B_CAMPFIRE);
     CHECK(world_get(w, 0, GROUND + 1, 0) == B_LOG);
-    advance(th, w, 10.0, 1.0 / 60.0, eye);         /* 900 s */
+    advance(th, w, 720.0 * GAME_S, 1.0 / 60.0, eye); /* 900 s */
     CHECK(world_get(w, 0, GROUND + 1, 0) == B_CAMPFIRE);
     CHECK(world_get_meta(w, 0, GROUND + 1, 0) == 4);
     CHECK(world_get(w, 0, GROUND + 1, 3) == B_LOG);
@@ -580,7 +586,7 @@ static void test_lava_ignites(void)
     CHECK(thermo_fire_count(th) == 2);
     /* Crude oil on lava goes up almost at once, a full cell as four units. */
     world_set(w, -1, GROUND + 1, -1, B_CRUDE_OIL, 0);
-    advance(th, w, 1.0, 1.0 / 60.0, eye);
+    advance(th, w, 72.0 * GAME_S, 1.0 / 60.0, eye);
     CHECK(world_get(w, -1, GROUND + 1, -1) == B_CAMPFIRE);
     CHECK(world_get_meta(w, -1, GROUND + 1, -1) == 4);
     /* Brine puts a fire out as water does. */
@@ -607,9 +613,9 @@ static void test_plants_burn(void)
     world_set(w, 0, GROUND + 1, 0, B_TALL_GRASS, 0);
     world_set(w, 1, GROUND + 1, 1, B_BUSH, 0);
     world_set(w, 0, GROUND + 1, 3, B_POPPY, 0); /* a metre off */
-    advance(th, w, 0.5, 1.0 / 60.0, eye);      /* 36 s: too soon */
+    advance(th, w, 36.0 * GAME_S, 1.0 / 60.0, eye); /* 36 s: too soon */
     CHECK(world_get(w, 0, GROUND + 1, 0) == B_TALL_GRASS && world_get(w, 1, GROUND + 1, 1) == B_BUSH);
-    advance(th, w, 2.0, 1.0 / 60.0, eye);      /* 180 s, as for leaves */
+    advance(th, w, 144.0 * GAME_S, 1.0 / 60.0, eye); /* 180 s, as for leaves */
     CHECK(world_get(w, 0, GROUND + 1, 0) == B_CAMPFIRE && world_get(w, 1, GROUND + 1, 1) == B_CAMPFIRE);
     CHECK(world_get(w, 0, GROUND + 1, 3) == B_POPPY);
     CHECK(thermo_fire_count(th) == 2);

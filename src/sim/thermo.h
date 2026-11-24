@@ -1,7 +1,7 @@
 /* Thermodynamics: the day, the air, and heat moving through blocks.
  *
  * - A day clock on the survival clock (HEALTH_CLOCK x real time): one day
- *   is 20 real minutes. Daylight and sky colour follow the sun.
+ *   is an hour of play. Daylight and sky colour follow the sun.
  * - Ambient air temperature from altitude (the terrain is vertically
  *   compressed, so the lapse rate is scaled to put 0 C at the snow line),
  *   time of day and shelter (enclosed spaces sit near the ground's mean).

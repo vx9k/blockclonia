@@ -131,6 +131,18 @@ static void test_faint_from_blood(void)
     CHECK(used == 0);
 }
 
+/* Getting used to the sight of blood is a reflex of the moment, in real
+ * seconds whatever the day clock runs at: it fades to a third in 25 s. */
+static void test_blood_seen_fades(void)
+{
+    health *h = new_body(93);
+    health_env e = calm_env();
+    h->blood_seen = 300.0f;
+    live(h, &e, 25.0);
+    CHECK(fabsf(h->blood_seen - 300.0f * expf(-1.0f)) < 3.0f);
+    mem_free(h);
+}
+
 /* Once running it doesn't restart, and an unconscious body has none. */
 static void test_faint_once(void)
 {
@@ -196,6 +208,7 @@ void test_faint_all(void)
     test_faint_feel();
     test_faint_from_pain();
     test_faint_from_blood();
+    test_blood_seen_fades();
     test_faint_once();
     test_faint_replay();
     test_faint_env();
