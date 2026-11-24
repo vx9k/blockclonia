@@ -528,6 +528,7 @@ static void test_blood_garbage(void)
     }
     for (int i = 0; i < BLOOD_SOURCES; i++) CHECK(isfinite(pending(&b, i)) && b.owed[i] >= 0.0f && b.ready[i] >= 0.0f);
     for (int i = 0; i < b.drops; i++) CHECK(isfinite(b.drop[i].pos.x) && isfinite(b.drop[i].vel.y));
+    blood_free(&b);
     blood_init(&b, 0, 1u); /* a zero budget still keeps a few */
     CHECK(b.max_stains > 0);
     blood_free(&b);
