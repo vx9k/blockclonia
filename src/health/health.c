@@ -1350,7 +1350,8 @@ static void step_bleeding(health *h, const health_env *e, double dt, float gh, c
         if (frand(h) < 0.15f && start_faint(h)) health_log(h, "The sight of the blood makes you woozy");
         h->blood_seen = ext;
     }
-    h->blood_seen = maxf(ext, h->blood_seen * expf(-gh / 0.5f));
+    /* Getting used to it is a reflex of the moment, in real seconds. */
+    h->blood_seen = maxf(ext, h->blood_seen * expf(-fdt / 25.0f));
     float internal = 0.0f;
     for (int i = 0; i < BP_COUNT; i++) {
         body_part *bp = &h->part[i];
@@ -1375,8 +1376,8 @@ static void step_bleeding(health *h, const health_env *e, double dt, float gh, c
  * survival clock, which dilutes the red cells that are left. The
  * capillaries can only move so much fluid, though: a few hundred mL in
  * the first hour, about 0.25 mL/kg/min at the most, in real time. Without
- * that cap the survival clock's 72x speed-up refilled 250 mL/min and an
- * open artery never emptied the body. */
+ * that cap the survival clock's speed-up refilled hundreds of mL a minute
+ * and an open artery never emptied the body. */
 #define REFILL_MAX_ML_S (0.25f * 75.0f / 60.0f)
 static void account_blood(health *h, float lost_ml, float gh, float dehyd, float dt)
 {

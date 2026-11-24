@@ -117,8 +117,9 @@ reads `world`, so the main thread can change the world while it runs.
   everything arrives through `health_env` and the injury functions.
 - `thermo.c` keeps a sparse heat field around the player, the day clock,
   campfires burning their fuel, and melting and freezing. Slow processes
-  (healing, thirst, conduction, fuel) run on the **survival clock**, 72×
-  real time, so a day lasts 20 minutes.
+  (healing, thirst, conduction, fuel) run on the **survival clock**, 24×
+  real time, so a day lasts an hour. `docs/design/health.md` (Clocks)
+  lists which process runs on which clock.
 
 ## Rendering
 

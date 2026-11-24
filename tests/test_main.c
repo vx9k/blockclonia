@@ -1359,13 +1359,13 @@ static void test_health_infection(void)
     CHECK(health_treat(b, &inv, BP_RARM, TREAT_BANDAGE, 0, msg, sizeof msg) == 1);
     CHECK(health_treat(b, &inv, BP_RARM, TREAT_ANTIBIOTIC, 0, msg, sizeof msg) == 1);
     CHECK(inv_count(&inv, I_ANTISEPTIC) + inv_count(&inv, I_ANTIBIOTIC) + inv_count(&inv, I_BANDAGE) == 0);
-    /* 30 minutes of real time is 36 hours on the survival clock. Food and
-     * water keep both bodies from starving meanwhile. */
+    /* 36 hours on the game clock. Food and water keep both bodies from
+     * starving meanwhile. */
     for (int m = 0; m < 30; m++) {
         a->stomach_water = b->stomach_water = 0.3f;
         a->stomach_kcal = b->stomach_kcal = 300.0f;
-        live(a, &e, 60.0);
-        live(b, &e, 60.0);
+        live(a, &e, 1.2 * GAME_H);
+        live(b, &e, 1.2 * GAME_H);
     }
     float inf_a = a->wound_count ? a->wounds[0].infection : 0.0f;
     float inf_b = b->wound_count ? b->wounds[0].infection : 0.0f;
@@ -1379,7 +1379,7 @@ static void test_health_infection(void)
     mem_free(b);
 }
 
-/* Thirst and hunger build on the survival clock; drinking and eating fix
+/* Thirst and hunger build on the game clock; drinking and eating fix
  * them, and breaking leaves finds food. */
 static void test_health_needs(void)
 {
@@ -1387,7 +1387,7 @@ static void test_health_needs(void)
     inventory inv = {0};
     inv_init(&inv);
     health_env e = calm_env();
-    live(h, &e, 600.0); /* half a survival day */
+    live(h, &e, 12.0 * GAME_H); /* half a game day */
     float hyd = health_hydration(h), hun = health_hunger(h);
     CHECK(hyd < 0.9f && hun > 0.2f);
     char msg[128] = {0};

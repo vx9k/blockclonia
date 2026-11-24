@@ -41,8 +41,8 @@
  *
  * Fast processes (heartbeats, bleeding, breathing, oxygen) run in real
  * time. Slow ones (digestion, dehydration, healing, infection) run on the
- * survival clock, HEALTH_CLOCK times faster: one in-game day is 20 real
- * minutes, as in Minecraft. */
+ * survival clock, HEALTH_CLOCK times faster: one in-game day is an hour of
+ * play. docs/design/health.md lists which process runs on which clock. */
 #ifndef MC_HEALTH_H
 #define MC_HEALTH_H
 
@@ -53,7 +53,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define HEALTH_CLOCK 72.0     /* survival-clock speed-up for slow processes */
+#define HEALTH_CLOCK 24.0     /* game-clock speed-up: one day is an hour of play */
 #define HEALTH_WAVE_HZ 240    /* monitor waveform sample rate */
 #define HEALTH_WAVE_LEN 1440  /* 6 s of waveform history */
 #define HEALTH_MAX_WOUNDS 24

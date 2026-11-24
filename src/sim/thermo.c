@@ -105,11 +105,11 @@
  * and hot gas, not the wood being consumed.
  *
  * Integration is explicit with sub-steps below half the smallest C/sum(G)
- * (~2.7 s for air in a plume), on the survival clock: a 60 Hz frame is 1.2 s
+ * (~2.7 s for air in a plume), on the survival clock: a 60 Hz frame is 0.4 s
  * of thermal time, one sub-step. Work per call is capped at 64 sub-steps
  * and 2^18 cell updates (16 sub-steps of a full field); beyond that the field
  * falls behind the clock rather than going unstable. Housekeeping runs every
- * 10 s of thermal time (8 frames) or when the field or its blocks change:
+ * 10 s of thermal time (25 frames) or when the field or its blocks change:
  * cells deviating more than 1 K bring their six neighbours into the field,
  * cells within 0.2 K of ambient with no phase progress and no such
  * neighbour are dropped, and the links (neighbour indices, conductances,

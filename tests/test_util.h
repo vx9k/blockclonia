@@ -44,6 +44,7 @@ int test_run(const test_suite *suites, int n, int argc, char **argv);
     } while (0)
 
 #define GROUND 13 /* first air block in the flat test world */
+#define GAME_H (3600.0 / HEALTH_CLOCK) /* real seconds in an hour of the game clock */
 
 typedef struct {
     jobs *js;

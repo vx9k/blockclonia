@@ -46,7 +46,7 @@ memory comes from [mimalloc](https://github.com/microsoft/mimalloc).
   ![mountain ranges with snow caps](docs/mountains.jpg)
 - **Realistic physics** (1 block = 1 m, SI units, fixed 60 Hz step). See
   [Physics](#physics).
-- **Heat and weather**: a day that lasts 20 minutes, air temperature from
+- **Heat and weather**: a day that lasts an hour, air temperature from
   altitude, time of day and shelter, campfires that burn fuel and heat
   their surroundings, and snow and ice that melt while still water freezes.
   See [Heat](#heat).
@@ -190,8 +190,8 @@ and heads it off; once down, you come round within seconds.
 
 ## Heat
 
-- **The day** runs on the survival clock (72× real time), so a day lasts
-  20 minutes. Daylight and the sky colour follow the sun.
+- **The day** runs on the survival clock (24× real time), so a day lasts
+  an hour. Daylight and the sky colour follow the sun.
 - **Air temperature** follows the terrain's climate (the same field the
   biomes come from) and falls 1.1 °C per 10 m of altitude, so the snow
   line is wherever the air reaches 0 °C. It swings between day and night
