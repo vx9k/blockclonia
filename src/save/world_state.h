@@ -26,10 +26,12 @@ size_t world_state_encode(const thermo *th, uint8_t *out, size_t cap);
  * or -1 with th untouched for malformed data. */
 int world_state_decode(thermo *th, const uint8_t *in, size_t len);
 
-/* The record from and to db: load returns 1 if one was read, 0 if the
- * world has none (a new world, or one from before it existed), -1 if it
- * is corrupt or unreadable (th untouched). */
-int world_state_save(save_db *db, const thermo *th);
+/* save adds the record to a batch for the database's writer (0, or -1 if
+ * it could not be encoded). load reads it from db: 1 if one was read, 0
+ * if the world has none (a new world, or one from before it existed), -1
+ * if it is corrupt or unreadable (th untouched). */
+struct save_batch;
+int world_state_save(struct save_batch *b, const thermo *th);
 int world_state_load(save_db *db, thermo *th);
 
 #endif

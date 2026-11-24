@@ -107,7 +107,7 @@ typedef struct column {
     col_state state;
     uint8_t want_unload;   /* unload once the in-flight load job finishes */
     uint8_t modified;      /* differs from generated terrain: keep a save file */
-    uint8_t unsaved;       /* edited since it was last written to disk (2: written, not yet committed) */
+    uint8_t unsaved;       /* edited since it was last saved (2: going into a save) */
     uint8_t keep_stored;   /* its saved row could not be read: generated instead, never saved over the row */
     uint8_t waited;        /* asked of the host and still loading at the last world_retry_requests */
     uint8_t *blocks;       /* COL_VOL block ids */
@@ -131,6 +131,7 @@ static inline int mesh_held(const section_mesh *m) { return m->vtx_capacity || m
 
 struct jobs;
 struct save_db;
+struct save_batch;
 struct light_emitter;
 
 #define WORLD_URGENT 64
@@ -148,7 +149,6 @@ typedef struct world {
     int have_center;
     uint32_t version_counter;
     struct save_db *db;  /* NULL: saving disabled; not owned */
-    int save_failed;     /* a column could not be saved: unloads keep edited columns until a save succeeds */
     struct jobs *jobs;
     int gen_in_flight, mesh_in_flight, light_in_flight;
     int max_gen_in_flight, max_mesh_in_flight;
@@ -174,12 +174,12 @@ typedef struct world {
     /* Called with edit_user just before a loaded column is saved and freed,
      * so state living outside it (falling bodies) can be written back. */
     void (*on_column_unload)(void *user, const column *c);
-    /* Called with save_user inside every transaction that saves columns,
-     * to write the rest of the game (the player) into it, so the world and
-     * the player on disk always come from the same moment. Returns 0, or
-     * -1 to abandon the whole save. */
+    /* Called with save_user for every batch that saves columns, to add the
+     * rest of the game (the player) to it, so the world and the player on
+     * disk always come from the same moment. Returns 0, or -1 to abandon
+     * the whole save. */
     void *save_user;
-    int (*on_save)(void *user);
+    int (*on_save)(void *user, struct save_batch *b);
     /* Light sources besides blocks (the heat field's hot cells), asked for
      * on the main thread when a column's light job starts: those in the
      * box x0 <= x < x0 + 48, z0 <= z < z0 + 48, y < top, written to out
@@ -278,6 +278,10 @@ int world_surface_y(const world *w, int x, int z);
  * changed, so it doubles as the autosave, and it retries columns kept
  * loaded because their save on unloading failed. */
 void world_save_all(world *w);
+/* The same, but the save is synced to the disk, so it survives a power cut
+ * or an OS crash as well as the game crashing: for what must not be lost
+ * (the body getting worse or better, death, quitting). */
+void world_save_now(world *w);
 
 /* A requested column's bytes (save format, untrusted) from the host. A
  * column that does not decode is generated from the seed instead. Returns

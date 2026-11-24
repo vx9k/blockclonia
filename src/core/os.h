@@ -36,6 +36,8 @@ typedef pthread_cond_t os_cond;
 typedef pthread_t os_thread;
 
 void os_mutex_init(os_mutex *m);
+/* A mutex the thread holding it may lock again (and unlocks as often). */
+void os_mutex_init_recursive(os_mutex *m);
 void os_mutex_destroy(os_mutex *m);
 void os_mutex_lock(os_mutex *m);
 void os_mutex_unlock(os_mutex *m);

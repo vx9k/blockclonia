@@ -13,7 +13,14 @@ int tmp_dir_make(char *out, size_t cap, const char *prefix)
 {
     const char *tmp = getenv("TMPDIR");
     int n = snprintf(out, cap, "%s/%sXXXXXX", tmp && tmp[0] && strlen(tmp) < 200 ? tmp : "/tmp", prefix);
-    return n > 0 && (size_t)n < cap && mkdtemp(out) != NULL;
+    if (n <= 0 || (size_t)n >= cap || mkdtemp(out) == NULL) return 0;
+    /* macOS's temp folder is under /var, a symlink to /private/var, and
+     * world files are opened without following symlinks anywhere in the
+     * path, so tests work in the resolved folder. */
+    char real[4096] = {0};
+    if (realpath(out, real) == NULL || strlen(real) >= cap) return 0;
+    memcpy(out, real, strlen(real) + 1);
+    return 1;
 }
 
 int tmp_symlink(const char *target, const char *link) { return symlink(target, link) == 0; }

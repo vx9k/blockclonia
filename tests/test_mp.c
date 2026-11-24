@@ -9,6 +9,7 @@
 #include "mp.h"
 #include "netkeys.h"
 #include "os.h"
+#include "save_batch.h"
 #include "save_db.h"
 #include "survival.h"
 #include "test_util.h"
@@ -271,7 +272,10 @@ static void check_saved_players(host_side *h, const nc_keypair *kh, const char *
     int na = mp_avatars(sm, 0.0, 1.0, sa, NET_MAX_PLAYERS), placed = 0;
     for (int i = 0; i < na; i++) placed |= sa[i].id == 1 && fabs(sa[i].pos.x - was.pos.x) < 1e-9 && sa[i].yaw == 1.25f;
     CHECK(placed);
-    CHECK(save_db_begin(db) == 0 && mp_save_players(sm) == 0 && save_db_commit(db) == 0);
+    save_batch sb = {0};
+    CHECK(mp_save_players(sm, &sb) == 0 && sb.n == 3);
+    save_db_submit(db, &sb);
+    CHECK(sb.n == 0 && save_db_flush(db) == 0);
     mp_destroy(sm);
     player back = {0};
     inventory got[3] = {0};

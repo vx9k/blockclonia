@@ -7,6 +7,7 @@
 #include "mesher.h"
 #include "os.h"
 #include "save.h"
+#include "save_batch.h"
 #include "save_db.h"
 
 #include <stddef.h>
@@ -446,31 +447,22 @@ static void store_column(world *w, const column *c)
     if (c->unsaved && w->db) world_save_all(w);
 }
 
-/* Saves and frees a column that left the ring. Returns 0 if it was kept:
- * when its save fails (a full disk, an I/O error) the column stays loaded
- * and unsaved, holding its ring slot, rather than taking the player's
- * edits with it. The slot bounds how many can pile up. Until a save goes
- * through again, unloads skip the attempt, so a dead disk is not retried
- * on every move; the autosave keeps trying. */
-static int unload_column(world *w, column *c)
+/* Saves and frees a column that left the ring. Its edits are safe once
+ * handed to the database's writer, which keeps them (and serves them to a
+ * reload) until they are on disk, however long a full disk holds out. */
+static void unload_column(world *w, column *c)
 {
     if (c->state == COL_LOADING) {
         c->want_unload = 1;
-        return 1;
+        return;
     }
     if (w->on_column_unload) w->on_column_unload(w->edit_user, c);
-    if (!w->save_failed) store_column(w, c);
-    if (c->unsaved && w->db) {
-        if (!w->save_failed) log_error("keeping unsaved columns loaded until saving works again");
-        w->save_failed = 1;
-        return 0;
-    }
+    store_column(w, c);
     if (w->on_mesh_free)
         for (int s = 0; s < SECTIONS; s++)
             if (mesh_held(&c->mesh[s])) w->on_mesh_free(w->render_user, &c->mesh[s]);
     detach(w, c);
     column_free(c);
-    return 1;
 }
 
 /* A column leaving the ring that an anchor still needs moves to the far
@@ -957,7 +949,10 @@ static void stream_far(world *w)
         column *c = w->far[i];
         if (!c || anchor_wants(w, c->cx, c->cz, 1)) continue;
         if (c->state == COL_LOADING) c->want_unload = 1;
-        else if (unload_column(w, c)) i--; /* the slot now holds the next of its probe run */
+        else {
+            unload_column(w, c);
+            i--; /* the slot now holds the next of its probe run */
+        }
     }
     for (int a = 0; a < w->anchor_n; a++)
         for (int d = 0; d <= w->anchor_r; d++)
@@ -1016,7 +1011,7 @@ void world_load_blocking(world *w, double px, double pz, int radius)
             if (!in_limits(cx, cz)) continue;
             column *c = w->grid[slot_of(w, cx, cz)];
             while (c && (c->cx != cx || c->cz != cz)) {
-                if (!unload_column(w, c)) break; /* kept unsaved: the slot stays its own */
+                unload_column(w, c);
                 if (w->grid[slot_of(w, cx, cz)] == c) {
                     jobs_wait_idle(w->jobs);
                     jobs_poll(w->jobs, -1);
@@ -1031,40 +1026,40 @@ void world_load_blocking(world *w, double px, double pz, int radius)
     w->gen_cursor = 0;
 }
 
-void world_save_all(world *w)
+static void save_world(world *w, int durable)
 {
     if (!w->db) return;
-    /* One transaction for the columns and the player (on_save), which
-     * lands whole or not at all: any failed write abandons it, as SQLite
-     * may already have rolled it back. A column counts as saved only once
-     * the commit went through; otherwise the next save tries it again. */
-    if (save_db_begin(w->db) != 0) {
-        log_error("could not start saving the world");
-        return;
-    }
+    /* One batch for the columns and the player (on_save), which the
+     * database's writer commits whole, so the two on disk always come from
+     * the same moment. Encoding happens here, the disk work on the writer.
+     * A column counts as saved once its bytes are handed over: the writer
+     * keeps them, and loads read them, until they are on disk. */
+    save_batch b = {0};
+    uint8_t *buf = mem_alloc(SAVE_MAX_FILE);
     int ok = 1;
     for (int i = 0; ok && i < held_slots(w); i++) {
         column *c = held(w, i);
         if (!c || c->state != COL_READY || !c->unsaved) continue;
-        if (save_db_put_column(w->db, c) == 0) c->unsaved = 2;
+        size_t len = save_encode_column(c, buf, SAVE_MAX_FILE);
+        if (len && save_batch_column(&b, c->cx, c->cz, buf, len) == 0) c->unsaved = 2;
         else {
             log_error("failed to save column %d,%d", c->cx, c->cz);
             ok = 0;
         }
     }
-    if (ok && w->on_save) ok = w->on_save(w->save_user) == 0;
-    if (ok) ok = save_db_commit(w->db) == 0;
-    else save_db_rollback(w->db);
+    mem_free(buf);
+    if (ok && w->on_save) ok = w->on_save(w->save_user, &b) == 0;
     for (int i = 0; i < held_slots(w); i++) {
         column *c = held(w, i);
         if (c && c->unsaved == 2) c->unsaved = ok ? 0 : 1;
     }
-    if (ok && w->save_failed) {
-        log_info("saving works again");
-        w->save_failed = 0;
-        w->have_center = 0; /* the next world_update unloads the columns kept meanwhile */
-    }
+    b.durable = durable;
+    if (ok) save_db_submit(w->db, &b);
+    else save_batch_free(&b);
 }
+
+void world_save_all(world *w) { save_world(w, 0); }
+void world_save_now(world *w) { save_world(w, 1); }
 
 int world_column_arrived(world *w, int cx, int cz, const uint8_t *data, size_t len)
 {

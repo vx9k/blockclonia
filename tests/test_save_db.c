@@ -7,10 +7,13 @@
 #include "mem.h"
 #include "os.h"
 #include "save.h"
+#include "save_batch.h"
 #include "save_db.h"
 #include "test_util.h"
 
 #include <sqlite3.h>
+
+#include <stdatomic.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,7 +67,10 @@ static long long raw_pragma(const char *dir, const char *name, const char *pragm
  * flag is set, as a failing SD card or a full disk would. save_db opens
  * through the default VFS, so installing this as the default puts it under
  * the game's database with no hook in the game. */
-static int g_fail_reads, g_fail_writes;
+static atomic_int g_fail_reads, g_fail_writes; /* the writer thread reads them too */
+/* While g_hold_writes is set, a write waits, with g_writing set, so a
+ * test can act while the writer is in the middle of a commit. */
+static atomic_int g_hold_writes, g_writing;
 static sqlite3_vfs *g_real_vfs;
 static sqlite3_vfs g_fault_vfs;
 
@@ -81,6 +87,8 @@ static int ff_read(sqlite3_file *f, void *buf, int n, sqlite3_int64 off)
 }
 static int ff_write(sqlite3_file *f, const void *buf, int n, sqlite3_int64 off)
 {
+    g_writing = g_hold_writes;
+    while (g_hold_writes) os_sleep(0.001);
     return g_fail_writes ? SQLITE_FULL : real_of(f)->pMethods->xWrite(real_of(f), buf, n, off);
 }
 static int ff_truncate(sqlite3_file *f, sqlite3_int64 n) { return real_of(f)->pMethods->xTruncate(real_of(f), n); }
@@ -420,11 +428,12 @@ static void test_import(void)
     column_free(d);
 }
 
-/* Stands in for the game's player: written by the world's on_save hook. */
+/* Stands in for the game's player: added by the world's on_save hook. */
 static int g_player_fails;
-static int save_test_player(void *user)
+static int save_test_player(void *user, save_batch *b)
 {
-    return g_player_fails ? -1 : save_db_put_player(user, SAVE_DB_LOCAL_PLAYER, "new", 3);
+    (void)user;
+    return g_player_fails ? -1 : save_batch_player(b, SAVE_DB_LOCAL_PLAYER, "new", 3);
 }
 
 static int player_is(save_db *db, const char *want)
@@ -469,6 +478,11 @@ static void test_save_with_player(void)
     long n = save_db_get_column(db, 0, 0, &b);
     CHECK(n > 0 && player_is(db, "new"));
     mem_free(b);
+    b = NULL;
+    CHECK(save_db_flush(db) == 0); /* and from the table, not the queue */
+    n = save_db_get_column(db, 0, 0, &b);
+    CHECK(n > 0 && player_is(db, "new"));
+    mem_free(b);
     world_destroy(&w);
     jobs_destroy(js);
     save_db_close(db);
@@ -502,9 +516,18 @@ static void test_world_db(void)
     save_db_close(db);
 }
 
+/* Waits for the writer while it may still be retrying an attempt that
+ * began before the disk was fixed. */
+static int flushed(save_db *db)
+{
+    int ok = 0;
+    for (int i = 0; i < 8 && !ok; i++) ok = save_db_flush(db) == 0;
+    return ok;
+}
+
 /* A column whose save fails as it unloads (a full disk) keeps its edits:
- * it stays loaded in its ring slot until a save goes through, and loading
- * over that slot leaves it alone instead of waiting for it. */
+ * the writer holds them and keeps trying, a reload reads them back from
+ * it, and they reach the disk once it has room again. */
 static void test_unload_save_fails(void)
 {
     char dir[400] = {0};
@@ -528,27 +551,30 @@ static void test_unload_save_fails(void)
     CHECK(w.grid_w == 16);
     g_fail_writes = 1;
     world_load_blocking(&w, 16 * CHUNK_W + 0.5, 0.5, 1);
-    const column *kept = w.grid[0];
-    CHECK(kept && kept->cx == 0 && kept->cz == 0 && kept->unsaved);
-    CHECK(world_column(&w, 16, 0) == NULL && world_column(&w, 17, 0) != NULL);
-    world_save_all(&w); /* the autosave, while the disk is still full */
-    CHECK(kept && kept->unsaved);
-    g_fail_writes = 0;
-    world_save_all(&w);
-    CHECK(kept && kept->unsaved == 0 && w.grid[0] == kept);
-    world_update(&w, 16 * CHUNK_W + 0.5, GROUND, 0.5); /* now it can go */
-    jobs_wait_idle(js);
-    jobs_poll(js, -1);
-    CHECK(world_column(&w, 16, 0) != NULL);
-    world_destroy(&w);
-
-    world_init(&w, 1, 2, js, db);
-    w.generator = test_flat_gen;
+    CHECK(world_column(&w, 0, 0) == NULL && world_column(&w, 16, 0) != NULL);
+    CHECK(save_db_flush(db) == -1 && save_db_failing(db));
+    uint8_t *b = NULL;
+    CHECK(save_db_get_column(db, 0, 0, &b) > 0); /* from the queue */
+    mem_free(b);
     world_load_blocking(&w, 0.5, 0.5, 1);
     CHECK(world_get(&w, 3, GROUND, 4) == B_GLASS);
+    world_save_all(&w); /* the autosave, while the disk is still full */
     world_destroy(&w);
-    jobs_destroy(js);
+    g_fail_writes = 0;
+    CHECK(flushed(db) && !save_db_failing(db));
     save_db_close(db);
+
+    db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (db) {
+        world_init(&w, 1, 2, js, db);
+        w.generator = test_flat_gen;
+        world_load_blocking(&w, 0.5, 0.5, 1);
+        CHECK(world_get(&w, 3, GROUND, 4) == B_GLASS);
+        world_destroy(&w);
+        save_db_close(db);
+    }
+    jobs_destroy(js);
     fault_vfs_remove();
 }
 
@@ -807,6 +833,72 @@ static void clean_up(void)
     tmp_remove(g_root);
 }
 
+/* A batch that fails goes back under the saves made since: once the disk
+ * has room, the newest bytes of every row land, and the older ones never
+ * overwrite them. */
+static void test_retry_keeps_newest(void)
+{
+    char dir[400] = {0};
+    sub_dir(dir, sizeof dir, "retry");
+    fault_vfs_install();
+    save_db *db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (!db) {
+        fault_vfs_remove();
+        return;
+    }
+    save_batch b = {0};
+    g_hold_writes = 1;
+    CHECK(save_batch_player(&b, SAVE_DB_LOCAL_PLAYER, "v1", 2) == 0);
+    CHECK(save_batch_blob(&b, "first", "f", 1) == 0);
+    save_db_submit(db, &b);
+    while (!g_writing) os_sleep(0.001); /* the writer is committing v1 */
+    CHECK(save_batch_player(&b, SAVE_DB_LOCAL_PLAYER, "v2", 2) == 0);
+    uint64_t last = save_db_submit(db, &b); /* queued behind it */
+    g_fail_writes = 1;
+    g_hold_writes = 0;
+    CHECK(save_db_flush(db) == -1 && save_db_failing(db));
+    CHECK(player_is(db, "v2"));
+    g_fail_writes = 0;
+    CHECK(flushed(db) && save_db_committed(db) == last && !save_db_failing(db));
+    char buf[4] = {0};
+    CHECK(player_is(db, "v2") && save_db_get_blob(db, "first", buf, sizeof buf) == 1 && buf[0] == 'f');
+    save_db_close(db);
+    db = save_db_open(dir);
+    CHECK(db && player_is(db, "v2"));
+    save_db_close(db);
+    fault_vfs_remove();
+}
+
+/* Closing while the disk refuses every write does not hang: what could
+ * not be written is logged as lost, and the world on disk is the last
+ * one that saved. */
+static void test_close_while_failing(void)
+{
+    char dir[400] = {0};
+    sub_dir(dir, sizeof dir, "closing");
+    fault_vfs_install();
+    save_db *db = save_db_open(dir);
+    CHECK(db != NULL);
+    if (!db) {
+        fault_vfs_remove();
+        return;
+    }
+    CHECK(save_db_put_player(db, SAVE_DB_LOCAL_PLAYER, "kept", 4) == 0);
+    save_batch b = {0};
+    CHECK(save_batch_player(&b, SAVE_DB_LOCAL_PLAYER, "lost", 4) == 0);
+    g_fail_writes = 1;
+    save_db_submit(db, &b);
+    double t0 = os_now();
+    save_db_close(db);
+    CHECK(os_now() - t0 < 5.0);
+    g_fail_writes = 0;
+    db = save_db_open(dir);
+    CHECK(db && player_is(db, "kept"));
+    save_db_close(db);
+    fault_vfs_remove();
+}
+
 void test_save_db_all(void)
 {
     int made = tmp_dir_make(g_root, sizeof g_root, "mc_db_");
@@ -824,5 +916,7 @@ void test_save_db_all(void)
     test_save_with_player();
     test_world_db();
     test_unload_save_fails();
+    test_retry_keeps_newest();
+    test_close_while_failing();
     clean_up();
 }

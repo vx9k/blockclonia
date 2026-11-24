@@ -35,6 +35,7 @@
 #include "recoil.h"
 #include "renderer.h"
 #include "save.h"
+#include "save_batch.h"
 #include "save_db.h"
 #include "settings.h"
 #include "sky.h"
@@ -64,7 +65,10 @@
 #define REACH 5.0
 #define MAX_STEPS_PER_FRAME 5
 #define MESH_UPLOADS_PER_FRAME 128
-#define AUTOSAVE_SECONDS 60.0
+/* Saving costs the game's thread only the encoding (the writer thread does
+ * the disk work), so the autosave runs often: a crash loses at most this
+ * much. A change to the body saves at once. */
+#define AUTOSAVE_SECONDS 5.0
 
 typedef struct {
     uint32_t seed;
@@ -688,22 +692,22 @@ typedef struct {
     mp *const *mp; /* the session, if hosting: its players are saved too */
 } save_ctx;
 
-/* The world's on_save hook: the player goes into the transaction that
- * saves the columns, so the two on disk always match. The hook's type
- * fixes the non-const parameter. */
+/* The world's on_save hook: the player goes into the batch that saves
+ * the columns, so the two on disk always match. The hook's type fixes the
+ * non-const parameter. */
 /* cppcheck-suppress constParameterCallback */
-static int save_player(void *user)
+static int save_player(void *user, save_batch *b)
 {
     const save_ctx *sc = user;
     uint8_t *buf = mem_alloc(PLAYER_RECORD_MAX);
     size_t n = survival_encode_player(sc->pl, sc->inv, sc->hl, buf, PLAYER_RECORD_MAX);
-    int ok = n && save_db_put_player(sc->db, SAVE_DB_LOCAL_PLAYER, buf, n) == 0;
+    int ok = n && save_batch_player(b, SAVE_DB_LOCAL_PLAYER, buf, n) == 0;
     mem_free(buf);
-    if (!ok || world_state_save(sc->db, sc->th) != 0) {
+    if (!ok || world_state_save(b, sc->th) != 0) {
         log_warn("could not save the player");
         return -1;
     }
-    if (*sc->mp && mp_save_players(*sc->mp) != 0) {
+    if (*sc->mp && mp_save_players(*sc->mp, b) != 0) {
         log_warn("could not save the other players");
         return -1;
     }
@@ -731,7 +735,8 @@ static void save_on_fatal(void *user)
 {
     save_ctx *sc = user;
     physics_settle_bodies(sc->ph, NULL);
-    world_save_all(sc->w); /* and the player, through on_save */
+    world_save_now(sc->w); /* and the player, through on_save */
+    if (sc->db) save_db_flush(sc->db);
 }
 
 /* --give: "name:count" pairs; names match case-insensitively, spaces as
@@ -1039,6 +1044,7 @@ typedef struct {
     double acc;               /* unsimulated time, s */
     int frame;
     int inv_was_open, panel_was_open;
+    uint32_t body_logged; /* hl.log_count at the last save it asked for */
     double title_t, save_t;
     float *gpu_samples;       /* --frames: GPU frame times over the run's second half, ms */
     int gpu_sample_count;
@@ -1516,7 +1522,7 @@ static void close_world(game *g)
     if (g->client) g->w.on_save = NULL; /* a client's world was never saved here */
     log_set_fatal_hook(NULL, NULL);
     physics_settle_bodies(&g->ph, NULL);
-    world_save_all(&g->w);               /* a host's joined players too: before the session ends */
+    world_save_now(&g->w); /* a host's joined players too: before the session ends */
     /* Leaving ends the session: a host's players are told. */
     mp_destroy(g->mp);
     g->mp = NULL;
@@ -2241,7 +2247,7 @@ static void frame_interact(game *g, double dt)
             /* Loading the spawn may have unloaded the death site, saving the
              * player there with an emptied inventory; a crash before the next
              * autosave would bring them back alive at that spot. */
-            world_save_all(&g->w);
+            world_save_now(&g->w);
         }
         g_in.respawn = 0;
     }
@@ -3151,7 +3157,13 @@ static void frame_bookkeeping(game *g, double now)
         glfwSetWindowTitle(g->win, title);
         update_discord(g);
     }
-    if (now - g->save_t >= AUTOSAVE_SECONDS) {
+    if (g->hl.log_count != g->body_logged) {
+        /* An injury, a treatment, a change of rhythm, death: what the body
+         * went through is saved now and synced, not left to the autosave. */
+        g->body_logged = g->hl.log_count;
+        g->save_t = now;
+        world_save_now(&g->w);
+    } else if (now - g->save_t >= AUTOSAVE_SECONDS) {
         g->save_t = now;
         world_save_all(&g->w); /* the player and the columns edited since the last save */
     }

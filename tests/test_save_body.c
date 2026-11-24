@@ -8,6 +8,7 @@
 #include "health.h"
 #include "inventory.h"
 #include "mem.h"
+#include "save_batch.h"
 #include "save_db.h"
 #include "survival.h"
 #include "tagged.h"
@@ -425,7 +426,9 @@ static void test_world_state_db(void)
         CHECK(world_state_load(db, b) == 0 && thermo_day_time(b) == 0.6);
         thermo_set_day_time(a, 0.125);
         thermo_set_days(a, 40);
-        CHECK(world_state_save(db, a) == 0);
+        save_batch sb = {0};
+        CHECK(world_state_save(&sb, a) == 0 && sb.n == 1);
+        save_db_submit(db, &sb);
         CHECK(world_state_load(db, b) == 1 && thermo_day_time(b) == 0.125 && thermo_days(b) == 40);
         CHECK(save_db_put_blob(db, "state", "MCWSjunk", 8) == 0);
         thermo_set_days(b, 7);
