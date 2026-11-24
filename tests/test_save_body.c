@@ -351,6 +351,12 @@ static void test_inv_valid(void)
     inventory ok = {0};
     inv_starting_kit(&ok);
     CHECK(inv_valid(&ok));
+    /* Empty is valid, and so is a stack held on the cursor. */
+    inventory empty = {0};
+    inv_init(&empty);
+    CHECK(inv_valid(&empty));
+    empty.cursor = (item_stack){I_APPLE, 3, 0};
+    CHECK(inv_valid(&empty));
     for (int c = 0; c < 7; c++) {
         inventory v = ok;
         switch (c) {
