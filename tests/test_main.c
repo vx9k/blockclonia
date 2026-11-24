@@ -2460,7 +2460,7 @@ static const test_suite SUITES[] = {
     SPLIT(test_health2_all, 15),
     SPLIT(test_circulation_all, 27),
     SPLIT(test_defib_all, 8),
-    SPLIT(test_save_body_all, 7),
+    SPLIT(test_save_body_all, 13),
     SUITE(test_health_infection),
     SPLIT(test_fear_all, 8),
     SPLIT(test_conscious_all, 9),
